@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 38 33% 96.5%;
+    --foreground: 30 10% 12%;
+    --card: 40 40% 99%;
+    --card-foreground: 30 10% 12%;
+    --popover: 40 40% 99%;
+    --popover-foreground: 30 10% 12%;
+    --primary: 30 12% 14%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 36 20% 92%;
+    --secondary-foreground: 30 10% 16%;
+    --muted: 36 19% 92%;
+    --muted-foreground: 30 6% 43%;
+    --accent: 140 12% 89%;
+    --accent-foreground: 145 14% 24%;
+    --destructive: 2 58% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 34 15% 87%;
+    --input: 34 15% 84%;
+    --ring: 30 12% 28%;
+    --radius: 0.875rem;
+    --shadow-color: 30 16% 22%;
+    --sage: 143 14% 34%;
+    --sage-soft: 140 17% 90%;
+    --brass: 32 36% 47%;
+    --brass-soft: 35 38% 91%;
+    --grain-opacity: 0.024;
+  }
+
+  .dark {
+    --background: 60 5% 6.5%;
+    --foreground: 40 16% 93%;
+    --card: 60 4% 9.5%;
+    --card-foreground: 40 16% 93%;
+    --popover: 60 4% 10%;
+    --popover-foreground: 40 16% 93%;
+    --primary: 40 26% 94%;
+    --primary-foreground: 60 5% 9%;
+    --secondary: 60 4% 14.5%;
+    --secondary-foreground: 40 12% 90%;
+    --muted: 60 4% 14.5%;
+    --muted-foreground: 40 6% 63%;
+    --accent: 145 10% 17%;
+    --accent-foreground: 140 13% 84%;
+    --destructive: 2 48% 49%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 60 4% 17.5%;
+    --input: 60 4% 22%;
+    --ring: 40 10% 65%;
+    --shadow-color: 0 0% 0%;
+    --sage: 142 14% 66%;
+    --sage-soft: 143 11% 17%;
+    --brass: 34 42% 62%;
+    --brass-soft: 33 20% 18%;
+    --grain-opacity: 0.035;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-[100dvh] bg-background font-sans text-foreground antialiased;
+    background-image:
+      radial-gradient(52rem 32rem at 10% -8%, hsl(var(--sage-soft) / 0.5), transparent 68%),
+      radial-gradient(44rem 28rem at 96% 2%, hsl(var(--brass-soft) / 0.34), transparent 70%);
+    background-attachment: fixed;
+    font-feature-settings: "ss01" 1, "cv11" 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-balance;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: hsl(var(--sage) / 0.22);
+  }
+
+  :focus-visible {
+    outline: none;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-muted-foreground/70;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.14);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground) / 0.24);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-2xl border border-border/80 bg-card/90 shadow-soft backdrop-blur-[2px];
+  }
+
+  .eyebrow {
+    @apply text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground;
+  }
+
+  .display-title {
+    @apply font-display text-[2.15rem] font-normal leading-[1.08] tracking-[-0.025em] sm:text-[2.75rem];
+  }
+
+  .section-title {
+    @apply font-display text-[1.6rem] font-normal leading-tight tracking-[-0.02em];
+  }
+
+  .hairline {
+    @apply border-border/70;
+  }
+
+  .glass {
+    background: hsl(var(--background) / 0.9);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+  }
+
+  .nav-link {
+    @apply relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.9rem] font-medium text-muted-foreground transition-colors duration-200 hover:bg-secondary/70 hover:text-foreground;
+  }
+
+  .nav-link-active {
+    @apply bg-secondary text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)];
+  }
+
+  .nav-link-active::before {
+    content: "";
+    @apply absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-sage;
+  }
+
+  .field-label {
+    @apply text-[0.8rem] font-medium tracking-[0.01em] text-foreground/90;
+  }
+
+  .image-placeholder {
+    background-image:
+      radial-gradient(120% 100% at 0% 0%, hsl(var(--sage-soft) / 0.9), transparent 70%),
+      radial-gradient(100% 90% at 100% 100%, hsl(var(--brass-soft) / 0.8), transparent 68%);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+
+  .safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .stagger > * {
+    animation: fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .stagger > *:nth-child(2) {
+    animation-delay: 45ms;
+  }
+
+  .stagger > *:nth-child(3) {
+    animation-delay: 90ms;
+  }
+
+  .stagger > *:nth-child(4) {
+    animation-delay: 135ms;
+  }
+
+  .stagger > *:nth-child(5) {
+    animation-delay: 180ms;
+  }
+
+  .stagger > *:nth-child(6) {
+    animation-delay: 225ms;
+  }
+}

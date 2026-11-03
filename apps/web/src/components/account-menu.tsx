@@ -1,0 +1,85 @@
+import { ChevronUp, LogOut, Settings, UserRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { getApiErrorMessage } from "@/lib/api";
+import { useLogout, useSession } from "@/lib/queries";
+import { cn, initials } from "@/lib/utils";
+
+export function AccountMenu({ compact = false }: { compact?: boolean }) {
+  const { data: session } = useSession();
+  const navigate = useNavigate();
+  const logout = useLogout();
+  const user = session?.user;
+  const household = session?.household;
+
+  const onLogout = () => {
+    logout.mutate(undefined, {
+      onSuccess: () => {
+        toast.success("Signed out");
+        navigate("/login", { replace: true });
+      },
+      onError: (error) => toast.error(getApiErrorMessage(error)),
+    });
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "group flex items-center gap-3 rounded-xl text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+            compact
+              ? "size-9 justify-center rounded-full hover:bg-secondary/70"
+              : "w-full px-2 py-2 hover:bg-secondary/60",
+          )}
+          aria-label="Account menu"
+        >
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-[0.68rem] font-semibold tracking-[0.04em] text-foreground ring-1 ring-border/60">
+            {user ? initials(user.name) : <UserRound className="size-4" />}
+          </span>
+          {!compact && (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.84rem] font-medium leading-tight text-foreground">
+                  {user?.name ?? "Account"}
+                </span>
+                <span className="mt-0.5 block truncate text-[0.72rem] text-muted-foreground">
+                  {household?.name ?? ""}
+                </span>
+              </span>
+              <ChevronUp className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+            </>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side={compact ? "bottom" : "top"} className="w-56">
+        <DropdownMenuLabel className="normal-case tracking-normal">
+          <span className="block text-[0.82rem] font-medium text-foreground">{user?.name}</span>
+          <span className="mt-0.5 block truncate text-[0.72rem] font-normal text-muted-foreground">
+            {user?.email}
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => navigate("/settings")}>
+          <Settings />
+          Settings
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem destructive disabled={logout.isPending} onSelect={onLogout}>
+          <LogOut />
+          {logout.isPending ? "Signing out…" : "Sign out"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

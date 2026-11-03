@@ -1,0 +1,247 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Check, LogOut, Monitor, Moon, Smartphone, Sun } from "lucide-react";
+import * as React from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+
+import { PageHeader } from "@/components/page-header";
+import { useTheme } from "@/components/theme-provider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, FormError } from "@/components/form-field";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { queryKeys, useLogout, useOverview, useSession } from "@/lib/queries";
+import type { Household, SessionState } from "@/lib/types";
+import { cn, formatFileSize } from "@/lib/utils";
+
+const THEME_OPTIONS = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+] as const;
+
+export function SettingsPage() {
+  const session = useSession();
+  const overview = useOverview();
+  const logout = useLogout();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { theme, setTheme } = useTheme();
+  const [householdName, setHouseholdName] = React.useState(session.data?.household?.name ?? "");
+
+  React.useEffect(() => {
+    if (session.data?.household) setHouseholdName(session.data.household.name);
+  }, [session.data?.household]);
+
+  const rename = useMutation({
+    mutationFn: () => api.patch<Household>("/household", { name: householdName.trim() }),
+    onSuccess: (household) => {
+      queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
+        current ? { ...current, household } : current,
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      toast.success("Household name updated");
+    },
+  });
+
+  if (session.isPending) {
+    return (
+      <div>
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="mt-4 h-12 w-48" />
+        <Skeleton className="mt-10 h-80 rounded-2xl" />
+      </div>
+    );
+  }
+
+  const user = session.data?.user;
+  const household = session.data?.household;
+  const isOwner = session.data?.role === "owner";
+  const fieldErrors = rename.error instanceof ApiError ? rename.error.fields : undefined;
+  const generalError = rename.error && !fieldErrors ? getApiErrorMessage(rename.error) : null;
+  const storageBytes = (overview.data?.photo_bytes ?? 0) + (overview.data?.document_bytes ?? 0);
+
+  return (
+    <div className="animate-fade-up">
+      <PageHeader
+        eyebrow="Preferences"
+        title="Settings"
+        description="Your account, household and the way Housetory looks."
+      />
+
+      <div className="grid max-w-4xl gap-6">
+        <section className="surface p-5 sm:p-6">
+          <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+            Household
+          </h2>
+          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+            The name that appears across your home.
+          </p>
+          <form
+            className="mt-5 flex max-w-md flex-col gap-4 sm:flex-row sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (householdName.trim()) rename.mutate();
+            }}
+          >
+            <Field
+              label="Household name"
+              htmlFor="household-name"
+              className="flex-1"
+              error={fieldErrors?.name}
+            >
+              <Input
+                id="household-name"
+                value={householdName}
+                maxLength={120}
+                disabled={!isOwner || rename.isPending}
+                onChange={(event) => setHouseholdName(event.target.value)}
+              />
+            </Field>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={
+                !isOwner ||
+                rename.isPending ||
+                !householdName.trim() ||
+                householdName.trim() === household?.name
+              }
+            >
+              {rename.isPending && <Spinner />}
+              Save
+            </Button>
+          </form>
+          {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
+          {!isOwner && (
+            <p className="mt-2 text-[0.72rem] text-muted-foreground">
+              Only the household owner can rename it.
+            </p>
+          )}
+        </section>
+
+        <section className="surface p-5 sm:p-6">
+          <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+            Account
+          </h2>
+          <dl className="mt-5 divide-y divide-border/60">
+            <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
+              <dt className="text-[0.78rem] text-muted-foreground">Name</dt>
+              <dd className="text-[0.85rem]">{user?.name}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-3">
+              <dt className="text-[0.78rem] text-muted-foreground">Email</dt>
+              <dd className="break-all text-right text-[0.85rem]">{user?.email}</dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
+              <dt className="text-[0.78rem] text-muted-foreground">Role</dt>
+              <dd>
+                <Badge variant="outline" className="capitalize">
+                  {session.data?.role}
+                </Badge>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="surface p-5 sm:p-6">
+          <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+            Appearance
+          </h2>
+          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+            Follow your device, or choose a look for this browser.
+          </p>
+          <div className="mt-5 grid max-w-md grid-cols-3 gap-2" role="group" aria-label="Theme">
+            {THEME_OPTIONS.map((option) => {
+              const active = theme === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setTheme(option.value)}
+                  aria-pressed={active}
+                  className={cn(
+                    "flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-[0.78rem] transition-colors",
+                    active
+                      ? "border-foreground/30 bg-secondary text-foreground"
+                      : "border-border bg-card/50 text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                  )}
+                >
+                  <option.icon className="size-4" strokeWidth={1.7} />
+                  <span className="flex items-center gap-1.5">
+                    {option.label}
+                    {active && <Check className="size-3 text-sage" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="surface p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                Storage
+              </h2>
+              <p className="mt-1 text-[0.78rem] text-muted-foreground">
+                Photographs and documents live on your server's persistent volume.
+              </p>
+            </div>
+            <p className="shrink-0 text-[0.85rem] tabular-nums text-foreground/80">
+              {formatFileSize(storageBytes)}
+            </p>
+          </div>
+          <p className="mt-4 text-[0.72rem] text-muted-foreground">
+            Back up your database and uploads regularly with{" "}
+            <code className="rounded bg-secondary px-1.5 py-0.5 text-[0.7rem]">scripts/backup.sh</code>.
+          </p>
+        </section>
+
+        <section className="surface p-5 sm:p-6">
+          <div className="flex items-center gap-2">
+            <Smartphone className="size-4 text-muted-foreground" strokeWidth={1.7} />
+            <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+              On your iPhone
+            </h2>
+          </div>
+          <p className="mt-2 max-w-xl text-[0.8rem] leading-relaxed text-muted-foreground">
+            Open Housetory at its Tailscale HTTPS address in Safari, tap the Share
+            button, then choose <span className="text-foreground">Add to Home Screen</span>.
+            It will open full-screen like a native app.
+          </p>
+        </section>
+
+        <section className="surface flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div>
+            <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+              Sign out
+            </h2>
+            <p className="mt-1 text-[0.78rem] text-muted-foreground">
+              End this session on this device.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            disabled={logout.isPending}
+            onClick={() =>
+              logout.mutate(undefined, {
+                onSuccess: () => {
+                  toast.success("Signed out");
+                  navigate("/login", { replace: true });
+                },
+                onError: (error) => toast.error(getApiErrorMessage(error)),
+              })
+            }
+          >
+            <LogOut />
+            Sign out
+          </Button>
+        </section>
+      </div>
+    </div>
+  );
+}
