@@ -1,0 +1,6 @@
+services:
+  # Local development only: expose PostgreSQL on loopback so host-run API and
+  # pytest can connect. Never use this override in production.
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"
