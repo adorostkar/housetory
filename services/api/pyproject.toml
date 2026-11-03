@@ -1,0 +1,46 @@
+[project]
+name = "housetory-api"
+version = "0.1.0"
+description = "Housetory API service"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.14,<2",
+    "argon2-cffi>=23.1,<26",
+    "email-validator>=2.2,<3",
+    "fastapi>=0.115,<1",
+    "pillow>=11.0,<13",
+    "pillow-heif>=0.20,<1",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.10,<3",
+    "pydantic-settings>=2.6,<3",
+    "python-multipart>=0.0.18,<1",
+    "sqlalchemy>=2.0.36,<3",
+    "uvicorn[standard]>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx2>=2.16,<3",
+    "pytest>=8.3,<9",
+    "pytest-cov>=6.0,<7",
+    "ruff>=0.8,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["housetory_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
