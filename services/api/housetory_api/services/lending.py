@@ -498,6 +498,8 @@ def create_loan(
     existing_request = _existing_loan_request(db, household_id, payload.request_id)
     if existing_request is not None:
         return loan_detail(db, household_id, existing_request.id, on_date=on_date)
+    if history.find_request_event(db, household_id, payload.request_id) is not None:
+        raise ApiError(409, "request_id_reused", "That request id was used for another action.")
 
     item = lock_item(db, household_id, payload.item_id)
     if item.is_archived:
@@ -565,7 +567,11 @@ def create_return(
 ) -> LoanDetailOut:
     existing_request = _existing_return_request(db, household_id, payload.request_id)
     if existing_request is not None:
+        if existing_request.loan_id != loan_id:
+            raise ApiError(409, "request_id_reused", "That request id was used for another loan.")
         return loan_detail(db, household_id, existing_request.loan_id, on_date=on_date)
+    if history.find_request_event(db, household_id, payload.request_id) is not None:
+        raise ApiError(409, "request_id_reused", "That request id was used for another action.")
 
     loan_preview = get_loan(db, household_id, loan_id)
     if loan_preview.item_id is None:

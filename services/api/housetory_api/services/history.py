@@ -514,6 +514,12 @@ def undo_event(
     if request_id is not None:
         existing_request = find_request_event(db, household_id, request_id)
         if existing_request is not None:
+            if existing_request.undoes_event_id != event.id:
+                raise ApiError(
+                    409,
+                    "request_id_reused",
+                    "That request id was used for another history action.",
+                )
             return existing_request
     can_undo, reason, existing_undo = _undo_blocked_reason(db, event)
     if existing_undo is not None:

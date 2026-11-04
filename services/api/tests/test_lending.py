@@ -178,6 +178,16 @@ def test_retries_are_idempotent(owner_client):
     assert latest["returned_quantity"] == 1
     assert len(latest["returns"]) == 1
 
+    second = create_loan(owner_client, item["id"], quantity=1)
+    assert second.status_code == 201
+    reused = create_return(
+        owner_client,
+        second.json()["id"],
+        request_id=return_request,
+    )
+    assert reused.status_code == 409
+    assert reused.json()["detail"]["code"] == "request_id_reused"
+
 
 def test_concurrent_lending_and_returns_do_not_oversell(owner_client):
     room = create_room(owner_client, "Office")
