@@ -8,7 +8,6 @@ so 100% printing produces physical labels at the stated size.
 import io
 import re
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 import segno
@@ -256,13 +255,10 @@ def _fit_single(text: str, *, font: str, size: float, max_width: float) -> str:
 
 @dataclass(frozen=True)
 class LabelData:
+    """Stable label content: permanent identity, optional name and live QR only."""
+
     identifier: str
     name: str
-    headline: str | None
-    short: str
-    detailed: str
-    location: str
-    summary_date: str | None
     qr_payload: str
 
 
@@ -362,25 +358,18 @@ def _draw_label(
         cursor = y + height - pad - id_size - id_size * 0.55
         if data.name and data.name != data.identifier:
             name_size = min(5.4 * mm, id_size * 0.62)
-            line = _fit_single(data.name, font=FONT_REGULAR, size=name_size, max_width=text_width)
-            if line:
+            for line in _wrap(
+                data.name,
+                font=FONT_REGULAR,
+                size=name_size,
+                max_width=text_width,
+                max_lines=2,
+            ):
+                if cursor - name_size < y + pad:
+                    break
                 canvas_obj.setFont(FONT_REGULAR, name_size)
                 canvas_obj.drawString(text_x, cursor, line)
-                cursor -= name_size * 1.3
-        summary_size = max(4.2 * mm, min(5.2 * mm, id_size * 0.58))
-        lines = _wrap(
-            data.headline or data.short,
-            font=FONT_REGULAR,
-            size=summary_size,
-            max_width=text_width,
-            max_lines=2,
-        )
-        for line in lines:
-            if cursor - summary_size < y + pad:
-                break
-            canvas_obj.setFont(FONT_REGULAR, summary_size)
-            canvas_obj.drawString(text_x, cursor, line)
-            cursor -= summary_size * 1.25
+                cursor -= name_size * 1.25
         _draw_qr(canvas_obj, data.qr_payload, qr_x, qr_y, qr_size)
         canvas_obj.restoreState()
         return
@@ -390,7 +379,8 @@ def _draw_label(
         width * 0.34,
         32 * mm,
     )
-    qr_size = max(14 * mm, qr_size)
+    # Mini labels must still fit the full permanent identifier beside the QR.
+    qr_size = max(8 * mm, qr_size)
     qr_x = x + width - pad - qr_size
     qr_y = y + height - pad - qr_size
     text_x = x + pad
@@ -399,7 +389,7 @@ def _draw_label(
         data.identifier,
         font=FONT_BOLD,
         max_size=min(13 * mm, (height if layout == "standard" else height * 0.9) * 0.22),
-        min_size=5.2 * mm,
+        min_size=4.0 * mm,
         max_width=text_width,
     )
     canvas_obj.setFont(FONT_BOLD, id_size)
@@ -412,67 +402,20 @@ def _draw_label(
 
     if data.name and data.name != data.identifier:
         name_size = min(7.2 * mm, id_size * 0.55)
-        name_line = _fit_single(data.name, font=FONT_REGULAR, size=name_size, max_width=text_width)
-        if name_line:
-            canvas_obj.setFont(FONT_BOLD, name_size)
-            canvas_obj.drawString(text_x, cursor, name_line)
-            cursor -= name_size * 1.35
-    if data.headline:
-        headline_size = min(6.2 * mm, id_size * 0.48)
-        for line in _wrap(
-            data.headline,
-            font=FONT_REGULAR,
-            size=headline_size,
+        name_lines = _wrap(
+            data.name,
+            font=FONT_BOLD,
+            size=name_size,
             max_width=text_width,
-            max_lines=2,
-        ):
-            if cursor - headline_size < y + pad + 8 * mm:
+            max_lines=2 if layout == "detailed" else 1,
+        )
+        for line in name_lines:
+            if cursor - name_size < y + pad:
                 break
-            canvas_obj.setFont(FONT_REGULAR, headline_size)
+            canvas_obj.setFont(FONT_BOLD, name_size)
             canvas_obj.drawString(text_x, cursor, line)
-            cursor -= headline_size * 1.25
-        cursor -= 1.2 * mm
+            cursor -= name_size * 1.3
 
-    summary_text = data.detailed if layout == "detailed" else data.short
-    summary_size = min(6.0 * mm, id_size * 0.52)
-    summary_size = max(4.3 * mm, summary_size)
-    available_height = cursor - (y + pad + (7 * mm if layout != "compact" else 0))
-    max_lines = max(1, int(available_height / (summary_size * 1.28)))
-    summary_lines = _wrap(
-        summary_text,
-        font=FONT_REGULAR,
-        size=summary_size,
-        max_width=text_width,
-        max_lines=min(max_lines, 14 if layout == "detailed" else 6),
-    )
-    for line in summary_lines:
-        if cursor - summary_size < y + pad + 5 * mm:
-            break
-        canvas_obj.setFont(FONT_REGULAR, summary_size)
-        canvas_obj.drawString(text_x, cursor, line)
-        cursor -= summary_size * 1.28
-
-    footer_size = max(3.8 * mm, min(4.8 * mm, id_size * 0.37))
-    footer_y = y + pad
-    if data.location:
-        canvas_obj.setFont(FONT_REGULAR, footer_size)
-        canvas_obj.drawString(
-            text_x,
-            footer_y,
-            _fit_single(
-                data.location,
-                font=FONT_REGULAR,
-                size=footer_size,
-                max_width=width - 2 * pad - qr_size,
-            ),
-        )
-    if data.summary_date and layout == "detailed":
-        canvas_obj.setFont(FONT_REGULAR, footer_size)
-        canvas_obj.drawRightString(
-            x + width - pad,
-            footer_y,
-            _fit_single(data.summary_date, font=FONT_REGULAR, size=footer_size, max_width=qr_size),
-        )
     _draw_qr(canvas_obj, data.qr_payload, qr_x, qr_y, qr_size)
     canvas_obj.restoreState()
 
@@ -611,20 +554,10 @@ def label_data(
     *,
     identifier: str,
     name: str,
-    headline: str | None,
-    short: str,
-    detailed: str,
-    location: str,
-    summary_date: date | None,
     location_id: str,
 ) -> LabelData:
     return LabelData(
         identifier=_clean(identifier, 40),
         name=_clean(name, 120),
-        headline=_clean(headline, 240) or None,
-        short=_clean(short, 1200),
-        detailed=_clean(detailed, 2400),
-        location=_clean(location, 300),
-        summary_date=summary_date.isoformat() if summary_date else None,
         qr_payload=qr_payload(location_id),
     )

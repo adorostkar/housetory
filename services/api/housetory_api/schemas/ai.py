@@ -89,6 +89,8 @@ class AiRecognitionSuggestion(BaseModel):
     notes: Description | None = None
     confidence: int | None = Field(default=None, ge=0, le=100)
     source: Literal["vision", "ocr"] = "vision"
+    review: bool = False
+    review_reason: str | None = Field(default=None, max_length=500)
     field_sources: dict[str, str] = Field(default_factory=dict)
 
 
@@ -124,6 +126,7 @@ class AiRecognitionOut(ORMModel):
     processing_mode: Literal["deterministic", "local", "private", "cloud", "unavailable"] = (
         "unavailable"
     )
+    processing_path: Literal["vision", "ocr", "none", "failed", "unavailable"] = "unavailable"
     applied_at: datetime | None = None
     applied_items: list[Any] = Field(default_factory=list)
     created_at: datetime

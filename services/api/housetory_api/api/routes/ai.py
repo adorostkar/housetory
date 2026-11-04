@@ -28,6 +28,7 @@ from ...services import storage
 from ...services.ai_tools import document_relations
 from ...services.assistant import answer_question, natural_search
 from ...services.documents import get_document
+from ...services.items import resolve_location
 from ...services.recognition import (
     apply_recognition,
     enqueue_recognition,
@@ -107,25 +108,8 @@ def create_recognition(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
-    if room_id is not None:
-        from ...models import Room
-
-        room = db.scalar(
-            select(Room).where(Room.id == room_id, Room.household_id == auth.household.id)
-        )
-        if room is None:
-            raise ApiError(404, "room_not_found", "Room not found.")
-    if location_id is not None:
-        from ...models import StorageLocation
-
-        location = db.scalar(
-            select(StorageLocation).where(
-                StorageLocation.id == location_id,
-                StorageLocation.household_id == auth.household.id,
-            )
-        )
-        if location is None:
-            raise ApiError(404, "location_not_found", "Storage location not found.")
+    room_id, location_record = resolve_location(db, auth.household.id, room_id, location_id)
+    location_id = location_record.id if location_record is not None else None
     stored = storage.store_ai_image(auth.household.id, file)
     recognition = AiRecognition(
         household_id=auth.household.id,

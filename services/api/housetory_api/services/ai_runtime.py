@@ -2,7 +2,7 @@
 
 import ipaddress
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -321,10 +321,9 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
     if setting is not None:
         if not setting.enabled:
             provider = by_id.get(setting.provider_id) if setting.provider_id else None
-            return _provider_config(
-                provider or providers[0],
-                task,
-                setting.model,
+            return replace(
+                _provider_config(provider or providers[0], task, setting.model),
+                configured=False,
                 error="AI is disabled for this task.",
             )
         provider = by_id.get(setting.provider_id) if setting.provider_id else None
@@ -345,19 +344,31 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 error="The selected provider no longer exists.",
             )
         return _provider_config(provider, task, setting.model or provider.default_model)
+    if task == AiTask.VISION.value:
+        # An assistant/default model is not proof that image recognition is configured.
+        # Vision must be assigned explicitly so a text-only model is never called blindly.
+        return AiRuntimeConfig(
+            provider="disabled",
+            base_url="",
+            api_key=None,
+            model=None,
+            task=task,
+            provider_id=None,
+            display_name=None,
+            mode="disabled",
+            source="database",
+            enabled=False,
+            cloud_consent=False,
+            configured=False,
+            error=(
+                "No vision task is configured. Choose a vision-capable provider and "
+                "model under Settings → AI providers → Task defaults."
+            ),
+        )
     # A single configured provider is a convenient default for text tasks.
     enabled = [provider for provider in providers if provider.enabled]
     if len(enabled) == 1:
         provider = enabled[0]
-        if task == AiTask.VISION.value and "vision" not in model_capabilities(
-            provider.provider, provider.default_model
-        ):
-            return _provider_config(
-                provider,
-                task,
-                provider.default_model,
-                error="Configure a vision-capable model for image recognition.",
-            )
         return _provider_config(provider, task, provider.default_model)
     return AiRuntimeConfig(
         provider="disabled",

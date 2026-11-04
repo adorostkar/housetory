@@ -476,6 +476,13 @@ def test_deterministic_summary_staleness_and_manual_edit(owner_client):
         json={"location_ids": [box["id"]], "template": "L7165", "record": True},
     )
     assert label.status_code == 200, label.text
+    label_text = pdf_text(label.content)
+    assert "BOX-001" in label_text
+    assert "Winter clothing" in label_text
+    assert "Winter jacket" not in label_text
+    assert "Scarf" not in label_text
+    assert "Gloves" not in label_text
+    assert "Attic" not in label_text
 
     create_item(
         owner_client,
@@ -641,6 +648,34 @@ def test_label_templates_geometry_partial_sheets_and_calibration(owner_client):
         },
     )
     assert custom.status_code == 422
+
+
+def test_standard_label_presets_use_identity_only(owner_client):
+    room = create_room(owner_client, "Attic")
+    box = create_container(owner_client, room["id"], name="Winter clothing")
+    create_item(
+        owner_client,
+        "Winter jacket",
+        quantity=3,
+        room_id=room["id"],
+        storage_location_id=box["id"],
+    )
+    for template in ["L7160", "L7163", "L7165", "L7651", "LARGE_A6"]:
+        response = owner_client.post(
+            "/api/v1/labels/pdf",
+            json={
+                "location_ids": [box["id"]],
+                "template": template,
+                "layout": "detailed",
+                "record": False,
+            },
+        )
+        assert response.status_code == 200, response.text
+        text = pdf_text(response.content)
+        assert "BOX-001" in text
+        assert "Winter jacket" not in text
+        assert "Attic" not in text
+        assert "3" not in text
 
 
 def test_import_matching_recognizes_container_identifiers(owner_client):

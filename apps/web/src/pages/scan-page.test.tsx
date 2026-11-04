@@ -94,6 +94,7 @@ const recognition: AiRecognition = {
     },
   ],
   processing_mode: "cloud",
+  processing_path: "vision",
   applied_at: null,
   applied_items: [],
   created_at: "2026-01-01T00:00:00Z",
@@ -143,6 +144,34 @@ vi.mock("@/lib/queries", async (importOriginal) => {
             created_at: "2026-01-01T00:00:00Z",
             updated_at: "2026-01-01T00:00:00Z",
           },
+          {
+            id: "shelf-2",
+            room_id: "room-2",
+            parent_id: null,
+            name: "Garage shelf",
+            description: null,
+            kind: "shelf",
+            is_container: false,
+            container_type: null,
+            identifier: "SHELF-001",
+            summary_headline: null,
+            summary_short: null,
+            label_generated_at: null,
+            sort_order: 0,
+            item_count: 0,
+            total_item_count: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+      isPending: false,
+    }),
+    useRooms: () => ({
+      data: {
+        items: [
+          { id: "room-1", name: "Office", description: null, parent_id: null, sort_order: 0, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+          { id: "room-2", name: "Garage", description: null, parent_id: null, sort_order: 0, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
         ],
       },
       isPending: false,
@@ -156,7 +185,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     }),
     useInvalidateInventory: () => vi.fn(),
     useRecognition: (id: string | undefined) => ({
-      data: id ? recognition : undefined,
+      data: id ? currentRecognition : undefined,
       isPending: false,
     }),
   };
@@ -185,20 +214,23 @@ beforeAll(() => {
   });
 });
 
+let currentRecognition = recognition;
+
 beforeEach(() => {
+  currentRecognition = recognition;
   vi.mocked(api.post).mockReset();
   vi.mocked(api.postForm).mockReset();
-  vi.mocked(api.postForm).mockResolvedValue(recognition);
+  vi.mocked(api.postForm).mockImplementation(async () => currentRecognition);
   vi.mocked(api.post).mockResolvedValue(applyResult);
 });
 
-function renderPage() {
+function renderPage(entry = "/scan?location_id=box-1") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/scan?location_id=box-1"]}>
+      <MemoryRouter initialEntries={[entry]}>
         <ScanPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -224,7 +256,7 @@ describe("ScanPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Review 2 suggestions" }),
     ).toBeVisible();
-    expect(screen.getByText(/Remote vision/)).toBeVisible();
+    expect(screen.getByText(/Remote\/cloud · openai · gpt-4o/)).toBeVisible();
     expect(screen.getByText("Camera body")).toBeVisible();
     expect(screen.getByText("USB-C cables")).toBeVisible();
     expect(screen.getAllByLabelText("Quantity")[1]).toHaveValue(3);
@@ -242,6 +274,7 @@ describe("ScanPage", () => {
     expect(payload.entries[0]).toMatchObject({
       suggestion_index: 0,
       action: "create",
+      room_id: "room-1",
       location_id: "box-1",
       proposal: expect.objectContaining({ name: "Camera body", quantity: 1 }),
     });
@@ -323,4 +356,176 @@ describe("ScanPage", () => {
     ];
     expect(payload.entries[1]?.proposal.quantity).toBe(5);
   });
+
+  it("supports a room-only destination and clears an incompatible container when room changes", async () => {
+    currentRecognition = {
+      ...recognition,
+      room_id: "room-2",
+      location_id: null,
+      location_label: null,
+      suggestion_duplicates: [],
+      result: {
+        suggestions: [recognition.result.suggestions![0]!],
+        warnings: [],
+      },
+    };
+    const { container } = renderPage("/scan?room_id=room-2");
+    const cameraInput = container.querySelector<HTMLInputElement>(
+      "input[capture='environment']",
+    );
+    fireEvent.change(cameraInput as HTMLInputElement, {
+      target: {
+        files: [new File([new Uint8Array([1])], "room.png", { type: "image/png" })],
+      },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Upload photograph" }),
+    );
+    await screen.findByRole("heading", { name: "Review 1 suggestion" });
+    expect(screen.getByLabelText(/Default room/)).toHaveValue("room-2");
+    expect(
+      screen.getByLabelText(/Default container or storage location/),
+    ).toHaveValue("");
+
+    await userEvent.selectOptions(screen.getByLabelText(/Default room/), "room-1");
+    const defaultContainer = screen.getByLabelText(
+      /Default container or storage location/,
+    );
+    expect(defaultContainer).toHaveValue("");
+    await userEvent.selectOptions(defaultContainer, "box-1");
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [, payload] = vi.mocked(api.post).mock.calls[0] as [
+      string,
+      { entries: Array<Record<string, unknown>> },
+    ];
+    expect(payload.entries[0]).toMatchObject({
+      room_id: "room-1",
+      location_id: "box-1",
+    });
+  });
+
+  it("flags fixed fixtures, excludes them by default and allows a per-suggestion room override", async () => {
+    currentRecognition = {
+      ...recognition,
+      room_id: "room-1",
+      location_id: null,
+      location_label: null,
+      suggestion_duplicates: [],
+      result: {
+        suggestions: [
+          {
+            name: "Window",
+            quantity: 1,
+            description: null,
+            category: null,
+            brand: null,
+            model: null,
+            tags: [],
+            notes: null,
+            confidence: 82,
+            source: "vision",
+            review: true,
+            review_reason:
+              "Windows are fixed architectural features, not movable possessions.",
+            field_sources: { name: "inferred" },
+          },
+          {
+            name: "Portable heater",
+            quantity: 1,
+            description: null,
+            category: null,
+            brand: null,
+            model: null,
+            tags: [],
+            notes: null,
+            confidence: 80,
+            source: "vision",
+            review: false,
+            review_reason: null,
+            field_sources: { name: "inferred" },
+          },
+        ],
+        warnings: [],
+      },
+    };
+    const { container } = renderPage("/scan?room_id=room-1");
+    const cameraInput = container.querySelector<HTMLInputElement>(
+      "input[capture='environment']",
+    );
+    fireEvent.change(cameraInput as HTMLInputElement, {
+      target: {
+        files: [new File([new Uint8Array([1])], "room.png", { type: "image/png" })],
+      },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Upload photograph" }),
+    );
+    await screen.findByRole("heading", { name: "Review 2 suggestions" });
+    expect(screen.getByLabelText("Include Window")).not.toBeChecked();
+    expect(screen.getByLabelText("Include Portable heater")).toBeChecked();
+    expect(screen.getByText("Review")).toBeVisible();
+    expect(screen.getByText(/fixed architectural features/i)).toBeVisible();
+    expect(screen.getByText(/not preselected/i)).toBeVisible();
+
+    const heaterCard = screen
+      .getByRole("heading", { name: "Portable heater" })
+      .closest("article") as HTMLElement;
+    await userEvent.selectOptions(within(heaterCard).getByLabelText(/^Room/), "room-2");
+    expect(
+      within(heaterCard).getByLabelText(/Container or storage location/),
+    ).toHaveValue("");
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [, payload] = vi.mocked(api.post).mock.calls[0] as [
+      string,
+      { entries: Array<Record<string, unknown>> },
+    ];
+    expect(payload.entries).toHaveLength(1);
+    expect(payload.entries[0]).toMatchObject({
+      suggestion_index: 1,
+      room_id: "room-2",
+      location_id: null,
+      proposal: expect.objectContaining({ name: "Portable heater" }),
+    });
+  });
+
+  it("shows OCR fallback and the actionable vision reason", async () => {
+    currentRecognition = {
+      ...recognition,
+      model_provider: null,
+      model_name: null,
+      processing_mode: "deterministic",
+      processing_path: "ocr",
+      suggestion_duplicates: [],
+      result: {
+        suggestions: [
+          {
+            ...recognition.result.suggestions![0]!,
+            source: "ocr",
+          },
+        ],
+        warnings: [
+          "No vision task is configured. Choose a vision-capable provider and model under Settings → AI providers → Task defaults.",
+        ],
+      },
+    };
+    const { container } = renderPage();
+    const cameraInput = container.querySelector<HTMLInputElement>(
+      "input[capture='environment']",
+    );
+    fireEvent.change(cameraInput as HTMLInputElement, {
+      target: {
+        files: [new File([new Uint8Array([1])], "label.png", { type: "image/png" })],
+      },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Upload photograph" }),
+    );
+    await screen.findByRole("heading", { name: "Review 1 suggestion" });
+    expect(screen.getByText("OCR text fallback")).toBeVisible();
+    expect(screen.getByText(/No vision task is configured/)).toBeVisible();
+    expect(screen.queryByText(/Remote\/cloud ·/)).not.toBeInTheDocument();
+  });
 });
+

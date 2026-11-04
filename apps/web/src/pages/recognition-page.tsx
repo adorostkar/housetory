@@ -22,6 +22,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { recognitionProcessing } from "@/lib/recognition";
 import {
   queryKeys,
   useAiStatus,
@@ -147,6 +148,7 @@ export function RecognitionPage() {
   });
 
   const recognition = recognitionQuery.data;
+  const processing = recognition ? recognitionProcessing(recognition) : null;
   const suggestions = recognition?.result.suggestions ?? [];
 
   React.useEffect(() => {
@@ -354,17 +356,24 @@ export function RecognitionPage() {
                 <h2 className="font-display text-[1.45rem] tracking-[-0.025em]">
                   Review the suggestion
                 </h2>
-                <p className="mt-1 text-[0.78rem] text-muted-foreground">
-                  {recognition.model_name
-                    ? `Suggested by ${recognition.model_provider ?? "AI"} · ${recognition.model_name}`
-                    : "Suggested from readable text"}
-                  {recognition.confidence != null
-                    ? ` · ${recognition.confidence}% confidence`
-                    : ""}
-                </p>
-                {(recognition.result.warnings ?? []).length > 0 && (
+                {processing && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.78rem] text-muted-foreground">
+                    <Badge variant={processing.variant}>{processing.label}</Badge>
+                    <span>{processing.detail}</span>
+                    {recognition.confidence != null ? (
+                      <span>· {recognition.confidence}% confidence</span>
+                    ) : null}
+                  </div>
+                )}
+                {processing && processing.warnings.length > 0 && (
                   <div className="mt-3 rounded-xl border border-brass/20 bg-brass-soft/50 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
-                    {(recognition.result.warnings ?? []).join(" ")}
+                    {processing.warnings.join(" ")}
+                  </div>
+                )}
+                {suggestions[0]?.review && suggestions[0].review_reason && (
+                  <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-brass">
+                    <span className="font-medium">Review this observation. </span>
+                    {suggestions[0].review_reason} It is not a confirmed possession.
                   </div>
                 )}
               </div>

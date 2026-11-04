@@ -237,7 +237,7 @@ export function LabelsPage() {
       <PageHeader
         eyebrow="Printable labels"
         title="Labels"
-        description="Preview and print A4 adhesive labels with a vector QR code and readable contents. Print at 100% / Actual size."
+        description="Preview and print A4 adhesive labels with the permanent identifier, optional display name and a live QR code. Print at 100% / Actual size."
         actions={
           <>
             <Button variant="outline" asChild>
@@ -638,12 +638,13 @@ export function LabelsPage() {
               page”. The PDF page is exactly A4.
             </p>
             <p className="mt-2">
-              QR codes are generated locally as vectors. The identifiers and contents are
-              drawn with embedded DejaVu fonts.
+              QR codes are generated locally as vectors. The permanent identifier and
+              optional display name are drawn with embedded DejaVu fonts.
             </p>
             <p className="mt-2">
-              Printed text is a snapshot. The QR always opens the current authenticated
-              container page.
+              Labels never print item names, counts, contents, or the current room. The QR
+              always opens the current authenticated container page, so moved or changed
+              contents do not make the printed label wrong.
             </p>
           </section>
         </aside>

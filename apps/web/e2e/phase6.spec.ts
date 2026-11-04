@@ -30,12 +30,58 @@ test.beforeAll(async () => {
       );
       return;
     }
+    if (request.method === "GET" && request.url?.endsWith("/models")) {
+      response.end(JSON.stringify({ data: [{ id: "gpt-4o", name: "GPT-4o" }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url?.endsWith("/chat/completions")) {
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  suggestions: [
+                    {
+                      name: `Window ${scanSuffix}`,
+                      quantity: 1,
+                      confidence: 82,
+                      field_sources: { name: "inferred" },
+                    },
+                    {
+                      name: `Portable heater ${scanSuffix}`,
+                      quantity: 1,
+                      confidence: 80,
+                      field_sources: { name: "inferred" },
+                    },
+                    {
+                      name: `Radiator ${scanSuffix}`,
+                      quantity: 1,
+                      confidence: 78,
+                      field_sources: { name: "inferred" },
+                    },
+                    {
+                      name: `Mystery object ${scanSuffix}`,
+                      quantity: 1,
+                      confidence: 22,
+                      field_sources: { name: "inferred" },
+                    },
+                  ],
+                  warnings: [],
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/chat") {
       const payload = JSON.parse(body || "{}") as {
         messages?: Array<{ content?: string }>;
       };
       const prompt = payload.messages?.map((message) => message.content ?? "").join("\n") ?? "";
-      if (prompt.includes("Identify every clearly visible household possession")) {
+      if (prompt.includes("Identify clearly visible, movable household possessions")) {
         response.end(
           JSON.stringify({
             message: {
@@ -326,14 +372,20 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   await expect(
     page.getByRole("heading", { name: "Review 2 suggestions" }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Local vision/)).toBeVisible();
+  await expect(page.getByText(/Local · ollama · llava:latest/)).toBeVisible();
   await expect(
     page.getByRole("heading", { name: cameraName }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: cablesName }),
   ).toBeVisible();
-  await expect(page.getByLabel("Destination").first()).toHaveValue(container.id);
+  const cameraCard = page
+    .getByRole("heading", { name: cameraName })
+    .locator("xpath=ancestor::article");
+  await expect(cameraCard.getByLabel(/^Room/)).toHaveValue(room.id);
+  await expect(
+    cameraCard.getByLabel(/Container or storage location/),
+  ).toHaveValue(container.id);
   await expect(page.getByLabel("Quantity").nth(1)).toHaveValue("3");
 
   await page.getByRole("button", { name: "Approve selected" }).click();
@@ -355,6 +407,82 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   const photos = await request.get(`/api/v1/items/${camera?.id}`);
   const detail = (await photos.json()) as { item: { photos: unknown[] } };
   expect(detail.item.photos).toHaveLength(0);
+});
+
+test("scans into a room only, flags fixed fixtures and applies a per-suggestion destination", async ({
+  page,
+  request,
+}) => {
+  await resetProviders(request);
+  scanSuffix = Date.now().toString().slice(-8);
+  const heaterName = `Portable heater ${scanSuffix}`;
+  const room = await createRoom(request, `Phase 6 room scan ${scanSuffix}`);
+  const otherRoom = await createRoom(request, `Phase 6 room scan target ${scanSuffix}`);
+  const providerResponse = await request.post("/api/v1/ai/providers", {
+    data: {
+      provider: "openai",
+      display_name: "Fixture vision",
+      base_url: `${mockProviderUrl()}/v1`,
+      default_model: "gpt-4o",
+      api_key: "sk-test-not-real",
+      enabled: true,
+      cloud_consent: true,
+    },
+  });
+  expect(providerResponse.ok()).toBeTruthy();
+  const provider = (await providerResponse.json()) as { id: string };
+  const task = await request.put("/api/v1/ai/tasks/vision", {
+    data: { provider_id: provider.id, model: "gpt-4o", enabled: true },
+  });
+  expect(task.ok()).toBeTruthy();
+
+  await page.goto(`/scan?room_id=${room.id}`);
+  await expect(page.getByText(/A vision-capable model is selected/)).toBeVisible();
+  await expect(page.getByLabel(/Default room/)).toHaveValue(room.id);
+  await expect(
+    page.getByLabel(/Default container or storage location/),
+  ).toHaveValue("");
+
+  await captureInput(page).setInputFiles(photoPath);
+  await page.getByRole("button", { name: "Upload photograph" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Review 4 suggestions" }),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Remote\/cloud · openai · gpt-4o/)).toBeVisible();
+  await expect(page.getByLabel(`Include Window ${scanSuffix}`)).not.toBeChecked();
+  await expect(page.getByLabel(`Include Radiator ${scanSuffix}`)).not.toBeChecked();
+  await expect(page.getByLabel(`Include Mystery object ${scanSuffix}`)).not.toBeChecked();
+  await expect(page.getByLabel(`Include ${heaterName}`)).toBeChecked();
+  await expect(page.getByText(/fixed architectural features/i)).toBeVisible();
+
+  const heaterCard = page
+    .getByRole("heading", { name: heaterName })
+    .locator("xpath=ancestor::article");
+  await heaterCard.getByLabel(/^Room/).selectOption(otherRoom.id);
+  await expect(
+    heaterCard.getByLabel(/Container or storage location/),
+  ).toHaveValue("");
+  await page.getByRole("button", { name: "Approve selected" }).click();
+  await expect(page.getByText("Scan applied")).toBeVisible();
+  await expect(page.getByText(/1 created/).first()).toBeVisible();
+
+  const itemsResponse = await request.get(
+    `/api/v1/items?limit=100&room_id=${otherRoom.id}`,
+  );
+  expect(itemsResponse.ok()).toBeTruthy();
+  const items = (await itemsResponse.json()) as {
+    items: Array<{ name: string; room: { id: string }; location: unknown }>;
+  };
+  const heater = items.items.find((item) => item.name === heaterName);
+  expect(heater).toBeTruthy();
+  expect(heater?.room.id).toBe(otherRoom.id);
+  expect(heater?.location).toBeNull();
+  expect(
+    items.items.some((item) => item.name === `Window ${scanSuffix}`),
+  ).toBe(false);
+  expect(
+    items.items.some((item) => item.name === `Radiator ${scanSuffix}`),
+  ).toBe(false);
 });
 
 test("imports the actual Inventory.md, excludes indexes/templates and prevents duplicate items", async ({

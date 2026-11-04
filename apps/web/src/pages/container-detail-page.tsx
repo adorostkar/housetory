@@ -311,13 +311,12 @@ export function ContainerDetailPage() {
           </div>
         </div>
 
-        {(detail.summary.stale || detail.summary.label_stale) && (
+        {detail.summary.stale && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-3.5 py-2.5 text-[0.73rem] leading-relaxed text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-brass" />
             <span>
-              {detail.summary.label_stale
-                ? "Contents changed after the last label was generated. The QR still opens live data; reprint the label if you want fresh printed text."
-                : "The saved summary no longer matches the current contents. Regenerate before printing."}
+              The saved summary no longer matches the current contents. Regenerate or edit it
+              if you use it for reference; printed labels do not include contents.
             </span>
           </div>
         )}
@@ -517,8 +516,8 @@ export function ContainerDetailPage() {
           <DialogHeader>
             <DialogTitle>Edit summary snapshot</DialogTitle>
             <DialogDescription>
-              This text is printed on labels until the contents change. The QR always
-              opens current inventory.
+              This text is kept for reference in Housetory. Labels print only the permanent
+              identifier, optional name and QR code; the QR always opens current inventory.
             </DialogDescription>
           </DialogHeader>
           <form

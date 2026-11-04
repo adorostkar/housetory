@@ -729,3 +729,37 @@ def test_status_catalog_failure_is_not_reported_as_model_mismatch(owner_client, 
     assert body["available"] is False
     assert "503" in body["error"]
     assert "models" not in body
+
+
+def test_vision_task_must_be_explicitly_configured(owner_client, monkeypatch):
+    monkeypatch.setattr(ai, "available_models", lambda config: ["plain-text-model", "gpt-4o"])
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(default_model="plain-text-model", cloud_consent=True),
+    ).json()
+
+    unset = owner_client.get("/api/v1/ai/status?task=vision").json()
+    assert unset["configured"] is False
+    assert unset["available"] is False
+    assert "No vision task is configured" in unset["error"]
+
+    configured = owner_client.put(
+        "/api/v1/ai/tasks/vision",
+        json={"provider_id": provider["id"], "model": "gpt-4o", "enabled": True},
+    )
+    assert configured.status_code == 200, configured.text
+    status = owner_client.get("/api/v1/ai/status?task=vision").json()
+    assert status["configured"] is True
+    assert status["model"] == "gpt-4o"
+    assert status["task"] == "vision"
+    assert status["provider"] == "openai"
+    assert status["available"] is True
+
+    disabled = owner_client.put(
+        "/api/v1/ai/tasks/vision",
+        json={"provider_id": provider["id"], "model": "gpt-4o", "enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    disabled_status = owner_client.get("/api/v1/ai/status?task=vision").json()
+    assert disabled_status["configured"] is False
+    assert "disabled" in (disabled_status["error"] or "").lower()

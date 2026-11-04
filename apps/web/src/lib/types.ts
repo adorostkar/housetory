@@ -776,6 +776,8 @@ export interface AiRecognitionSuggestion {
   notes: string | null;
   confidence: number | null;
   source?: "vision" | "ocr";
+  review?: boolean;
+  review_reason?: string | null;
   field_sources: Record<string, string>;
 }
 
@@ -800,6 +802,7 @@ export interface AiRecognition {
   location_label?: string | null;
   suggestion_duplicates?: AiRecognitionDuplicateGroup[];
   processing_mode?: "deterministic" | "local" | "private" | "cloud" | "unavailable";
+  processing_path?: "vision" | "ocr" | "none" | "failed" | "unavailable";
   applied_at?: string | null;
   applied_items?: Array<Record<string, unknown>>;
   created_at: string;

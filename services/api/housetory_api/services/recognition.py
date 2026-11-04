@@ -32,15 +32,88 @@ logger = logging.getLogger("housetory.recognition")
 
 RECOGNITION_TASK = "ai.recognize"
 
-AI_RECOGNITION_SYSTEM = """Identify every clearly visible household possession in the image.
+AI_RECOGNITION_SYSTEM = """Identify clearly visible, movable household possessions in the image.
 Return JSON exactly shaped as:
 {"suggestions":[{"name":"...","quantity":1,"description":null,"category":null,"brand":null,
-"model":null,"tags":[],"notes":null,"confidence":0,
+"model":null,"tags":[],"notes":null,"confidence":0,"review":false,"review_reason":null,
 "field_sources":{"name":"inferred"}}],"warnings":[]}
+Focus on things a person could pack, carry, store or move. Do not present fixed
+architectural features or installed fixtures as possessions: exclude windows,
+walls, doors, floors, ceilings, built-in cabinets, sinks, toilets, baths, showers,
+fireplaces, light fixtures, smoke detectors, thermostats and HVAC equipment.
+A portable heater or fan may be movable; a built-in radiator usually is not.
+If mobility is genuinely ambiguous, keep the observation only with confidence below
+40, set review=true, and explain why in review_reason. Do not invent items to fill
+the frame. Never create one suggestion per identical object if a quantity is clearer.
 Only claim a brand or model when visibly identifiable. Never invent or read a
 serial number unless it is clearly legible. Never infer purchase price or date.
-Return at most 20 suggestions, best first. Each suggestion must include a quantity.
-Never create one suggestion per identical object if a quantity is clearer. Confidence is 0-100."""
+Return at most 20 suggestions, best first. Confidence is 0-100."""
+
+
+FIXED_FEATURE_TERMS = {
+    "window": "Windows are fixed architectural features, not movable possessions.",
+    "wall": "Walls are fixed architectural features, not movable possessions.",
+    "door": "Doors are fixed architectural features, not movable possessions.",
+    "floor": "Floors are fixed architectural features, not movable possessions.",
+    "ceiling": "Ceilings are fixed architectural features, not movable possessions.",
+    "radiator": (
+        "Radiators are usually installed fixtures. Verify whether this is a fixed "
+        "radiator or a portable heater before creating an item."
+    ),
+    "built-in": "Built-in fixtures are not movable possessions.",
+    "built in": "Built-in fixtures are not movable possessions.",
+    "fixture": "Installed fixtures are not movable possessions.",
+    "sink": "Sinks are installed fixtures, not movable possessions.",
+    "toilet": "Toilets are installed fixtures, not movable possessions.",
+    "bathtub": "Bathtubs are installed fixtures, not movable possessions.",
+    "shower": "Showers are installed fixtures, not movable possessions.",
+    "fireplace": "Fireplaces are fixed architectural features, not movable possessions.",
+    "staircase": "Staircases are fixed architectural features, not movable possessions.",
+    "stairs": "Stairs are fixed architectural features, not movable possessions.",
+    "light fixture": "Light fixtures are installed fixtures, not movable possessions.",
+    "ceiling light": "Ceiling lights are installed fixtures, not movable possessions.",
+    "smoke detector": "Smoke detectors are installed fixtures, not movable possessions.",
+    "thermostat": "Thermostats are installed fixtures, not movable possessions.",
+    "hvac": "HVAC equipment is installed and is not a movable possession.",
+    "boiler": "Boilers are installed appliances, not movable possessions.",
+}
+
+
+def _review_fixed_features(suggestions: list[AiRecognitionSuggestion]) -> None:
+    for suggestion in suggestions:
+        if suggestion.source != "vision":
+            continue
+        name = suggestion.name.lower()
+        for term, reason in FIXED_FEATURE_TERMS.items():
+            if re.search(rf"(?<![a-z]){re.escape(term)}s?(?![a-z])", name):
+                suggestion.review = True
+                if not suggestion.review_reason:
+                    suggestion.review_reason = reason
+                break
+        if suggestion.review and not suggestion.review_reason:
+            suggestion.review_reason = "Verify that this is a movable possession."
+        if (
+            not suggestion.review
+            and suggestion.confidence is not None
+            and suggestion.confidence < 40
+        ):
+            suggestion.review = True
+            suggestion.review_reason = "Low-confidence suggestion; verify before creating."
+
+
+def _processing_path(recognition: AiRecognition) -> str:
+    if recognition.status == RecognitionStatus.FAILED.value:
+        return "failed"
+    if recognition.status != RecognitionStatus.SUCCEEDED.value:
+        return "unavailable"
+    suggestions = (recognition.result or {}).get("suggestions") or []
+    if not suggestions:
+        return "none"
+    if any(str(suggestion.get("source")) == "vision" for suggestion in suggestions):
+        return "vision"
+    if any(str(suggestion.get("source")) == "ocr" for suggestion in suggestions):
+        return "ocr"
+    return "none"
 
 
 def enqueue_recognition(db, recognition: AiRecognition) -> Any:
@@ -113,6 +186,7 @@ def serialize_recognition(
         location_label=location_label,
         suggestion_duplicates=duplicates,
         processing_mode=recognition.processing_mode or "unavailable",
+        processing_path=_processing_path(recognition),
         applied_at=recognition.applied_at,
         applied_items=recognition.applied_items or [],
         created_at=recognition.created_at,
@@ -173,6 +247,9 @@ def run_recognition(recognition_id: uuid.UUID | str) -> dict[str, Any] | None:
             return {"recognition_id": str(recognition.id), "skipped": True}
         recognition.status = RecognitionStatus.PROCESSING.value
         recognition.error = None
+        recognition.model_provider = None
+        recognition.model_name = None
+        recognition.processing_mode = "unavailable"
         db.commit()
         source_path = None
         try:
@@ -180,51 +257,62 @@ def run_recognition(recognition_id: uuid.UUID | str) -> dict[str, Any] | None:
                 recognition.original_storage_key or recognition.storage_key
             )
             status = ai.status_for(db, recognition.household_id, AiTask.VISION.value, probe=False)
-            recognition.model_provider = status.provider
-            recognition.model_name = status.model
-            recognition.processing_mode = status.mode if status.configured else "unavailable"
+            if status.configured:
+                recognition.model_provider = status.provider
+                recognition.model_name = status.model
             result = None
             confidence = None
-            ai_error = None
+            vision_error = None
+            vision_succeeded = False
             if status.configured:
                 try:
                     raw = ai.complete_json(
                         AI_RECOGNITION_SYSTEM,
-                        "Identify every clearly visible household possession in this "
+                        "Identify clearly visible, movable household possessions in this "
                         "image. Return only the requested JSON.",
                         image_path=source_path,
                         image_mime=recognition.original_content_type,
                         config=ai.config_for(db, recognition.household_id, AiTask.VISION.value),
                     )
                     result = AiRecognitionResult.model_validate(raw)
+                    vision_succeeded = True
+                    _review_fixed_features(result.suggestions)
                     confidence = result.suggestions[0].confidence if result.suggestions else None
+                    if not result.suggestions:
+                        result.warnings.append(
+                            "The vision model returned no suggestions. No inventory was created."
+                        )
                 except (ai.AiError, ValueError) as exc:
-                    ai_error = "AI vision was unavailable or returned invalid data."
+                    vision_error = (
+                        f"AI vision via {status.provider}/{status.model} failed; "
+                        "OCR text was used instead."
+                    )
                     logger.info(
                         "Recognition %s falling back to OCR (%s)",
                         recognition_id,
                         type(exc).__name__,
                     )
+            processing_mode = status.mode if vision_succeeded else "deterministic"
             if result is None:
-                recognition.processing_mode = "deterministic"
-                result, confidence = _fallback_from_ocr(
-                    source_path, recognition.original_content_type
-                )
-                if ai_error:
-                    result.warnings.append(ai_error)
+                try:
+                    result, confidence = _fallback_from_ocr(
+                        source_path, recognition.original_content_type
+                    )
+                except ai.AiUnavailable as exc:
+                    reasons = [reason for reason in (status.error, vision_error) if reason]
+                    message = " ".join([*reasons, str(exc)]).strip()
+                    raise ai.AiUnavailable(message) from exc
+                if status.error:
+                    result.warnings.append(status.error)
+                if vision_error:
+                    result.warnings.append(vision_error)
             recognition.result = result.model_dump(mode="json")
             recognition.field_sources = (
                 result.suggestions[0].field_sources if result.suggestions else {}
             )
             recognition.confidence = confidence
             recognition.status = RecognitionStatus.SUCCEEDED.value
-            recognition.processing_mode = (
-                status.mode
-                if status.configured
-                and result.suggestions
-                and result.suggestions[0].source == "vision"
-                else "deterministic"
-            )
+            recognition.processing_mode = processing_mode
             recognition.completed_at = datetime.now(UTC)
             recognition.error = None
             db.commit()
@@ -324,13 +412,20 @@ def apply_recognition(
             db, household_id, raw.get("category")
         )
         tag_ids = _resolve_tag_ids(db, household_id, raw.get("tags") or [])
-        location_id = entry.location_id or recognition.location_id
-        room_id = entry.room_id or recognition.room_id
-        if room_id is None and location_id is not None:
-            _, location = resolve_location(db, household_id, None, location_id)
-            room_id = location.room_id if location else None
+        requested_room_id = (
+            entry.room_id if "room_id" in entry.model_fields_set else recognition.room_id
+        )
+        requested_location_id = (
+            entry.location_id
+            if "location_id" in entry.model_fields_set
+            else recognition.location_id
+        )
         savepoint = db.begin_nested()
         try:
+            room_id, location_record = resolve_location(
+                db, household_id, requested_room_id, requested_location_id
+            )
+            location_id = location_record.id if location_record is not None else None
             if entry.action == "update":
                 if not entry.item_id:
                     raise ValueError("Choose an existing item to update.")
@@ -368,9 +463,6 @@ def apply_recognition(
                         "A possible duplicate was found. Choose update, allow a new item, "
                         "or reject this suggestion."
                     )
-                if location_id is not None:
-                    _, location = resolve_location(db, household_id, room_id, location_id)
-                    room_id = location.room_id if location else room_id
                 item = create_item_record(
                     db,
                     household_id,

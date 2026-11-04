@@ -13,14 +13,6 @@ from ...schemas.containers import (
     LabelPrintRequest,
     LabelTemplateList,
 )
-from ...services.containers import (
-    load_container_items,
-    location_ancestors,
-    refresh_summary,
-    room_ancestors,
-    summary_for_location,
-    summary_is_stale,
-)
 from ...services.labels import (
     build_calibration_pdf,
     build_labels_pdf,
@@ -53,41 +45,11 @@ def _ordered_locations(
     return [by_id[location_id] for location_id in unique_ids]
 
 
-def _location_line(db: Session, household_id: uuid.UUID, location: StorageLocation) -> str:
-    room_names = [room.name for room in room_ancestors(db, household_id, location.room_id)]
-    names = [*room_names] + [
-        entry.name for entry in location_ancestors(db, household_id, location.id)
-    ]
-    return " / ".join(dict.fromkeys(names))
-
-
-def _label_for_location(
-    db: Session,
-    household_id: uuid.UUID,
-    location: StorageLocation,
-    *,
-    persist: bool,
-):
-    items = load_container_items(db, household_id, location.id)
-    live = summary_for_location(db, household_id, location, live_items=items)
-    stale = summary_is_stale(location, live)
-    stored = bool(location.summary_generated_at and location.summary_short and not stale)
-    if persist and not stored:
-        refresh_summary(db, household_id, location, source="deterministic")
-        stored = True
-    short = location.summary_short if stored and location.summary_short else live.short
-    detailed = location.summary_detailed if stored and location.summary_detailed else live.detailed
-    headline = location.summary_headline if stored else None
-    generated = location.summary_generated_at if stored else None
-    summary_date = generated.date() if generated else None
+def _label_for_location(location: StorageLocation):
+    """Labels intentionally contain only stable identity, name and live QR."""
     return label_data(
         identifier=location.identifier or location.name,
         name=location.name,
-        headline=headline,
-        short=short,
-        detailed=detailed,
-        location=_location_line(db, household_id, location),
-        summary_date=summary_date,
         location_id=str(location.id),
     )
 
@@ -104,9 +66,7 @@ def _render_labels(
         resolve_geometry(payload.template, payload.custom)
     except ValueError as exc:
         raise ApiError(422, "invalid_label_geometry", str(exc)) from None
-    labels = [
-        _label_for_location(db, household_id, location, persist=persist) for location in locations
-    ]
+    labels = [_label_for_location(location) for location in locations]
     try:
         pdf = build_labels_pdf(
             labels,
