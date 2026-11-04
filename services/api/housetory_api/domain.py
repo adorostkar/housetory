@@ -14,7 +14,48 @@ class LocationKind(StrEnum):
     DRAWER = "drawer"
     BOX = "box"
     BIN = "bin"
+    CRATE = "crate"
+    SUITCASE = "suitcase"
+    BAG = "bag"
     OTHER = "other"
+
+
+class ContainerType(StrEnum):
+    BOX = "box"
+    BIN = "bin"
+    CRATE = "crate"
+    SUITCASE = "suitcase"
+    BAG = "bag"
+    OTHER = "other"
+
+
+CONTAINER_PREFIXES: dict[str, str] = {
+    ContainerType.BOX.value: "BOX",
+    ContainerType.BIN.value: "BIN",
+    ContainerType.CRATE.value: "CRATE",
+    ContainerType.SUITCASE.value: "SUITCASE",
+    ContainerType.BAG.value: "BAG",
+    ContainerType.OTHER.value: "CONT",
+}
+
+FIXED_LOCATION_PREFIXES: dict[str, str] = {
+    LocationKind.CLOSET.value: "CLOSET",
+    LocationKind.CABINET.value: "CABINET",
+    LocationKind.SHELF.value: "SHELF",
+    LocationKind.DRAWER.value: "DRAWER",
+    LocationKind.OTHER.value: "LOC",
+    LocationKind.ROOM.value: "LOC",
+}
+
+
+def prefix_for_container_type(container_type: str) -> str:
+    return CONTAINER_PREFIXES.get(container_type, "CONT")
+
+
+def prefix_for_location_kind(kind: str) -> str:
+    if kind in CONTAINER_PREFIXES:
+        return CONTAINER_PREFIXES[kind]
+    return FIXED_LOCATION_PREFIXES.get(kind, "LOC")
 
 
 class ItemCondition(StrEnum):

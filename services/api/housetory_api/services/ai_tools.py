@@ -31,6 +31,13 @@ from ..services.serializers import (
 )
 from ..services.warranties import warranty_status
 from ..services.warranty_dashboard import build_dashboard, load_warranties
+from .container_serializers import location_path_map
+from .containers import (
+    deterministic_summary,
+    load_container_items,
+    location_ancestors,
+    room_ancestors,
+)
 from .items import get_item
 
 
@@ -45,6 +52,25 @@ class ToolResult:
     references: list[AssistantReference] = field(default_factory=list)
     notices: list[str] = field(default_factory=list)
     facts: dict[str, Any] = field(default_factory=dict)
+
+
+def _summaries_with_paths(
+    db: Session,
+    household_id: uuid.UUID,
+    items: list[Item],
+    *,
+    household_reminder_days: int,
+) -> list[ItemSummary]:
+    paths = location_path_map(db, household_id)
+    summaries = []
+    for item in items:
+        summary = item_summary(item, household_reminder_days=household_reminder_days)
+        if item.storage_location_id:
+            summary = summary.model_copy(
+                update={"location_path": paths.get(item.storage_location_id, [])}
+            )
+        summaries.append(summary)
+    return summaries
 
 
 def _item_reference(item: ItemSummary | Item) -> AssistantReference:
@@ -107,6 +133,16 @@ def _resolve_location(
     if not name:
         return None
     normalized = name.strip().lower()
+    identifier = name.strip().upper()
+    if re.fullmatch(r"[A-Z]{2,12}-[0-9]{3,6}", identifier):
+        exact = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                func.upper(StorageLocation.identifier) == identifier,
+            )
+        )
+        if exact is not None:
+            return exact
     return db.scalar(
         select(StorageLocation)
         .where(
@@ -216,7 +252,12 @@ def search_inventory(
                 Item.serial_number.ilike(search),
                 Item.category.has(Category.name.ilike(search)),
                 Item.room.has(Room.name.ilike(search)),
-                Item.storage_location.has(StorageLocation.name.ilike(search)),
+                Item.storage_location.has(
+                    or_(
+                        StorageLocation.name.ilike(search),
+                        StorageLocation.identifier.ilike(search),
+                    )
+                ),
                 Item.tags.any(Tag.name.ilike(search)),
                 Item.documents.any(
                     or_(
@@ -324,9 +365,9 @@ def tool_search_items(
     items, total = search_inventory(
         db, household_id, filters, household_reminder_days=household_reminder_days
     )
-    summaries = [
-        item_summary(item, household_reminder_days=household_reminder_days) for item in items
-    ]
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
     if not summaries:
         summary = "No matching inventory items were found."
     elif len(summaries) == 1:
@@ -334,7 +375,7 @@ def tool_search_items(
         summary = (
             f"Found 1 item: {item.name}. "
             f"Location: {item.room.name if item.room else 'unassigned'}"
-            f"{', ' + item.location.name if item.location else ''}. "
+            f"{', ' + (item.location.identifier or item.location.name) if item.location else ''}. "
             f"Purchase price: {item.purchase.price_cents if item.purchase else 'not recorded'}."
         )
     else:
@@ -369,7 +410,7 @@ def tool_get_item_details(
     if detail.room:
         parts.append(f"in {detail.room.name}")
     if detail.location:
-        parts.append(f"at {detail.location.name}")
+        parts.append(f"at {detail.location.identifier or detail.location.name}")
     if detail.brand or detail.model:
         parts.append(f"{detail.brand or ''} {detail.model or ''}".strip())
     summary += ", ".join(parts) if parts else "no location recorded"
@@ -398,7 +439,11 @@ def tool_search_locations(
     if query:
         lowered = query.lower()
         rooms = [room for room in rooms if lowered in room.name.lower()]
-        locations = [loc for loc in locations if lowered in loc.name.lower()]
+        locations = [
+            loc
+            for loc in locations
+            if lowered in loc.name.lower() or (loc.identifier and lowered in loc.identifier.lower())
+        ]
     results = [
         {
             "id": str(room.id),
@@ -422,8 +467,11 @@ def tool_search_locations(
             "id": str(location.id),
             "type": "storage_location",
             "name": location.name,
+            "identifier": location.identifier,
+            "is_container": location.is_container,
+            "container_type": location.container_type,
             "room": room_map.get(location.room_id).name if room_map.get(location.room_id) else None,
-            "url": f"/rooms/{location.room_id}?location_id={location.id}",
+            "url": f"/containers/{location.id}",
         }
         for location in locations[:20]
     ]
@@ -469,9 +517,9 @@ def tool_list_room_contents(
         )
         .order_by(func.lower(Item.name))
     ).all()
-    summaries = [
-        item_summary(item, household_reminder_days=household_reminder_days) for item in items
-    ]
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
     locations = db.scalars(
         select(StorageLocation)
         .where(
@@ -485,8 +533,10 @@ def tool_list_room_contents(
             "id": str(location.id),
             "type": "storage_location",
             "name": location.name,
+            "identifier": location.identifier,
+            "is_container": location.is_container,
             "room": room.name,
-            "url": f"/rooms/{room.id}?location_id={location.id}",
+            "url": f"/containers/{location.id}",
         }
         for location in locations
     ]
@@ -502,6 +552,78 @@ def tool_list_room_contents(
         references=[_item_reference(item) for item in summaries]
         + [AssistantReference(type="room", id=room.id, title=room.name, url=f"/rooms/{room.id}")],
         facts={"room_id": str(room.id), "room_name": room.name, "total": len(summaries)},
+    )
+
+
+def tool_get_container_contents(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    location_id = args.get("container_id")
+    identifier = str(args.get("identifier") or "").strip().upper()
+    if location_id:
+        location = _resolve_location(db, household_id, location_id=uuid.UUID(str(location_id)))
+    elif identifier:
+        location = _resolve_location(db, household_id, name=identifier)
+    else:
+        location = _resolve_location(
+            db, household_id, name=str(args.get("container_name") or "").strip()
+        )
+    if location is None:
+        raise ValueError("Container not found")
+    items = load_container_items(db, household_id, location.id)
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
+    live = deterministic_summary(items)
+    path = " / ".join(
+        [entry.name for entry in room_ancestors(db, household_id, location.room_id)]
+        + [entry.name for entry in location_ancestors(db, household_id, location.id)]
+    )
+    label = location.identifier or location.name
+    summary = (
+        f"{label} is in {path} and contains {len(summaries)} items "
+        f"({sum(item.quantity for item in items)} units)."
+        if summaries
+        else f"{label} is in {path} and is empty."
+    )
+    return ToolResult(
+        tool="get_container_contents",
+        summary=summary,
+        items=summaries,
+        locations=[
+            {
+                "id": str(location.id),
+                "type": "storage_location",
+                "name": location.name,
+                "identifier": location.identifier,
+                "room": location.room.name if location.room else None,
+                "url": f"/containers/{location.id}",
+            }
+        ],
+        references=[_item_reference(item) for item in summaries]
+        + [
+            AssistantReference(
+                type="location",
+                id=location.id,
+                title=label,
+                subtitle=path,
+                url=f"/containers/{location.id}",
+            )
+        ],
+        facts={
+            "container_id": str(location.id),
+            "identifier": location.identifier,
+            "name": location.name,
+            "path": path,
+            "room": location.room.name if location.room else None,
+            "item_count": len(summaries),
+            "total_quantity": sum(item.quantity for item in items),
+            "summary": live.short,
+        },
     )
 
 
@@ -757,9 +879,9 @@ def tool_find_missing_information(
         .order_by(func.lower(Item.name))
         .limit(50)
     ).all()
-    summaries = [
-        item_summary(item, household_reminder_days=household_reminder_days) for item in items
-    ]
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
     return ToolResult(
         tool="find_missing_information",
         summary=f"Found {len(summaries)} items {label}.",
@@ -789,6 +911,9 @@ def execute_tool(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "list_room_contents": lambda: tool_list_room_contents(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_container_contents": lambda: tool_get_container_contents(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "search_documents": lambda: tool_search_documents(

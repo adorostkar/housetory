@@ -45,6 +45,9 @@ class LocationBrief(ORMModel):
     name: str
     kind: str
     parent_id: uuid.UUID | None = None
+    identifier: str | None = None
+    container_type: str | None = None
+    is_container: bool = False
 
 
 class ItemCreate(BaseModel):
@@ -109,6 +112,7 @@ class ItemSummary(ORMModel):
     is_archived: bool
     room: RoomBrief | None
     location: LocationBrief | None
+    location_path: list[LocationBrief] = Field(default_factory=list)
     category: CategoryBrief | None
     tags: list[TagBrief]
     primary_photo: PhotoOut | None

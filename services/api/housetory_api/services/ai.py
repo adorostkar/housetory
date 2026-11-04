@@ -82,7 +82,8 @@ def _request_json(
         method=method,
     )
     try:
-        with urllib.request.urlopen(
+        # URL is operator-configured and validated as http(s); never user data.
+        with urllib.request.urlopen(  # nosec B310
             request, timeout=timeout or settings.ai_timeout_seconds
         ) as response:
             body = response.read(2_000_000)

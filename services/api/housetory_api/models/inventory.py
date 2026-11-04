@@ -67,10 +67,28 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
         CheckConstraint("length(name) between 1 and 120", name="name_length"),
         CheckConstraint(
-            "kind in ('room', 'closet', 'cabinet', 'shelf', 'drawer', 'box', 'bin', 'other')",
+            "kind in ('room', 'closet', 'cabinet', 'shelf', 'drawer', 'box', 'bin', "
+            "'crate', 'suitcase', 'bag', 'other')",
             name="valid_kind",
         ),
+        CheckConstraint(
+            "container_type is null or container_type in "
+            "('box', 'bin', 'crate', 'suitcase', 'bag', 'other')",
+            name="valid_container_type",
+        ),
+        CheckConstraint(
+            "identifier is null or identifier ~ '^[A-Z]{2,12}-[0-9]{3,6}$'",
+            name="identifier_format",
+        ),
+        CheckConstraint(
+            "is_container = false or container_type is not null",
+            name="container_type_required",
+        ),
+        UniqueConstraint(
+            "household_id", "identifier", name="uq_storage_locations_household_identifier"
+        ),
         Index("ix_storage_locations_household_room", "household_id", "room_id"),
+        Index("ix_storage_locations_household_container", "household_id", "is_container"),
         Index("ix_storage_locations_parent_id", "parent_id"),
     )
 
@@ -88,6 +106,16 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=LocationKind.SHELF.value
     )
+    is_container: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    container_type: Mapped[str | None] = mapped_column(String(20))
+    identifier: Mapped[str | None] = mapped_column(String(32))
+    summary_short: Mapped[str | None] = mapped_column(Text)
+    summary_detailed: Mapped[str | None] = mapped_column(Text)
+    summary_headline: Mapped[str | None] = mapped_column(Text)
+    summary_source: Mapped[str | None] = mapped_column(String(20))
+    summary_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary_contents_hash: Mapped[str | None] = mapped_column(String(64))
+    label_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     household: Mapped["Household"] = relationship(back_populates="storage_locations")
@@ -99,6 +127,25 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="parent", cascade="all, delete-orphan"
     )
     items: Mapped[list["Item"]] = relationship(back_populates="storage_location")
+
+
+class LocationIdentifierCounter(Base):
+    """Append-only allocator for permanent human-readable location identifiers.
+
+    Updates are atomic and transaction-scoped. The row is never decremented on
+    deletion, so identifiers are never reused within a household.
+    """
+
+    __tablename__ = "location_identifier_counters"
+    __table_args__ = (CheckConstraint("last_value >= 0", name="last_value_non_negative"),)
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("households.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    prefix: Mapped[str] = mapped_column(String(16), primary_key=True)
+    last_value: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
 
 class Category(UUIDPrimaryKeyMixin, TimestampMixin, Base):

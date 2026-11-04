@@ -12,6 +12,7 @@ AssistantTool = Literal[
     "get_item_details",
     "search_locations",
     "list_room_contents",
+    "get_container_contents",
     "search_documents",
     "get_purchase_history",
     "get_warranty_status",

@@ -162,7 +162,8 @@ def create_import(
         if has_text:
             stored = storage.store_import_text(auth.household.id, batch.id, text or "")
         else:
-            assert file is not None
+            if file is None:
+                raise ApiError(422, "import_source_required", "Choose a file to import.")
             stored = storage.store_import_source(auth.household.id, batch.id, file)
         batch.storage_key = stored.storage_key
         batch.byte_size = stored.byte_size

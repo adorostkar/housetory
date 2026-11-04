@@ -12,6 +12,7 @@ from ...schemas.locations import (
     StorageLocationOut,
     StorageLocationUpdate,
 )
+from ...services.containers import household_hierarchy_lock
 from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -121,6 +122,12 @@ def _to_out(
         name=location.name,
         description=location.description,
         kind=location.kind,
+        is_container=location.is_container,
+        container_type=location.container_type,
+        identifier=location.identifier,
+        summary_headline=location.summary_headline,
+        summary_short=location.summary_short,
+        label_generated_at=location.label_generated_at,
         sort_order=location.sort_order,
         item_count=direct_counts.get(location.id, 0),
         total_item_count=total_counts.get(location.id, 0),
@@ -132,6 +139,8 @@ def _to_out(
 @router.get("", response_model=StorageLocationList)
 def list_locations(
     room_id: uuid.UUID | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=120),
+    is_container: bool | None = Query(default=None),
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> StorageLocationList:
@@ -139,6 +148,13 @@ def list_locations(
     if room_id is not None:
         _get_room(db, auth.household.id, room_id)
         query = query.where(StorageLocation.room_id == room_id)
+    if is_container is not None:
+        query = query.where(StorageLocation.is_container.is_(is_container))
+    if q and q.strip():
+        search = f"%{q.strip()}%"
+        query = query.where(
+            (StorageLocation.identifier.ilike(search)) | (StorageLocation.name.ilike(search))
+        )
     locations = db.scalars(
         query.order_by(
             StorageLocation.room_id,
@@ -156,6 +172,7 @@ def create_location(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> StorageLocationOut:
+    household_hierarchy_lock(db, auth.household.id)
     _get_room(db, auth.household.id, payload.room_id)
     _validate_parent(
         db,
@@ -202,6 +219,7 @@ def update_location(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> StorageLocationOut:
+    household_hierarchy_lock(db, auth.household.id)
     location = _get_location(db, auth.household.id, location_id)
     fields = payload.model_fields_set
     new_parent_id = payload.parent_id if "parent_id" in fields else location.parent_id
@@ -249,6 +267,7 @@ def delete_location(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> Response:
+    household_hierarchy_lock(db, auth.household.id)
     location = _get_location(db, auth.household.id, location_id)
     has_children = (
         db.scalar(

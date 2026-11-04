@@ -26,8 +26,8 @@ CURRENCY_SYMBOLS = {
     "AU$": "AUD",
 }
 MONEY_RE = re.compile(
-    r"(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹])?\s*"
-    r"(?P<amount>\d{1,3}(?:[ ,]\d{3})*(?:[.,]\d{2})?|\d+[.,]\d{2})"
+    r"(?<![\w-])(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹])?\s*"
+    r"(?P<amount>\d{1,3}(?:[ ,]\d{3})*(?:[.,]\d{2})?|\d+[.,]\d{2})(?![\w-])"
 )
 SERIAL_RE = re.compile(
     r"\b(?:serial(?:\s*(?:no\.?|number))?|s/n|sn|imei)\s*[:#-]?\s*"

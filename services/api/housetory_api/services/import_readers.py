@@ -11,7 +11,8 @@ import re
 import zipfile
 from datetime import date, timedelta
 from pathlib import Path, PurePosixPath
-from xml.etree import ElementTree
+
+from defusedxml import ElementTree
 
 from ..config import get_settings
 from .import_types import ExtractedSourceFile, ParsedDocument, ParsedTable, SourceBundle

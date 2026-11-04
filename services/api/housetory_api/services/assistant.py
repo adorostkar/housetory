@@ -31,6 +31,7 @@ Allowed tools and arguments:
 - get_item_details: item_id
 - search_locations: q
 - list_room_contents: room_id or room_name
+- get_container_contents: container_id or identifier
 - search_documents: q, item_id
 - get_purchase_history: merchant, item_id, date_from, date_to
 - get_warranty_status: status(active|expiring|expired), category
@@ -102,6 +103,12 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
     room = _match_named(question, index.rooms)
     location = _match_named(question, index.locations)
     category = _match_named(question, index.categories)
+    identifier_match = re.search(r"\b([A-Z]{2,12}-[0-9]{3,6})\b", question, re.IGNORECASE)
+    if identifier_match:
+        return AssistantPlan(
+            tool="get_container_contents",
+            arguments={"identifier": identifier_match.group(1).upper()},
+        )
 
     if _contains_phrase(lowered, MISSING_PURCHASE_PHRASES):
         return AssistantPlan(tool="find_missing_information", arguments={"field": "purchase"})
@@ -348,6 +355,17 @@ def interpret_search(
     room = _match_named(question, index.rooms)
     location = _match_named(question, index.locations)
     category = _match_named(question, index.categories)
+    identifier_match = re.search(r"\b([A-Z]{2,12}-[0-9]{3,6})\b", question, re.IGNORECASE)
+    if identifier_match:
+        identifier = identifier_match.group(1).upper()
+        location = next(
+            (
+                entry
+                for entry in index.locations
+                if entry.identifier and entry.identifier.upper() == identifier
+            ),
+            location,
+        )
     if room:
         filters.room_id = room.id
         filters.room_name = room.name
@@ -355,7 +373,7 @@ def interpret_search(
     if location:
         filters.location_id = location.id
         filters.location_name = location.name
-        interpretations.append(f"storage place: {location.name}")
+        interpretations.append(f"storage place: {location.identifier or location.name}")
     if category:
         filters.category_id = category.id
         filters.category_name = category.name

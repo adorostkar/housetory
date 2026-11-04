@@ -244,6 +244,12 @@ def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict
                 "quantity": item.quantity,
                 "category": item.category.name if item.category else "",
                 "room": item.room.name if item.room else "",
+                "container": (
+                    item.storage_location.identifier
+                    if item.storage_location and item.storage_location.identifier
+                    else (item.storage_location.name if item.storage_location else "")
+                ),
+                "storage_location": (item.storage_location.name if item.storage_location else ""),
                 "purchase_date": purchase.purchase_date.isoformat()
                 if purchase and purchase.purchase_date
                 else "",

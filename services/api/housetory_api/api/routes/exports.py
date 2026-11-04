@@ -171,6 +171,8 @@ def export_inventory(
         "quantity",
         "category",
         "room",
+        "container",
+        "storage_location",
         "purchase_date",
         "merchant",
         "purchase_currency",

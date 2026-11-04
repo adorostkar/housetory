@@ -190,6 +190,9 @@ def item_summary(item: Item, *, household_reminder_days: int | None = None) -> I
                 name=item.storage_location.name,
                 kind=item.storage_location.kind,
                 parent_id=item.storage_location.parent_id,
+                identifier=item.storage_location.identifier,
+                container_type=item.storage_location.container_type,
+                is_container=item.storage_location.is_container,
             )
             if item.storage_location
             else None
@@ -218,10 +221,12 @@ def item_detail(
     *,
     household_reminder_days: int | None = None,
     import_source: ImportSourceBrief | None = None,
+    location_path: list[LocationBrief] | None = None,
 ) -> ItemDetail:
     summary = item_summary(item, household_reminder_days=household_reminder_days)
     return ItemDetail(
-        **summary.model_dump(),
+        **summary.model_dump(exclude={"location_path"}),
+        location_path=location_path or [],
         serial_number=item.serial_number,
         import_source=import_source,
         photos=[

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     imports_dir: Path | None = None
 
     app_base_url: str = "http://localhost:8080"
+    qr_base_url: str = ""
     extra_origins: str = ""
     cookie_secure: bool = False
     session_ttl_days: int = Field(default=30, ge=1, le=365)
@@ -53,6 +54,27 @@ class Settings(BaseSettings):
     ai_import_max_chunks: int = Field(default=8, ge=1, le=50)
 
     @property
+    def qr_effective_base_url(self) -> str:
+        return (self.qr_base_url or self.app_base_url).rstrip("/")
+
+    @property
+    def qr_base_url_warning(self) -> str | None:
+        parsed = urlparse(self.qr_effective_base_url)
+        hostname = (parsed.hostname or "").lower()
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            return (
+                "QR codes currently point at a localhost address. A phone camera "
+                "cannot reach that address. Set QR_BASE_URL to your Tailscale or "
+                "LAN URL before printing labels."
+            )
+        if parsed.scheme == "http" and self.environment == "production":
+            return (
+                "QR codes use plain HTTP. Set QR_BASE_URL to an HTTPS address for "
+                "trusted phone access outside your private network."
+            )
+        return None
+
+    @property
     def ai_effective_model(self) -> str:
         if self.ai_provider == "openai_compatible":
             return self.ai_cloud_model
@@ -68,10 +90,20 @@ class Settings(BaseSettings):
     def ai_cloud_allowed(self) -> bool:
         return self.ai_cloud_enabled and self.ai_cloud_consent
 
-    @field_validator("app_base_url")
+    @field_validator("app_base_url", "qr_base_url")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("qr_base_url", "ai_base_url", "ai_cloud_base_url")
+    @classmethod
+    def _validate_service_url(cls, value: str) -> str:
+        if not value:
+            return value
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Service URLs must be absolute http(s) URLs.")
+        return value
 
     @model_validator(mode="after")
     def _validate_deployment_security(self) -> "Settings":

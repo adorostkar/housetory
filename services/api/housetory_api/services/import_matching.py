@@ -129,6 +129,7 @@ def _candidate_from_location(location: StorageLocation, score: int) -> LocationC
     return LocationCandidate(
         id=location.id,
         name=location.name,
+        identifier=location.identifier,
         kind=location.kind,
         room_id=location.room_id,
         parent_id=location.parent_id,
@@ -174,8 +175,12 @@ def _location_candidates(
     text: str, index: InventoryIndex, room_id: uuid.UUID | None = None
 ) -> list[LocationCandidate]:
     candidates = []
+    normalized = _normalize(text).upper()
     for location in index.locations:
         if room_id is not None and location.room_id != room_id:
+            continue
+        if location.identifier and location.identifier.upper() == normalized.replace(" ", "-"):
+            candidates.append(_candidate_from_location(location, 100))
             continue
         score = _similarity(text, location.name)
         if score >= LOCATION_THRESHOLD:
@@ -202,6 +207,7 @@ def match_location(
             status=status,
             matched_id=best.id,
             name=best.name,
+            identifier=best.identifier,
             room_id=best.room_id,
             parent_id=best.parent_id,
             candidates=ranked,

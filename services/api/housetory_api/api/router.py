@@ -3,12 +3,14 @@ from fastapi import APIRouter
 from .routes import (
     ai,
     auth,
+    containers,
     documents,
     exports,
     health,
     household,
     imports,
     items,
+    labels,
     locations,
     overview,
     ownership,
@@ -26,6 +28,8 @@ api_router.include_router(overview.router)
 api_router.include_router(ownership.router)
 api_router.include_router(rooms.router)
 api_router.include_router(locations.router)
+api_router.include_router(containers.router)
+api_router.include_router(labels.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(items.router)
 api_router.include_router(documents.router)

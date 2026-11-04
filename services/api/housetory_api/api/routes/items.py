@@ -27,6 +27,8 @@ from ...schemas.items import (
 )
 from ...services import items as item_service
 from ...services import storage
+from ...services.container_serializers import location_path_map
+from ...services.containers import location_breadcrumb
 from ...services.hierarchy import descendant_ids
 from ...services.serializers import (
     item_detail,
@@ -144,7 +146,7 @@ def list_items(
         for matched_id in db.scalars(
             select(StorageLocation.id).where(
                 StorageLocation.household_id == auth.household.id,
-                StorageLocation.name.ilike(search),
+                (StorageLocation.name.ilike(search)) | (StorageLocation.identifier.ilike(search)),
             )
         ):
             matched_location_ids.update(descendant_ids(location_rows, matched_id))
@@ -180,8 +182,17 @@ def list_items(
         .limit(limit)
         .offset(offset)
     ).all()
+    path_map = location_path_map(db, auth.household.id)
+    summaries = []
+    for item in items:
+        summary = item_summary(item)
+        if item.storage_location_id:
+            summary = summary.model_copy(
+                update={"location_path": path_map.get(item.storage_location_id, [])}
+            )
+        summaries.append(summary)
     return ItemList(
-        items=[item_summary(item) for item in items],
+        items=summaries,
         total=total,
         limit=limit,
         offset=offset,
@@ -197,7 +208,12 @@ def create_item(
     item = item_service.create_item_record(db, auth.household.id, payload)
     db.commit()
     item = _get_item(db, auth.household.id, item.id)
-    return ItemDetailResponse(item=item_detail(item))
+    path = (
+        location_breadcrumb(db, auth.household.id, item.storage_location_id)
+        if item.storage_location_id
+        else []
+    )
+    return ItemDetailResponse(item=item_detail(item, location_path=path))
 
 
 @router.get("/items/{item_id}", response_model=ItemDetailResponse)
@@ -207,7 +223,18 @@ def get_item(
     db: Session = Depends(get_db),
 ) -> ItemDetailResponse:
     item = _get_item(db, auth.household.id, item_id)
-    return ItemDetailResponse(item=item_detail(item, import_source=_import_source(db, item.id)))
+    path = (
+        location_breadcrumb(db, auth.household.id, item.storage_location_id)
+        if item.storage_location_id
+        else []
+    )
+    return ItemDetailResponse(
+        item=item_detail(
+            item,
+            import_source=_import_source(db, item.id),
+            location_path=path,
+        )
+    )
 
 
 @router.patch("/items/{item_id}", response_model=ItemDetailResponse)
@@ -224,7 +251,12 @@ def update_item(
     # fresh read so a moved item's room/location/category are reflected.
     db.expire_all()
     item = _get_item(db, auth.household.id, item.id)
-    return ItemDetailResponse(item=item_detail(item))
+    path = (
+        location_breadcrumb(db, auth.household.id, item.storage_location_id)
+        if item.storage_location_id
+        else []
+    )
+    return ItemDetailResponse(item=item_detail(item, location_path=path))
 
 
 @router.delete("/items/{item_id}", status_code=204)

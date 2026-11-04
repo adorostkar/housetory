@@ -10,6 +10,7 @@ from ..schemas.common import Description, ORMModel, trimmed
 class LocationCandidate(BaseModel):
     id: uuid.UUID
     name: str
+    identifier: str | None = None
     kind: str | None = None
     room_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
@@ -19,6 +20,7 @@ class LocationCandidate(BaseModel):
 class LocationProposal(BaseModel):
     text: str
     entity_type: Literal["room", "storage_location"]
+    identifier: str | None = None
     status: Literal["matched", "ambiguous", "missing", "none"] = "none"
     matched_id: uuid.UUID | None = None
     name: str | None = None
