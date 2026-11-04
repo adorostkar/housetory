@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     func,
 )
@@ -44,8 +45,17 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "households"
+    __table_args__ = (
+        CheckConstraint(
+            "warranty_reminder_days between 1 and 3650",
+            name="warranty_reminder_days",
+        ),
+    )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    warranty_reminder_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="30"
+    )
 
     members: Mapped[list["HouseholdMember"]] = relationship(
         back_populates="household", cascade="all, delete-orphan"

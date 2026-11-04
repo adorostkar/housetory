@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import tempfile
 import uuid
 import warnings
@@ -40,6 +41,8 @@ DOCUMENT_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
     "text/plain": ".txt",
 }
 
@@ -60,13 +63,21 @@ class StoredPhoto:
 @dataclass(frozen=True)
 class StoredDocument:
     storage_key: str
+    original_storage_key: str
     original_filename: str
     content_type: str
+    original_content_type: str
     byte_size: int
+    original_byte_size: int
+
+
+def _root_path() -> Path:
+    return get_settings().resolved_uploads_dir
 
 
 def _root() -> Path:
-    root = get_settings().resolved_uploads_dir
+    """Return the writable upload root, creating and restricting it if needed."""
+    root = _root_path()
     root.mkdir(parents=True, exist_ok=True)
     os.chmod(root, 0o700)
     return root
@@ -267,6 +278,7 @@ def _normalize_document_image(
         extension, content_type = PHOTO_FORMATS[image_format][1], PHOTO_FORMATS[image_format][0]
 
     destination = destination_dir / f"{document_id}.{extension}"
+    original_content_type = PHOTO_FORMATS[image_format][0]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -284,7 +296,12 @@ def _normalize_document_image(
     except Exception:
         destination.unlink(missing_ok=True)
         raise
-    return destination, content_type, _filename_with_extension(original_filename, extension)
+    return (
+        destination,
+        content_type,
+        original_content_type,
+        _filename_with_extension(original_filename, extension),
+    )
 
 
 def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocument:
@@ -300,9 +317,18 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
     temp_path, size = _write_temp(upload, settings.max_upload_bytes)
     document_id = uuid.uuid4()
     extension = DOCUMENT_TYPES[declared_type]
-    destination_dir = _root() / "households" / str(household_id) / "documents"
+    documents_dir = _root() / "households" / str(household_id) / "documents"
+    destination_dir = documents_dir
     destination = destination_dir / f"{document_id}{extension}"
+    originals_dir = documents_dir / "originals"
+    original_destination = originals_dir / f"{document_id}{extension}"
     try:
+        # Preserve the exact uploaded bytes before any validation, conversion or
+        # EXIF stripping. The normalized copy remains the default download.
+        _mkdir_private(originals_dir)
+        shutil.copyfile(temp_path, original_destination)
+        _chmod_file(original_destination)
+
         if extension == ".pdf":
             _validate_pdf(temp_path)
         elif extension == ".txt":
@@ -313,7 +339,12 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
                     422, "invalid_document", "Text documents must be UTF-8 encoded."
                 ) from exc
         else:
-            destination, declared_type, original_filename = _normalize_document_image(
+            (
+                destination,
+                declared_type,
+                original_content_type,
+                original_filename,
+            ) = _normalize_document_image(
                 temp_path,
                 destination_dir,
                 document_id,
@@ -321,9 +352,12 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
             )
             return StoredDocument(
                 storage_key=destination.relative_to(_root()).as_posix(),
+                original_storage_key=original_destination.relative_to(_root()).as_posix(),
                 original_filename=original_filename,
                 content_type=declared_type,
+                original_content_type=original_content_type,
                 byte_size=destination.stat().st_size,
+                original_byte_size=size,
             )
 
         _mkdir_private(destination_dir)
@@ -331,19 +365,25 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
         _chmod_file(destination)
         return StoredDocument(
             storage_key=destination.relative_to(_root()).as_posix(),
+            original_storage_key=original_destination.relative_to(_root()).as_posix(),
             original_filename=_safe_filename(upload.filename),
             content_type=declared_type,
+            original_content_type=declared_type,
             byte_size=size,
+            original_byte_size=size,
         )
     except Exception:
         destination.unlink(missing_ok=True)
+        original_destination.unlink(missing_ok=True)
         raise
     finally:
         temp_path.unlink(missing_ok=True)
 
 
 def resolve_key(storage_key: str) -> Path:
-    root = _root().resolve()
+    # Read paths must not mutate the upload directory: the worker mounts it
+    # read-only and only needs to resolve files for OCR.
+    root = _root_path().resolve()
     path = (root / storage_key).resolve()
     if root not in path.parents and path != root:
         raise ApiError(404, "file_not_found", "File not found.")

@@ -119,6 +119,10 @@ services:
       ENVIRONMENT: production
       DATA_DIR: /data
       UPLOADS_DIR: /data/uploads
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
+      OCR_MAX_PDF_PAGES: ${OCR_MAX_PDF_PAGES:-5}
+    volumes:
+      - housetory_uploads:/data/uploads:ro
     depends_on:
       db:
         condition: service_healthy

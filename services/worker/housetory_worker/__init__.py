@@ -26,6 +26,7 @@ from housetory_api.jobs import (
     requeue_stale_jobs,
 )
 from housetory_api.models import AuthSession, Job
+from housetory_api.services.document_ocr import OCR_TASK, run_job as run_document_ocr
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,6 +83,7 @@ HANDLERS = {
     PRUNE_TASK: prune_expired_sessions,
     PRUNE_FINISHED_TASK: prune_finished_jobs,
     "maintenance.ping": ping,
+    OCR_TASK: run_document_ocr,
 }
 
 

@@ -49,11 +49,15 @@ def test_valid_archive_validates():
             {"name": "./", "type": "dir"},
             {"name": "./items/a/photo.jpg", "data": b"photo"},
             {"name": "./households/b/documents/receipt.pdf", "data": b"pdf"},
+            {
+                "name": "./households/b/documents/originals/receipt.pdf",
+                "data": b"original-pdf",
+            },
         ]
     )
     result = run(["--check"], archive)
     assert result.returncode == 0, result.stderr.decode()
-    assert "validated 3 archive entries" in result.stdout.decode()
+    assert "validated 4 archive entries" in result.stdout.decode()
 
 
 def test_parent_traversal_is_rejected(tmp_path):
@@ -99,6 +103,10 @@ def test_valid_archive_extracts_private_files(tmp_path):
             {"name": "./", "type": "dir"},
             {"name": "./items/a/photo.jpg", "data": b"photo-data"},
             {"name": "./households/b/documents/receipt.pdf", "data": b"pdf-data"},
+            {
+                "name": "./households/b/documents/originals/receipt.pdf",
+                "data": b"original-pdf-data",
+            },
         ]
     )
     result = run(["--extract", "--root", str(uploads)], archive)
@@ -106,5 +114,14 @@ def test_valid_archive_extracts_private_files(tmp_path):
     assert not (uploads / "old").exists()
     photo = uploads / "items/a/photo.jpg"
     assert photo.read_bytes() == b"photo-data"
+    original = uploads / "households/b/documents/originals/receipt.pdf"
+    assert original.read_bytes() == b"original-pdf-data"
     assert stat.S_IMODE(os.stat(photo).st_mode) == 0o600
     assert stat.S_IMODE(os.stat(uploads).st_mode) == 0o700
+
+
+def test_restore_reapplies_least_privilege_role_grants():
+    restore_script = SCRIPT.parent / "restore.sh"
+    text = restore_script.read_text()
+    assert "create-app-role.sql" in text
+    assert "Restoring application role privileges" in text

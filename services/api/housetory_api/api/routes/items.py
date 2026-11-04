@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...models import (
     Category,
-    Document,
     Item,
     ItemPhoto,
     Purchase,
@@ -19,8 +18,6 @@ from ...models import (
     Warranty,
 )
 from ...schemas.items import (
-    DocumentList,
-    DocumentOut,
     ItemCreate,
     ItemDetailResponse,
     ItemList,
@@ -31,13 +28,14 @@ from ...schemas.items import (
 )
 from ...services import storage
 from ...services.hierarchy import descendant_ids
+from ...services.purchases import get_purchase, prune_orphan_purchases, validate_receipt
 from ...services.serializers import (
-    document_out,
     item_detail,
     item_load_options,
     item_summary,
     photo_out,
 )
+from ...services.warranties import resolve_end_date
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -116,20 +114,53 @@ def _resolve_location(
     return room_id, location
 
 
-def _apply_purchase(item: Item, payload: PurchaseIn, *, replace: bool) -> None:
+def _apply_purchase(db: Session, item: Item, payload: PurchaseIn, *, replace: bool) -> None:
     if replace or item.purchase is None:
-        item.purchase = Purchase(currency="USD")
+        item.purchase = Purchase(household_id=item.household_id, currency="USD")
     purchase = cast(Purchase, item.purchase)
-    for field in payload.model_fields_set:
-        setattr(purchase, field, getattr(payload, field))
+    fields = payload.model_fields_set
+    if "merchant" in fields or "vendor" in fields:
+        purchase.vendor = payload.merchant_name
+    if "purchase_date" in fields:
+        purchase.purchase_date = payload.purchase_date
+    if "price_cents" in fields:
+        purchase.price_cents = payload.price_cents
+    if "currency" in fields:
+        purchase.currency = payload.currency
+    if "order_number" in fields:
+        purchase.order_number = payload.order_number
+    if "notes" in fields:
+        purchase.notes = payload.notes
+    if "receipt_document_id" in fields:
+        validate_receipt(db, item.household_id, payload.receipt_document_id)
+        purchase.receipt_document_id = payload.receipt_document_id
 
 
-def _apply_warranty(item: Item, payload: WarrantyIn, *, replace: bool) -> None:
+def _apply_warranty(db: Session, item: Item, payload: WarrantyIn, *, replace: bool) -> None:
     if replace or item.warranty is None:
         item.warranty = Warranty()
     warranty = cast(Warranty, item.warranty)
-    for field in payload.model_fields_set:
-        setattr(warranty, field, getattr(payload, field))
+    fields = payload.model_fields_set
+    if "provider" in fields:
+        warranty.provider = payload.provider
+    if "start_date" in fields:
+        warranty.start_date = payload.start_date
+    if "duration_months" in fields:
+        warranty.duration_months = payload.duration_months
+    if "reminder_days" in fields:
+        warranty.reminder_days = payload.reminder_days
+    if "notes" in fields:
+        warranty.notes = payload.notes
+    if "document_id" in fields:
+        document = validate_receipt(db, item.household_id, payload.document_id)
+        warranty.document_id = document.id if document is not None else None
+    if "end_date" in fields:
+        warranty.end_date = payload.end_date
+    warranty.end_date = resolve_end_date(
+        start_date=warranty.start_date,
+        duration_months=warranty.duration_months,
+        end_date=warranty.end_date,
+    )
     if (
         warranty.start_date is not None
         and warranty.end_date is not None
@@ -137,6 +168,12 @@ def _apply_warranty(item: Item, payload: WarrantyIn, *, replace: bool) -> None:
     ):
         raise ApiError(
             422, "invalid_warranty_dates", "Warranty end date must not precede its start date."
+        )
+    if warranty.duration_months is not None and warranty.start_date is None:
+        raise ApiError(
+            422,
+            "warranty_start_required",
+            "A warranty duration requires a start date.",
         )
 
 
@@ -279,12 +316,16 @@ def create_item(
         room_id=room_id,
         storage_location_id=location.id if location else None,
         category_id=category.id if category else None,
+        current_value_cents=payload.current_value_cents,
+        current_value_currency=payload.current_value_currency,
     )
     item.tags = tags
-    if payload.purchase is not None:
-        _apply_purchase(item, payload.purchase, replace=True)
+    if payload.purchase_id is not None:
+        item.purchase_id = get_purchase(db, auth.household.id, payload.purchase_id).id
+    elif payload.purchase is not None:
+        _apply_purchase(db, item, payload.purchase, replace=True)
     if payload.warranty is not None:
-        _apply_warranty(item, payload.warranty, replace=True)
+        _apply_warranty(db, item, payload.warranty, replace=True)
     db.add(item)
     db.commit()
     item = _get_item(db, auth.household.id, item.id)
@@ -356,16 +397,34 @@ def update_item(
     if payload.is_archived is not None:
         item.is_archived = payload.is_archived
 
-    if "purchase" in fields:
-        if payload.purchase is None:
-            item.purchase = None
+    if "current_value_cents" in fields:
+        item.current_value_cents = payload.current_value_cents
+    if "current_value_currency" in fields and payload.current_value_currency is not None:
+        item.current_value_currency = payload.current_value_currency
+
+    if "purchase_id" in fields:
+        previous_purchase_id = item.purchase_id
+        if payload.purchase_id is None:
+            item.purchase_id = None
         else:
-            _apply_purchase(item, payload.purchase, replace=item.purchase is None)
+            item.purchase_id = get_purchase(db, auth.household.id, payload.purchase_id).id
+        if previous_purchase_id is not None:
+            db.flush()
+            prune_orphan_purchases(db, auth.household.id)
+    elif "purchase" in fields:
+        previous_purchase_id = item.purchase_id
+        if payload.purchase is None:
+            item.purchase_id = None
+        else:
+            _apply_purchase(db, item, payload.purchase, replace=item.purchase is None)
+        if previous_purchase_id is not None and item.purchase_id != previous_purchase_id:
+            db.flush()
+            prune_orphan_purchases(db, auth.household.id)
     if "warranty" in fields:
         if payload.warranty is None:
             item.warranty = None
         else:
-            _apply_warranty(item, payload.warranty, replace=item.warranty is None)
+            _apply_warranty(db, item, payload.warranty, replace=item.warranty is None)
 
     db.commit()
     # Relationships may already be loaded on the identity-mapped object; force a
@@ -391,7 +450,23 @@ def delete_item(
     exclusive_documents = [document for document in item.documents if len(document.items) <= 1]
     for document in exclusive_documents:
         keys.append(document.storage_key)
+        keys.append(document.original_storage_key)
         db.delete(document)
+
+    if item.purchase_id is not None:
+        other_links = int(
+            db.scalar(
+                select(func.count(Item.id)).where(
+                    Item.purchase_id == item.purchase_id,
+                    Item.id != item.id,
+                )
+            )
+            or 0
+        )
+        if other_links == 0:
+            purchase = db.get(Purchase, item.purchase_id)
+            if purchase is not None:
+                db.delete(purchase)
 
     db.delete(item)
     db.commit()
@@ -556,93 +631,3 @@ def get_photo_thumbnail(
             "Cross-Origin-Resource-Policy": "same-origin",
         },
     )
-
-
-def _authorized_document(db: Session, household_id: uuid.UUID, document_id: uuid.UUID) -> Document:
-    document = db.scalar(
-        select(Document).where(Document.id == document_id, Document.household_id == household_id)
-    )
-    if document is None:
-        raise ApiError(404, "document_not_found", "Document not found.")
-    return document
-
-
-@router.post("/items/{item_id}/documents", response_model=DocumentOut, status_code=201)
-def upload_document(
-    item_id: uuid.UUID,
-    file: Annotated[UploadFile, File()],
-    title: Annotated[str | None, Form()] = None,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> DocumentOut:
-    item = _get_item(db, auth.household.id, item_id)
-    clean_title = (title or "").strip()
-    if len(clean_title) > 200:
-        raise ApiError(422, "invalid_title", "Document titles must be 200 characters or fewer.")
-    if not clean_title:
-        clean_title = (file.filename or "Document").rsplit(".", 1)[0][:200] or "Document"
-
-    stored = storage.store_document(auth.household.id, file)
-    document = Document(
-        household_id=auth.household.id,
-        storage_key=stored.storage_key,
-        original_filename=stored.original_filename,
-        content_type=stored.content_type,
-        byte_size=stored.byte_size,
-        title=clean_title,
-    )
-    document.items.append(item)
-    db.add(document)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        storage.delete_key(stored.storage_key)
-        raise
-    db.refresh(document)
-    return document_out(document)
-
-
-@router.get("/documents", response_model=DocumentList)
-def list_documents(
-    item_id: uuid.UUID | None = None,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> DocumentList:
-    query = select(Document).where(Document.household_id == auth.household.id)
-    if item_id is not None:
-        item = _get_item(db, auth.household.id, item_id)
-        query = query.where(Document.items.any(Item.id == item.id))
-    documents = db.scalars(query.order_by(Document.created_at.desc())).all()
-    return DocumentList(items=[document_out(document) for document in documents])
-
-
-@router.get("/documents/{document_id}/file")
-def get_document_file(
-    document_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> FileResponse:
-    document = _authorized_document(db, auth.household.id, document_id)
-    path = storage.resolve_key(document.storage_key)
-    headers = {
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
-        "Cross-Origin-Resource-Policy": "same-origin",
-        "Content-Disposition": f'attachment; filename="{document.original_filename}"',
-    }
-    return FileResponse(path, media_type=document.content_type, headers=headers)
-
-
-@router.delete("/documents/{document_id}", status_code=204)
-def delete_document(
-    document_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> Response:
-    document = _authorized_document(db, auth.household.id, document_id)
-    key = document.storage_key
-    db.delete(document)
-    db.commit()
-    storage.delete_key(key)
-    return Response(status_code=204)

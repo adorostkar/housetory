@@ -28,3 +28,8 @@ class Timestamped(ORMModel):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class ItemReference(ORMModel):
+    id: uuid.UUID
+    name: str

@@ -20,5 +20,6 @@ def test_migrations_are_current():
 
 def test_single_initial_revision():
     versions = list((API_DIR / "alembic" / "versions").glob("*.py"))
-    assert len(versions) == 1
-    assert "down_revision: str | None = None" in versions[0].read_text()
+    roots = [path for path in versions if "down_revision: str | None = None" in path.read_text()]
+    assert len(roots) == 1
+    assert "e58f0ce93a5d" in roots[0].read_text()

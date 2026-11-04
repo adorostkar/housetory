@@ -1,21 +1,13 @@
-from datetime import date, timedelta
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...db import get_db
-from ...models import (
-    Document,
-    Item,
-    ItemPhoto,
-    Purchase,
-    Room,
-    StorageLocation,
-    Warranty,
-)
-from ...schemas.overview import OverviewOut
+from ...models import Document, Item, ItemPhoto, Room, StorageLocation
+from ...schemas.overview import CurrencyTotal, OverviewOut
+from ...services.ownership import financial_overview
 from ...services.serializers import item_load_options, item_summary
+from ...services.warranty_dashboard import build_dashboard, load_warranties
 from ..deps import AuthContext, require_auth
 
 router = APIRouter(tags=["overview"])
@@ -44,13 +36,6 @@ def overview(
     total_quantity = int(
         db.scalar(select(func.coalesce(func.sum(Item.quantity), 0)).where(*active_items)) or 0
     )
-    value_rows = db.execute(
-        select(Purchase.currency, func.sum(Purchase.price_cents))
-        .join(Item, Item.id == Purchase.item_id)
-        .where(*active_items, Purchase.price_cents.is_not(None))
-        .group_by(Purchase.currency)
-        .order_by(Purchase.currency)
-    ).all()
     document_count = int(
         db.scalar(select(func.count(Document.id)).where(Document.household_id == household_id)) or 0
     )
@@ -70,20 +55,6 @@ def overview(
         )
         or 0
     )
-    soon = date.today() + timedelta(days=30)
-    warranties_expiring_soon = int(
-        db.scalar(
-            select(func.count(Warranty.id))
-            .join(Item, Item.id == Warranty.item_id)
-            .where(
-                *active_items,
-                Warranty.end_date.is_not(None),
-                Warranty.end_date >= date.today(),
-                Warranty.end_date <= soon,
-            )
-        )
-        or 0
-    )
     recent_items = db.scalars(
         select(Item)
         .options(*item_load_options())
@@ -92,17 +63,42 @@ def overview(
         .limit(6)
     ).all()
 
+    financial = financial_overview(
+        db,
+        household_id,
+        household_reminder_days=auth.household.warranty_reminder_days,
+        valuable_limit=4,
+        missing_limit=5,
+    )
+    warranties = build_dashboard(
+        load_warranties(db, household_id),
+        auth.household.warranty_reminder_days,
+        limit=5,
+    )
+
     return OverviewOut(
         room_count=room_count,
         location_count=location_count,
         item_count=item_count,
         total_quantity=total_quantity,
         value_by_currency=[
-            {"currency": currency, "total_cents": int(total or 0)} for currency, total in value_rows
+            CurrencyTotal(currency=entry.currency, total_cents=entry.purchase_total_cents)
+            for entry in financial.currency_totals
+            if entry.purchase_item_count > 0
+        ],
+        current_value_by_currency=[
+            CurrencyTotal(currency=entry.currency, total_cents=entry.current_value_cents)
+            for entry in financial.currency_totals
+            if entry.current_value_item_count > 0
         ],
         document_count=document_count,
-        warranties_expiring_soon=warranties_expiring_soon,
+        warranties_expiring_soon=warranties.expiring_count,
+        warranties=warranties,
+        items_missing_purchase_count=financial.items_missing_purchase_count,
         photo_bytes=photo_bytes,
         document_bytes=document_bytes,
-        recent_items=[item_summary(item) for item in recent_items],
+        recent_items=[
+            item_summary(item, household_reminder_days=auth.household.warranty_reminder_days)
+            for item in recent_items
+        ],
     )

@@ -96,6 +96,17 @@ docker compose exec -T db sh -c \
   'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges --exit-on-error' \
   < "$source_dir/database.dump"
 
+# Recreating the database also removes its CONNECT/table/sequence grants and
+# default privileges. Reapply the least-privilege application role before the
+# API and worker start.
+echo "Restoring application role privileges..."
+docker compose exec -T db sh -c \
+  'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    --set=app_user="$HOUSETORY_APP_USER" \
+    --set=app_password="$HOUSETORY_APP_PASSWORD" \
+    --set=db_name="$POSTGRES_DB"' \
+  < scripts/create-app-role.sql
+
 echo "Restoring uploaded files..."
 docker compose run --rm --no-deps -T \
   -v "$ROOT/scripts:/scripts:ro" \

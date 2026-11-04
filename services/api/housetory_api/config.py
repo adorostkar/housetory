@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=25, ge=1, le=100)
     login_max_failures: int = Field(default=10, ge=1, le=100)
     login_window_seconds: int = Field(default=900, ge=10, le=86_400)
+    ocr_language: str = "eng"
+    ocr_max_pdf_pages: int = Field(default=5, ge=1, le=20)
 
     @field_validator("app_base_url")
     @classmethod

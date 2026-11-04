@@ -45,10 +45,12 @@ class UserOut(ORMModel):
 class HouseholdOut(ORMModel):
     id: uuid.UUID
     name: str
+    warranty_reminder_days: int = 30
 
 
 class HouseholdUpdate(BaseModel):
-    name: Name
+    name: Name | None = None
+    warranty_reminder_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class SessionState(BaseModel):

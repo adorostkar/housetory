@@ -21,7 +21,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ..domain import CustomFieldType, ItemCondition, LocationKind
+from ..domain import (
+    CustomFieldType,
+    DocumentType,
+    ItemCondition,
+    LocationKind,
+    OcrStatus,
+)
 from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -190,6 +196,15 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_items_household_room", "household_id", "room_id"),
         Index("ix_items_household_location", "household_id", "storage_location_id"),
         Index("ix_items_household_category", "household_id", "category_id"),
+        Index("ix_items_household_purchase", "household_id", "purchase_id"),
+        CheckConstraint(
+            "current_value_cents IS NULL OR current_value_cents >= 0",
+            name="current_value_non_negative",
+        ),
+        CheckConstraint(
+            "char_length(current_value_currency) = 3",
+            name="current_value_currency_length",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -214,15 +229,20 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(16), nullable=False, server_default=ItemCondition.GOOD.value
     )
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    purchase_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="SET NULL")
+    )
+    current_value_cents: Mapped[int | None] = mapped_column(BigInteger)
+    current_value_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, server_default="USD"
+    )
 
     household: Mapped["Household"] = relationship(back_populates="items")
     room: Mapped[Room | None] = relationship(back_populates="items")
     storage_location: Mapped[StorageLocation | None] = relationship(back_populates="items")
     category: Mapped[Category | None] = relationship(back_populates="items")
     tags: Mapped[list[Tag]] = relationship(secondary=item_tags, back_populates="items")
-    purchase: Mapped["Purchase | None"] = relationship(
-        back_populates="item", cascade="all, delete-orphan", uselist=False
-    )
+    purchase: Mapped["Purchase | None"] = relationship(back_populates="items")
     warranty: Mapped["Warranty | None"] = relationship(
         back_populates="item", cascade="all, delete-orphan", uselist=False
     )
@@ -242,13 +262,15 @@ class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("price_cents IS NULL OR price_cents >= 0", name="price_non_negative"),
         CheckConstraint("char_length(currency) = 3", name="currency_length"),
+        Index("ix_purchases_household_date", "household_id", "purchase_date"),
+        Index("ix_purchases_receipt_document_id", "receipt_document_id"),
     )
 
-    item_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("items.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    receipt_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
     )
     vendor: Mapped[str | None] = mapped_column(String(160))
     purchase_date: Mapped[date | None] = mapped_column(Date)
@@ -257,7 +279,8 @@ class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     order_number: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
 
-    item: Mapped[Item] = relationship(back_populates="purchase")
+    items: Mapped[list[Item]] = relationship(back_populates="purchase")
+    receipt_document: Mapped["Document | None"] = relationship(foreign_keys=[receipt_document_id])
 
 
 class Warranty(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -267,6 +290,16 @@ class Warranty(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "start_date IS NULL OR end_date IS NULL OR end_date >= start_date",
             name="dates_in_order",
         ),
+        CheckConstraint(
+            "duration_months IS NULL OR duration_months between 1 and 1200",
+            name="duration_months_range",
+        ),
+        CheckConstraint(
+            "reminder_days IS NULL OR reminder_days between 1 and 3650",
+            name="reminder_days_range",
+        ),
+        Index("ix_warranties_end_date", "end_date"),
+        Index("ix_warranties_document_id", "document_id"),
     )
 
     item_id: Mapped[uuid.UUID] = mapped_column(
@@ -275,12 +308,18 @@ class Warranty(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         unique=True,
     )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )
     provider: Mapped[str | None] = mapped_column(String(160))
     start_date: Mapped[date | None] = mapped_column(Date)
+    duration_months: Mapped[int | None] = mapped_column(Integer)
     end_date: Mapped[date | None] = mapped_column(Date)
+    reminder_days: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
 
     item: Mapped[Item] = relationship(back_populates="warranty")
+    document: Mapped["Document | None"] = relationship(foreign_keys=[document_id])
 
 
 class ItemPhoto(UUIDPrimaryKeyMixin, Base):
@@ -310,18 +349,59 @@ class ItemPhoto(UUIDPrimaryKeyMixin, Base):
 
 class Document(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "documents"
-    __table_args__ = (CheckConstraint("byte_size > 0", name="byte_size_positive"),)
+    __table_args__ = (
+        CheckConstraint("byte_size > 0", name="byte_size_positive"),
+        CheckConstraint("original_byte_size > 0", name="original_byte_size_positive"),
+        CheckConstraint(
+            "document_type in ('receipt', 'invoice', 'warranty_certificate', 'manual', "
+            "'specification', 'other')",
+            name="valid_document_type",
+        ),
+        CheckConstraint(
+            "ocr_status in ('not_requested', 'queued', 'processing', 'succeeded', 'failed')",
+            name="valid_ocr_status",
+        ),
+        CheckConstraint(
+            "ocr_confidence IS NULL OR ocr_confidence between 0 and 100",
+            name="ocr_confidence_range",
+        ),
+        Index("ix_documents_household_type", "household_id", "document_type"),
+        Index("ix_documents_household_created", "household_id", "created_at"),
+        Index("ix_documents_ocr_status", "ocr_status"),
+    )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
     )
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    original_storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    original_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    original_byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
+    document_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default=DocumentType.OTHER.value
+    )
+    document_date: Mapped[date | None] = mapped_column(Date)
+    merchant: Mapped[str | None] = mapped_column(String(160))
+    notes: Mapped[str | None] = mapped_column(Text)
+    extracted_text: Mapped[str | None] = mapped_column(Text)
+    extracted_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    ocr_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=OcrStatus.NOT_REQUESTED.value
+    )
+    ocr_error: Mapped[str | None] = mapped_column(Text)
+    ocr_confidence: Mapped[int | None] = mapped_column(Integer)
+    ocr_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     household: Mapped["Household"] = relationship(back_populates="documents")

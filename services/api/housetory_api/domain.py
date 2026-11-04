@@ -40,3 +40,27 @@ class JobStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class DocumentType(StrEnum):
+    RECEIPT = "receipt"
+    INVOICE = "invoice"
+    WARRANTY_CERTIFICATE = "warranty_certificate"
+    MANUAL = "manual"
+    SPECIFICATION = "specification"
+    OTHER = "other"
+
+
+class OcrStatus(StrEnum):
+    NOT_REQUESTED = "not_requested"
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class WarrantyStatus(StrEnum):
+    ACTIVE = "active"
+    EXPIRING = "expiring"
+    EXPIRED = "expired"
+    UNKNOWN = "unknown"

@@ -18,7 +18,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/api:/app/worker \
     PATH="/app/api/.venv/bin:$PATH"
 
-RUN apk add --no-cache libstdc++ \
+RUN apk add --no-cache \
+        libstdc++ \
+        tesseract-ocr \
+        tesseract-ocr-data-eng \
+        poppler-utils \
     && addgroup -S housetory \
     && adduser -S -G housetory -h /home/housetory housetory
 
