@@ -8,10 +8,11 @@ purchase history and current-value estimates. Local OCR reads receipts, a
 searchable document library keeps the paperwork, and ownership reports stay
 honest across multiple currencies.
 
-Designed for a CPU-only Linux server, reached securely through Tailscale, and
-installed on an iPhone as a PWA.
+Designed for a CPU-only Linux server, reachable over a private tailnet, a trusted
+LAN address or a public HTTPS hostname, and installable on an iPhone as a PWA.
+Tailscale is optional.
 
-![Status: physical storage and smart labels complete](https://img.shields.io/badge/status-physical_storage_%2B_smart_labels_complete-56614f)
+![Status: AI intelligence, mobile camera and smart imports complete](https://img.shields.io/badge/status-AI_%2B_mobile_camera_complete-56614f)
 
 ## What is working
 
@@ -39,9 +40,12 @@ installed on an iPhone as a PWA.
   aggregate nested items, and room selections are deep-linkable.
 - Items with search across room, place, category, tag and item fields; quantities,
   condition, categories and tags.
-- Multiple item photographs with validation, thumbnail generation, EXIF
-  stripping, HEIC conversion, cover selection and a full-screen viewer.
-- One-tap camera capture on iPhone alongside library uploads.
+- Multiple item, room and container photographs with validation, thumbnail
+  generation, EXIF stripping, HEIC conversion, cover selection, explicit
+  reordering and a full-screen viewer.
+- Direct **Take Photo** and **Choose Photo** actions for items, movable
+  containers, rooms and storage locations, with preview, retake, cancel and
+  upload progress.
 - A dedicated document library for receipts, invoices, warranty certificates,
   manuals, specifications and other files, associated with one or many items.
 - PDF, JPEG, PNG, WebP, HEIC and text uploads; original uploads are preserved,
@@ -59,7 +63,8 @@ installed on an iPhone as a PWA.
   implicit exchange rate.
 - CSV exports for documents, purchases, warranties and inventory.
 - AI-assisted bulk inventory import from pasted text, TXT, Markdown, CSV, XLSX,
-  DOCX, PDF, OCR images and complete Obsidian ZIP vaults.
+  DOCX, PDF, OCR images and complete Obsidian ZIP vaults through the ordinary
+  **Upload file** action.
 - Import review with per-field provenance, source context, inline missing-room and
   missing-place creation, duplicate candidates, merge/skip/reject decisions,
   partial approval, retry safety and import history.
@@ -68,14 +73,25 @@ installed on an iPhone as a PWA.
   attachment resolution, broken-link reporting and vault structure.
 - A read-only grounded assistant using real household tools, with deterministic
   answers when no model is available, plus natural-language smart search.
-- AI item recognition from photographs, with a deterministic OCR fallback and
-  explicit create/update review.
+- Multi-object **AI Scan Items** from one photograph: editable suggestions,
+  quantities, duplicate review, destination changes and approved bulk creation.
+  Nothing is written automatically.
+- A conservative hierarchy importer that understands rooms, boxes, nested
+  containers, legacy identifiers such as `STO-01` and their contents. Index
+  pages and empty templates are skipped, and the tree is reviewed before apply.
+- Provider management for OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
+  OpenRouter and local Ollama through **Settings → AI providers**. API keys are
+  encrypted at rest with a key held outside PostgreSQL.
+- Separate task models for assistant, imports, documents, search, vision and
+  label headlines, with capability warnings and explicit cloud-data consent.
+- Optional direct HTTPS with nginx, or Tailscale Serve as an optional private
+  access layer. PWA and camera features work in secure contexts.
 - Document-to-item relationship suggestions that require explicit linking.
-- Optional local Ollama or consented OpenAI-compatible inference. AI is disabled by
-  default and ordinary Housetory functionality does not depend on it.
+- Optional local Ollama or consented cloud inference. AI is disabled by default
+  and ordinary Housetory functionality does not depend on it.
 - PostgreSQL-backed background worker for maintenance, OCR, import and AI jobs.
-- Docker Compose deployment with health checks, migrations, backups and
-  Tailscale HTTPS guidance.
+- Docker Compose deployment with health checks, migrations, backups, optional
+  nginx TLS and optional Tailscale guidance.
 - Automated backend and frontend tests.
 
 ### Verification
@@ -83,17 +99,20 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 141 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 156 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
-  import/duplicate/location review, AI-provider contracts, grounded tools, smart
-  search, recognition, prompt-injection resistance and exhaustive
+  import/duplicate/location review, encrypted provider credentials and rotation,
+  provider adapters, task capabilities, consent enforcement, entity photos,
+  multi-object recognition/apply/idempotency, hierarchical imports and exhaustive
   cross-household access checks.
-- 25 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 4 checked-in Playwright workflows pass on a disposable Compose stack, covering
-  unnamed/bulk container creation, cross-room movement, label preview/download,
-  QR and mobile container views.
+- 34 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 8 checked-in Playwright workflows pass both over HTTP and direct HTTPS on
+  disposable Compose stacks, covering the Phase 5 container/label/QR flows plus
+  provider configuration against a mocked local Ollama service, camera upload,
+  multi-object review and approved creation, the hierarchy fixture, duplicate
+  prevention and PWA/service-worker/deep-link routing.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -117,9 +136,11 @@ in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
 [`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md). The Phase 4 AI,
 import and Obsidian walkthrough is in
-[`docs/PHASE_4_WALKTHROUGH.md`](docs/PHASE_4_WALKTHROUGH.md), and the Phase 5
+[`docs/PHASE_4_WALKTHROUGH.md`](docs/PHASE_4_WALKTHROUGH.md), the Phase 5
 container, QR and label walkthrough is in
-[`docs/PHASE_5_WALKTHROUGH.md`](docs/PHASE_5_WALKTHROUGH.md).
+[`docs/PHASE_5_WALKTHROUGH.md`](docs/PHASE_5_WALKTHROUGH.md), and the Phase 6
+provider, camera, AI scan, hierarchy and HTTPS walkthrough is in
+[`docs/PHASE_6_WALKTHROUGH.md`](docs/PHASE_6_WALKTHROUGH.md).
 
 The pre-deployment security review, findings and remaining risks are in
 [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a
@@ -127,8 +148,8 @@ guarantee of production security.
 
 The product is intentionally not finished. Custom fields, category/tag
 management UI, multi-user sharing, password changes and exchange-rate conversion
-are not implemented yet. The Tauri macOS shell remains Phase 6. A checked-in
-Playwright suite now covers the critical Phase 5 workflows.
+are not implemented yet. The Tauri macOS shell is deferred to Phase 7. A
+checked-in Playwright suite covers the critical Phase 5 and Phase 6 workflows.
 AI extraction is review-only and heuristics remain approximate; no model is
 bundled or downloaded automatically. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
@@ -137,10 +158,10 @@ honestly.
 
 ## Quick start with Docker Compose
 
-Requirements: Docker Engine 24+ with Compose v2. For remote access, a Linux
-server joined to your Tailscale tailnet. The worker image installs Tesseract,
-its English language data and Poppler at build time; no host OCR packages or GPU
-are needed.
+Requirements: Docker Engine 24+ with Compose v2. Remote access can use a trusted
+LAN address, optional Tailscale Serve, or direct HTTPS with a domain certificate.
+The worker image installs Tesseract, its English language data and Poppler at
+build time; no host OCR packages or GPU are needed.
 
 ```bash
 git clone <your-repository-url> housetory
@@ -152,6 +173,8 @@ cp .env.example .env
 #   2. HOUSETORY_APP_PASSWORD   — least-privilege role used by API and worker
 openssl rand -hex 24
 openssl rand -hex 24
+# Generate the credential-encryption key once and keep it with your secrets:
+python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 $EDITOR .env
 
 docker compose up --build -d
@@ -175,31 +198,90 @@ The `migrate` service applies Alembic migrations before the API and worker start
 The web port is published only on `127.0.0.1`; PostgreSQL and the API have no host
 ports.
 
-## Secure remote access from iPhone
+## Remote access and HTTPS
 
-Housetory is designed to be exposed through **Tailscale Serve**, never the public
-internet. Tailscale terminates HTTPS with a trusted certificate on your tailnet,
-so the iPhone can install Housetory as a standalone home-screen app.
+Choose one exposure model. Housetory never publishes PostgreSQL, the API or the
+worker; only nginx has a host port. Do not add router port forwards unless you
+intend to expose the app.
 
-1. Install Tailscale on the server and sign in: `tailscale up`.
-2. Find the machine's MagicDNS name: `tailscale status`.
-3. Set in `.env`:
-   ```dotenv
-   APP_BASE_URL=https://your-machine.your-tailnet.ts.net
-   COOKIE_SECURE=true
-   ```
-4. Recreate the application: `docker compose up -d`.
-5. Publish it on your tailnet:
-   ```bash
-   tailscale serve --bg --https=443 http://127.0.0.1:8080
-   tailscale serve status
-   ```
-6. On the iPhone, install Tailscale, sign in to the same tailnet, open the HTTPS
-   address in Safari, tap Share → **Add to Home Screen**.
+### 1. Local network only
 
-Do **not** use `tailscale funnel`; it would expose the app publicly. Do not add
-router port forwards for this stack. Full details and troubleshooting are in
-[`docs/TAILSCALE.md`](docs/TAILSCALE.md).
+The default `WEB_BIND=127.0.0.1` is reachable only from the server itself. To
+reach it from another device on a trusted LAN, set:
+
+```dotenv
+WEB_BIND=0.0.0.0
+APP_BASE_URL=http://192.168.1.20:8080
+EXTRA_ORIGINS=http://192.168.1.20:8080
+```
+
+LAN HTTP is not a secure context on iPhones, so camera capture and PWA service
+workers require HTTPS (localhost is the exception).
+
+### 2. Private Tailscale access (optional)
+
+Tailscale Serve terminates HTTPS with a trusted certificate inside your tailnet.
+It is not required, and Housetory does not depend on it.
+
+```bash
+tailscale up
+tailscale status
+# Set APP_BASE_URL=https://your-machine.your-tailnet.ts.net and COOKIE_SECURE=true
+docker compose up -d
+tailscale serve --bg --https=443 http://127.0.0.1:8080
+```
+
+Open the HTTPS address in Safari on the iPhone and choose Share → **Add to Home
+Screen**. Do not use `tailscale funnel` unless you intentionally want a public
+deployment. See [`docs/TAILSCALE.md`](docs/TAILSCALE.md).
+
+### 3. Public HTTPS with nginx and a trusted certificate
+
+Keep nginx as the only public web server. Point a DNS name at the host, obtain a
+certificate (for example with Let's Encrypt), and run:
+
+```dotenv
+APP_BASE_URL=https://inventory.example.com
+QR_BASE_URL=https://inventory.example.com
+COOKIE_SECURE=true
+WEB_BIND=0.0.0.0
+WEB_PORT=80
+WEB_TLS_PORT=443
+TLS_CERT_PATH=/etc/letsencrypt/live/inventory.example.com/fullchain.pem
+TLS_KEY_PATH=/etc/letsencrypt/live/inventory.example.com/privkey.pem
+```
+
+```bash
+docker compose -f compose.yaml -f compose.tls.yaml up -d --build
+```
+
+Port 80 redirects to HTTPS, except for the `/healthz` probe. The redirect
+assumes the standard 443 port; when using a nonstandard `WEB_TLS_PORT`, open the
+HTTPS URL directly and adjust or omit the redirect if needed. The certificate and
+private key must be readable by the unprivileged nginx UID (101), for example
+`root:101` mode `640`. Do not mount the whole Let's Encrypt directory. Verify:
+
+```bash
+curl -fsS https://inventory.example.com/api/v1/health/ready
+curl -sSI https://inventory.example.com/ | grep -i strict-transport-security
+```
+
+For a local self-signed certificate rehearsal, add
+`-subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost'` and use
+`curl -k`. Browsers will reject an untrusted certificate because secure-context
+features such as service workers and camera access require a trusted HTTPS
+origin. **Complete first-run setup immediately** after exposing the app; before
+the first owner exists, any client that can reach it can claim it.
+
+### iPhone PWA installation
+
+1. Open the trusted HTTPS address in Safari.
+2. Select Share → **Add to Home Screen**.
+3. Launch the installed Housetory icon.
+4. Allow camera access when prompted by **Take Photo**.
+
+The app shell is cached; inventory and API responses are deliberately never
+cached by the service worker.
 
 ## Configuration
 
@@ -214,8 +296,12 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `HOUSETORY_APP_PASSWORD` | — | **Required.** Separate app-role password (use hex) |
 | `APP_BASE_URL` | `http://localhost:8080` | Public origin used for cookie/origin checks |
 | `QR_BASE_URL` | empty | Address encoded in printed QR labels; defaults to `APP_BASE_URL` |
-| `COOKIE_SECURE` | `false` | Must be `true` behind Tailscale HTTPS |
-| `WEB_PORT` | `8080` | Loopback-only host port for nginx |
+| `COOKIE_SECURE` | `false` | Must be `true` for any HTTPS origin |
+| `WEB_BIND` | `127.0.0.1` | Host interface for nginx; use `0.0.0.0` only when intended |
+| `WEB_PORT` | `8080` | HTTP host port (redirect port with TLS) |
+| `WEB_TLS_PORT` | `443` | HTTPS host port when using `compose.tls.yaml` |
+| `TLS_CERT_PATH` | empty | PEM certificate chain mounted read-only by `compose.tls.yaml` |
+| `TLS_KEY_PATH` | empty | Matching PEM private key mounted read-only |
 | `SESSION_TTL_DAYS` | `30` | Login lifetime |
 | `MAX_UPLOAD_MB` | `25` | Per-file upload cap |
 | `LOGIN_MAX_FAILURES` | `10` | Failed sign-ins per email/IP before throttling |
@@ -223,22 +309,28 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `EXTRA_ORIGINS` | empty | Comma-separated extra allowed origins (normally empty) |
 | `OCR_LANGUAGE` | `eng` | Tesseract language code installed in the worker image |
 | `OCR_MAX_PDF_PAGES` | `5` | Maximum scanned PDF pages rendered for OCR |
-| `AI_PROVIDER` | `disabled` | `disabled`, `ollama`, or `openai_compatible` |
-| `AI_MODEL` | empty | Local Ollama model name |
-| `AI_BASE_URL` | `http://host.docker.internal:11434` | Ollama endpoint |
+| `AI_CREDENTIAL_KEY` | empty | Fernet key encrypting API keys saved in the UI; keep outside PostgreSQL |
+| `AI_CREDENTIAL_KEY_PREVIOUS` | empty | Old key used only during credential rotation |
+| `AI_PROVIDER` | `disabled` | Optional environment bootstrap: `disabled`, `ollama`, or `openai_compatible` |
+| `AI_MODEL` | empty | Bootstrap Ollama model name |
+| `AI_BASE_URL` | `http://host.docker.internal:11434` | Bootstrap Ollama endpoint |
 | `AI_TIMEOUT_SECONDS` | `90` | Inference request timeout |
 | `AI_MAX_CONCURRENCY` | `1` | In-process inference concurrency limit |
-| `AI_CLOUD_ENABLED` | `false` | Enable an OpenAI-compatible endpoint |
-| `AI_CLOUD_CONSENT` | `false` | Must also be true before household data leaves the server |
-| `AI_CLOUD_BASE_URL` | empty | OpenAI-compatible base URL, including `/v1` |
-| `AI_CLOUD_MODEL` | empty | Cloud model name |
-| `AI_CLOUD_API_KEY` | empty | Optional cloud bearer token |
+| `AI_CLOUD_ENABLED` | `false` | Environment bootstrap cloud enablement |
+| `AI_CLOUD_CONSENT` | `false` | Environment bootstrap consent; database providers use per-provider consent |
+| `AI_CLOUD_BASE_URL` | empty | Bootstrap OpenAI-compatible base URL, including `/v1` |
+| `AI_CLOUD_MODEL` | empty | Bootstrap cloud model name |
+| `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI providers |
 | `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
 | `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
 | `IMPORT_MAX_FILES` | `2000` | Maximum files accepted from one vault ZIP |
 | `IMPORT_MAX_TOTAL_MB` | `50` | Maximum decompressed vault size |
 | `IMPORT_MAX_FILE_MB` | `10` | Maximum single extracted vault file |
 
+`AI_CREDENTIAL_KEY` is required before API keys can be saved in **Settings → AI
+providers**. Generate one Fernet key and keep it with your password-manager or
+secret backup; a database backup cannot decrypt saved credentials without it.
+The key is never stored in PostgreSQL and is never returned to the browser.
 `APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
 refuses to start with an insecure cookie configuration. Production also rejects
 remote plain-HTTP origins and `DEBUG=true`.
@@ -263,32 +355,80 @@ Inside the containers the API uses `DATABASE_URL`, `DATA_DIR=/data`,
 `UPLOADS_DIR=/data/uploads`, `IMPORTS_DIR=/data/imports` and
 `ENVIRONMENT=production`. Secrets are never committed.
 
-### Optional local AI with Ollama
+### AI providers
 
-Housetory does not ship or download a model. To use local AI on a machine that
-already has Ollama:
+Ordinary provider setup happens in the application, not `.env`. Sign in as the
+household owner and open **Settings → AI providers**.
 
-```bash
-ollama serve
-ollama pull <a CPU-friendly model you have chosen>
-```
+1. Add a provider: OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
+   OpenRouter or local Ollama.
+2. Enter the API key (cloud) or local endpoint (Ollama), choose a default model,
+   and test the connection. Model discovery uses the provider's official models
+   endpoint where supported.
+3. Enable cloud data consent separately for each cloud provider. Saving an API
+   key does **not** authorize sending household data.
+4. Assign a provider and model to assistant, smart imports, document
+   interpretation, natural-language search, image recognition and optional label
+   headlines. Vision tasks reject models that do not advertise vision capability.
+5. Replace a key, disable a provider or remove it without editing files.
 
-Set in `.env`:
+The database stores only Fernet-encrypted credentials. All calls originate from
+the API or worker; the browser never receives a saved key. Decryption failures
+fail closed and are reported as provider errors. Rotation:
 
 ```dotenv
-AI_PROVIDER=ollama
-AI_MODEL=<that model>
-AI_BASE_URL=http://host.docker.internal:11434
+AI_CREDENTIAL_KEY_PREVIOUS=<old key>
+AI_CREDENTIAL_KEY=<new key>
 ```
 
-Then rebuild/recreate the API and worker. The Settings screen shows provider
-status, the selected model and whether it is available. If the model is missing
-or unreachable, ordinary import, search, smart search and the assistant continue
-with deterministic grounded tools. Cloud inference remains disabled unless both
-`AI_CLOUD_ENABLED=true` and `AI_CLOUD_CONSENT=true` are explicitly configured.
+Restart the API and worker, use **Rotate credentials**, verify provider tests,
+then remove the previous key. Provider models are selected explicitly rather than
+assumed. There is no automatic model download and no GPU requirement.
 
-Changing `APP_BASE_URL` requires recreating the API container and signing in
-again if the cookie domain policy changes.
+Environment-based `AI_PROVIDER`/`AI_CLOUD_*` configuration remains available for
+bootstrap or administrator-managed deployments, but a database provider takes
+precedence. If no database provider exists, deterministic imports, search,
+recognition fallback and assistant answers continue to work. Ollama setup:
+`ollama serve`, `ollama pull <chosen model>`, then configure the endpoint in the
+UI (`http://host.docker.internal:11434` from Compose).
+
+Official provider APIs use API keys, bearer tokens or local endpoints. Housetory
+does not reuse consumer-account cookies, subscription tokens or unofficial OAuth.
+
+## Camera, AI Scan Items and hierarchical imports
+
+### Camera and photo management
+
+Item, room and container screens expose **Take Photo** and **Choose Photo**.
+Camera capture uses the rear camera hint where supported, presents a local
+preview, and supports retake, cancel, upload progress, validation errors and
+retry. The photo is uploaded directly; it does not need to be saved to the
+iPhone photo library first. Existing secure image processing normalizes
+orientation, strips metadata and converts HEIC/HEIF to a browser-safe format.
+Room and storage-location photos reuse the same authenticated storage pipeline.
+
+### AI Scan Items
+
+Open **AI scan** from the navigation, an item list, a room or a container. With a
+container context, the destination defaults to that container. After upload, a
+vision-capable model returns separate editable suggestions. Review name,
+quantity, category, brand/model, confidence, possible duplicates and destination;
+then approve only the selected suggestions. Apply is explicit, idempotent and
+reports partial failures. The source photograph is retained as provenance and is
+not automatically used as every item's cover. Without a vision model, OCR can
+offer limited text-based suggestions and the UI labels that fallback honestly.
+
+### Hierarchical imports
+
+**Import → Upload file** accepts TXT, Markdown, CSV, XLSX, DOCX, PDF, images and
+Obsidian ZIP exports. There is no separate Obsidian tab. When the source contains
+a recognizable room/container structure, Housetory builds a review tree instead
+of flat items. Expand branches, edit names, quantities, entity types, parents and
+legacy identifiers, review duplicates and source text, then approve individual
+entries, branches or the whole tree. Rooms and containers are created before their
+contents. Index pages, instructions and empty templates are skipped. Legacy
+identifiers such as `STO-01`, `APT-KIDS-01` and `CAR-TOOLS-01` are preserved as
+aliases, while Phase 5 permanent identifiers remain authoritative.
 
 ## Data, backups and restore
 
@@ -312,6 +452,11 @@ data and password hashes. **Backups are not encrypted by the script**; encrypt
 them before copying off-server (for example with `age` or GPG) and keep them in
 protected storage. Copy them off the server and schedule the script with cron or
 a systemd timer.
+
+Back up `AI_CREDENTIAL_KEY` separately from the database. Saved provider API keys
+cannot be decrypted after a restore without the same key (or the previous key
+during rotation). The backup script intentionally does not copy deployment
+secrets into the backup directory.
 
 Restore **replaces** the current database and uploads:
 
@@ -443,13 +588,33 @@ They create data and must not be pointed at a live household:
 cd apps/web
 npm install
 E2E_BASE_URL=http://localhost:8090 \
-E2E_EMAIL=phase5@example.com \
-E2E_PASSWORD=phase-five-password-2026 \
+E2E_EMAIL=phase6@example.com \
+E2E_PASSWORD=phase-six-password-2026 \
 npx playwright test
 ```
 
-The global setup signs in, or performs first-run setup when the stack is empty.
-Set `E2E_CHANNEL` if Chrome is not installed under the default `chrome` channel.
+The Phase 6 provider test starts a local mock Ollama HTTP service in the
+Playwright process and configures the disposable API to call it through
+`host.docker.internal`. Override `E2E_AI_BASE_URL` if the API is not in Docker
+(for example `http://127.0.0.1:<port>`). The hierarchy test expects a fresh
+disposable household because it applies fixed fixture identifiers; recreate the
+disposable volumes between full runs. The global setup signs in, or performs
+first-run setup when the stack is empty. Set `E2E_CHANNEL` if Chrome is not
+installed under the default `chrome` channel.
+
+To exercise direct HTTPS with a local self-signed certificate:
+
+```bash
+E2E_BASE_URL=https://localhost \
+E2E_IGNORE_HTTPS=true \
+E2E_EMAIL=phase6-tls@example.com \
+E2E_PASSWORD=phase-six-tls-password-2026 \
+npx playwright test
+```
+
+`E2E_IGNORE_HTTPS=true` also adds Chrome's certificate-error bypass so service
+workers can register with the local test certificate. Use a trusted certificate
+for real iPhone testing.
 
 ### Useful Compose commands
 
@@ -496,10 +661,11 @@ apps/web/               React application
 apps/desktop/           Tauri 2 placeholder (deferred)
 services/api/           FastAPI, SQLAlchemy, Alembic, pytest
 services/worker/        PostgreSQL job worker
-infrastructure/docker/  Dockerfiles and nginx
-docs/                   Tailscale and operations
+infrastructure/docker/  Dockerfiles and nginx HTTP/TLS configs
+docs/                   walkthroughs, Tailscale and operations
 scripts/                backup, restore, compose helpers
 compose.yaml            Production topology
+compose.tls.yaml        Optional direct-HTTPS nginx override
 compose.dev.yaml        Loopback Postgres exposure for development only
 ```
 
@@ -509,8 +675,9 @@ compose.dev.yaml        Loopback Postgres exposure for development only
   UUID-based. No public or anonymous QR sharing exists.
 - Container identifiers are allocated by a database counter with atomic
   `INSERT … ON CONFLICT` updates; they are never reused or reassigned.
-- Only nginx binds a host port, and only to loopback. PostgreSQL and FastAPI are
-  reachable only inside the Compose network.
+- Only nginx binds a host port. The default is loopback; `WEB_BIND=0.0.0.0` or
+  `compose.tls.yaml` must be chosen explicitly. PostgreSQL, FastAPI and the worker
+  remain on the internal Compose network.
 - Web, API, worker and migration containers run non-root. API, worker, web and
   migrate drop all Linux capabilities; API/worker/web use read-only root
   filesystems with minimal tmpfs mounts and `no-new-privileges`.
@@ -540,8 +707,16 @@ compose.dev.yaml        Loopback Postgres exposure for development only
   decompressed-size excess. Imported notes are never executed. AI sees delimited
   untrusted data, returns strict validated JSON, and has no write/SQL/shell tools.
 - The worker mounts document/photo uploads read-only and has a separate writable
-  private imports volume for extracted vault files. AI is disabled by default;
-  cloud calls require explicit enablement and consent.
+  private imports volume for extracted vault files. AI is disabled by default.
+  Database provider credentials are encrypted with `AI_CREDENTIAL_KEY`, never
+  returned to the browser and never logged. Cloud calls require per-provider
+  consent separate from API-key configuration; decryption failures fail closed.
+  Official provider APIs are used; no consumer subscription tokens or unofficial
+  OAuth are used. AI output is strict validated JSON and has no SQL/write tools.
+- Direct TLS terminates in nginx with TLS 1.2/1.3, HSTS and the same security
+  headers as HTTP. `APP_BASE_URL` must match the public HTTPS origin and
+  `COOKIE_SECURE=true` is mandatory. Certificate private keys must be readable by
+  the unprivileged nginx user and must not be committed or placed in the database.
 - Keep the host patched, rebuild images periodically, leave Tailscale Funnel
   off, use a private tailnet ACL, and encrypt backups before taking them
   off-server.

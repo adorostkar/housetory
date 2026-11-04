@@ -1,8 +1,9 @@
 # Tailscale access for Housetory
 
-Housetory should never be exposed directly to the public internet. Tailscale
-Serve gives the application an HTTPS URL inside your tailnet, using a certificate
-managed by Tailscale, and forwards traffic to the nginx container on loopback.
+Tailscale is **optional**. It gives Housetory an HTTPS URL inside your tailnet,
+using a certificate managed by Tailscale, and forwards traffic to the nginx
+container on loopback. If you prefer not to use Tailscale, see the trusted-LAN and
+public nginx TLS modes in the main README.
 
 This guide assumes a Linux server and an iPhone on the same tailnet.
 

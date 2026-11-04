@@ -234,7 +234,40 @@ the product-facing numbering below follows the delivery brief.
       their tailnet; cannot be done from this repository).
 - [ ] Automated off-site backup scheduling (scripts are ready for cron/systemd).
 
-## Phase 6 — Tauri Desktop & Further Polish (next, not started)
+## Phase 6 — AI Intelligence, Mobile Camera & Smart Import ✅
+
+- [x] Owner-only AI provider settings for OpenAI, Anthropic Claude, Gemini,
+      xAI Grok, OpenRouter and local Ollama.
+- [x] Fernet-encrypted API credentials with environment-held key, rotation,
+      fail-closed decryption and no secret serialization/logging.
+- [x] Separate task models for assistant, imports, documents, search, vision and
+      label headlines, capability warnings and connection/model discovery.
+- [x] Explicit per-provider cloud consent, local/cloud distinction and
+      task-aware AI status/privacy notes.
+- [x] Direct camera and library photo actions for items, rooms and storage
+      locations, with preview, retake, cancel, progress and secure processing.
+- [x] Cover selection, explicit photo ordering, deletion and full-screen viewing.
+- [x] Multi-object AI Scan Items with editable suggestions, quantities,
+      duplicate review, destinations, source provenance and approved bulk apply.
+- [x] Idempotent recognition application with existing-item updates, partial
+      failure reporting and household isolation.
+- [x] Conservative hierarchical import parser and tree review: rooms, containers,
+      nested locations, items, quantities, legacy identifiers, source references,
+      branch approval, parent/entity editing and duplicate prevention.
+- [x] Index, instruction and empty-template content excluded from inventory.
+- [x] Obsidian ZIP export support through the ordinary Upload file action; the
+      dedicated vault tab was removed.
+- [x] Optional direct nginx HTTPS with `compose.tls.yaml`, HTTP redirect, HSTS,
+      secure cookies, PWA/service-worker and camera secure-context guidance.
+- [x] Tailscale remains optional; LAN and public trusted-certificate modes are
+      documented.
+- [x] Backend, frontend and Playwright tests for providers, credentials,
+      capabilities, consent, camera, recognition, hierarchy, duplicates and
+      HTTPS/PWA routing.
+- [ ] Real cloud-provider credentials/model benchmark and real iPhone camera/PWA
+      verification require the user's environment and hardware.
+
+## Phase 7 — Tauri Desktop & Further Polish (next, not started)
 
 - [ ] Scaffold Tauri 2 in `apps/desktop` using the production web build.
 - [ ] macOS window chrome, menu bar, keyboard commands.
@@ -260,7 +293,8 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Account profile, password change, session revocation and optional 2FA.
 
 ### Media and documents
-- [ ] Photo reordering and captions.
+- [x] Explicit photo reordering (move earlier/later) and cover selection.
+- [ ] Photo captions and drag-and-drop ordering.
 - [x] Document rename/edit and document library view.
 - [x] Original upload preservation and authenticated original downloads.
 - [x] OCR-assisted document relationship suggestions with explicit approval.
@@ -278,7 +312,7 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Add PDF report export and optional exchange-rate configuration.
 
 ### Reliability
-- [ ] Playwright end-to-end suite against Compose.
+- [x] Checked-in Playwright end-to-end suite against disposable Compose stacks.
 - [ ] Backup restore drill automation.
 - [ ] Structured JSON logging and log rotation policy review.
 - [ ] PostgreSQL-backed (multi-process) login throttling and audit history.
@@ -308,9 +342,10 @@ the product-facing numbering below follows the delivery brief.
 - No antivirus scanning for documents; PDFs download as attachments. OCR and
   imports parse untrusted files locally and must be kept patched.
 - Backups are unencrypted unless the operator encrypts them.
-- A checked-in Playwright suite covers Phase 5 critical workflows; broader
-  accessibility and visual-regression automation is not implemented.
-- Photo drag-reordering and captions are not implemented; users can choose a cover.
+- A checked-in Playwright suite covers Phase 5 and Phase 6 critical workflows;
+  broader accessibility and visual-regression automation is not implemented.
+- Photograph ordering uses explicit earlier/later controls; drag-and-drop and
+  captions are not implemented.
 - OCR is heuristic and English-first. It proposes values only and does not parse
   full line-item purchases; review is mandatory.
 - No exchange rates are configured. Currencies are never combined, and shared
@@ -322,8 +357,10 @@ the product-facing numbering below follows the delivery brief.
   fallbacks and mocked provider contracts are tested.
 - Obsidian support does not execute plugins, Dataview queries or canvas files,
   and implements a practical YAML frontmatter subset rather than full YAML.
-- Tauri desktop is not started; it is Phase 6. Physical printer alignment depends
-  on the printer and must be verified with the calibration sheet at 100% scale.
+- Tauri desktop is not started; it is Phase 7. Physical printer alignment and
+  real iPhone camera/PWA behavior depend on the environment and must be verified
+  physically. Real AI model quality was not benchmarked; Phase 6 vision tests use
+  a mocked Ollama endpoint.
 - Offline mode is an app shell, not offline inventory data.
 
 ## Definition of done for Phase 2
@@ -375,11 +412,33 @@ the product-facing numbering below follows the delivery brief.
 8. Full tests, security scans, backup/restore and desktop/iPhone walkthroughs
    pass. ✅
 
+## Definition of done for Phase 6
+
+1. Supported AI providers can be configured and tested through the UI without
+   editing `.env`. ✅
+2. Credentials are encrypted at rest and never returned or logged. ✅
+3. Task-specific models and capabilities are enforced. ✅
+4. Direct mobile camera capture with preview, retake, cancel and progress. ✅
+5. Multi-object recognition produces editable suggestions without automatic
+   writes. ✅
+6. Approved suggestions become correctly located inventory records. ✅
+7. The hierarchy fixture creates rooms, containers and contents without
+   duplicates. ✅
+8. Index and template content are excluded, and legacy identifiers are preserved
+   as aliases. ✅
+9. Obsidian ZIP exports work through Upload file. ✅
+10. Processing mode is shown and deterministic fallback is never described as AI. ✅
+11. nginx remains the web server and Tailscale is optional. ✅
+12. HTTP, direct HTTPS, PWA assets, service worker and deep links verified. ✅
+13. Phase 4 and Phase 5 regressions pass. ✅
+14. Backend/frontend/Playwright tests and security scans pass. ✅
+
 ## Recommended next phase
 
-Do not start until explicitly approved. **Phase 6 — Tauri 2 macOS desktop** is the
+Do not start until explicitly approved. **Phase 7 — Tauri 2 macOS desktop** is the
 strongest next milestone now that the web application, physical containers,
-imports and AI surfaces are stable. Further polish there should include a real
-Ollama benchmark on the target hardware, accessibility automation and visual
-regression tests. Advanced organisation (custom fields, taxonomy management and
-multi-user sharing) should follow in Phase 7.
+imports, AI providers and camera workflows are stable. Further work should also
+include a real Ollama/cloud-model benchmark, real iPhone PWA/camera verification,
+optional suggestion merge/split, accessibility automation and visual-regression
+tests. Advanced organisation (custom fields, taxonomy management and multi-user
+sharing) should follow afterwards.

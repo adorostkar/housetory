@@ -4,8 +4,9 @@
 
 Housetory is a self-hosted inventory of a home: rooms, nested storage places,
 items, photographs, documents, purchase details and warranties. It is designed
-as a private, single-account application that runs on a CPU-only Linux server
-and is reached through Tailscale.
+as a private, single-account application that runs on a CPU-only Linux server.
+It can be reached over a trusted LAN, an optional Tailscale tailnet, or a public
+hostname with direct nginx TLS.
 
 This document describes the architecture implemented in this repository. It is
 not a wish list; where something is intentionally deferred, it is marked.
@@ -16,9 +17,10 @@ not a wish list; where something is intentionally deferred, it is marked.
 
 ```
 iPhone / Mac browser
-        │  HTTPS (Tailscale certificate)
+        │  HTTPS (trusted certificate)
         ▼
-Tailscale Serve  ──────────────►  127.0.0.1:8080
+Tailscale Serve (optional) ─────► 127.0.0.1:8080
+   or direct nginx TLS ─────────► 0.0.0.0:443
                                       │
                                       ▼
                               ┌────────────────┐
@@ -43,11 +45,11 @@ Tailscale Serve  ──────────────►  127.0.0.1:8080
                     └────────────────┘
 ```
 
-- Only `web` publishes a port, and only on `127.0.0.1`. PostgreSQL and FastAPI
-  have no host ports.
-- Tailscale Serve terminates HTTPS and forwards to the nginx container. There
-  is no public DNS, no public certificate management and no extra reverse
-  proxy.
+- Only `web` publishes a port. The default is `127.0.0.1`; explicit opt-in is
+  required for LAN/public binds. PostgreSQL and FastAPI have no host ports.
+- Tailscale Serve can terminate HTTPS and forward to the loopback nginx port, or
+  `compose.tls.yaml` terminates TLS directly in nginx with an operator-provided
+  trusted certificate. There is no extra reverse proxy.
 - Compose services: `db`, `migrate` (one-shot), `api`, `worker`, `web`.
 - Persistent named volumes: `housetory_pgdata`, `housetory_uploads`.
 
@@ -132,15 +134,16 @@ All application endpoints are versioned under `/api/v1`.
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
 | Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
-| Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, `GET /photos/{id}/file`, `GET /photos/{id}/thumbnail` |
+| Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
-| Imports | `GET/POST /imports`, `GET/DELETE /imports/{id}`, `GET /imports/{id}/source`, `GET /imports/{id}/files/{file_id}/download`, `POST /imports/{id}/retry`, `POST /imports/{id}/apply` |
+| Imports | `GET/POST /imports`, `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
 | Documents/AI | `GET /documents/{id}/related-items` |
-| AI | `GET /ai/status`, `POST /assistant/query`, `POST /search/natural`, `GET/POST /ai/recognitions`, recognition image/original/retry/delete |
+| AI | `GET /ai/status?task=`, `POST /assistant/query`, `POST /search/natural`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
+| AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
 
 OpenAPI documentation is available in development at `/api/docs`. It is
 disabled when `ENVIRONMENT=production`.
@@ -185,8 +188,10 @@ Health semantics:
   setup should be completed immediately after deployment.
 
 Not in the foundation: password reset/change UI, 2FA, SSO, idle timeout and
-multi-device session management. Tailscale keeps the service off the public
-internet, which is the primary access control boundary.
+multi-device session management. Deployment choice determines the access
+boundary: keep the default loopback bind for a private install, use Tailscale for
+a private tailnet, or expose nginx TLS publicly only with a trusted certificate,
+strong credentials, prompt first-run setup and host patching.
 
 ## 5. Data model
 
@@ -218,7 +223,11 @@ purchases ──> documents (receipt)      warranties ──> documents (certifi
 documents (OCR metadata, original + normalized storage)
 import_batches ──< import_entries ──> items (imported/matched)
 import_batches ──< import_source_files (notes/attachments)
-ai_recognitions (private photo, status, suggestions)
+ai_recognitions (private photo, status, mode, suggestions, applied items)
+recognition_item_links >── items
+room_photos / location_photos (entity photographs)
+ai_providers (encrypted credentials, consent, provider endpoint)
+ai_task_settings (provider/model per task)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -272,7 +281,13 @@ Key decisions:
 - **Current values** are optional item estimates stored separately from purchase
   values, with their own currency.
 - **Photos** are item-owned files with dimensions, byte size, sort order and a
-  derived WebP thumbnail. Up to 20 per item.
+  derived WebP thumbnail. Up to 20 per item. Room and storage-location photos use
+  the same validated storage pipeline and authenticated file routes.
+- **AI providers** are household-scoped rows containing provider type, base URL,
+  default model, encrypted API key, key version, enabled state and separate cloud
+  consent. `ai_task_settings` assigns a provider/model to assistant, imports,
+  documents, search, vision and label tasks. Credentials are Fernet-encrypted with
+  an environment key held outside PostgreSQL; no secret is serialized to clients.
 - **Documents** are household-owned files with type, merchant, document date,
   notes, extracted text, JSONB extraction metadata, OCR status/error/confidence/
   processed time, and original/normalized storage keys. They can be linked to
@@ -288,8 +303,14 @@ Key decisions:
   attachments. Application is explicit and idempotent; no inventory is created by
   extraction.
 - **AI recognition records** store a private normalized/original photo, status,
-  validated suggestions, model metadata and errors. Applying a suggestion uses the
-  existing item APIs only after user confirmation.
+  validated suggestions, model metadata, actual processing mode, optional
+  destination room/container, applied-item provenance and errors.
+  `recognition_item_links` records idempotent application. Applying a suggestion
+  uses existing item APIs only after user confirmation.
+- **Hierarchical imports** use the existing import batch/entry model with
+  `entity_type`, `parent_entry_id`, `legacy_identifier`, created room/location
+  links and hierarchy metadata. Legacy labels such as `STO-03` become aliases;
+  Phase 5 permanent identifiers remain authoritative.
 - **Jobs** carry task name, JSON payload, status, priority, run time, attempts,
   max attempts and worker lock fields.
 
@@ -301,11 +322,12 @@ item is their sole attachment; shared documents remain available. Deleting a
 purchase detaches its items without deleting them. A deleted receipt or warranty
 document clears the reference through `SET NULL`.
 
-Phase 4 added migration `9b4f2c7a1e3d` for imports/recognition. Phase 5 adds the
+Phase 4 added migration `9b4f2c7a1e3d` for imports/recognition. Phase 5 added the
 append-only migration `4d8e1a6c2b90` for container fields, identifier uniqueness,
-summary/label snapshots and the identifier-counter table. It extends the storage
-kind check constraint and adds container/identifier checks and indexes without
-rewriting existing migrations or records.
+summary/label snapshots and the identifier-counter table. Phase 6 adds
+`c1a7e5d9f320` for AI providers/task settings, room/location photos, recognition
+mode/destination/apply provenance, hierarchical import fields and storage-location
+legacy identifiers/aliases. No earlier migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -446,9 +468,13 @@ development and nginx proxies in production. No CORS allowlist is needed.
   capabilities, use `no-new-privileges`, and have read-only root filesystems with
   minimal tmpfs mounts. The nginx image is the unprivileged variant.
 - nginx adds CSP, HSTS, COOP/CORP, clickjacking, MIME-sniffing, referrer and
-  permissions headers. API JSON and authenticated media are `no-store`.
-- The application port binds only to loopback. Tailscale Serve is the only
-  intended entry point. Tailscale Funnel is explicitly not used.
+  permissions headers. The optional TLS server adds TLS 1.2/1.3, HSTS and an HTTP
+  redirect while keeping the same headers. API JSON and authenticated media are
+  `no-store`.
+- The application binds to loopback by default. Three documented modes exist:
+  trusted LAN (`WEB_BIND=0.0.0.0`), optional Tailscale Serve, or direct nginx TLS
+  via `compose.tls.yaml` with a trusted certificate. Tailscale is optional;
+  Funnel is not used. PostgreSQL and the worker never receive host ports.
 - PostgreSQL (`db`), uploads (`api`) and private imports (`api`/`worker`) own
   persistent data. The worker mounts uploads read-only and imports writable. The
   worker image adds Tesseract, English language data and Poppler for CPU-only OCR.
@@ -465,7 +491,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 141 pytest tests against a real PostgreSQL database. The test session
+- Backend: 156 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -477,22 +503,28 @@ development and nginx proxies in production. No CORS allowlist is needed.
   associations, warranty duration/status/reminders, currency separation, CSV
   exports, archive traversal/symlink/bomb limits, import extraction for text,
   Markdown, Obsidian, CSV/XLSX/DOCX, duplicate/location review, partial approval,
-  retry safety, source traceability, AI provider contracts, cloud consent,
-  grounded tools, smart search, recognition fallback, document suggestions,
+  retry safety, source traceability, provider adapters, encrypted credentials and
+  rotation, capability validation, consent enforcement, entity photos,
+  multi-object recognition/apply/idempotency, hierarchical parsing/apply,
+  duplicate prevention, legacy identifiers, AI provider contracts, grounded
+  tools, smart search, recognition fallback, document suggestions,
   prompt-injection resistance, upload content validation, malformed PDF/images,
   EXIF stripping, traversal filenames, upload size and permissions, archive
   extraction safety, concurrent identifier allocation, non-reuse, conversion,
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 25 Vitest tests + Testing Library, including hierarchy utilities,
-  location paths, nested room cards, the photo lightbox, document cards,
-  warranty labels/status text and calendar-month expiration, plus container
-  creation/bulk/movement dialogs and nested-container resolution. TypeScript is
-  checked in strict mode; the production build is part of verification.
-- Browser: 4 checked-in Playwright workflows cover unnamed/bulk creation,
-  cross-room movement, label preview/PDF/calibration downloads, QR and mobile
-  container/label views on a disposable stack.
+- Frontend: 34 Vitest tests + Testing Library, including provider settings,
+  camera preview/retake/cancel, multi-object review and bulk approval, hierarchy
+  branch approval/type-parent editing, processing-mode text, hierarchy utilities,
+  location paths, nested room cards, photo lightbox, document cards, warranty
+  labels/status text, container dialogs and nested-container resolution.
+  TypeScript is checked in strict mode; the production build is part of
+  verification.
+- Browser: 8 checked-in Playwright workflows cover the Phase 5 container flows plus
+  mocked-Ollama provider configuration, camera upload, multi-object approval,
+  hierarchy import/duplicate prevention and PWA/deep-link routing over HTTP and
+  direct HTTPS.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.

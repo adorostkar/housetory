@@ -601,3 +601,37 @@ remaining risks are primarily deployment-boundary, availability, operational
 (encryption/backups) and future-vulnerability risks. Treat this report as a
 point-in-time assessment and re-run the scans after dependency, base-image or
 deployment changes.
+
+
+## Phase 6 verification update
+
+Phase 6 adds database-backed AI providers, encrypted API credentials, entity
+photos, multi-object recognition approval, hierarchical imports and optional
+direct nginx TLS.
+
+- API credentials are encrypted at rest with Fernet using `AI_CREDENTIAL_KEY`
+  from the deployment environment. They are never returned to clients or logged.
+  A missing/wrong key fails closed. `AI_CREDENTIAL_KEY_PREVIOUS` supports
+  rotation; database backups do not include the key.
+- Cloud providers require consent separate from API-key configuration. Local
+  Ollama remains local. All provider calls originate in the API/worker; the
+  browser never calls a provider directly. Provider adapters use official APIs
+  only, with strict validated JSON and no SQL/shell/write tools.
+- `compose.tls.yaml` adds direct TLS 1.2/1.3 termination in nginx, HSTS, an HTTP
+  redirect (except health), secure cookies and the existing security headers.
+  Tailscale is optional. The default bind remains loopback.
+- New uploads continue through the existing validation, metadata stripping,
+  HEIC normalization, size limits, authenticated no-store file routes and
+  household authorization. Room/location photos use the same pipeline.
+- Recognition apply and hierarchy apply are explicit, household-scoped,
+  transactional/per-savepoint and idempotent. AI cannot create records without
+  reviewed approval.
+- Fresh migration `c1a7e5d9f320` passes `alembic upgrade head` and `alembic check`.
+- Final dependency/image checks: production `pip-audit` clean, `npm audit` 0
+  vulnerabilities, Trivy HIGH/CRITICAL 0 across API, worker, web and database
+  images (after `cryptography` 50.0.2). Backend tests: 156. Frontend: 34.
+  Playwright: 8 over HTTP and 8 over direct HTTPS.
+- Residual risk: real cloud/local-model behavior, rate-limit handling and model
+  accuracy were not benchmarked; a real iPhone camera/PWA and physical printer
+  were unavailable. The self-signed TLS rehearsal required a test-only browser
+  certificate bypass; production must use a trusted certificate.
