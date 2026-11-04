@@ -27,7 +27,7 @@ from ...schemas.items import (
     PhotoOrderRequest,
 )
 from ...services import items as item_service
-from ...services import storage
+from ...services import lending, storage
 from ...services.container_serializers import location_path_map
 from ...services.containers import location_breadcrumb
 from ...services.hierarchy import descendant_ids
@@ -184,9 +184,12 @@ def list_items(
         .offset(offset)
     ).all()
     path_map = location_path_map(db, auth.household.id)
+    loan_quantities = lending.loan_quantities_for_items(
+        db, auth.household.id, [item.id for item in items]
+    )
     summaries = []
     for item in items:
-        summary = item_summary(item)
+        summary = item_summary(item, on_loan_quantity=loan_quantities.get(item.id, 0))
         if item.storage_location_id:
             summary = summary.model_copy(
                 update={"location_path": path_map.get(item.storage_location_id, [])}
@@ -246,7 +249,14 @@ def update_item(
     db: Session = Depends(get_db),
 ) -> ItemDetailResponse:
     item = _get_item(db, auth.household.id, item_id)
-    item_service.update_item_record(db, auth.household.id, item, payload)
+    item_service.update_item_record(
+        db,
+        auth.household.id,
+        item,
+        payload,
+        actor_user_id=auth.user.id,
+        actor_name=auth.user.name,
+    )
     db.commit()
     # Relationships may already be loaded on the identity-mapped object; force a
     # fresh read so a moved item's room/location/category are reflected.
@@ -266,6 +276,8 @@ def delete_item(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> Response:
+    item = lending.lock_item(db, auth.household.id, item_id)
+    lending.ensure_item_deletable(db, auth.household.id, item)
     item = _get_item(db, auth.household.id, item_id)
     keys = [photo.storage_key for photo in item.photos]
     keys += [photo.thumbnail_key for photo in item.photos if photo.thumbnail_key]

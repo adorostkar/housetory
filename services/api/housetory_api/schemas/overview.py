@@ -22,4 +22,7 @@ class OverviewOut(BaseModel):
     items_missing_purchase_count: int
     photo_bytes: int
     document_bytes: int
+    outstanding_loan_count: int = 0
+    overdue_loan_count: int = 0
+    on_loan_quantity: int = 0
     recent_items: list[ItemSummary]

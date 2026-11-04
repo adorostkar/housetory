@@ -183,7 +183,12 @@ def _primary_photo(item: Item) -> PhotoOut | None:
     return photo_out(photos[0]) if photos else None
 
 
-def item_summary(item: Item, *, household_reminder_days: int | None = None) -> ItemSummary:
+def item_summary(
+    item: Item,
+    *,
+    household_reminder_days: int | None = None,
+    on_loan_quantity: int = 0,
+) -> ItemSummary:
     purchase = item.purchase
     warranty = item.warranty
     reminder_days = (
@@ -198,6 +203,7 @@ def item_summary(item: Item, *, household_reminder_days: int | None = None) -> I
         brand=item.brand,
         model=item.model,
         quantity=item.quantity,
+        on_loan_quantity=on_loan_quantity,
         condition=item.condition,
         is_archived=item.is_archived,
         room=RoomBrief(id=item.room.id, name=item.room.name) if item.room else None,

@@ -15,6 +15,7 @@ import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import { ActivityTimeline } from "@/components/activity-timeline";
 import {
   AddItemsButton,
   useAddItems,
@@ -49,6 +50,7 @@ import {
   queryKeys,
   useCanWrite,
   useContainer,
+  useContainerHistory,
   useInvalidateInventory,
   useLocations,
   useRooms,
@@ -68,6 +70,7 @@ export function ContainerDetailPage() {
   const canWrite = useCanWrite();
   const { containerId = "" } = useParams();
   const containerQuery = useContainer(containerId);
+  const historyQuery = useContainerHistory(containerId);
   const roomsQuery = useRooms();
   const locationsQuery = useLocations();
   const invalidate = useInvalidateInventory();
@@ -414,6 +417,26 @@ export function ContainerDetailPage() {
           </div>
         </section>
       )}
+
+      <section className="surface mt-8 p-5 sm:p-6">
+        <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
+          Movement history
+        </h2>
+        <p className="mt-1 text-[0.74rem] leading-relaxed text-muted-foreground">
+          Container moves describe the contents that moved with it. Items are not given
+          duplicate individual move events for an inherited container move.
+        </p>
+        <div className="mt-4">
+          <ActivityTimeline
+            events={historyQuery.data?.items ?? []}
+            emptyText="No container moves recorded yet."
+            onChanged={() => {
+              void historyQuery.refetch();
+              refreshContainer();
+            }}
+          />
+        </div>
+      </section>
 
       {detail.documents.length > 0 && (
         <section className="mt-8">

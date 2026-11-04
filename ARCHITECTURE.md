@@ -146,6 +146,7 @@ All application endpoints are versioned under `/api/v1`.
 | Search | `GET /search/quick` bounded item/container/location results; `POST /search/natural` remains the explicit AI/deterministic full-search flow |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}`, `POST /voice/{id}/interpret`, transcription retry, explicit confirm and cancel |
+| Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
 | AI | `GET /ai/status?task=`, `POST /assistant/query`, `POST /search/natural`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
@@ -341,6 +342,17 @@ Key decisions:
   the resulting item. **Import source files** preserve extracted notes and
   attachments. Application is explicit and idempotent; no inventory is created by
   extraction.
+- **Loans** store household scope, borrower display name, original and returned
+  quantities, dates, private notes, status, created-by and home-location snapshots.
+  `loan_returns` records immutable partial returns with active/reversed state.
+  Owned quantity remains on the item; on-loan quantity is the sum of open loan
+  outstanding amounts, and at-home/available is the difference. Item and loan row
+  locks plus request-id uniqueness prevent overselling and retry duplication.
+- **Activity events** store actor/id snapshots, action, stable entity references,
+  item/container/loan links, human summary, preserved from/to place snapshots and
+  optional undo links. Container moves record inherited-content counts without
+  fabricating per-item move events. Undo is a new compensating event with a unique
+  original-event constraint.
 - **Voice-note records** store household scope, creator, status, private audio
   metadata/storage key, room/container context, transcript and provider metadata,
   validated structured suggestions with source spans, deterministic grouping and
@@ -375,7 +387,9 @@ summary/label snapshots and the identifier-counter table. Phase 6 adds
 mode/destination/apply provenance, hierarchical import fields and storage-location
 legacy identifiers/aliases. The voice milestone adds append-only migration
 `a4b6c8d0e2f1` for `voice_notes`, the transcription task check constraint and
-voice indexes. No earlier migration or record is rewritten.
+voice indexes. The lending milestone adds append-only migration `c9e1f3a5b7d2`
+for loans, partial returns and activity events. No earlier migration or record is
+rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -469,7 +483,9 @@ deployment.
   explicit transcription task and supports only OpenAI `/audio/transcriptions` or
   Gemini inline audio; interpretation reuses `imports`. Missing configuration,
   cancellation, request failure, OCR fallback, empty and failed paths are
-  recorded and labelled. Fixed
+  recorded and labelled. Lending and undo are synchronous authenticated API
+  operations using row locks, request-id idempotency and compensating events;
+  no borrower email or reminder jobs exist. Fixed
   fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 

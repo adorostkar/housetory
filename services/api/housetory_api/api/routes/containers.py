@@ -285,6 +285,8 @@ def move_existing_container(
             location_id,
             destination_room_id=payload.room_id,
             destination_parent_id=payload.parent_id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
         )
         db.commit()
     except Exception:

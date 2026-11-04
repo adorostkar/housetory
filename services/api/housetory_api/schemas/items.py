@@ -108,6 +108,7 @@ class ItemSummary(ORMModel):
     brand: str | None
     model: str | None
     quantity: int
+    on_loan_quantity: int = 0
     condition: str
     is_archived: bool
     room: RoomBrief | None

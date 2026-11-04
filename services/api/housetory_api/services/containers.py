@@ -22,6 +22,7 @@ from ..models import (
     StorageLocation,
 )
 from ..schemas.items import LocationBrief
+from . import history
 from .hierarchy import descendant_ids
 from .serializers import item_load_options
 
@@ -503,6 +504,9 @@ def move_container(
     *,
     destination_room_id: uuid.UUID,
     destination_parent_id: uuid.UUID | None,
+    actor_user_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+    record_history: bool = True,
 ) -> StorageLocation:
     household_hierarchy_lock(db, household_id)
     # Lock the household's location rows in a deterministic order. This makes
@@ -551,6 +555,28 @@ def move_container(
         [(location.id, location.parent_id) for location in locations], moving.id
     )
     subtree_ids = list(subtree)
+    from_room = get_room(db, household_id, moving.room_id)
+    from_parent = by_id.get(moving.parent_id) if moving.parent_id else None
+    destination_room = get_room(db, household_id, destination_room_id)
+    destination_parent = by_id.get(destination_parent_id) if destination_parent_id else None
+    affected_items = int(
+        db.scalar(
+            select(func.count(Item.id)).where(
+                Item.household_id == household_id,
+                Item.storage_location_id.in_(subtree_ids),
+            )
+        )
+        or 0
+    )
+    affected_quantity = int(
+        db.scalar(
+            select(func.coalesce(func.sum(Item.quantity), 0)).where(
+                Item.household_id == household_id,
+                Item.storage_location_id.in_(subtree_ids),
+            )
+        )
+        or 0
+    )
     now = datetime.now(UTC)
     db.execute(
         update(StorageLocation)
@@ -578,7 +604,40 @@ def move_container(
     )
     db.flush()
     db.expire_all()
-    return get_location(db, household_id, location_id)
+    moved = get_location(db, household_id, location_id)
+    if record_history:
+        history.record_event(
+            db,
+            household_id,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
+            action="container.moved",
+            entity_type="container",
+            entity_id=moved.id,
+            container_id=moved.id,
+            summary=(
+                f"Moved container {moved.identifier or moved.name} from "
+                f"{from_room.name if from_room else 'an unknown room'}"
+                f"{' / ' + from_parent.name if from_parent else ''} to "
+                f"{destination_room.name}"
+                f"{' / ' + destination_parent.name if destination_parent else ''}"
+                f" · {affected_items} item(s), {affected_quantity} unit(s) moved with it"
+            ),
+            details={
+                "from_room_id": str(from_room.id) if from_room else None,
+                "from_room_name": from_room.name if from_room else None,
+                "from_parent_id": str(from_parent.id) if from_parent else None,
+                "from_parent_name": from_parent.name if from_parent else None,
+                "to_room_id": str(destination_room.id),
+                "to_room_name": destination_room.name,
+                "to_parent_id": str(destination_parent.id) if destination_parent else None,
+                "to_parent_name": destination_parent.name if destination_parent else None,
+                "affected_item_count": affected_items,
+                "affected_quantity": affected_quantity,
+                "affected_container_count": max(0, len(subtree_ids) - 1),
+            },
+        )
+    return moved
 
 
 def container_children(

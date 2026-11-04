@@ -2,6 +2,7 @@ import {
   DoorOpen,
   Download,
   FileText,
+  HandCoins,
   Package,
   Plus,
   ReceiptText,
@@ -184,6 +185,30 @@ export function OverviewPage() {
           to="/warranties"
         />
       </div>
+
+      {data.outstanding_loan_count > 0 && (
+        <Link
+          to="/loans"
+          className="surface mt-4 flex flex-col gap-2 border-brass/25 bg-brass-soft/25 px-4 py-3.5 transition-colors hover:bg-brass-soft/40 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span className="flex items-start gap-2.5 text-[0.8rem] leading-relaxed">
+            <HandCoins className="mt-0.5 size-4 shrink-0 text-brass" />
+            <span>
+              <strong className="font-medium">
+                {data.on_loan_quantity} {data.on_loan_quantity === 1 ? "unit" : "units"}
+              </strong>{" "}
+              on loan across {pluralize(data.outstanding_loan_count, "open loan")}.
+              Owned totals still include them.
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2 text-[0.72rem] text-muted-foreground">
+            {data.overdue_loan_count > 0 && (
+              <Badge variant="brass">{data.overdue_loan_count} past due</Badge>
+            )}
+            <span className="underline underline-offset-4">View loans</span>
+          </span>
+        </Link>
+      )}
 
       <OwnershipSection financial={financialQuery.data} loading={financialQuery.isPending} />
 

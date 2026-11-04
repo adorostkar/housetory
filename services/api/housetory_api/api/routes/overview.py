@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...models import Document, Item, ItemPhoto, Room, StorageLocation
 from ...schemas.overview import CurrencyTotal, OverviewOut
+from ...services import lending
 from ...services.ownership import financial_overview
 from ...services.serializers import item_load_options, item_summary
 from ...services.warranty_dashboard import build_dashboard, load_warranties
@@ -75,6 +78,17 @@ def overview(
         auth.household.warranty_reminder_days,
         limit=5,
     )
+    loan_quantities = lending.loan_quantities_for_items(
+        db, household_id, [item.id for item in recent_items]
+    )
+    loans = lending.list_loans(
+        db,
+        household_id,
+        status="open",
+        on_date=date.today(),
+        limit=1,
+        offset=0,
+    )
 
     return OverviewOut(
         room_count=room_count,
@@ -97,8 +111,15 @@ def overview(
         items_missing_purchase_count=financial.items_missing_purchase_count,
         photo_bytes=photo_bytes,
         document_bytes=document_bytes,
+        outstanding_loan_count=loans.outstanding_count,
+        overdue_loan_count=loans.overdue_count,
+        on_loan_quantity=loans.on_loan_quantity,
         recent_items=[
-            item_summary(item, household_reminder_days=auth.household.warranty_reminder_days)
+            item_summary(
+                item,
+                household_reminder_days=auth.household.warranty_reminder_days,
+                on_loan_quantity=loan_quantities.get(item.id, 0),
+            )
             for item in recent_items
         ],
     )

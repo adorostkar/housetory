@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, buildQuery } from "@/lib/api";
+import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
   AiRecognitionList,
@@ -31,6 +32,12 @@ import type {
   TagList,
   VoiceConfig,
   VoiceNote,
+  ActivityHistory,
+  ItemLoanSummary,
+  Loan,
+  LoanDetail,
+  LoanFilterStatus,
+  LoanList,
   WarrantyList,
   WarrantyStatus,
 } from "@/lib/types";
@@ -70,7 +77,79 @@ export const queryKeys = {
   qrConfig: ["containers", "qr-config"] as const,
   voiceConfig: ["voice", "config"] as const,
   voiceNote: (noteId: string) => ["voice", "note", noteId] as const,
+  loans: ["loans"] as const,
+  loan: (loanId: string) => ["loans", loanId] as const,
+  itemLoans: (itemId: string) => ["items", itemId, "loans"] as const,
+  itemHistory: (itemId: string) => ["items", itemId, "history"] as const,
+  containerHistory: (containerId: string) =>
+    ["containers", containerId, "history"] as const,
 };
+
+export interface LoanFilters {
+  status?: LoanFilterStatus;
+  item_id?: string;
+  q?: string;
+  overdue?: boolean;
+  on_date?: string;
+}
+
+export function useLoans(filters: LoanFilters = {}, limit = 50) {
+  return useQuery({
+    queryKey: [...queryKeys.loans, filters, limit],
+    queryFn: () =>
+      api.get<LoanList>(
+        `/loans${buildQuery({
+          status: filters.status ?? "open",
+          item_id: filters.item_id,
+          q: filters.q,
+          overdue: filters.overdue ? "true" : undefined,
+          on_date: filters.on_date ?? localDateISO(),
+          limit,
+        })}`,
+      ),
+  });
+}
+
+export function useLoan(loanId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.loan(loanId ?? ""),
+    queryFn: () =>
+      api.get<LoanDetail>(`/loans/${loanId}${buildQuery({ on_date: localDateISO() })}`),
+    enabled: Boolean(loanId),
+  });
+}
+
+export function useItemLoans(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.itemLoans(itemId ?? ""),
+    queryFn: () =>
+      api.get<ItemLoanSummary>(
+        `/items/${itemId}/loans${buildQuery({ on_date: localDateISO() })}`,
+      ),
+    enabled: Boolean(itemId),
+  });
+}
+
+export function useItemHistory(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.itemHistory(itemId ?? ""),
+    queryFn: () => api.get<ActivityHistory>(`/items/${itemId}/history`),
+    enabled: Boolean(itemId),
+  });
+}
+
+export function useContainerHistory(containerId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.containerHistory(containerId ?? ""),
+    queryFn: () => api.get<ActivityHistory>(`/containers/${containerId}/history`),
+    enabled: Boolean(containerId),
+  });
+}
+
+export function useLoanReference(loanId: string | undefined): Loan | undefined {
+  const detail = useLoan(loanId);
+  return detail.data;
+}
 
 export function useSession() {
   return useQuery({

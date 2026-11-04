@@ -178,6 +178,26 @@ class VoiceNoteStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class LoanStatus(StrEnum):
+    OUTSTANDING = "outstanding"
+    PARTIALLY_RETURNED = "partially_returned"
+    RETURNED = "returned"
+    CANCELLED = "cancelled"
+
+
+class ActivityAction(StrEnum):
+    ITEM_MOVED = "item.moved"
+    CONTAINER_MOVED = "container.moved"
+    LOAN_CREATED = "loan.created"
+    LOAN_RETURNED = "loan.returned"
+    LOAN_CORRECTED = "loan.corrected"
+    LOAN_CANCELLED = "loan.cancelled"
+    ITEM_MOVE_UNDONE = "item.move_undone"
+    CONTAINER_MOVE_UNDONE = "container.move_undone"
+    LOAN_CREATION_UNDONE = "loan.creation_undone"
+    LOAN_RETURN_UNDONE = "loan.return_undone"
+
+
 class ImportEntityType(StrEnum):
     ITEM = "item"
     ROOM = "room"

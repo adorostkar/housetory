@@ -592,27 +592,108 @@ manual entry, imports, photo recognition, quantities or authorization semantics.
 - [ ] Real paid-provider transcription and physical microphone smoke tests require
       the operator's credentials and hardware.
 
-## Agreed product roadmap — 2026-11-04
+## Staged milestone — lending, movement history and safe undo
+
+This milestone extends the existing item/container and role model. It does not
+create borrower accounts, move loaned items out of their home location, send email
+or start later roadmap milestones.
+
+### Stage A — lending foundation and quantity rules
+
+- [x] Append-only migration `c9e1f3a5b7d2` for loans, partial returns and
+      household-scoped activity events. No existing row is rewritten.
+- [x] Borrower display name, lent date, optional due date, private notes, quantity,
+      returned quantity and explicit outstanding/partial/returned/cancelled states.
+- [x] Owned quantity remains on the item; on-loan is the sum of open outstanding
+      quantities; at-home/available is owned minus on-loan. Existing aggregates
+      still use owned quantities.
+- [x] Multiple concurrent loans and partial returns with item/loan row locking,
+      unique request ids and server-side stock validation.
+- [x] Loan correction, cancellation before returns, date validation and neutral
+      local-date overdue interpretation.
+- [x] Quantity reduction below on-loan stock and archive/delete with open loans are
+      blocked; moving items/containers while loaned is allowed and recorded.
+- [x] Loans, item summaries, overview and assistant expose accurate owned/on-loan
+      context without treating loaned units as disposed or duplicated.
+
+### Stage B — movement and lending history
+
+- [x] Item moves record actor, time, stable item/room/location IDs and preserved
+      room/location/path name snapshots before and after.
+- [x] Container moves record one inherited-content event with affected item, unit
+      and nested-container counts; they do not fabricate per-item move events.
+- [x] Loans, returns, corrections and cancellations create household-scoped events
+      with borrower/quantity/date snapshots and no private notes in history.
+- [x] Item timeline, container movement history and loan detail history endpoints
+      and UI, with empty legacy state and no fabricated creation dates.
+
+### Stage C — safe compensating undo
+
+- [x] Undo only for item/container moves, untouched loan creation and the latest
+      active return.
+- [x] Verify current actor permission, household, origin/destination existence,
+      current quantities and intervening item/container/loan changes.
+- [x] Undo creates a new event and never deletes history; unique `undoes_event_id`
+      plus event locking prevents double undo.
+- [x] Clear blocked-undo reasons in UI and docs; correction/cancel/quantity/archive
+      actions are deliberately not silently reversible.
+
+### Stage D — review UI and local delivery
+
+- [x] Compact Lend/Return/Correct dialogs on item and loan pages.
+- [x] Outstanding loans page with borrower, item links, quantity, dates, status,
+      optional past-due filter and no borrower contacts or emails.
+- [x] Item details show owned/at-home/on-loan quantities, open loans, Lend action
+      and history; container details show movement history; overview shows a small
+      loan banner only when relevant.
+- [x] Small Loans navigation addition while preserving typography, palette, cards,
+      spacing and the existing shell.
+- [x] Backend tests for authorization/IDOR, quantities, concurrency, retries,
+      partial returns, dates, quantity/archive/delete restrictions, history
+      snapshots, container inheritance, safe/blocked/replayed/concurrent undo.
+- [x] Frontend tests and disposable-stack browser workflows for lending, partial
+      return, outstanding list, timeline and undo.
+- [x] Document exact quantity definitions, permissions, constraints, supported and
+      unsupported undo, retry semantics and limits in
+      `docs/LENDING_HISTORY_UNDO.md`.
+- [ ] Local deployment after backup; remote server remains untouched.
+
+## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Finish the current voice-note work; wait for the user to announce completion,
-review once, and obtain the next implementation instruction before proceeding.
+Voice notes are complete and locally verified. Milestone 2 is implemented and
+locally verified; later milestones still require a separate instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
-2. **Receipt and document scanning:** inspect existing Documents/OCR capabilities
+2. **Lending, movement history and undo:** prioritise the user's everyday lending
+   workflow. Record borrower name (no borrower account required), lent date,
+   optional due date and a clear lent/returned state. Preserve the normal home
+   location; lending is not a move into a fictitious room. Support partial lending
+   and returns for quantity-bearing items without losing or double-counting stock.
+   Show outstanding loans and overdue status, allow corrections, and keep contact
+   details private. Automated email reminders require separate configuration and
+   explicit recipient/notification choices; do not send unsolicited borrower mail.
+   Add who/when/from/to history for item and container moves, including lending
+   events where relevant. Offer safe undo with permission and intervening-change
+   checks. Inspect/reuse existing movement functionality rather than duplicating it.
+3. **Bulk organisation:** select multiple items to move, tag or categorise; offer
+   a compact list view alongside existing cards. Preview affected items and
+   destination, handle quantity/location ambiguity and partial failures clearly,
+   preserve permissions and record changes in history. Reuse safe undo primitives.
+4. **Receipt and document scanning:** inspect existing Documents/OCR capabilities
    first; add capture, crop, perspective correction, rotation, contrast cleanup
    and multi-page PDFs while preserving originals. Accept files from dedicated
    scanning apps. Basic cleanup must not require an LLM.
-3. **Intelligent extraction and matching:** propose receipt fields and line items,
+5. **Intelligent extraction and matching:** propose receipt fields and line items,
    purchases, warranties and attachments. Use an available, consented LLM to
    interpret abbreviations and rank relevant inventory candidates with evidence;
    retain OCR/basic matching without it. Exact identifiers carry strong weight.
    Handle duplicate documents, no matching item and per-line purchase values.
    Review before creating, attaching or overwriting records. Before this work,
    check that matching, jobs and AI context use explicit household scope.
-4. **Single-home polish, including unified search and assistant:** make manual,
+6. **Single-home polish, including unified search and assistant:** make manual,
    photo, voice and document flows consistent, with duplicate/quantity handling.
    Use one everyday input labelled “Search or ask about your inventory…”.
    - Short queries such as “PS5” show matching items and boxes immediately,
@@ -629,11 +710,45 @@ review once, and obtain the next implementation instruction before proceeding.
    - Preserve useful ordinary search without AI, show honest unavailable/error
      states, enforce permissions and cloud consent, and treat queries as
      untrusted data. Changes require a specific destination and confirmation.
-5. **Multiple properties in one household:** property → room → storage/box → item;
+   - Make overview useful with sparse data: lead with finding/organising items,
+     recent items and rooms; collapse empty financial/warranty panels. Surface
+     outstanding loans when relevant, without adding another wall of empty cards.
+   - Purchase information supports explicit “Unknown” and “Not applicable” states;
+     avoid treating every item as an outstanding purchase-information task.
+     Define how these states affect counts and missing-information searches.
+   - Standardise container/storage terminology and present display name, permanent
+     identifier and full room path consistently across cards, filters and details.
+     Do not rename user records or identifiers merely to improve presentation.
+   - Hide irrelevant empty filters, show active filter chips, and preserve chosen
+     list/card views. Reduce empty item-photo placeholders and redundant upload
+     controls. Remove empty-library export calls to action while retaining normal
+     export capability once useful. Lead assistant with the question and retain
+     accurate provider/privacy information in compact expandable details.
+7. **Inventory evidence package:** export selected items, boxes, rooms or the
+   current home as a presentable itemised PDF, with an optional spreadsheet and
+   bundle of original supporting attachments. Include recorded quantities,
+   location paths, photos, serial/model identifiers, purchase details, receipts
+   and recorded values where available. Clearly distinguish purchase price from
+   current estimates, preserve currencies without unsupported conversion, and
+   mark unknown/missing information rather than inventing facts or valuations.
+   Include export date and scope; distinguish recorded inventory from physically
+   verified contents. Offer the user a preview and attachment selection before
+   download. Keep access household-scoped, protect private documents, and allow
+   saving outside the home server. No automatic sending to insurers. Position as
+   “Export inventory with evidence”, useful for insurance, theft/loss documentation
+   and moving; do not claim insurer acceptance, coverage or professional appraisal.
+   Reuse existing export infrastructure and avoid adding an insurance-management
+   section or mandatory purchase data entry.
+8. **Stocktake / last verified here:** allow checking a room or box against its
+   recorded contents, explicitly marking present, missing, moved or quantity
+   discrepancies. Record who verified what and when; distinguish a verification
+   from an edit. Do not mark unchecked contents as present or overwrite quantities
+   automatically. Preserve an interrupted stocktake for later completion.
+9. **Multiple properties in one household:** property → room → storage/box → item;
    migrate existing inventory into an initial property without breaking IDs,
    attachments or QR links. Add property context/filters and clear location paths.
    Initially retain household-level permissions across all its properties.
-6. **Multiple households:** creation, switching, household-specific invitations,
+10. **Multiple households:** creation, switching, household-specific invitations,
    membership roles, settings and verified isolation in jobs, AI and documents.
    Search and assistant must support “All my places” across households/properties
    the account can access, with explicit filters and labelled result locations;
@@ -642,6 +757,17 @@ review once, and obtain the next implementation instruction before proceeding.
    consent rather than sending its data through another household's provider.
    Mutations identify a particular household/property and clarify ambiguity.
    Cross-household item transfers are deferred beyond the initial release.
+
+### Visual continuity and delivery boundaries
+
+The user likes the current feel: preserve typography, dark palette, spacing
+character, cards, rounded controls and overall navigation shell. This is an
+incremental refinement, not a redesign. Prefer existing components and small,
+reviewable changes; do not replace the dashboard/sidebar wholesale or introduce
+a new design system. Review representative before/after desktop and mobile views.
+Low-risk polish directly related to a milestone can ship with it; broader overview
+reordering and unified search remain in the dedicated polish milestone. No drastic
+visual change is implied by this roadmap.
 
 For each milestone: OpenCode implements, verifies and deploys locally; we review
 after the user reports completion. Deploy to the server only on explicit request,

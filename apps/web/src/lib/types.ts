@@ -304,6 +304,7 @@ export interface ItemSummary {
   brand: string | null;
   model: string | null;
   quantity: number;
+  on_loan_quantity?: number;
   condition: ItemCondition;
   is_archived: boolean;
   room: RoomBrief | null;
@@ -440,6 +441,9 @@ export interface Overview {
   items_missing_purchase_count: number;
   photo_bytes: number;
   document_bytes: number;
+  outstanding_loan_count: number;
+  overdue_loan_count: number;
+  on_loan_quantity: number;
   recent_items: ItemSummary[];
 }
 
@@ -1297,4 +1301,136 @@ export interface VoiceConfig {
   max_upload_mb: number;
   supported_formats: string[];
   retention_note: string;
+}
+
+export type LoanStatus = "outstanding" | "partially_returned" | "returned" | "cancelled";
+export type LoanFilterStatus =
+  | "all"
+  | "open"
+  | "outstanding"
+  | "partially_returned"
+  | "returned"
+  | "cancelled";
+
+export interface Loan {
+  id: UUID;
+  item_id: UUID | null;
+  item_name: string;
+  item_name_snapshot: string;
+  home_room_id: UUID | null;
+  home_room_name_snapshot: string | null;
+  home_location_id: UUID | null;
+  home_location_name_snapshot: string | null;
+  home_location_identifier_snapshot: string | null;
+  borrower_name: string;
+  quantity: number;
+  returned_quantity: number;
+  outstanding_quantity: number;
+  status: LoanStatus;
+  lent_on: string;
+  due_on: string | null;
+  notes: string | null;
+  overdue: boolean;
+  days_past_due: number | null;
+  latest_returned_on: string | null;
+  created_by_user_id: UUID | null;
+  created_by_name: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoanReturn {
+  id: UUID;
+  quantity: number;
+  returned_on: string;
+  notes: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  reversed_at: string | null;
+  reversed_by_event_id: UUID | null;
+}
+
+export interface ActivityEvent {
+  id: UUID;
+  action: string;
+  entity_type: "item" | "container" | "loan";
+  entity_id: UUID | null;
+  item_id: UUID | null;
+  container_id: UUID | null;
+  loan_id: UUID | null;
+  actor_user_id: UUID | null;
+  actor_name: string;
+  summary: string;
+  details: Record<string, unknown>;
+  created_at: string;
+  undoes_event_id: UUID | null;
+  undo_event_id: UUID | null;
+  can_undo: boolean;
+  undo_blocked_reason: string | null;
+}
+
+export interface ActivityHistory {
+  items: ActivityEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface LoanDetail extends Loan {
+  returns: LoanReturn[];
+  history: ActivityEvent[];
+}
+
+export interface LoanList {
+  items: Loan[];
+  total: number;
+  limit: number;
+  offset: number;
+  outstanding_count: number;
+  overdue_count: number;
+  on_loan_quantity: number;
+}
+
+export interface ItemLoanSummary {
+  item_id: UUID;
+  item_name: string;
+  owned_quantity: number;
+  on_loan_quantity: number;
+  available_quantity: number;
+  outstanding_loan_count: number;
+  overdue_count: number;
+  loans: Loan[];
+}
+
+export interface LoanCreateInput {
+  item_id: UUID;
+  borrower_name: string;
+  quantity: number;
+  lent_on: string;
+  due_on?: string | null;
+  notes?: string | null;
+  request_id: string;
+}
+
+export interface LoanReturnInput {
+  quantity: number;
+  returned_on: string;
+  notes?: string | null;
+  request_id: string;
+}
+
+export interface LoanCorrectInput {
+  borrower_name?: string;
+  quantity?: number;
+  lent_on?: string;
+  due_on?: string | null;
+  notes?: string | null;
+  request_id: string;
+}
+
+export interface UndoResult {
+  event: ActivityEvent;
+  undone_event_id: UUID;
+  message: string;
 }

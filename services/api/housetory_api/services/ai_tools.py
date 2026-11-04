@@ -39,6 +39,7 @@ from .containers import (
     room_ancestors,
 )
 from .items import get_item
+from .lending import item_loan_summary, list_loans, loan_quantities_for_items
 
 
 @dataclass
@@ -62,9 +63,14 @@ def _summaries_with_paths(
     household_reminder_days: int,
 ) -> list[ItemSummary]:
     paths = location_path_map(db, household_id)
+    loan_quantities = loan_quantities_for_items(db, household_id, [item.id for item in items])
     summaries = []
     for item in items:
-        summary = item_summary(item, household_reminder_days=household_reminder_days)
+        summary = item_summary(
+            item,
+            household_reminder_days=household_reminder_days,
+            on_loan_quantity=loan_quantities.get(item.id, 0),
+        )
         if item.storage_location_id:
             summary = summary.model_copy(
                 update={"location_path": paths.get(item.storage_location_id, [])}
@@ -413,6 +419,11 @@ def tool_get_item_details(
         parts.append(f"at {detail.location.identifier or detail.location.name}")
     if detail.brand or detail.model:
         parts.append(f"{detail.brand or ''} {detail.model or ''}".strip())
+    loan_summary = item_loan_summary(db, household_id, detail.id)
+    if loan_summary.on_loan_quantity:
+        parts.append(
+            f"{loan_summary.on_loan_quantity} on loan, {loan_summary.available_quantity} at home"
+        )
     summary += ", ".join(parts) if parts else "no location recorded"
     return ToolResult(
         tool="get_item_details",
@@ -836,6 +847,79 @@ def tool_get_inventory_summary(
     )
 
 
+def tool_list_outstanding_loans(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    del args
+    today = date.today()
+    result = list_loans(
+        db,
+        household_id,
+        status="open",
+        on_date=today,
+        limit=50,
+        offset=0,
+    )
+    item_ids = [loan.item_id for loan in result.items if loan.item_id]
+    items = (
+        list(
+            db.scalars(
+                select(Item)
+                .options(*item_load_options())
+                .where(
+                    Item.household_id == household_id,
+                    Item.id.in_(item_ids),
+                )
+            ).all()
+        )
+        if item_ids
+        else []
+    )
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
+    item_name_by_id = {item.id: item.name for item in summaries}
+    facts_loans = [
+        {
+            "loan_id": str(loan.id),
+            "item_id": str(loan.item_id) if loan.item_id else None,
+            "item_name": item_name_by_id.get(loan.item_id) if loan.item_id else loan.item_name,
+            "borrower_name": loan.borrower_name,
+            "quantity": loan.outstanding_quantity,
+            "lent_on": loan.lent_on.isoformat(),
+            "due_on": loan.due_on.isoformat() if loan.due_on else None,
+            "overdue": loan.overdue,
+            "status": loan.status,
+        }
+        for loan in result.items
+    ]
+    if not result.items:
+        summary = "No items are currently recorded as on loan."
+    else:
+        summary = (
+            f"{result.outstanding_count} open loan(s), "
+            f"{result.on_loan_quantity} unit(s) on loan"
+            f"{', ' + str(result.overdue_count) + ' past due' if result.overdue_count else ''}."
+        )
+    references = [_item_reference(item) for item in summaries]
+    return ToolResult(
+        tool="list_outstanding_loans",
+        summary=summary,
+        items=summaries,
+        references=references,
+        facts={
+            "outstanding_count": result.outstanding_count,
+            "overdue_count": result.overdue_count,
+            "on_loan_quantity": result.on_loan_quantity,
+            "loans": facts_loans,
+        },
+    )
+
+
 def tool_find_missing_information(
     db: Session,
     household_id: uuid.UUID,
@@ -929,6 +1013,9 @@ def execute_tool(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "find_missing_information": lambda: tool_find_missing_information(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "list_outstanding_loans": lambda: tool_list_outstanding_loans(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
     }

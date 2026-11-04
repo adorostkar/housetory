@@ -39,6 +39,7 @@ Allowed tools and arguments:
 - get_warranty_status: status(active|expiring|expired), category
 - get_inventory_summary: {}
 - find_missing_information: field(purchase|serial|room|location|warranty)
+- list_outstanding_loans: {}
 Never invent an item id. Never make up filters. Use search_items for unknown questions."""
 
 MISSING_PURCHASE_PHRASES = (
@@ -128,6 +129,12 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
             arguments={"identifier": identifier_match.group(1).upper()},
         )
 
+    if re.search(
+        r"\b(?:on loan|loaned|lent out|lent to|borrowed|borrower|"
+        r"outstanding loans?|overdue loans?)\b",
+        lowered,
+    ):
+        return AssistantPlan(tool="list_outstanding_loans", arguments={})
     if _contains_phrase(lowered, MISSING_PURCHASE_PHRASES):
         return AssistantPlan(tool="find_missing_information", arguments={"field": "purchase"})
     if _contains_phrase(lowered, MISSING_SERIAL_PHRASES):
@@ -270,6 +277,14 @@ def _deterministic_answer(result: ToolResult) -> str:
             f"• {purchase.get('merchant') or 'Purchase'} — {amount} — "
             f"{', '.join(purchase.get('items') or [])}"
         )
+    loans = result.facts.get("loans")
+    if isinstance(loans, list):
+        for loan in loans[:8]:
+            due = f" · due {loan['due_on']}" if loan.get("due_on") else ""
+            lines.append(
+                f"• {loan.get('item_name') or 'Item'} — {loan.get('quantity')} on loan "
+                f"to {loan.get('borrower_name') or 'an unnamed borrower'}{due}"
+            )
     warranties = result.facts.get("warranties")
     if isinstance(warranties, list):
         for warranty in warranties[:8]:

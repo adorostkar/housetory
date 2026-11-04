@@ -1,3 +1,4 @@
+from .activity import ActivityEvent, Loan, LoanReturn
 from .auth import (
     AuthSession,
     Household,
@@ -38,6 +39,7 @@ from .jobs import Job
 from .voice import VoiceNote
 
 __all__ = [
+    "ActivityEvent",
     "AuthSession",
     "Base",
     "Category",
@@ -50,6 +52,8 @@ __all__ = [
     "Item",
     "ItemCustomValue",
     "ItemPhoto",
+    "Loan",
+    "LoanReturn",
     "LocationIdentifierCounter",
     "AiProvider",
     "AiRecognition",

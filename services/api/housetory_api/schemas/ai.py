@@ -18,6 +18,7 @@ AssistantTool = Literal[
     "get_warranty_status",
     "get_inventory_summary",
     "find_missing_information",
+    "list_outstanding_loans",
 ]
 
 

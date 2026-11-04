@@ -1,5 +1,6 @@
 import type {
   DocumentType,
+  LoanStatus,
   OcrStatus,
   WarrantyStatus,
 } from "@/lib/types";
@@ -102,6 +103,23 @@ export const IMPORT_SOURCE_LABELS: Record<string, string> = {
   file: "File",
   vault: "Obsidian vault",
   image: "Image",
+};
+
+export const LOAN_STATUS_LABELS: Record<LoanStatus, string> = {
+  outstanding: "Outstanding",
+  partially_returned: "Partially returned",
+  returned: "Returned",
+  cancelled: "Cancelled",
+};
+
+export const LOAN_STATUS_TONE: Record<
+  LoanStatus,
+  "sage" | "brass" | "destructive" | "outline" | "secondary"
+> = {
+  outstanding: "brass",
+  partially_returned: "sage",
+  returned: "outline",
+  cancelled: "secondary",
 };
 
 export const IMPORT_ENTRY_STATUS_LABELS: Record<string, string> = {

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..models import Category, Item, Purchase, Room, StorageLocation, Tag, Warranty
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
+from . import history, lending
 from .purchases import get_purchase, prune_orphan_purchases, validate_receipt
 from .serializers import item_load_options
 from .warranties import resolve_end_date
@@ -190,11 +191,37 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
 
 
 def update_item_record(
-    db: Session, household_id: uuid.UUID, item: Item, payload: ItemUpdate
+    db: Session,
+    household_id: uuid.UUID,
+    item: Item,
+    payload: ItemUpdate,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+    record_history: bool = True,
 ) -> Item:
     fields = payload.model_fields_set
 
+    if "quantity" in fields or "is_archived" in fields:
+        db.scalar(
+            select(Item)
+            .where(Item.id == item.id, Item.household_id == household_id)
+            .with_for_update()
+        )
+        db.refresh(item)
+        lending.ensure_quantity_allowed(
+            db,
+            household_id,
+            item,
+            new_quantity=payload.quantity if "quantity" in fields else None,
+            new_archived=payload.is_archived if "is_archived" in fields else None,
+        )
+
+    moved_from = None
     if "room_id" in fields or "storage_location_id" in fields:
+        moved_from = history.location_snapshot(
+            db, household_id, item.room_id, item.storage_location_id
+        )
         new_room_id = payload.room_id if "room_id" in fields else item.room_id
         new_location_id = (
             payload.storage_location_id
@@ -269,4 +296,35 @@ def update_item_record(
             apply_warranty(db, item, payload.warranty, replace=item.warranty is None)
 
     db.flush()
+    current_room = str(item.room_id) if item.room_id else None
+    current_location = str(item.storage_location_id) if item.storage_location_id else None
+    moved = moved_from is not None and (
+        moved_from.get("room_id") != current_room
+        or moved_from.get("location_id") != current_location
+    )
+    if record_history and moved:
+        moved_to = history.location_snapshot(
+            db, household_id, item.room_id, item.storage_location_id
+        )
+        from_label = moved_from.get("location_name") or moved_from.get("room_name") or "no place"
+        to_label = moved_to.get("location_name") or moved_to.get("room_name") or "no place"
+        history.record_event(
+            db,
+            household_id,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
+            action="item.moved",
+            entity_type="item",
+            entity_id=item.id,
+            item_id=item.id,
+            summary=f"Moved {item.name} from {from_label} to {to_label}",
+            details={
+                "from": moved_from,
+                "to": moved_to,
+                "from_room_id": moved_from.get("room_id"),
+                "from_location_id": moved_from.get("location_id"),
+                "to_room_id": moved_to.get("room_id"),
+                "to_location_id": moved_to.get("location_id"),
+            },
+        )
     return item

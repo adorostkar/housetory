@@ -5,7 +5,9 @@ import {
   CalendarDays,
   ChevronRight,
   FileText,
+  HandCoins,
   Hash,
+  History,
   MapPin,
   MoreHorizontal,
   Pencil,
@@ -18,9 +20,11 @@ import {
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
 import { ItemDocuments } from "@/components/item-documents";
+import { LendLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { PhotoGallery } from "@/components/photo-gallery";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +38,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useCanWrite, useInvalidateInventory, useItem, useLocations } from "@/lib/queries";
+import {
+  useCanWrite,
+  useInvalidateInventory,
+  useItem,
+  useItemHistory,
+  useItemLoans,
+  useLocations,
+} from "@/lib/queries";
 import type { ItemDetail } from "@/lib/types";
 import {
   WARRANTY_STATUS_LABELS,
@@ -43,6 +54,7 @@ import {
 } from "@/lib/labels";
 import {
   CONDITION_LABELS,
+  cn,
   formatCurrency,
   formatDate,
   formatRelativeDate,
@@ -57,7 +69,10 @@ export function ItemDetailPage() {
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
   const canWrite = useCanWrite();
+  const loansQuery = useItemLoans(itemId);
+  const historyQuery = useItemHistory(itemId);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [lendOpen, setLendOpen] = useState(false);
 
   const archive = useMutation({
     mutationFn: (item: ItemDetail) =>
@@ -90,6 +105,9 @@ export function ItemDetailPage() {
   }
 
   const item = itemQuery.data.item;
+  const loanSummary = loansQuery.data;
+  const onLoan = loanSummary?.on_loan_quantity ?? 0;
+  const available = loanSummary?.available_quantity ?? item.quantity;
   const warrantyStatus = item.warranty?.status ?? "unknown";
   const locationTrail = item.location
     ? locationPath(locationsQuery.data?.items ?? [], item.location.id)
@@ -112,6 +130,21 @@ export function ItemDetailPage() {
             {item.is_archived && <Badge variant="secondary">Archived</Badge>}
             {canWrite && (
               <>
+                {!item.is_archived && (
+                  <Button
+                    variant="outline"
+                    disabled={available <= 0}
+                    title={
+                      available <= 0
+                        ? "All owned units are currently on loan."
+                        : "Record a borrower and due date without moving the item."
+                    }
+                    onClick={() => setLendOpen(true)}
+                  >
+                    <HandCoins />
+                    Lend
+                  </Button>
+                )}
                 <Button variant="outline" asChild>
                   <Link to={`/items/${item.id}/edit`}>
                     <Pencil />
@@ -126,14 +159,18 @@ export function ItemDetailPage() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
-                      disabled={archive.isPending}
+                      disabled={archive.isPending || onLoan > 0}
                       onSelect={() => archive.mutate(item)}
                     >
                       {item.is_archived ? <ArchiveRestore /> : <Archive />}
                       {item.is_archived ? "Restore item" : "Archive item"}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)}>
+                    <DropdownMenuItem
+                      destructive
+                      disabled={onLoan > 0}
+                      onSelect={() => setDeleteOpen(true)}
+                    >
                       <Trash2 />
                       Delete item
                     </DropdownMenuItem>
@@ -251,7 +288,17 @@ export function ItemDetailPage() {
               </InfoRow>
 
               <InfoRow icon={Wallet} label="Quantity">
-                {item.quantity} · {CONDITION_LABELS[item.condition]}
+                {onLoan > 0 ? (
+                  <span>
+                    Owned {item.quantity} ·{" "}
+                    <span className="text-accent-foreground">at home {available}</span> ·{" "}
+                    <span className="text-brass">on loan {onLoan}</span>
+                  </span>
+                ) : (
+                  <span>
+                    {item.quantity} · {CONDITION_LABELS[item.condition]}
+                  </span>
+                )}
               </InfoRow>
 
               <InfoRow icon={Wallet} label="Current value">
@@ -291,6 +338,62 @@ export function ItemDetailPage() {
                   </Link>
                 ))}
               </div>
+            )}
+          </section>
+
+          <section className="surface p-5">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <HandCoins className="size-4 text-muted-foreground" strokeWidth={1.7} />
+                <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                  Lending
+                </h2>
+              </div>
+              {canWrite && !item.is_archived && available > 0 && (
+                <Button size="sm" variant="ghost" onClick={() => setLendOpen(true)}>
+                  <HandCoins />
+                  Lend
+                </Button>
+              )}
+            </div>
+            {onLoan > 0 ? (
+              <>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <LoanQuantity label="Owned" value={item.quantity} />
+                  <LoanQuantity label="At home" value={available} tone="sage" />
+                  <LoanQuantity label="On loan" value={onLoan} tone="brass" />
+                </div>
+                <ul className="mt-4 space-y-2">
+                  {(loanSummary?.loans ?? []).slice(0, 4).map((loan) => (
+                    <li key={loan.id}>
+                      <Link
+                        to={`/loans/${loan.id}`}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-[0.75rem] transition-colors hover:bg-secondary/30"
+                      >
+                        <span className="min-w-0 truncate">
+                          {loan.borrower_name} · {loan.outstanding_quantity} of {loan.quantity}
+                        </span>
+                        <span className="shrink-0 text-[0.66rem] text-muted-foreground">
+                          {loan.due_on ? `due ${formatDate(loan.due_on)}` : "no due date"}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {loanSummary && loanSummary.outstanding_loan_count > 4 && (
+                  <Link
+                    to={`/loans?item_id=${item.id}`}
+                    className="mt-3 inline-block text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  >
+                    All {loanSummary.outstanding_loan_count} open loans
+                  </Link>
+                )}
+              </>
+            ) : (
+              <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
+                Everything is at home. Lending records a borrower without moving this item out
+                of its room or container.
+              </p>
             )}
           </section>
 
@@ -469,6 +572,27 @@ export function ItemDetailPage() {
         <ItemDocuments item={item} />
       </div>
 
+      <section className="surface mt-4 p-5 sm:p-6">
+        <div className="flex items-center gap-2">
+          <History className="size-4 text-muted-foreground" />
+          <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">History</h2>
+        </div>
+        <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+          Moves and lending changes, with household member, time and preserved place names.
+          Undo creates a new compensating event and is only offered while it is safe.
+        </p>
+        <div className="mt-4">
+          <ActivityTimeline
+            events={historyQuery.data?.items ?? []}
+            emptyText="No moves or lending history yet. Legacy items do not have fabricated history."
+            onChanged={() => {
+              void historyQuery.refetch();
+              void loansQuery.refetch();
+            }}
+          />
+        </div>
+      </section>
+
       {item.import_source && (
         <div className="surface mt-4 flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -490,6 +614,18 @@ export function ItemDetailPage() {
           </Button>
         </div>
       )}
+
+      <LendLoanDialog
+        open={lendOpen}
+        onOpenChange={setLendOpen}
+        itemId={item.id}
+        itemName={item.name}
+        available={available}
+        onCreated={() => {
+          void loansQuery.refetch();
+          void historyQuery.refetch();
+        }}
+      />
 
       <ConfirmDialog
         open={deleteOpen}
@@ -521,6 +657,33 @@ function InfoRow({
         {label}
       </dt>
       <dd className="min-w-0">{children}</dd>
+    </div>
+  );
+}
+
+function LoanQuantity({
+  label,
+  value,
+  tone = "muted",
+}: {
+  label: string;
+  value: number;
+  tone?: "muted" | "sage" | "brass";
+}) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-background/30 px-2 py-2.5">
+      <p className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-1 font-display text-[1.45rem] leading-none tabular-nums",
+          tone === "sage" && "text-accent-foreground",
+          tone === "brass" && "text-brass",
+        )}
+      >
+        {value}
+      </p>
     </div>
   );
 }

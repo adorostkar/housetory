@@ -27,6 +27,7 @@ from .containers import (
     summary_is_stale,
 )
 from .hierarchy import descendant_ids
+from .lending import loan_quantities_for_items
 from .serializers import document_brief, item_summary
 
 
@@ -177,9 +178,10 @@ def serialize_container_detail(
     base = serialize_container(db, household_id, location)
     items = load_container_items(db, household_id, location.id)
     path_map = location_path_map(db, household_id)
+    loan_quantities = loan_quantities_for_items(db, household_id, [item.id for item in items])
     summaries = []
     for item in items:
-        summary = item_summary(item)
+        summary = item_summary(item, on_loan_quantity=loan_quantities.get(item.id, 0))
         if item.storage_location_id:
             summary = summary.model_copy(
                 update={"location_path": path_map.get(item.storage_location_id, [])}

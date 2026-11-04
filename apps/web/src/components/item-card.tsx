@@ -1,4 +1,4 @@
-import { ImageOff, ShieldCheck } from "lucide-react";
+import { HandCoins, ImageOff, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +50,16 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
               >
                 <ShieldCheck className="size-3 text-sage" />
                 {item.warranty?.status === "expiring" ? "Expiring" : "Covered"}
+              </Badge>
+            )}
+            {Boolean(item.on_loan_quantity) && (
+              <Badge
+                variant="secondary"
+                className="gap-1 bg-background/80 backdrop-blur-md"
+                title="Owned quantity includes loaned stock"
+              >
+                <HandCoins className="size-3 text-brass" />
+                {item.on_loan_quantity} on loan
               </Badge>
             )}
           </div>
@@ -163,7 +173,8 @@ export function ItemRow({ item }: { item: ItemSummary }) {
         <p className="truncate text-[0.88rem] font-medium">{item.name}</p>
         <p className="mt-0.5 truncate text-[0.72rem] text-muted-foreground">
           {[item.room?.name, item.location?.name].filter(Boolean).join(" · ") ||
-            "No location"}{" "}
+            "No location"}
+          {item.on_loan_quantity ? ` · ${item.on_loan_quantity} on loan` : ""}{" "}
           {item.purchase?.price_cents != null && (
             <span className="text-muted-foreground/70">
               · {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
