@@ -656,7 +656,7 @@ or start later roadmap milestones.
 - [x] Document exact quantity definitions, permissions, constraints, supported and
       unsupported undo, retry semantics and limits in
       `docs/LENDING_HISTORY_UNDO.md`.
-- [ ] Local deployment after backup; remote server remains untouched.
+- [x] Local deployment after backup; remote server remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
@@ -667,8 +667,8 @@ locally verified; later milestones still require a separate instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
-2. **Lending, movement history and undo:** prioritise the user's everyday lending
-   workflow. Record borrower name (no borrower account required), lent date,
+2. **Lending, movement history and undo (implemented locally):** prioritise the
+   user's everyday lending workflow. Record borrower name (no borrower account required), lent date,
    optional due date and a clear lent/returned state. Preserve the normal home
    location; lending is not a move into a fictitious room. Support partial lending
    and returns for quantity-bearing items without losing or double-counting stock.
