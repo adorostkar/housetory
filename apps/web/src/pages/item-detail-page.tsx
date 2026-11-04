@@ -195,17 +195,21 @@ export function ItemDetailPage() {
                           >
                             <ChevronRight className="size-3 text-muted-foreground/50" />
                             <Link
-                              to={`/rooms/${item.room?.id}?location_id=${location.id}`}
+                              to={
+                                location.is_container
+                                  ? `/containers/${location.id}`
+                                  : `/rooms/${item.room?.id}?location_id=${location.id}`
+                              }
                               className="underline-offset-4 hover:underline"
                             >
-                              {location.name}
+                              {location.identifier ?? location.name}
                             </Link>
                           </span>
                         ))
                       : item.location && (
                           <>
                             <ChevronRight className="size-3 text-muted-foreground/50" />
-                            <span>{item.location.name}</span>
+                            <span>{item.location.identifier ?? item.location.name}</span>
                           </>
                         )}
                   </span>

@@ -71,6 +71,19 @@ const RecognitionPage = React.lazy(() =>
     default: module.RecognitionPage,
   })),
 );
+const ContainersPage = React.lazy(() =>
+  import("@/pages/containers-page").then((module) => ({
+    default: module.ContainersPage,
+  })),
+);
+const ContainerDetailPage = React.lazy(() =>
+  import("@/pages/container-detail-page").then((module) => ({
+    default: module.ContainerDetailPage,
+  })),
+);
+const LabelsPage = React.lazy(() =>
+  import("@/pages/labels-page").then((module) => ({ default: module.LabelsPage })),
+);
 const SettingsPage = React.lazy(() =>
   import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })),
 );
@@ -154,6 +167,9 @@ export default function App() {
             <Route path="imports/:batchId" element={<ImportDetailPage />} />
             <Route path="assistant" element={<AssistantPage />} />
             <Route path="recognize" element={<RecognitionPage />} />
+            <Route path="containers" element={<ContainersPage />} />
+            <Route path="containers/:containerId" element={<ContainerDetailPage />} />
+            <Route path="labels" element={<LabelsPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />

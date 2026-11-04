@@ -33,9 +33,12 @@ const KINDS: LocationKind[] = [
   "cabinet",
   "shelf",
   "drawer",
+  "closet",
   "box",
   "bin",
-  "closet",
+  "crate",
+  "suitcase",
+  "bag",
   "other",
 ];
 

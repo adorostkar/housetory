@@ -256,8 +256,12 @@ export function ImportEntryCard({
             <span className="inline-flex items-center gap-1">
               <MapPin className="size-3" />
               {proposed.room?.name || "No room"}
-              {proposed.storage_location?.name
-                ? ` / ${proposed.storage_location.name}`
+              {proposed.storage_location?.identifier ||
+              proposed.storage_location?.name
+                ? ` / ${
+                    proposed.storage_location?.identifier ??
+                    proposed.storage_location?.name
+                  }`
                 : ""}
             </span>
             {proposed.purchase?.price_cents != null && (

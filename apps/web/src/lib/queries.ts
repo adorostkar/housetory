@@ -6,6 +6,8 @@ import type {
   AiRecognitionList,
   AiStatus,
   CategoryList,
+  ContainerDetail,
+  ContainerList,
   DocumentList,
   DocumentRecord,
   DocumentRelations,
@@ -14,6 +16,7 @@ import type {
   ImportBatchList,
   ItemDetailResponse,
   ItemList,
+  LabelTemplateList,
   Overview,
   PurchaseList,
   RoomList,
@@ -45,6 +48,10 @@ export const queryKeys = {
   aiStatus: ["ai", "status"] as const,
   recognitions: ["ai", "recognitions"] as const,
   recognition: (recognitionId: string) => ["ai", "recognition", recognitionId] as const,
+  containers: ["containers"] as const,
+  container: (containerId: string) => ["containers", containerId] as const,
+  labelTemplates: ["labels", "templates"] as const,
+  qrConfig: ["containers", "qr-config"] as const,
 };
 
 export function useSession() {
@@ -278,6 +285,8 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.financial });
     void queryClient.invalidateQueries({ queryKey: queryKeys.imports });
     void queryClient.invalidateQueries({ queryKey: ["ai", "recognitions"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
+    void queryClient.invalidateQueries({ queryKey: ["containers"] });
   };
 }
 
@@ -291,5 +300,46 @@ export function useLogout() {
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.session });
     },
+  });
+}
+
+
+export interface ContainerFilters {
+  q?: string;
+  room_id?: string;
+  container_type?: string;
+  empty?: boolean;
+  include_fixed?: boolean;
+}
+
+export function useContainers(filters: ContainerFilters = {}, limit = 200) {
+  return useQuery({
+    queryKey: [...queryKeys.containers, filters, limit],
+    queryFn: () =>
+      api.get<ContainerList>(`/containers${buildQuery({ ...filters, limit })}`),
+  });
+}
+
+export function useContainer(containerId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.container(containerId ?? ""),
+    queryFn: () => api.get<ContainerDetail>(`/containers/${containerId}`),
+    enabled: Boolean(containerId),
+  });
+}
+
+export function useLabelTemplates() {
+  return useQuery({
+    queryKey: queryKeys.labelTemplates,
+    queryFn: () => api.get<LabelTemplateList>("/labels/templates"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useQrConfig() {
+  return useQuery({
+    queryKey: queryKeys.qrConfig,
+    queryFn: () => api.get<{ base_url: string; warning: string | null; local_only: boolean }>("/containers/qr-config"),
+    staleTime: 60_000,
   });
 }

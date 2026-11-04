@@ -1,7 +1,13 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-import type { ItemCondition, LocationKind, Room } from "@/lib/types";
+import type {
+  ContainerType,
+  ItemCondition,
+  LocationBrief,
+  LocationKind,
+  Room,
+} from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
@@ -95,6 +101,18 @@ export const LOCATION_KIND_LABELS: Record<LocationKind, string> = {
   drawer: "Drawer",
   box: "Box",
   bin: "Bin",
+  crate: "Crate",
+  suitcase: "Suitcase",
+  bag: "Bag",
+  other: "Other",
+};
+
+export const CONTAINER_TYPE_LABELS: Record<ContainerType, string> = {
+  box: "Box",
+  bin: "Plastic bin",
+  crate: "Crate",
+  suitcase: "Suitcase",
+  bag: "Bag",
   other: "Other",
 };
 
@@ -249,4 +267,18 @@ export function addMonthsIso(start: string, months: number): string | null {
   return `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(
     targetDay,
   ).padStart(2, "0")}`;
+}
+
+
+export function itemContainer(item: {
+  location: LocationBrief | null;
+  location_path?: LocationBrief[];
+}): LocationBrief | null {
+  const path =
+    item.location_path && item.location_path.length > 0
+      ? item.location_path
+      : item.location
+        ? [item.location]
+        : [];
+  return [...path].reverse().find((entry) => entry.is_container) ?? null;
 }

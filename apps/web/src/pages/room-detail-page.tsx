@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
+  Boxes,
   ChevronRight,
   MoreHorizontal,
   Pencil,
@@ -178,6 +179,12 @@ export function RoomDetailPage() {
         backLabel={parent ? parent.name : "All rooms"}
         actions={
           <>
+            <Button variant="outline" asChild>
+              <Link to={`/containers?room_id=${room.id}`}>
+                <Boxes />
+                Containers
+              </Link>
+            </Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -293,7 +300,9 @@ export function RoomDetailPage() {
                             active ? "font-medium text-foreground" : "text-muted-foreground",
                           )}
                         >
-                          {location.name}
+                          {location.identifier
+                            ? `${location.identifier} · ${location.name}`
+                            : location.name}
                         </span>
                         <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground/80">
                           {location.total_item_count}
@@ -310,6 +319,12 @@ export function RoomDetailPage() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem asChild>
+                            <Link to={`/containers/${location.id}`}>
+                              <Boxes />
+                              Open container page
+                            </Link>
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onSelect={() => {
                               setEditingLocation(location);
@@ -389,7 +404,11 @@ export function RoomDetailPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <h2 className="section-title">
-                {selectedLocation ? selectedLocation.name : "Everything here"}
+                {selectedLocation
+                  ? selectedLocation.identifier
+                    ? `${selectedLocation.identifier} · ${selectedLocation.name}`
+                    : selectedLocation.name
+                  : "Everything here"}
               </h2>
               {selectedLocation && (
                 <button

@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useAiStatus } from "@/lib/queries";
 import type { AssistantResponse } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, itemContainer } from "@/lib/utils";
 
 const SUGGESTIONS = [
   "Where is my camera?",
@@ -258,7 +258,7 @@ function AssistantAnswer({
               <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">{item.name}</span>
               <span className="shrink-0 text-[0.68rem] text-muted-foreground">
-                {item.room?.name ?? "No room"}
+                {itemContainer(item)?.identifier ?? item.room?.name ?? "No room"}
               </span>
               <ArrowUpRight className="size-3 shrink-0 text-muted-foreground" />
             </Link>

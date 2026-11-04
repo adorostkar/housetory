@@ -91,6 +91,40 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await response.json()) as T;
 }
 
+async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const { body, formData, skipUnauthorizedEvent, headers, ...rest } = options;
+  const requestHeaders = new Headers(headers);
+  let payload: BodyInit | undefined;
+  if (formData) payload = formData;
+  else if (body !== undefined) {
+    requestHeaders.set("Content-Type", "application/json");
+    payload = JSON.stringify(body);
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${API_PREFIX}${path}`, {
+      ...rest,
+      headers: requestHeaders,
+      body: payload,
+      credentials: "include",
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      "network_error",
+      "Housetory can't reach the server. Check your connection and try again.",
+    );
+  }
+  if (!response.ok) {
+    const error = await parseError(response);
+    if (error.status === 401 && !skipUnauthorizedEvent) {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    }
+    throw error;
+  }
+  return response.blob();
+}
+
 export const api = {
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: "GET" });
@@ -106,6 +140,9 @@ export const api = {
   },
   postForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: "POST", formData });
+  },
+  postBlob(path: string, body?: unknown, options?: RequestOptions): Promise<Blob> {
+    return requestBlob(path, { ...options, method: "POST", body });
   },
 };
 

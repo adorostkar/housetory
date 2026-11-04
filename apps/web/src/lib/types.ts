@@ -10,7 +10,12 @@ export type LocationKind =
   | "drawer"
   | "box"
   | "bin"
+  | "crate"
+  | "suitcase"
+  | "bag"
   | "other";
+
+export type ContainerType = "box" | "bin" | "crate" | "suitcase" | "bag" | "other";
 
 export type ItemCondition = "new" | "excellent" | "good" | "fair" | "poor" | "unknown";
 
@@ -77,6 +82,12 @@ export interface StorageLocation {
   name: string;
   description: string | null;
   kind: LocationKind;
+  is_container: boolean;
+  container_type: ContainerType | null;
+  identifier: string | null;
+  summary_headline: string | null;
+  summary_short: string | null;
+  label_generated_at: string | null;
   sort_order: number;
   item_count: number;
   total_item_count: number;
@@ -136,6 +147,9 @@ export interface LocationBrief {
   name: string;
   kind: LocationKind;
   parent_id: UUID | null;
+  identifier: string | null;
+  container_type: ContainerType | null;
+  is_container: boolean;
 }
 
 export interface ItemReference {
@@ -257,6 +271,7 @@ export interface ItemSummary {
   is_archived: boolean;
   room: RoomBrief | null;
   location: LocationBrief | null;
+  location_path: LocationBrief[];
   category: CategoryBrief | null;
   tags: TagBrief[];
   primary_photo: Photo | null;
@@ -534,6 +549,7 @@ export type DuplicateResolution = "new" | "skip" | "merge";
 export interface LocationCandidate {
   id: UUID;
   name: string;
+  identifier?: string | null;
   kind: string | null;
   room_id: UUID | null;
   parent_id: UUID | null;
@@ -543,6 +559,7 @@ export interface LocationCandidate {
 export interface LocationProposal {
   text: string;
   entity_type: "room" | "storage_location";
+  identifier?: string | null;
   status: "matched" | "ambiguous" | "missing" | "none";
   matched_id: UUID | null;
   name: string | null;
@@ -853,4 +870,133 @@ export interface ImportDecision {
   action: ImportEntryAction;
   mergeItemId: string;
   mergeFields: ImportMergeField[];
+}
+
+
+export interface ContainerSummary {
+  short: string;
+  detailed: string;
+  headline: string | null;
+  lines: string[];
+  detailed_lines: string[];
+  item_count: number;
+  total_quantity: number;
+  empty: boolean;
+  stale: boolean;
+  needs_refresh: boolean;
+  stored: boolean;
+  source: "deterministic" | "ai" | "manual" | null;
+  contents_hash: string;
+  generated_at: string | null;
+  label_generated_at: string | null;
+  label_stale: boolean;
+  contents_updated_at: string | null;
+}
+
+export interface Container {
+  id: UUID;
+  identifier: string | null;
+  name: string;
+  description: string | null;
+  kind: LocationKind;
+  container_type: ContainerType | null;
+  is_container: boolean;
+  room_id: UUID;
+  parent_id: UUID | null;
+  room: RoomBrief;
+  path: LocationBrief[];
+  item_count: number;
+  total_item_count: number;
+  total_quantity: number;
+  child_count: number;
+  container_count: number;
+  summary_short: string | null;
+  summary_headline: string | null;
+  qr_payload: string;
+  qr_url: string;
+  qr_warning: string | null;
+  label_generated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContainerChild {
+  id: UUID;
+  identifier: string | null;
+  name: string;
+  kind: LocationKind;
+  container_type: ContainerType | null;
+  is_container: boolean;
+  room_id: UUID;
+  parent_id: UUID | null;
+  item_count: number;
+  total_item_count: number;
+  total_quantity: number;
+  child_count: number;
+}
+
+export interface ContainerDetail extends Container {
+  room_path: RoomBrief[];
+  items: ItemSummary[];
+  children: ContainerChild[];
+  documents: DocumentBrief[];
+  summary: ContainerSummary;
+}
+
+export interface ContainerList {
+  items: Container[];
+  total: number;
+  qr_base_url: string;
+  qr_warning: string | null;
+}
+
+export interface ContainerBulkResult {
+  items: Container[];
+  identifiers: string[];
+}
+
+export interface ContainerQrConfig {
+  base_url: string;
+  warning: string | null;
+  local_only: boolean;
+}
+
+export interface LabelGeometry {
+  paper_width_mm: number;
+  paper_height_mm: number;
+  label_width_mm: number;
+  label_height_mm: number;
+  columns: number;
+  rows: number;
+  top_margin_mm: number;
+  left_margin_mm: number;
+  horizontal_pitch_mm: number;
+  vertical_pitch_mm: number;
+}
+
+export interface LabelPreset extends LabelGeometry {
+  code: string;
+  name: string;
+  description: string;
+  manufacturer_code: string | null;
+  default_layout: "compact" | "standard" | "detailed";
+}
+
+export interface LabelTemplateList {
+  items: LabelPreset[];
+  default: string;
+}
+
+export type LabelLayout = "compact" | "standard" | "detailed";
+
+export interface LabelPrintInput {
+  location_ids: UUID[];
+  template: string;
+  layout: LabelLayout;
+  copies: number;
+  start_slot: number;
+  offset_x_mm: number;
+  offset_y_mm: number;
+  record: boolean;
+  custom?: LabelGeometry | null;
 }

@@ -1,4 +1,5 @@
 import {
+  Boxes,
   Camera,
   DoorOpen,
   FileText,
@@ -31,6 +32,7 @@ const primaryNav = [
   { to: "/imports", label: "Import", icon: Upload, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
   { to: "/recognize", label: "Recognise", icon: Camera, end: false },
+  { to: "/containers", label: "Containers", icon: Boxes, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
 
@@ -40,6 +42,7 @@ const mobileNav = [
   { to: "/items", label: "Items", icon: Package, end: false },
   { to: "/documents", label: "Docs", icon: FileText, end: false },
   { to: "/imports", label: "Import", icon: Upload, end: false },
+  { to: "/containers", label: "Boxes", icon: Boxes, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
 ] as const;
 

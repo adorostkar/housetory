@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import type { ItemSummary } from "@/lib/types";
-import { cn, CONDITION_LABELS, formatCurrency, formatDate } from "@/lib/utils";
+import { cn, CONDITION_LABELS, formatCurrency, formatDate, itemContainer } from "@/lib/utils";
 
 export function ItemCard({ item, className }: { item: ItemSummary; className?: string }) {
   const photo = item.primary_photo;
+  const container = itemContainer(item);
   const price = item.purchase?.price_cents;
   const warrantyActive =
     item.warranty?.status === "active" || item.warranty?.status === "expiring";
@@ -90,8 +91,16 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
         <div className="mt-auto pt-4">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.72rem] text-muted-foreground">
             {item.room && <span className="truncate">{item.room.name}</span>}
-            {item.room && item.location && <span className="text-border">/</span>}
-            {item.location && <span className="truncate">{item.location.name}</span>}
+            {item.room && (container || item.location) && (
+              <span className="text-border">/</span>
+            )}
+            {container ? (
+              <span className="truncate font-medium text-foreground/75">
+                {container.identifier ?? container.name}
+              </span>
+            ) : (
+              item.location && <span className="truncate">{item.location.name}</span>
+            )}
             {!item.room && !item.location && (
               <span className="italic opacity-80">No place assigned</span>
             )}

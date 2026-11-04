@@ -657,13 +657,18 @@ export function ItemForm({
                   {locationOptions.map(({ location, depth }) => (
                     <option key={location.id} value={location.id}>
                       {depth > 0 ? `${"— ".repeat(depth)}` : ""}
-                      {location.name} · {LOCATION_KIND_LABELS[location.kind as LocationKind]}
+                      {location.identifier
+                        ? `${location.identifier} · ${location.name}`
+                        : location.name}{" "}
+                      · {LOCATION_KIND_LABELS[location.kind as LocationKind]}
                     </option>
                   ))}
                 </Select>
                 {selectedLocationPath.length > 1 && (
                   <p className="mt-2 text-[0.7rem] leading-relaxed text-muted-foreground">
-                    {selectedLocationPath.map((location) => location.name).join(" / ")}
+                    {selectedLocationPath
+                      .map((location) => location.identifier ?? location.name)
+                      .join(" / ")}
                   </p>
                 )}
               </Field>
