@@ -1,5 +1,6 @@
 """Database-backed AI provider configuration and capability helpers."""
 
+import ipaddress
 import uuid
 from dataclasses import dataclass
 from typing import Literal
@@ -49,7 +50,7 @@ class AiRuntimeConfig:
     task: str
     provider_id: uuid.UUID | None
     display_name: str | None
-    mode: Literal["disabled", "local", "cloud"]
+    mode: Literal["disabled", "local", "private", "cloud"]
     source: Literal["database", "environment"]
     enabled: bool
     cloud_consent: bool
@@ -61,13 +62,70 @@ class AiRuntimeConfig:
         return self.mode == "local"
 
     @property
+    def endpoint_scope(self) -> Literal["local", "private", "remote"]:
+        return endpoint_scope(self.provider, self.base_url)
+
+    @property
+    def endpoint_host(self) -> str:
+        return (urlparse(self.base_url).hostname or self.base_url).lower()
+
+    @property
     def capabilities(self) -> list[str]:
         return model_capabilities(self.provider, self.model)
 
 
-def _mode(provider: str) -> Literal["disabled", "local", "cloud"]:
-    if provider == AiProviderType.OLLAMA.value:
+LOCAL_ENDPOINT_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "host.docker.internal",
+    "host.containers.internal",
+    "gateway.docker.internal",
+}
+
+
+def endpoint_scope(provider: str, base_url: str) -> Literal["local", "private", "remote"]:
+    """Classify where inference data is sent.
+
+    Ollama is a runtime, not a privacy guarantee. Loopback and container-host
+    endpoints stay on the Housetory host; RFC1918/link-local/Tailscale/private
+    DNS endpoints are private-network destinations; everything else is remote.
+    """
+    if provider != AiProviderType.OLLAMA.value:
+        return "remote"
+    host = (urlparse(base_url).hostname or "").strip().lower()
+    if not host or host in LOCAL_ENDPOINT_HOSTS or host.endswith(".localhost"):
         return "local"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        if address.is_loopback:
+            return "local"
+        if (
+            address.is_private
+            or address.is_link_local
+            or address in ipaddress.ip_network("100.64.0.0/10")
+        ):
+            return "private"
+        return "remote"
+    if "." not in host:
+        # Docker/Kubernetes service name such as http://ollama:11434.
+        return "local"
+    if host.endswith((".local", ".internal", ".lan", ".home", ".ts.net")):
+        return "private"
+    return "remote"
+
+
+def _mode_for(provider: str, base_url: str) -> Literal["disabled", "local", "private", "cloud"]:
+    if provider == AiProviderType.OLLAMA.value:
+        scope = endpoint_scope(provider, base_url)
+        if scope == "local":
+            return "local"
+        if scope == "private":
+            return "private"
+        return "cloud"
     if provider in CLOUD_PROVIDERS:
         return "cloud"
     return "disabled"
@@ -85,19 +143,15 @@ def _env_config(task: str) -> AiRuntimeConfig:
     )
     model = settings.ai_effective_model or None
     base_url = settings.ai_effective_base_url if mapped != "disabled" else ""
+    mode = _mode_for(mapped, base_url)
     consent = settings.ai_cloud_allowed
-    configured = bool(
-        mapped != "disabled"
-        and model
-        and base_url
-        and (mapped == AiProviderType.OLLAMA.value or consent)
-    )
+    configured = bool(mapped != "disabled" and model and base_url and (mode == "local" or consent))
     error = None
     if mapped != "disabled" and not configured:
         error = (
             "No AI model is selected."
             if not model
-            else "Cloud inference requires AI_CLOUD_ENABLED=true and AI_CLOUD_CONSENT=true."
+            else "Remote inference requires AI_CLOUD_ENABLED=true and AI_CLOUD_CONSENT=true."
         )
     return AiRuntimeConfig(
         provider=mapped,
@@ -107,7 +161,7 @@ def _env_config(task: str) -> AiRuntimeConfig:
         task=task,
         provider_id=None,
         display_name=mapped if mapped != "disabled" else None,
-        mode=_mode(mapped),
+        mode=mode,
         source="environment",
         enabled=mapped != "disabled",
         cloud_consent=consent,
@@ -124,8 +178,8 @@ def _provider_config(
     *,
     require_consent: bool = True,
 ) -> AiRuntimeConfig:
-    mode = _mode(provider.provider)
     base_url = (provider.base_url or DEFAULT_BASE_URLS.get(provider.provider) or "").rstrip("/")
+    mode = _mode_for(provider.provider, base_url)
     if base_url and urlparse(base_url).scheme not in {"http", "https"}:
         return AiRuntimeConfig(
             provider=provider.provider,
@@ -178,7 +232,7 @@ def _provider_config(
             configured=False,
             error="This provider is disabled.",
         )
-    if mode == "cloud" and require_consent and not provider.cloud_consent:
+    if mode in {"private", "cloud"} and require_consent and not provider.cloud_consent:
         return AiRuntimeConfig(
             provider=provider.provider,
             base_url=base_url,
@@ -193,8 +247,9 @@ def _provider_config(
             cloud_consent=False,
             configured=False,
             error=(
-                "Cloud consent is not enabled for this provider. Household content "
-                "will not be sent until the owner explicitly enables consent."
+                "Remote inference consent is not enabled for this provider. Household "
+                "content will not be sent to a private-network or external endpoint "
+                "until the owner explicitly enables consent."
             ),
         )
     if not model:
@@ -378,13 +433,25 @@ def status_from_config(
 ) -> AiStatus:
     model = config.model or None
     error = config.error or probe_error
-    privacy_note = (
-        "Local inference is used. Household content stays on your server."
-        if config.mode == "local"
-        else "Cloud inference can send household prompts and excerpts to the selected provider."
-        if config.mode == "cloud"
-        else "AI is disabled. Housetory's deterministic import, search and assistance still work."
-    )
+    if config.mode == "local":
+        privacy_note = (
+            "Local inference is used. The configured endpoint is on this Housetory "
+            "host or its Docker host; household content stays local."
+        )
+    elif config.mode == "private":
+        privacy_note = (
+            f"Private-network inference sends household content to {config.endpoint_host}. "
+            "This is not the Housetory server; explicit consent is required."
+        )
+    elif config.mode == "cloud":
+        privacy_note = (
+            f"Remote inference sends household prompts and excerpts to "
+            f"{config.endpoint_host}. Explicit consent is required."
+        )
+    else:
+        privacy_note = (
+            "AI is disabled. Housetory's deterministic import, search and assistance still work."
+        )
     return AiStatus(
         provider=config.provider,
         mode=config.mode,
@@ -392,9 +459,9 @@ def status_from_config(
         configured=config.configured,
         available=available,
         models=models or [],
-        cloud_enabled=config.mode == "cloud",
+        cloud_enabled=config.mode in {"private", "cloud"},
         cloud_consent=config.cloud_consent,
-        data_leaves_server=bool(config.mode == "cloud" and config.configured),
+        data_leaves_server=bool(config.mode in {"private", "cloud"} and config.configured),
         error=error,
         privacy_note=privacy_note,
         source=config.source,

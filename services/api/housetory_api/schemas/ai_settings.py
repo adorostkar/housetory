@@ -41,6 +41,7 @@ class AiProviderOut(BaseModel):
     enabled: bool
     cloud_consent: bool
     is_local: bool
+    endpoint_scope: Literal["local", "private", "remote"]
     capabilities: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

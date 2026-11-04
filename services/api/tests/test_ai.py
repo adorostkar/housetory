@@ -400,3 +400,72 @@ def test_document_related_item_suggestions(owner_client):
     assert body["suggested_item_ids"]
     assert body["items"][0]["item"]["name"] == "Camera Body"
     assert any("serial" in reason for reason in body["items"][0]["reasons"])
+
+
+def test_natural_search_uses_configured_search_model_and_validates_names(owner_client, monkeypatch):
+    from housetory_api.services import assistant as assistant_service
+
+    seed_assistant_data(owner_client)
+    fake_status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="search-model",
+        configured=True,
+        available=True,
+        privacy_note="Local",
+    )
+    monkeypatch.setattr(assistant_service.ai, "status_for", lambda *args, **kwargs: fake_status)
+    monkeypatch.setattr(assistant_service.ai, "config_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        assistant_service.ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "room_name": "Attic",
+            "category_name": "Electronics",
+            "q": "television",
+            "sort": "name_asc",
+        },
+    )
+    response = owner_client.post(
+        "/api/v1/search/natural",
+        json={"question": "Find the television in the attic"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "ai"
+    assert body["filters"]["room_name"] == "Attic"
+    assert body["filters"]["category_name"] == "Electronics"
+    assert body["filters"]["q"] == "television"
+    assert body["ai_available"] is True
+
+
+def test_natural_search_rejects_invented_ai_names_and_falls_back(owner_client, monkeypatch):
+    from housetory_api.services import assistant as assistant_service
+
+    seed_assistant_data(owner_client)
+    fake_status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="search-model",
+        configured=True,
+        available=True,
+        privacy_note="Local",
+    )
+    monkeypatch.setattr(assistant_service.ai, "status_for", lambda *args, **kwargs: fake_status)
+    monkeypatch.setattr(assistant_service.ai, "config_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        assistant_service.ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "room_name": "Invented Penthouse",
+            "category_name": "Invented Category",
+            "q": "camera",
+        },
+    )
+    response = owner_client.post("/api/v1/search/natural", json={"question": "Where is my camera?"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "ai"
+    assert body["filters"]["room_id"] is None
+    assert body["filters"]["category_id"] is None
+    assert body["filters"]["q"] == "camera"

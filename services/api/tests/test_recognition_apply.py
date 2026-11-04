@@ -174,3 +174,71 @@ def test_recognition_update_existing_and_duplicate_guard(owner_client, monkeypat
     item = owner_client.get(f"/api/v1/items/{existing['id']}").json()["item"]
     assert item["brand"] == "Acme"
     assert owner_client.get("/api/v1/items?limit=50").json()["total"] == 1
+
+
+def test_recognition_split_entries_same_suggestion_are_distinct_and_idempotent(
+    owner_client, monkeypatch
+):
+    room = create_room(owner_client)
+    container = create_container(owner_client, room["id"])
+    fake_vision(
+        monkeypatch,
+        [
+            {
+                "name": "Camera kit",
+                "quantity": 1,
+                "confidence": 80,
+                "field_sources": {"name": "inferred"},
+            }
+        ],
+    )
+    recognition = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("kit.png", make_image(), "image/png")},
+        data={"location_id": container["id"]},
+    ).json()
+    run_recognition(recognition["id"])
+    entries = [
+        {
+            "suggestion_index": 0,
+            "entry_key": "0",
+            "action": "create",
+            "proposal": {
+                "name": "Camera kit",
+                "quantity": 1,
+                "field_sources": {"name": "inferred"},
+            },
+        },
+        {
+            "suggestion_index": 0,
+            "entry_key": "0-split-1",
+            "action": "create",
+            "allow_duplicate": True,
+            "proposal": {
+                "name": "Camera kit (split)",
+                "quantity": 1,
+                "field_sources": {"name": "inferred"},
+            },
+        },
+    ]
+    applied = owner_client.post(
+        f"/api/v1/ai/recognitions/{recognition['id']}/apply",
+        json={"entries": entries},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 2
+    assert len(applied.json()["recognition"]["applied_items"]) == 2
+    assert {item["entry_key"] for item in applied.json()["recognition"]["applied_items"]} == {
+        "0",
+        "0-split-1",
+    }
+    assert owner_client.get("/api/v1/items?limit=50").json()["total"] == 2
+
+    replay = owner_client.post(
+        f"/api/v1/ai/recognitions/{recognition['id']}/apply",
+        json={"entries": entries},
+    )
+    assert replay.status_code == 200
+    assert replay.json()["created"] == 0
+    assert replay.json()["skipped"] == 2
+    assert owner_client.get("/api/v1/items?limit=50").json()["total"] == 2

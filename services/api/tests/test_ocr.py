@@ -172,3 +172,55 @@ def test_ocr_apply_requires_confirmed_item_for_purchase(owner_client):
         json={"item_ids": [], "create_purchase": True},
     )
     assert response.status_code == 422
+
+
+def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_client, monkeypatch):
+    from housetory_api.schemas.ai import AiStatus
+    from housetory_api.services import document_ocr
+
+    item = create_item(owner_client)
+    document = upload_text_document(owner_client, item["id"]).json()
+    fake_status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="document-model",
+        configured=True,
+        available=True,
+        privacy_note="Local",
+    )
+    monkeypatch.setattr(document_ocr.ai, "status_for", lambda *args, **kwargs: fake_status)
+    monkeypatch.setattr(document_ocr.ai, "config_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        document_ocr.ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "merchant": "La Marzocco Boutique",
+            "purchase_date": "2030-01-01",
+            "total_cents": 999,
+            "currency": "EUR",
+            "product_names": ["Espresso Machine", "Invented Rocket"],
+            "invoice_number": "INV-9001",
+            "serial_numbers": ["INVENTED-SERIAL"],
+            "brand": "La Marzocco",
+            "model": None,
+        },
+    )
+    run_document_ocr(
+        document["id"],
+        extractor=lambda path, content_type: ExtractedText(
+            text=RECEIPT_TEXT, confidence=91, source="ocr"
+        ),
+    )
+    with SessionLocal() as db:
+        stored = db.get(Document, document["id"])
+        assert stored is not None
+        metadata = stored.extracted_metadata
+        assert metadata["processing_mode"] == "local"
+        assert metadata["ai_used"] is True
+        assert metadata["total_cents"] == 625000
+        assert metadata["purchase_date"] == "2026-02-14"
+        assert metadata["currency"] == "USD"
+        assert "Invented Rocket" not in metadata["product_names"]
+        assert "Espresso Machine" in metadata["product_names"]
+        assert metadata["serial_numbers"] == ["LM-2026-0042"]
+        assert any("Rejected AI total" in warning for warning in metadata["ai_warnings"])

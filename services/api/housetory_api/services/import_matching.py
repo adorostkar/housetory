@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from ..models import Category, Item, Room, StorageLocation
+from ..models import Category, Item, Room, StorageLocation, Tag
 from ..schemas.imports import (
     DuplicateCandidate,
     LocationCandidate,
@@ -30,6 +30,7 @@ class InventoryIndex:
     rooms: list[Room]
     locations: list[StorageLocation]
     categories: list[Category]
+    tags: list[Tag]
 
 
 def build_index(db: Session, household_id: uuid.UUID) -> InventoryIndex:
@@ -54,6 +55,9 @@ def build_index(db: Session, household_id: uuid.UUID) -> InventoryIndex:
                 .where(Category.household_id == household_id)
                 .order_by(Category.name)
             ).all()
+        ),
+        tags=list(
+            db.scalars(select(Tag).where(Tag.household_id == household_id).order_by(Tag.name)).all()
         ),
     )
 

@@ -23,7 +23,7 @@ AssistantTool = Literal[
 
 class AiStatus(BaseModel):
     provider: str
-    mode: Literal["disabled", "local", "cloud"]
+    mode: Literal["disabled", "local", "private", "cloud"]
     source: Literal["disabled", "environment", "database"] = "disabled"
     task: str = "assistant"
     provider_id: uuid.UUID | None = None
@@ -118,7 +118,9 @@ class AiRecognitionOut(ORMModel):
     location_id: uuid.UUID | None = None
     location_label: str | None = None
     suggestion_duplicates: list[AiRecognitionDuplicateGroup] = Field(default_factory=list)
-    processing_mode: Literal["deterministic", "local", "cloud", "unavailable"] = "unavailable"
+    processing_mode: Literal["deterministic", "local", "private", "cloud", "unavailable"] = (
+        "unavailable"
+    )
     applied_at: datetime | None = None
     applied_items: list[Any] = Field(default_factory=list)
     created_at: datetime
@@ -177,6 +179,38 @@ class NaturalSearchFilters(BaseModel):
     sort: Literal["relevance", "purchase_desc", "purchase_asc", "name_asc"] = "relevance"
 
 
+class AiDocumentMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merchant: str | None = Field(default=None, max_length=160)
+    purchase_date: date | None = None
+    total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    product_names: list[str] | None = Field(default=None, max_length=50)
+    invoice_number: str | None = Field(default=None, max_length=120)
+    serial_numbers: list[str] | None = Field(default=None, max_length=50)
+    brand: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=120)
+
+
+class AiSearchPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str | None = Field(default=None, max_length=400)
+    room_name: str | None = Field(default=None, max_length=200)
+    location_name: str | None = Field(default=None, max_length=200)
+    category_name: str | None = Field(default=None, max_length=120)
+    tag: str | None = Field(default=None, max_length=80)
+    missing_purchase: bool | None = None
+    missing_serial: bool | None = None
+    warranty_status: Literal["active", "expiring", "expired"] | None = None
+    purchased_after: date | None = None
+    purchased_before: date | None = None
+    min_purchase_cents: int | None = Field(default=None, ge=0, le=10**12)
+    max_purchase_cents: int | None = Field(default=None, ge=0, le=10**12)
+    sort: Literal["relevance", "purchase_desc", "purchase_asc", "name_asc"] | None = None
+
+
 class NaturalSearchRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     limit: int = Field(default=30, ge=1, le=100)
@@ -218,6 +252,7 @@ class DocumentRelations(BaseModel):
 
 class AiRecognitionApplyEntry(BaseModel):
     suggestion_index: int = Field(ge=0, le=29)
+    entry_key: str | None = Field(default=None, max_length=80)
     action: Literal["create", "update", "reject"] = "create"
     proposal: AiRecognitionSuggestion | None = None
     item_id: uuid.UUID | None = None

@@ -31,6 +31,7 @@ from .ai_runtime import (
     CLOUD_PROVIDERS,
     DEFAULT_BASE_URLS,
     config_for_provider,
+    endpoint_scope,
     model_capabilities,
     resolve_config,
 )
@@ -84,6 +85,8 @@ def _validate_base_url(value: str | None) -> str | None:
 
 
 def serialize_provider(provider: AiProvider) -> AiProviderOut:
+    base_url = provider.base_url or DEFAULT_BASE_URLS.get(provider.provider) or ""
+    scope = endpoint_scope(provider.provider, base_url)
     return AiProviderOut(
         id=provider.id,
         provider=provider.provider,
@@ -94,7 +97,8 @@ def serialize_provider(provider: AiProvider) -> AiProviderOut:
         api_key_version=provider.api_key_version,
         enabled=provider.enabled,
         cloud_consent=provider.cloud_consent,
-        is_local=provider.provider == AiProviderType.OLLAMA.value,
+        is_local=scope == "local",
+        endpoint_scope=scope,
         capabilities=model_capabilities(provider.provider, provider.default_model),
         created_at=provider.created_at,
         updated_at=provider.updated_at,
@@ -247,8 +251,10 @@ def update_provider(
         provider.default_model = payload.default_model
     if payload.enabled is not None:
         provider.enabled = payload.enabled
-    if payload.cloud_consent is not None and provider.provider in CLOUD_PROVIDERS:
+    if payload.cloud_consent is not None:
         provider.cloud_consent = payload.cloud_consent
+    if endpoint_scope(provider.provider, provider.base_url or "") == "local":
+        provider.cloud_consent = False
     if payload.clear_api_key:
         provider.encrypted_api_key = None
         provider.api_key_version += 1

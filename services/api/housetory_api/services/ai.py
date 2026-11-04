@@ -45,6 +45,13 @@ purchases. Mark unknown values as null. You are read-only and cannot modify data
 _semaphore = threading.BoundedSemaphore(1)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward household content to a redirect target we did not classify."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
 class AiError(RuntimeError):
     pass
 
@@ -92,12 +99,21 @@ def _request_json(
         )
         try:
             # URL is provider-configured and restricted to http(s); never user data.
-            with urllib.request.urlopen(  # nosec B310
+            # Redirects are deliberately not followed: a local endpoint must not be
+            # able to forward a request to an unconsented remote host. urllib keeps
+            # its default TLS certificate verification.
+            opener = urllib.request.build_opener(_NoRedirect)
+            with opener.open(  # nosec B310
                 request, timeout=timeout or settings.ai_timeout_seconds
             ) as response:
                 body = response.read(3_000_000)
             break
         except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                raise AiUnavailable(
+                    "Inference provider returned a redirect. Redirects are not followed "
+                    "because the destination may be outside the consented endpoint."
+                ) from None
             if exc.code in {429, 500, 502, 503, 504} and attempt + 1 < attempts:
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
                 try:

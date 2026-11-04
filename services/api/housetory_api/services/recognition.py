@@ -293,8 +293,8 @@ def apply_recognition(
         raise ValueError("This recognition is not ready to apply.")
     suggestions = (recognition.result or {}).get("suggestions") or []
     applied = list(recognition.applied_items or [])
-    applied_by_index = {
-        int(entry.get("suggestion_index")): entry
+    applied_by_key = {
+        str(entry.get("entry_key") or entry.get("suggestion_index")): entry
         for entry in applied
         if isinstance(entry, dict) and entry.get("suggestion_index") is not None
     }
@@ -307,10 +307,11 @@ def apply_recognition(
             )
             failed += 1
             continue
+        entry_key = entry.entry_key or str(entry.suggestion_index)
         if entry.action == "reject":
             rejected += 1
             continue
-        existing = applied_by_index.get(entry.suggestion_index)
+        existing = applied_by_key.get(entry_key)
         if existing and entry.action == "create":
             skipped += 1
             continue
@@ -400,8 +401,9 @@ def apply_recognition(
                         suggestion_index=entry.suggestion_index,
                     )
                 )
-            applied_by_index[entry.suggestion_index] = {
+            applied_by_key[entry_key] = {
                 "suggestion_index": entry.suggestion_index,
+                "entry_key": entry_key,
                 "item_id": str(item.id),
                 "name": item.name,
                 "action": entry.action,
@@ -415,7 +417,16 @@ def apply_recognition(
                 message = "Could not apply this suggestion."
             failures.append({"suggestion_index": entry.suggestion_index, "message": message[:500]})
     db.flush()
-    recognition.applied_items = [applied_by_index[index] for index in sorted(applied_by_index)]
+    recognition.applied_items = [
+        applied_by_key[key]
+        for key in sorted(
+            applied_by_key,
+            key=lambda value: (
+                int(applied_by_key[value].get("suggestion_index") or 0),
+                value,
+            ),
+        )
+    ]
     if failed == 0:
         recognition.applied_at = datetime.now(UTC)
     db.commit()

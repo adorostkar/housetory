@@ -259,3 +259,120 @@ def test_provider_fails_closed_when_credential_key_is_unavailable(owner_client, 
     tested = owner_client.post(f"/api/v1/ai/providers/{provider['id']}/test")
     assert tested.status_code == 200
     assert tested.json()["ok"] is False
+
+
+def test_ollama_endpoint_scope_and_remote_consent(owner_client, monkeypatch):
+    from housetory_api.services import ai
+    from housetory_api.services.ai_runtime import endpoint_scope
+
+    assert endpoint_scope("ollama", "http://127.0.0.1:11434") == "local"
+    assert endpoint_scope("ollama", "http://host.docker.internal:11434") == "local"
+    assert endpoint_scope("ollama", "http://ollama:11434") == "local"
+    assert endpoint_scope("ollama", "http://192.168.1.20:11434") == "private"
+    assert endpoint_scope("ollama", "https://external.example.invalid") == "remote"
+    assert endpoint_scope("openai", "https://api.openai.com/v1") == "remote"
+
+    monkeypatch.setattr(ai, "available_models", lambda config: ["llava:latest"])
+    external = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "ollama",
+            "display_name": "External Ollama",
+            "base_url": "https://external.example.invalid",
+            "default_model": "llava:latest",
+            "enabled": True,
+            "cloud_consent": False,
+        },
+    )
+    assert external.status_code == 201, external.text
+    external_body = external.json()
+    assert external_body["endpoint_scope"] == "remote"
+    assert external_body["is_local"] is False
+    assert external_body["cloud_consent"] is False
+    status = owner_client.get("/api/v1/ai/status?task=assistant").json()
+    assert status["mode"] == "cloud"
+    assert status["configured"] is False
+    assert "consent" in (status["error"] or "").lower()
+
+    owner_client.delete(f"/api/v1/ai/providers/{external_body['id']}")
+    private = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "ollama",
+            "display_name": "LAN Ollama",
+            "base_url": "http://192.168.1.20:11434",
+            "default_model": "llava:latest",
+            "enabled": True,
+            "cloud_consent": False,
+        },
+    )
+    assert private.status_code == 201, private.text
+    assert private.json()["endpoint_scope"] == "private"
+    assert owner_client.get("/api/v1/ai/status?task=assistant").json()["mode"] == "private"
+
+    owner_client.delete(f"/api/v1/ai/providers/{private.json()['id']}")
+    local = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "ollama",
+            "display_name": "Local Ollama",
+            "base_url": "http://host.docker.internal:11434",
+            "default_model": "llava:latest",
+            "enabled": True,
+        },
+    )
+    assert local.status_code == 201, local.text
+    assert local.json()["endpoint_scope"] == "local"
+    local_status = owner_client.get("/api/v1/ai/status?task=assistant").json()
+    assert local_status["mode"] == "local"
+    assert local_status["configured"] is True
+
+
+def test_provider_requests_do_not_follow_redirects(monkeypatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from housetory_api.services import ai
+
+    target_hits: list[str] = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            target_hits.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):  # noqa: ANN002
+            return
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target_port}/steal")
+            self.end_headers()
+
+        def log_message(self, *args):  # noqa: ANN002
+            return
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+    target_port = target.server_address[1]
+    redirect = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    redirect_port = redirect.server_address[1]
+    threads = [
+        threading.Thread(target=target.serve_forever, daemon=True),
+        threading.Thread(target=redirect.serve_forever, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        with pytest.raises(ai.AiUnavailable, match="redirect"):
+            ai._request_json(
+                f"http://127.0.0.1:{redirect_port}/start", None, method="GET", timeout=3
+            )
+        assert target_hits == []
+    finally:
+        redirect.shutdown()
+        target.shutdown()
+        redirect.server_close()
+        target.server_close()
