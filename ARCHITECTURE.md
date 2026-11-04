@@ -155,16 +155,28 @@ Health semantics:
 - Sessions are opaque 40-byte random tokens. Only a SHA-256 hash of the token is
   stored in `auth_sessions`; the raw value lives solely in an HttpOnly cookie.
 - Cookie defaults: `HttpOnly`, `SameSite=Lax`, `Path=/`, configurable `Secure`.
-  Production behind Tailscale must set `COOKIE_SECURE=true`.
-- Unsafe browser requests with an `Origin` header must match `APP_BASE_URL` (or
-  configured extra origins). Combined with SameSite cookies, this blocks
-  cross-site state changes without a CSRF-token round trip.
+  Settings validation refuses to start when `APP_BASE_URL` is HTTPS and
+  `COOKIE_SECURE` is false. Production also rejects remote plain-HTTP origins
+  and `DEBUG=true`.
+- Unsafe browser requests must match `APP_BASE_URL` (or configured extra
+  origins) using `Origin`, falling back to `Referer` when `Origin` is absent.
+  Combined with SameSite cookies, this blocks cross-site state changes without a
+  CSRF-token round trip. Non-browser API clients with neither header are allowed.
 - Session expiry defaults to 30 days; expired sessions are pruned by the worker
-  and opportunistically on login.
-- Authorization is role-ready (`owner` / `member`) but only owner setup exists
-  in the UI. Multi-user invitations are not implemented.
+  and opportunistically on login. Logout deletes the session row, so cookie
+  replay fails. Sessions for deactivated users are rejected.
+- Login failures are throttled with a sliding window per email and proxy
+  address (default 10 failures per 15 minutes). The limiter is in-process and
+  resets on restart; it must become PostgreSQL-backed before multiple API
+  replicas. Behind Tailscale Serve, the proxy address is shared, which makes the
+  limit effectively global as well as per-account. Setup itself is not throttled.
+- Authorization is role-ready (`owner` / `member`). Household rename requires
+  owner; multi-user invitations are not implemented.
+- **First-run claim:** before an owner exists, any client that can reach the
+  setup endpoint can claim the instance. Tailscale ACLs must restrict access and
+  setup should be completed immediately after deployment.
 
-Not in the foundation: login rate limiting, password reset/change UI, 2FA and
+Not in the foundation: password reset/change UI, 2FA, SSO, idle timeout and
 multi-device session management. Tailscale keeps the service off the public
 internet, which is the primary access control boundary.
 
@@ -233,18 +245,30 @@ is their sole attachment; documents shared with other items remain available.
   `households/<household_uuid>/documents/<document_uuid>.<ext>`.
 - All access goes through authenticated API file routes. The uploads directory
   is not served by nginx as static files, so UUIDs alone are not access.
-- Uploads are size-capped (`MAX_UPLOAD_MB`, default 25 MB).
-- Photos are validated by decoding with Pillow, not by trusting MIME headers.
-  JPEG, PNG, WebP and HEIC are accepted; HEIC is normalized to JPEG for browser
-  compatibility. Images are re-encoded (stripping EXIF/GPS), oriented correctly,
-  and a 1600px max WebP thumbnail is generated synchronously.
-- Documents are limited to PDF, JPEG, PNG, WebP and UTF-8 text, with magic-byte
-  checks for PDF and image decoding. Executables are rejected.
-- File responses are marked `private`, `nosniff`, and cached immutably where the
-  object is immutable. Document downloads use `Content-Disposition`.
-- Files are deleted best-effort after the database commit. Deleting an item
-  removes its photographs and any documents only that item used.
-- Backups capture both the database and the uploads volume.
+- Uploads are size-capped (`MAX_UPLOAD_MB`, default 25 MB); nginx caps the whole
+  request at 30 MB.
+- Photos are validated by decoding with Pillow through an explicit
+  `JPEG/PNG/WebP/HEIF` decoder allowlist, not by trusting MIME headers or
+  extensions. HEIC is normalized to JPEG for browser compatibility. Images are
+  re-encoded (stripping EXIF/GPS and other metadata), oriented correctly, and a
+  1600px max WebP thumbnail is generated synchronously.
+- Documents are limited to PDF, JPEG, PNG, WebP and UTF-8 text. PDFs are parsed
+  with pypdf and must contain at least one page; encrypted/malformed PDFs are
+  rejected. Image documents are re-encoded to their actual format, normalizing
+  MIME/extension mismatches and stripping metadata. Executables, SVG and HTML
+  are rejected.
+- All document responses are forced to `Content-Disposition: attachment` so
+  active PDF content is not rendered in the application origin. Photo and
+  document responses are `private, no-store`, `nosniff` and CORP same-origin.
+- Files and directories are stored with `0600` and `0700` permissions under the
+  uploads volume; the volume root is also `0700`.
+- Deleted files are removed best-effort after the database commit. Deleting an
+  item removes its photographs and any documents only that item used.
+- Backups capture both the database and the uploads volume. Backup directories
+  are `0700` and files `0600`; restores verify checksums and refuse database or
+  Compose-project mismatches. Uploads archives are validated for traversal,
+  links, devices and duplicate entries and extracted with Python's safe tar
+  filter.
 
 ## 7. Background jobs
 
@@ -288,29 +312,40 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 - Compose runs a one-shot `migrate` service (`alembic upgrade head`) before the
   API and worker start, gated by health/completion conditions.
-- API and worker containers run as a non-root user, read-only root filesystems,
-  with `/tmp` tmpfs and `no-new-privileges`.
-- nginx adds CSP, clickjacking, MIME-sniffing, referrer and permissions headers.
+- API, worker, web and migrate containers run non-root. They drop all Linux
+  capabilities, use `no-new-privileges`, and have read-only root filesystems with
+  minimal tmpfs mounts. The nginx image is the unprivileged variant.
+- nginx adds CSP, HSTS, COOP/CORP, clickjacking, MIME-sniffing, referrer and
+  permissions headers. API JSON and authenticated media are `no-store`.
 - The application port binds only to loopback. Tailscale Serve is the only
   intended entry point. Tailscale Funnel is explicitly not used.
-- Only PostgreSQL (`db`) and uploads (`api`) own persistent data. Backups use
-  `pg_dump` plus a tar of the uploads because snapshots cannot be atomic across
-  both; restore stops the API and worker first.
+- Only PostgreSQL (`db`) and uploads (`api`) own persistent data. The PostgreSQL
+  image is rebuilt with a current Go-built `gosu`; API and worker images use
+  Alpine Python to keep the runtime high/critical package count at zero in the
+  audit performed. Backups use `pg_dump` plus a tar of the uploads because
+  snapshots cannot be atomic across both; restore stops the API and worker first.
+- The database admin role is used only for migrations, backup and restore. API
+  and worker connect with a separate non-superuser role that has DML privileges
+  only and cannot create databases, roles or schema objects. A fresh volume
+  creates the role through the init script; existing volumes use
+  `scripts/harden-db-role.sh` once.
 
 ## 10. Testing
 
-- Backend: pytest against a real PostgreSQL database. The test session creates a
-  dedicated database, runs the real Alembic migration, and truncates tables
-  between tests. Coverage includes health, auth/session lifecycle, origin
-  protection, household isolation, rooms/locations/taxonomy, items, multi-
-  currency overview, photos/documents, validation, queue mechanics and
-  migration freshness.
-- Frontend: Vitest + Testing Library. Unit tests cover hierarchy building, paths,
-  formatting and card rendering. TypeScript is checked in strict mode; the
-  production build is part of verification.
+- Backend: 67 pytest tests against a real PostgreSQL database. The test session
+  creates a dedicated database, runs the real Alembic migration, and truncates
+  tables between tests. Coverage includes health, auth/session lifecycle,
+  concurrent first-run setup, cookie attributes, token hashing, rate limiting,
+  origin/Referer protection, exhaustive cross-household isolation, rooms/
+  locations/taxonomy, items, multi-currency overview, upload content validation,
+  malformed PDF/images, EXIF stripping, traversal filenames, upload size and
+  permissions, archive extraction safety, queue mechanics and migration freshness.
+- Frontend: 11 Vitest tests + Testing Library. TypeScript is checked in strict
+  mode; the production build is part of verification.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
-  and nginx; exercised locally.
-- Not implemented: browser end-to-end tests (Playwright), load testing,
+  and nginx; exercised locally, plus non-root/capability/port inspection.
+- Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
+- Not implemented: checked-in browser end-to-end tests (Playwright), load testing,
   accessibility automation, visual regression tests.
 
 ## 11. Deliberate limitations
@@ -319,9 +354,21 @@ development and nginx proxies in production. No CORS allowlist is needed.
 - No custom-field API/UI yet.
 - No Tauri desktop build yet; it is scheduled after the web app is stable.
 - No automatic backup scheduler; scripts are provided for external scheduling.
+  Backups are not encrypted by the scripts.
+- The login rate limiter is process-local and resets on restart; it is not a
+  substitute for Tailscale ACLs. Setup is not rate-limited and can be claimed
+  before the first owner exists.
+- No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
+  attachments but may still contain malicious content when opened in a PDF
+  reader.
+- Secrets (database password) are supplied to containers as environment
+  variables and are visible to the Docker host/root. Protect host access.
+- PostgreSQL connections inside the private Compose bridge are not TLS-encrypted.
 - Search uses indexed household fields with `ILIKE`; PostgreSQL full-text/trigram
   search is a future optimization, not needed at personal-inventory scale.
 - Mixed currencies are reported per currency, not converted.
 - Offline mode caches only the app shell; inventory data requires the server.
 - Uploads are stored on a single local volume, not replicated object storage, by
   design for a single-server self-hosted deployment.
+- Base images use mutable tags; rebuild and rescan regularly for newly disclosed
+  OS/library vulnerabilities.

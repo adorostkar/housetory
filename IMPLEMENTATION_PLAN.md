@@ -45,6 +45,26 @@ it is not the complete product.
       warranties expiring soon, storage use, recent items).
 - [x] Household rename endpoint.
 
+## Phase 1.5 — Security gate ✅
+
+- [x] Audit authentication, authorization, uploads, web security, infrastructure,
+      dependencies, backup and recovery.
+- [x] Upgrade Pillow/pillow-heif and add an explicit image decoder allowlist.
+- [x] Parse PDFs with pypdf and force document downloads as attachments.
+- [x] Enforce Secure cookies for HTTPS deployments at startup.
+- [x] Add login throttling, session replay/expiry/cookie tests and concurrent
+      first-run setup coverage.
+- [x] Exhaustive cross-household IDOR tests for every household-scoped endpoint.
+- [x] Harden upload validation, filenames, metadata stripping, storage modes,
+      media caching and maximum sizes.
+- [x] Add CSP/HSTS/COOP/CORP hardening and no-store headers.
+- [x] Harden containers (non-root nginx, read-only filesystems, capability drops)
+      and rebuild images with zero fixable HIGH/CRITICAL scanner findings.
+- [x] Split PostgreSQL admin and least-privilege API/worker roles.
+- [x] Protect backup permissions, validate upload archives against traversal,
+      guard against restoring into the wrong database and rehearse a full restore.
+- [x] Record findings and remaining risks in `SECURITY_AUDIT.md`.
+
 ## Phase 2 — Background processing ✅
 
 - [x] PostgreSQL queue with `FOR UPDATE SKIP LOCKED`, retries/backoff, stale job
@@ -133,9 +153,12 @@ it is not the complete product.
 - [ ] Playwright end-to-end suite against Compose.
 - [ ] Backup restore drill automation.
 - [ ] Structured JSON logging and log rotation policy review.
-- [ ] Login throttling and audit history.
+- [ ] PostgreSQL-backed (multi-process) login throttling and audit history.
+- [ ] Malware scanning hook for uploaded documents.
+- [ ] Backup encryption and off-site replication automation.
 - [ ] Graceful job prioritisation and worker concurrency limits.
 - [ ] Migration downgrade rehearsal on staging data.
+- [ ] Automated dependency/image scanning in CI.
 
 ### Offline and mobile
 - [ ] Offline read cache for recently viewed items (private, opt-in).
@@ -151,7 +174,10 @@ it is not the complete product.
 - Multi-user membership management is modelled but not exposed.
 - The worker currently handles maintenance only.
 - Password change/reset is not implemented.
+- Login throttling is in-process only; setup can be claimed before first setup.
 - Search is `ILIKE` based; adequate for personal scale but not optimised.
+- No antivirus scanning for documents; PDFs download as attachments.
+- Backups are unencrypted unless the operator encrypts them.
 - No automated browser E2E suite is checked in.
 - Tauri desktop is intentionally deferred until the web application is stable.
 - Offline mode is an app shell, not offline inventory data.

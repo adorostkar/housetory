@@ -59,8 +59,15 @@ The web port is bound to `127.0.0.1` by Compose. It is not reachable from other
 machines directly.
 
 > `APP_BASE_URL` is also the origin allowed to submit forms. It must match the
-> HTTPS URL exactly, with no trailing slash. API returns
-> `403 origin_not_allowed` if it does not.
+> HTTPS URL exactly, with no trailing slash. The API refuses to start if an
+> HTTPS `APP_BASE_URL` is paired with `COOKIE_SECURE=false`. API returns
+> `403 origin_not_allowed` if the origin does not match.
+
+**Complete first-run setup immediately after starting the stack.** Before the
+first owner account exists, any client that can reach the app can claim it. Keep
+the tailnet ACL restricted to your own devices/users and claim ownership before
+sharing or widening access. After initialization, `/auth/setup` returns
+`409 setup_complete` permanently.
 
 ## 3. Serve it over Tailscale HTTPS
 
@@ -159,8 +166,12 @@ starts. Take a backup first for major updates:
 ./scripts/backup.sh
 ```
 
-Copy the resulting directory off the server. Schedule with cron or a systemd
-timer. Restores are destructive and documented in the README.
+Backup directories are created with mode `700` and files with `600`, because they
+contain the full household inventory, uploads, password hashes and session rows.
+They are **not encrypted** by the script. Encrypt them before copying off-server
+and store them in protected storage. Schedule with cron or a systemd timer.
 
-Do not back up the PostgreSQL container's raw data directory while it is running;
-use the provided `pg_dump` script.
+Restores are destructive, require confirmation (or an explicit `--yes`), verify
+the backup's database/project identity, and safely validate the uploads archive
+before stopping services. Do not back up the PostgreSQL container's raw data
+directory while it is running; use the provided `pg_dump` script.

@@ -33,16 +33,23 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 37 pytest tests pass against PostgreSQL, including a fresh Alembic migration.
+- 67 pytest tests pass against PostgreSQL, including a fresh Alembic migration,
+  authentication/abuse controls and exhaustive cross-household access checks.
 - 11 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance jobs.
 - A headless Chrome walkthrough covered first-run setup, room/location creation,
   item creation, multi-photo and document upload, search, dark mode, settings
   and mobile layouts with no console errors or failed requests.
-- Backup, checksum verification and destructive restore were rehearsed locally.
-  The restore drill exposed and fixed stale nginx upstream resolution after API
-  recreation.
+- Backup permissions, checksum verification, archive extraction safety, target
+  checks and a full destructive restore were rehearsed locally, including
+  authenticating and retrieving photos/documents after restore.
+- Production dependency audits report no known Python or npm vulnerabilities.
+  Final application images scan with zero fixable HIGH/CRITICAL vulnerabilities.
+
+The pre-deployment security review, findings and remaining risks are in
+[`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a
+guarantee of production security.
 
 The foundation is intentionally not the whole product. Custom fields, category/
 tag management UI, multi-user sharing, password changes, the Tauri macOS shell
@@ -60,7 +67,10 @@ git clone <your-repository-url> housetory
 cd housetory
 
 cp .env.example .env
-# Generate a URL-safe database password and put it in POSTGRES_PASSWORD:
+# Generate two URL-safe passwords:
+#   1. POSTGRES_PASSWORD        — admin role for migrations/backups/restore only
+#   2. HOUSETORY_APP_PASSWORD   — least-privilege role used by API and worker
+openssl rand -hex 24
 openssl rand -hex 24
 $EDITOR .env
 
@@ -114,15 +124,32 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `POSTGRES_USER` | `housetory` | Database role |
+| `POSTGRES_USER` | `housetory` | Admin database role (migrations/backup/restore) |
 | `POSTGRES_DB` | `housetory` | Database name |
-| `POSTGRES_PASSWORD` | — | **Required.** URL-safe password (use hex) |
+| `POSTGRES_PASSWORD` | — | **Required.** Admin password (use hex) |
+| `HOUSETORY_APP_USER` | `housetory_app` | DML-only role used by API/worker |
+| `HOUSETORY_APP_PASSWORD` | — | **Required.** Separate app-role password (use hex) |
 | `APP_BASE_URL` | `http://localhost:8080` | Public origin used for cookie/origin checks |
 | `COOKIE_SECURE` | `false` | Must be `true` behind Tailscale HTTPS |
 | `WEB_PORT` | `8080` | Loopback-only host port for nginx |
 | `SESSION_TTL_DAYS` | `30` | Login lifetime |
 | `MAX_UPLOAD_MB` | `25` | Per-file upload cap |
+| `LOGIN_MAX_FAILURES` | `10` | Failed sign-ins per email/IP before throttling |
+| `LOGIN_WINDOW_SECONDS` | `900` | Sliding throttle window |
 | `EXTRA_ORIGINS` | empty | Comma-separated extra allowed origins (normally empty) |
+
+`APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
+refuses to start with an insecure cookie configuration. Production also rejects
+remote plain-HTTP origins and `DEBUG=true`.
+
+The API and worker connect with `HOUSETORY_APP_USER`, a non-superuser role with
+DML privileges only. Alembic migrations use the admin role. Existing databases
+created before this split need the one-time role migration:
+
+```bash
+./scripts/harden-db-role.sh
+docker compose up -d --force-recreate api worker
+```
 
 Inside the containers the API uses `DATABASE_URL`, `DATA_DIR=/data`,
 `UPLOADS_DIR=/data/uploads` and `ENVIRONMENT=production`. Secrets are never
@@ -144,8 +171,12 @@ Create a verified backup (PostgreSQL custom dump + uploads tar + SHA-256 sums):
 ./scripts/backup.sh
 ```
 
-Backups land in `./backups/housetory-<UTC timestamp>/`. Copy them off the server
-and schedule the script with cron or a systemd timer.
+Backups land in `./backups/housetory-<UTC timestamp>/` with directory mode `700`
+and file mode `600`. The database and upload files contain private household
+data and password hashes. **Backups are not encrypted by the script**; encrypt
+them before copying off-server (for example with `age` or GPG) and keep them in
+protected storage. Copy them off the server and schedule the script with cron or
+a systemd timer.
 
 Restore **replaces** the current database and uploads:
 
@@ -153,9 +184,19 @@ Restore **replaces** the current database and uploads:
 ./scripts/restore.sh ./backups/housetory-20261104T120000Z
 ```
 
-The restore script verifies checksums, stops the API and worker, recreates the
-database, restores files, runs migrations and restarts the stack. See
-[`ARCHITECTURE.md`](ARCHITECTURE.md) for the consistency trade-off.
+The restore script:
+
+- verifies SHA-256 checksums;
+- checks the backup's database name and Compose project against the live target
+  and refuses to overwrite a mismatched database unless
+  `--allow-target-mismatch` is explicitly supplied;
+- validates the uploads archive and rejects absolute paths, `..` traversal,
+  links, devices and duplicate entries before stopping services;
+- requires typed confirmation unless `--yes` is supplied;
+- stops the API and worker, recreates the database, restores files, runs
+  migrations and restarts the stack.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the non-atomic snapshot trade-off.
 
 Never delete a Docker volume unless you intend to lose data. To reset a
 development environment only:
@@ -294,15 +335,38 @@ compose.dev.yaml        Loopback Postgres exposure for development only
 
 ## Security notes
 
-- Only nginx binds a host port, and only to loopback.
-- PostgreSQL and FastAPI are reachable only inside the Compose network.
-- API and worker run read-only, non-root, without new privileges.
-- nginx sends CSP, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions
-  headers.
-- Passwords use Argon2id; session tokens are stored hashed.
-- Upload MIME types are validated by content, not by HTTP headers.
-- Images are re-encoded, which strips location metadata.
-- Keep the host patched, leave Tailscale Funnel off, and back up off-server.
+- Only nginx binds a host port, and only to loopback. PostgreSQL and FastAPI are
+  reachable only inside the Compose network.
+- Web, API, worker and migration containers run non-root. API, worker, web and
+  migrate drop all Linux capabilities; API/worker/web use read-only root
+  filesystems with minimal tmpfs mounts and `no-new-privileges`.
+- nginx sends CSP, HSTS, COOP/CORP, `X-Frame-Options: DENY`, `nosniff`, referrer
+  and permissions headers. API and file responses are `no-store`; uploaded files
+  are only available through authenticated endpoints.
+- Passwords use Argon2id; only SHA-256 hashes of session tokens are stored;
+  cookies are HttpOnly, SameSite=Lax and Secure whenever `APP_BASE_URL` is HTTPS.
+  The API refuses to start with an HTTPS origin and an insecure cookie setting.
+- The API/worker database role is not a superuser and cannot create databases or
+  roles or alter schema. Only the one-shot migration and backup/restore paths use
+  the admin role.
+- Login failures are throttled per email and proxy address with a documented
+  in-process limiter. It resets on restart and is single-process only.
+- Cross-household access is denied for rooms, storage locations, categories,
+  tags, items, photos and documents (covered by tests).
+- Uploads are validated by content with an image-decoder allowlist and a PDF
+  parser, re-encoded to strip metadata, size-capped, and stored with `0600`
+  permissions under `0700` directories. PDFs and documents download as
+  attachments rather than rendering in the application origin.
+- Keep the host patched, rebuild images periodically, leave Tailscale Funnel
+  off, use a private tailnet ACL, and encrypt backups before taking them
+  off-server.
+- **Complete first-run setup immediately.** Before the first owner exists, any
+  client that can reach the application can claim it. The first-run endpoint is
+  then locked, but Tailscale ACLs and immediate initialization are the
+  mitigations.
+
+See [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md) for the full review and remaining
+risks.
 
 ## Design direction
 
