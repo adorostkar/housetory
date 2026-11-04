@@ -129,8 +129,8 @@ All application endpoints are versioned under `/api/v1`.
 | Storage | `GET/POST /storage-locations`, `GET/PATCH/DELETE /storage-locations/{id}` |
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
-| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}` |
-| Photos | `GET/POST /items/{id}/photos`, `DELETE /photos/{id}`, `GET /photos/{id}/file`, `GET /photos/{id}/thumbnail` |
+| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
+| Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, `GET /photos/{id}/file`, `GET /photos/{id}/thumbnail` |
 | Documents | `GET /documents`, `POST /items/{id}/documents`, `GET /documents/{id}/file`, `DELETE /documents/{id}` |
 | Overview | `GET /overview` |
 
@@ -299,6 +299,9 @@ deployment.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
+- Item photography supports multiple uploads, cover selection, an accessible
+  full-screen viewer with keyboard/thumbnail navigation, and an iPhone camera
+  capture action.
 - Design system: warm ivory/stone light mode, deep charcoal dark mode, system
   SF typography with New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.
@@ -332,16 +335,19 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 67 pytest tests against a real PostgreSQL database. The test session
+- Backend: 72 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the real Alembic migration, and truncates
   tables between tests. Coverage includes health, auth/session lifecycle,
   concurrent first-run setup, cookie attributes, token hashing, rate limiting,
   origin/Referer protection, exhaustive cross-household isolation, rooms/
-  locations/taxonomy, items, multi-currency overview, upload content validation,
-  malformed PDF/images, EXIF stripping, traversal filenames, upload size and
-  permissions, archive extraction safety, queue mechanics and migration freshness.
-- Frontend: 11 Vitest tests + Testing Library. TypeScript is checked in strict
-  mode; the production build is part of verification.
+  locations/taxonomy, nested-room/place counts, descendant-aware filters,
+  ancestor-aware search, cover-photo ordering, item-move responses, multi-currency
+  overview, upload content validation, malformed PDF/images, EXIF stripping,
+  traversal filenames, upload size and permissions, archive extraction safety,
+  queue mechanics and migration freshness.
+- Frontend: 16 Vitest tests + Testing Library, including hierarchy utilities,
+  location paths, nested room cards and the photo lightbox. TypeScript is checked
+  in strict mode; the production build is part of verification.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
@@ -352,7 +358,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 - No multi-user sharing UI yet, though the membership model supports it.
 - No custom-field API/UI yet.
-- No Tauri desktop build yet; it is scheduled after the web app is stable.
+- No Tauri desktop build yet; Core Inventory is now stable enough to begin it.
 - No automatic backup scheduler; scripts are provided for external scheduling.
   Backups are not encrypted by the scripts.
 - The login rate limiter is process-local and resets on restart; it is not a
@@ -364,8 +370,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
 - Secrets (database password) are supplied to containers as environment
   variables and are visible to the Docker host/root. Protect host access.
 - PostgreSQL connections inside the private Compose bridge are not TLS-encrypted.
-- Search uses indexed household fields with `ILIKE`; PostgreSQL full-text/trigram
-  search is a future optimization, not needed at personal-inventory scale.
+- Search uses household-scoped `ILIKE` matching, including ancestor room/place
+  names; PostgreSQL full-text/trigram search is a future optimization.
+- Photos cannot be drag-reordered and have no captions; a cover can be chosen.
 - Mixed currencies are reported per currency, not converted.
 - Offline mode caches only the app shell; inventory data requires the server.
 - Uploads are stored on a single local volume, not replicated object storage, by

@@ -1,8 +1,9 @@
 # Housetory implementation plan
 
-This plan tracks the foundation delivered in this repository and the work that
-remains. Status is deliberately honest: the foundation is usable end-to-end, but
-it is not the complete product.
+This plan tracks the foundation and product phases delivered in this repository.
+Status is deliberately honest: Core Inventory is complete and verified, but the
+product is not finished. Earlier platform milestones used different phase numbers;
+the product-facing numbering below follows the delivery brief.
 
 ## Working agreement
 
@@ -65,14 +66,35 @@ it is not the complete product.
       guard against restoring into the wrong database and rehearse a full restore.
 - [x] Record findings and remaining risks in `SECURITY_AUDIT.md`.
 
-## Phase 2 — Background processing ✅
+## Phase 2 — Core Inventory Experience ✅
+
+- [x] Hierarchy-aware room counts including all descendant rooms.
+- [x] Hierarchical storage-place counts including descendant locations.
+- [x] Descendant-aware item filtering by room and place.
+- [x] URL-driven room/place selection with deep-linkable filters.
+- [x] Full nested room and place hierarchy in desktop and mobile views.
+- [x] Search across room names, storage-place names, categories, tags and item
+      fields, including ancestor rooms/places.
+- [x] Full room → place path on item detail with links into filtered browsing.
+- [x] Item-form hierarchical room picker and selected place path.
+- [x] Cover-photo selection with server-side ordering and primary image update.
+- [x] Full-screen photo viewer with keyboard, control and thumbnail navigation.
+- [x] iPhone camera-capture action alongside multi-photo library uploads.
+- [x] Fixed modal centering animation defect found during the walkthrough.
+- [x] Fresh relationship reads after an item move so PATCH responses show the new
+      room/place immediately.
+- [x] Backend and frontend tests for hierarchy, search, cover photos and lightbox.
+- [x] Desktop and iPhone browser walkthrough with zero console/network errors.
+- [x] Walkthrough documentation and screenshots in `docs/PHASE_2_WALKTHROUGH.md`.
+
+## Supporting platform — Background processing ✅
 
 - [x] PostgreSQL queue with `FOR UPDATE SKIP LOCKED`, retries/backoff, stale job
       recovery, heartbeat health check.
 - [x] Worker container, scheduled session cleanup and finished-job pruning.
 - [x] Queue mechanics tests.
 
-## Phase 3 — Web application ✅
+## Supporting platform — Web application shell ✅
 
 - [x] Vite + React + TypeScript strict + Tailwind + shadcn/ui patterns.
 - [x] Session bootstrap, setup and login screens with field-level errors.
@@ -89,7 +111,7 @@ it is not the complete product.
       service worker.
 - [x] Vitest unit/component tests and strict typecheck.
 
-## Phase 4 — Container environment ✅
+## Deployment — Container environment ✅
 
 - [x] Compose services: PostgreSQL, one-shot migrate, API, worker, nginx web.
 - [x] No host ports for database/API; web bound to loopback only.
@@ -103,7 +125,7 @@ it is not the complete product.
       search, themes and mobile layouts.
 - [x] Backup and restore scripts with checksums; restore drill completed.
 
-## Phase 5 — Access and operations ✅ (documented, environment-dependent)
+## Operations — Access and recovery ✅ (documented, environment-dependent)
 
 - [x] Tailscale Serve instructions with HTTPS, no public DNS, no Funnel.
 - [x] iPhone PWA installation workflow.
@@ -111,7 +133,7 @@ it is not the complete product.
       their tailnet; cannot be done from this repository).
 - [ ] Automated off-site backup scheduling (scripts are ready for cron/systemd).
 
-## Phase 6 — Desktop (next, not started)
+## Phase 3 — Desktop (next, not started)
 
 - [ ] Scaffold Tauri 2 in `apps/desktop` using the production web build.
 - [ ] macOS window chrome, menu bar, keyboard commands.
@@ -119,7 +141,7 @@ it is not the complete product.
 - [ ] Code signing/notarization and update strategy.
 - [ ] Desktop-specific tests.
 
-## Phase 7 — Product depth (next)
+## Phase 4 — Product depth (next)
 
 ### Custom fields
 - [ ] CRUD endpoints and validation for custom field definitions and values.
@@ -163,7 +185,7 @@ it is not the complete product.
 ### Offline and mobile
 - [ ] Offline read cache for recently viewed items (private, opt-in).
 - [ ] Outbox for offline edits, if desired.
-- [ ] Camera capture shortcuts and HEIC upload UX.
+- [x] Camera capture shortcuts and HEIC upload UX.
 - [ ] Push reminders for expiring warranties (requires user-chosen notification
       transport).
 
@@ -178,14 +200,23 @@ it is not the complete product.
 - Search is `ILIKE` based; adequate for personal scale but not optimised.
 - No antivirus scanning for documents; PDFs download as attachments.
 - Backups are unencrypted unless the operator encrypts them.
-- No automated browser E2E suite is checked in.
-- Tauri desktop is intentionally deferred until the web application is stable.
+- No automated browser E2E suite is checked in; Phase 2 used a manual Playwright
+  walkthrough with zero console/network failures.
+- Photo drag-reordering and captions are not implemented; users can choose a cover.
+- Tauri desktop is not started. Core Inventory is now stable enough to begin it.
 - Offline mode is an app shell, not offline inventory data.
 
-## Definition of done for the next milestone
+## Definition of done for Phase 2
 
-1. Custom fields usable end-to-end.
-2. Category/tag management UI with safe reassignment.
-3. Password change and active-session revocation.
-4. Playwright smoke suite green against `docker compose up --build`.
-5. Tauri shell loading the production web app.
+1. Nested rooms and storage places are browseable and countable end-to-end. ✅
+2. Search and filters understand the hierarchy. ✅
+3. Photos can be uploaded, viewed full-screen and assigned a cover. ✅
+4. Item create, edit, location assignment and retrieval work on desktop/iPhone. ✅
+5. Backend and frontend suites pass on the Compose-built application. ✅
+6. Walkthrough evidence and limitations are documented. ✅
+
+## Recommended Phase 3
+
+Do not start until explicitly approved. The strongest next candidates are the
+Tauri macOS shell, advanced organisation (custom fields and taxonomy management),
+and deeper media/document workflows. See the walkthrough for the trade-offs.

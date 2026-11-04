@@ -18,9 +18,13 @@ installed on an iPhone as a PWA.
   iPhone.
 - Rooms with optional nesting; shelves, cabinets, drawers and boxes with
   unlimited nesting.
-- Items with search, filters, quantities, condition, categories and tags.
+- Hierarchy-aware browsing: room and place filters include descendants, counts
+  aggregate nested items, and room selections are deep-linkable.
+- Items with search across room, place, category, tag and item fields; quantities,
+  condition, categories and tags.
 - Multiple item photographs with validation, thumbnail generation, EXIF
-  stripping and HEIC conversion.
+  stripping, HEIC conversion, cover selection and a full-screen viewer.
+- One-tap camera capture on iPhone alongside library uploads.
 - Receipts and manuals attached to items, stored on a persistent local volume.
 - Purchase prices grouped by currency, warranty dates and an overview dashboard.
 - PostgreSQL-backed background worker for maintenance jobs.
@@ -33,19 +37,24 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 67 pytest tests pass against PostgreSQL, including a fresh Alembic migration,
-  authentication/abuse controls and exhaustive cross-household access checks.
-- 11 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 72 pytest tests pass against PostgreSQL, including a fresh Alembic migration,
+  authentication/abuse controls, hierarchy semantics and exhaustive cross-
+  household access checks.
+- 16 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance jobs.
-- A headless Chrome walkthrough covered first-run setup, room/location creation,
-  item creation, multi-photo and document upload, search, dark mode, settings
-  and mobile layouts with no console errors or failed requests.
+- Headless Chrome walkthroughs covered first-run setup, nested rooms/places,
+  item creation and editing, multi-photo and document uploads, cover selection,
+  the photo viewer, hierarchy-aware filtering/search and mobile layouts with no
+  console errors or failed requests.
 - Backup permissions, checksum verification, archive extraction safety, target
   checks and a full destructive restore were rehearsed locally, including
   authenticating and retrieving photos/documents after restore.
 - Production dependency audits report no known Python or npm vulnerabilities.
   Final application images scan with zero fixable HIGH/CRITICAL vulnerabilities.
+
+The Phase 2 desktop/iPhone walkthrough, screenshots and remaining limitations are
+in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md).
 
 The pre-deployment security review, findings and remaining risks are in
 [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a

@@ -305,8 +305,10 @@ Trivy scan date: 2026-11-04. Image vulnerabilities are time-sensitive.
 
 ## Verification performed
 
-- 67 backend pytest tests, including new security regressions.
-- 11 frontend Vitest tests; strict TypeScript check and production build pass.
+- 67 backend pytest tests at audit sign-off; the Phase 2 follow-up raised this
+  to 72, including new security regressions.
+- 11 frontend Vitest tests at audit sign-off; now 16 after Phase 2; strict
+  TypeScript check and production build pass.
 - Headless Chromium walkthrough: setup, room/location, item create/edit,
   multipart photo upload, document upload, search, dark mode, settings and mobile
   layouts; zero console errors and zero failed responses.
@@ -377,6 +379,21 @@ trivy image --scanners vuln --severity HIGH,CRITICAL housetory-worker:latest
 trivy image --scanners vuln --severity HIGH,CRITICAL housetory-web:latest
 trivy image --scanners vuln --severity HIGH,CRITICAL housetory-db:local
 ```
+
+## Phase 2 follow-up
+
+Phase 2 added descendant-aware filters/counts, ancestor-aware search, a cover
+photo endpoint and a full-screen photo viewer. Security implications were
+reviewed and covered:
+
+- Cross-household tests extended to the cover-photo endpoint and ancestor-aware
+  search; foreign room/place/category names do not leak results.
+- Uploaded-photo authorization and no-store headers are unchanged.
+- No new runtime dependencies were added; `@testing-library/user-event` is
+  development-only.
+- Backend tests increased to 72 and frontend tests to 16; the Phase 2 walkthrough
+  reported zero console errors and failed network requests.
+- No new critical/high security findings were introduced.
 
 ## Conclusion
 
