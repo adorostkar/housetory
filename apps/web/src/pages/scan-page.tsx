@@ -3,9 +3,11 @@ import {
   AlertTriangle,
   Camera,
   Check,
+  GitMerge,
   Loader2,
   MapPin,
   ScanLine,
+  Split,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -44,6 +46,8 @@ interface SuggestionState {
   itemId: string;
   allowDuplicate: boolean;
   locationId: string;
+  sourceIndex: number;
+  entryKey: string;
 }
 
 export function ScanPage() {
@@ -76,8 +80,8 @@ export function ScanPage() {
     if (!recognition || recognition.id === initializedFor) return;
     if (recognition.status !== "succeeded") return;
     const raw = recognition.result.suggestions ?? [];
-    const next = raw.map((suggestion) => {
-      const duplicates = duplicateFor(recognition, raw.indexOf(suggestion));
+    const next = raw.map((suggestion, sourceIndex) => {
+      const duplicates = duplicateFor(recognition, sourceIndex);
       return {
         include: true,
         action: "create" as const,
@@ -85,6 +89,8 @@ export function ScanPage() {
         itemId: duplicates[0]?.item_id ?? "",
         allowDuplicate: false,
         locationId: defaultLocation,
+        sourceIndex,
+        entryKey: String(sourceIndex),
       };
     });
     setSuggestions(next);
@@ -113,10 +119,10 @@ export function ScanPage() {
     mutationFn: () =>
       api.post<AiRecognitionApplyResult>(`/ai/recognitions/${recognitionId}/apply`, {
         entries: suggestions
-          .map((entry, index) => ({ entry, index }))
-          .filter(({ entry }) => entry.include && entry.action !== "reject")
-          .map(({ entry, index }) => ({
-            suggestion_index: index,
+          .filter((entry) => entry.include && entry.action !== "reject")
+          .map((entry) => ({
+            suggestion_index: entry.sourceIndex,
+            entry_key: entry.entryKey,
             action: entry.action,
             proposal: entry.proposal,
             item_id: entry.action === "update" ? entry.itemId || null : null,
@@ -137,6 +143,76 @@ export function ScanPage() {
     setSuggestions((current) =>
       current.map((entry, entryIndex) => (entryIndex === index ? { ...entry, ...patch } : entry)),
     );
+  };
+
+  const splitSuggestion = (index: number) => {
+    setSuggestions((current) => {
+      const target = current[index];
+      if (!target) return current;
+      const siblings = current.filter((entry) =>
+        entry.entryKey.startsWith(`${target.entryKey}-split-`),
+      ).length;
+      const originalQuantity = target.proposal.quantity > 1 ? target.proposal.quantity - 1 : 1;
+      const split: SuggestionState = {
+        ...target,
+        entryKey: `${target.entryKey}-split-${siblings + 1}`,
+        include: true,
+        allowDuplicate: true,
+        proposal: {
+          ...target.proposal,
+          name: `${target.proposal.name} (split)`,
+          quantity: 1,
+          notes: [target.proposal.notes, "Split from another suggestion."]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      };
+      const updated = current.map((entry, entryIndex) =>
+        entryIndex === index
+          ? { ...entry, proposal: { ...entry.proposal, quantity: originalQuantity } }
+          : entry,
+      );
+      return [...updated.slice(0, index + 1), split, ...updated.slice(index + 1)];
+    });
+  };
+
+  const mergeWithNext = (index: number) => {
+    setSuggestions((current) => {
+      const first = current[index];
+      const second = current[index + 1];
+      if (!first || !second) return current;
+      const merged: SuggestionState = {
+        ...first,
+        allowDuplicate: false,
+        proposal: {
+          ...first.proposal,
+          name: `${first.proposal.name} + ${second.proposal.name}`,
+          quantity: first.proposal.quantity + second.proposal.quantity,
+          description:
+            [first.proposal.description, second.proposal.description]
+              .filter(Boolean)
+              .join("\n") || null,
+          tags: [...new Set([...first.proposal.tags, ...second.proposal.tags])],
+          notes:
+            [first.proposal.notes, second.proposal.notes, "Merged suggestions."]
+              .filter(Boolean)
+              .join("\n"),
+          source: first.proposal.source,
+          field_sources: {
+            ...first.proposal.field_sources,
+            ...second.proposal.field_sources,
+          },
+          confidence:
+            first.proposal.confidence == null || second.proposal.confidence == null
+              ? first.proposal.confidence ?? second.proposal.confidence
+              : Math.min(first.proposal.confidence, second.proposal.confidence),
+        },
+      };
+      const updated = current.map((entry, entryIndex) =>
+        entryIndex === index ? merged : entry,
+      );
+      return [...updated.slice(0, index + 1), ...updated.slice(index + 2)];
+    });
   };
 
   return (
@@ -242,10 +318,12 @@ export function ScanPage() {
                   </h2>
                   <p className="mt-1 text-[0.74rem] text-muted-foreground">
                     {recognition.processing_mode === "cloud"
-                      ? "Cloud vision"
-                      : recognition.processing_mode === "local"
-                        ? "Local vision"
-                        : "OCR fallback"}{" "}
+                      ? "Remote vision"
+                      : recognition.processing_mode === "private"
+                        ? "Private-network vision"
+                        : recognition.processing_mode === "local"
+                          ? "Local vision"
+                          : "OCR fallback"}{" "}
                     · {recognition.model_name ?? "deterministic"} · {formatDate(recognition.created_at)}
                   </p>
                 </div>
@@ -259,14 +337,17 @@ export function ScanPage() {
               </div>
               {suggestions.map((entry, index) => (
                 <SuggestionCard
-                  key={`${recognition.id}-${index}`}
+                  key={entry.entryKey}
                   index={index}
                   entry={entry}
-                  duplicates={duplicateFor(recognition, index)}
+                  duplicates={duplicateFor(recognition, entry.sourceIndex)}
                   items={items}
                   locations={locations}
+                  canMerge={Boolean(suggestions[index + 1])}
                   onChange={(patch) => updateSuggestion(index, patch)}
                   onLocationChange={(value) => updateSuggestion(index, { locationId: value })}
+                  onMerge={() => mergeWithNext(index)}
+                  onSplit={() => splitSuggestion(index)}
                 />
               ))}
             </section>
@@ -351,6 +432,9 @@ function SuggestionCard({
   locations,
   onChange,
   onLocationChange,
+  canMerge,
+  onMerge,
+  onSplit,
 }: {
   index: number;
   entry: SuggestionState;
@@ -359,6 +443,9 @@ function SuggestionCard({
   locations: Array<{ id: string; name: string; identifier: string | null }>;
   onChange: (patch: Partial<SuggestionState>) => void;
   onLocationChange: (value: string) => void;
+  canMerge: boolean;
+  onMerge: () => void;
+  onSplit: () => void;
 }) {
   const suggestion = entry.proposal;
   return (
@@ -390,7 +477,8 @@ function SuggestionCard({
               )}
             </div>
             <p className="mt-1 text-[0.68rem] text-muted-foreground">
-              Suggestion {index + 1}
+              Suggestion {entry.sourceIndex + 1}
+              {entry.entryKey.includes("-split-") ? " · split record" : ""}
             </p>
           </div>
         </div>
@@ -540,10 +628,30 @@ function SuggestionCard({
         )}
       </div>
 
-      <div className="mt-3 flex items-center gap-2 border-t border-border/60 pt-3 text-[0.68rem] text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3 text-[0.68rem] text-muted-foreground">
         <MapPin className="size-3" />
-        {entry.include ? "Will be reviewed for creation" : "Excluded from this approval"}
-        {entry.allowDuplicate && " · duplicate override enabled"}
+        <span className="mr-auto">
+          {entry.include ? "Will be reviewed for creation" : "Excluded from this approval"}
+          {entry.allowDuplicate && " · duplicate override enabled"}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={!canMerge || entry.action === "update" || entry.action === "reject"}
+          onClick={onMerge}
+        >
+          <GitMerge /> Merge with next
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={entry.action === "update" || entry.action === "reject"}
+          onClick={onSplit}
+        >
+          <Split /> Split
+        </Button>
       </div>
     </article>
   );

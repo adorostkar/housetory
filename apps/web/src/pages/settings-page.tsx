@@ -292,16 +292,18 @@ export function SettingsPage() {
                   variant={
                     aiStatus.data.mode === "local"
                       ? "sage"
-                      : aiStatus.data.mode === "cloud"
+                      : aiStatus.data.mode === "private" || aiStatus.data.mode === "cloud"
                         ? "brass"
                         : "outline"
                   }
                 >
                   {aiStatus.data.mode === "local"
                     ? "Local AI"
-                    : aiStatus.data.mode === "cloud"
-                      ? "Cloud AI"
-                      : "AI disabled"}
+                    : aiStatus.data.mode === "private"
+                      ? "Private-network AI"
+                      : aiStatus.data.mode === "cloud"
+                        ? "Remote AI"
+                        : "AI disabled"}
                 </Badge>
                 <Badge variant={aiStatus.data.available ? "sage" : "outline"}>
                   {aiStatus.data.available ? "Model available" : "No model available"}
@@ -358,9 +360,11 @@ export function SettingsPage() {
             </h2>
           </div>
           <p className="mt-2 max-w-xl text-[0.8rem] leading-relaxed text-muted-foreground">
-            Open Housetory at its Tailscale HTTPS address in Safari, tap the Share
-            button, then choose <span className="text-foreground">Add to Home Screen</span>.
-            It will open full-screen like a native app.
+            Open Housetory at its trusted HTTPS address — your public domain, a
+            trusted LAN address, or an optional Tailscale address — in Safari, tap
+            the Share button, then choose{" "}
+            <span className="text-foreground">Add to Home Screen</span>. Camera
+            capture and installed-PWA features require this secure context.
           </p>
         </section>
 

@@ -222,8 +222,13 @@ export function SearchPage() {
               </p>
               {mode === "smart" && naturalSearch.data && (
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="brass">
-                    <Sparkles className="size-3" /> Smart interpretation
+                  <Badge variant={naturalSearch.data.mode === "ai" ? "brass" : "outline"}>
+                    {naturalSearch.data.mode === "ai" ? (
+                      <Sparkles className="size-3" />
+                    ) : null}
+                    {naturalSearch.data.mode === "ai"
+                      ? "AI interpretation"
+                      : "Deterministic interpretation"}
                   </Badge>
                   <span className="text-[0.7rem] text-muted-foreground">
                     {naturalSearch.data.interpretation}

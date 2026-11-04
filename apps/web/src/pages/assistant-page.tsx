@@ -111,7 +111,7 @@ export function AssistantPage() {
             variant={
               aiStatus.data?.mode === "local"
                 ? "sage"
-                : aiStatus.data?.mode === "cloud"
+                : aiStatus.data?.mode === "private" || aiStatus.data?.mode === "cloud"
                   ? "brass"
                   : "outline"
             }
@@ -119,9 +119,11 @@ export function AssistantPage() {
             <Sparkles className="size-3" />
             {aiStatus.data?.mode === "local"
               ? "Local AI"
-              : aiStatus.data?.mode === "cloud"
-                ? "Cloud AI"
-                : "Grounded mode"}
+              : aiStatus.data?.mode === "private"
+                ? "Private-network AI"
+                : aiStatus.data?.mode === "cloud"
+                  ? "Remote AI"
+                  : "Grounded mode"}
           </Badge>
           {aiStatus.data?.model && (
             <span className="text-[0.72rem] text-muted-foreground">
@@ -134,7 +136,7 @@ export function AssistantPage() {
             <Badge variant="outline">Model unavailable</Badge>
           )}
           {aiStatus.data?.data_leaves_server && (
-            <Badge variant="brass">Cloud transmission enabled with consent</Badge>
+            <Badge variant="brass">Remote transmission enabled with consent</Badge>
           )}
         </div>
         <p className="mt-2 max-w-2xl text-[0.75rem] leading-relaxed text-muted-foreground">

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,7 +223,7 @@ describe("ScanPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Review 2 suggestions" }),
     ).toBeVisible();
-    expect(screen.getByText(/Cloud vision/)).toBeVisible();
+    expect(screen.getByText(/Remote vision/)).toBeVisible();
     expect(screen.getByText("Camera body")).toBeVisible();
     expect(screen.getByText("USB-C cables")).toBeVisible();
     expect(screen.getAllByLabelText("Quantity")[1]).toHaveValue(3);
@@ -246,6 +246,55 @@ describe("ScanPage", () => {
     });
     expect(await screen.findByText("Scan applied")).toBeVisible();
     expect(screen.getByText(/2 created/)).toBeVisible();
+  });
+
+  it("splits and merges suggestions into reviewed records", async () => {
+    const { container } = renderPage();
+    const cameraInput = container.querySelector<HTMLInputElement>(
+      "input[capture='environment']",
+    );
+    fireEvent.change(cameraInput as HTMLInputElement, {
+      target: {
+        files: [new File([new Uint8Array([1])], "box.png", { type: "image/png" })],
+      },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Upload photograph" }),
+    );
+    await screen.findByRole("heading", { name: "Review 2 suggestions" });
+    const cameraCard = screen
+      .getByRole("heading", { name: "Camera body" })
+      .closest("article") as HTMLElement;
+    await userEvent.click(
+      within(cameraCard).getByRole("button", { name: "Split" }),
+    );
+    await screen.findByRole("heading", { name: "Review 3 suggestions" });
+    expect(screen.getByText(/split record/)).toBeVisible();
+    const splitCard = screen
+      .getByRole("heading", { name: "Camera body (split)" })
+      .closest("article") as HTMLElement;
+    await userEvent.click(
+      within(splitCard).getByRole("button", { name: "Merge with next" }),
+    );
+    await screen.findByRole("heading", { name: "Review 2 suggestions" });
+    expect(
+      screen.getByRole("heading", { name: "Camera body (split) + USB-C cables" }),
+    ).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Approve selected" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [, payload] = vi.mocked(api.post).mock.calls[0] as [
+      string,
+      { entries: Array<{ suggestion_index: number; entry_key: string }> },
+    ];
+    expect(payload.entries).toHaveLength(2);
+    expect(payload.entries[0]).toMatchObject({
+      suggestion_index: 0,
+      entry_key: "0",
+    });
+    expect(payload.entries[1]).toMatchObject({
+      suggestion_index: 0,
+      entry_key: "0-split-1",
+    });
   });
 
   it("edits a suggestion quantity before approval", async () => {

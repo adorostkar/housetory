@@ -390,12 +390,29 @@ export function DocumentDetailPage() {
                 </p>
               </div>
             ) : document.ocr_status === "succeeded" ? (
+              <>
               <p className="mt-3 text-[0.78rem] leading-relaxed text-muted-foreground">
                 {document.ocr_confidence != null
                   ? `${document.ocr_confidence}% mean confidence. `
                   : "Read from embedded PDF text. "}
+                {document.extracted_metadata.processing_mode === "local"
+                  ? "Local AI normalized supported fields. "
+                  : document.extracted_metadata.processing_mode === "private" ||
+                      document.extracted_metadata.processing_mode === "cloud"
+                    ? "Remote AI normalized supported fields. "
+                    : "Deterministic extraction only. "}
                 Check the proposed values before applying them.
               </p>
+              {Array.isArray(document.extracted_metadata.ai_warnings) &&
+              document.extracted_metadata.ai_warnings.length > 0 ? (
+                <div className="mt-2 rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+                  {document.extracted_metadata.ai_warnings
+                    .slice(0, 5)
+                    .map((warning) => String(warning))
+                    .join(" ")}
+                </div>
+              ) : null}
+              </>
             ) : (
               <p className="mt-3 text-[0.78rem] leading-relaxed text-muted-foreground">
                 No OCR run yet. Start one to propose fields from this document.

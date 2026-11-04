@@ -24,6 +24,7 @@ const settings: AiSettings = {
       enabled: true,
       cloud_consent: true,
       is_local: false,
+      endpoint_scope: "remote",
       capabilities: ["text", "vision", "structured", "tools"],
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
@@ -39,6 +40,7 @@ const settings: AiSettings = {
       enabled: true,
       cloud_consent: false,
       is_local: true,
+      endpoint_scope: "local",
       capabilities: ["text", "structured", "vision"],
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
@@ -128,7 +130,7 @@ describe("AiSettingsPage", () => {
     expect(screen.getAllByText("OpenAI household").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Home Ollama").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Local").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Cloud").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Remote/cloud").length).toBeGreaterThan(0);
     expect(screen.getByText("Data consent on")).toBeVisible();
     expect(
       screen.getByText(/Configuring a cloud API key/).closest("p")?.textContent,
@@ -147,6 +149,27 @@ describe("AiSettingsPage", () => {
       "http://host.docker.internal:11434",
     );
     expect(within(dialog).getByText("Enable this provider")).toBeVisible();
+  });
+
+  it("requires consent when an Ollama endpoint is not local", async () => {
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText("Provider", { exact: true }),
+      "ollama",
+    );
+    await userEvent.clear(within(dialog).getByLabelText("Base URL"));
+    await userEvent.type(
+      within(dialog).getByLabelText("Base URL"),
+      "https://ollama.example.com",
+    );
+    expect(
+      within(dialog).getByText(/I consent to sending household data/i),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByText(/This endpoint is not on the Housetory host/i),
+    ).toBeVisible();
   });
 
   it("saves a task-specific model through the task defaults form", async () => {

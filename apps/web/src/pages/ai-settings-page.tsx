@@ -96,8 +96,45 @@ function providerLabel(value: string) {
   return PROVIDERS.find((provider) => provider.value === value)?.label ?? value;
 }
 
-function isLocal(value: string) {
-  return value === "ollama";
+function endpointScope(provider: string, baseUrl: string): "local" | "private" | "remote" {
+  if (provider !== "ollama") return "remote";
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    if (
+      !host ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "host.docker.internal" ||
+      host === "host.containers.internal" ||
+      host.endsWith(".localhost") ||
+      /^127\./.test(host)
+    ) {
+      return "local";
+    }
+    if (
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal") ||
+      host.endsWith(".lan") ||
+      host.endsWith(".home") ||
+      host.endsWith(".ts.net")
+    ) {
+      return "private";
+    }
+    if (!host.includes(".")) return "local";
+    return "remote";
+  } catch {
+    return "remote";
+  }
+}
+
+function scopeLabel(scope: "local" | "private" | "remote") {
+  return scope === "local" ? "Local" : scope === "private" ? "Private network" : "Remote/cloud";
 }
 
 export function AiSettingsPage() {
@@ -322,9 +359,13 @@ export function AiSettingsPage() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-[0.92rem] font-medium">{provider.display_name}</h3>
-                        <Badge variant={provider.is_local ? "sage" : "brass"}>
-                          {provider.is_local ? <Laptop className="size-3" /> : <Cloud className="size-3" />}
-                          {provider.is_local ? "Local" : "Cloud"}
+                        <Badge variant={provider.endpoint_scope === "local" ? "sage" : "brass"}>
+                          {provider.endpoint_scope === "local" ? (
+                            <Laptop className="size-3" />
+                          ) : (
+                            <Cloud className="size-3" />
+                          )}
+                          {scopeLabel(provider.endpoint_scope)}
                         </Badge>
                         <Badge variant={provider.enabled ? "outline" : "secondary"}>
                           {provider.enabled ? "Enabled" : "Disabled"}
@@ -336,7 +377,11 @@ export function AiSettingsPage() {
                       </p>
                       <p className="mt-1 text-[0.7rem] text-muted-foreground">
                         {provider.default_model ?? "No default model"} ·{" "}
-                        {provider.has_api_key ? "API key saved" : provider.is_local ? "No key" : "No API key"}
+                        {provider.has_api_key
+                          ? "API key saved"
+                          : provider.provider === "ollama"
+                            ? "No key"
+                            : "No API key"}
                       </p>
                     </div>
                     <div className="flex gap-1">
@@ -569,7 +614,7 @@ export function AiSettingsPage() {
                 >
                   {PROVIDERS.map((provider) => (
                     <option key={provider.value} value={provider.value}>
-                      {provider.label} {provider.local ? "(local)" : ""}
+                      {provider.label} {provider.local ? "(local or remote endpoint)" : ""}
                     </option>
                   ))}
                 </Select>
@@ -635,7 +680,7 @@ export function AiSettingsPage() {
                 </span>
               </span>
             </label>
-            {!isLocal(draft.provider) && (
+            {endpointScope(draft.provider, draft.base_url) !== "local" && (
               <label className="flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 p-3 text-[0.75rem]">
                 <input
                   type="checkbox"
@@ -644,10 +689,14 @@ export function AiSettingsPage() {
                   onChange={(event) => setDraft((current) => ({ ...current, cloud_consent: event.target.checked }))}
                 />
                 <span>
-                  <span className="font-medium">I consent to sending household data to {providerLabel(draft.provider)}</span>
+                  <span className="font-medium">
+                    I consent to sending household data to {providerLabel(draft.provider)}
+                    {draft.base_url ? ` at ${draft.base_url}` : ""}
+                  </span>
                   <span className="block text-[0.68rem] leading-relaxed text-muted-foreground">
-                    This includes prompts, inventory excerpts, documents and photographs sent
-                    for the selected tasks. You can revoke it here at any time.
+                    This endpoint is not on the Housetory host. Prompts, inventory excerpts,
+                    documents and photographs for selected tasks will leave this server.
+                    You can revoke consent here at any time.
                   </span>
                 </span>
               </label>

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturePath = path.resolve(
   here,
-  "../../../services/api/tests/fixtures/home_inventory.md",
+  "../../../services/api/tests/fixtures/home_inventory_actual.md",
 );
 const photoPath = path.resolve(here, "../public/icons/icon-192.png");
 
@@ -299,11 +299,11 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   expect(detail.item.photos).toHaveLength(0);
 });
 
-test("imports the hierarchy fixture, excludes indexes/templates and prevents duplicate items", async ({
+test("imports the actual Inventory.md, excludes indexes/templates and prevents duplicate items", async ({
   page,
   request,
 }) => {
-  const batch = await uploadFixture(request, `Hierarchy ${Date.now()}`);
+  const batch = await uploadFixture(request, `Actual hierarchy ${Date.now()}`);
   await waitForImport(request, batch.id);
   await page.goto(`/imports/${batch.id}`);
   await expect(page.getByText("Structured hierarchy")).toBeVisible();
@@ -314,13 +314,23 @@ test("imports the hierarchy fixture, excludes indexes/templates and prevents dup
     page.getByRole("heading", { name: "Storage room 2", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Cables and computer parts", exact: true }),
+    page.getByRole("heading", { name: "STO-03", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("STO-03", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Keyboards" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Keyboards (incl. Dell keyboard)", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ethernet cables + long ethernet cable", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Source reference").first()).toBeVisible();
   await expect(page.getByText("Sample item")).toHaveCount(0);
   await expect(page.getByText("Possible duplicate")).toHaveCount(0);
+  const detailBefore = await (
+    await request.get(`/api/v1/imports/${batch.id}`)
+  ).json();
+  expect(detailBefore.metadata.hierarchy_nodes).toBe(8);
+  expect(detailBefore.metadata.hierarchy_items).toBe(52);
+  expect(detailBefore.metadata.ai_used).toBe(false);
 
   await page.getByRole("button", { name: "Approve selected" }).click();
   await expect(page.getByText("Import applied")).toBeVisible({ timeout: 30_000 });
@@ -329,49 +339,67 @@ test("imports the hierarchy fixture, excludes indexes/templates and prevents dup
   const rooms = (await (
     await request.get("/api/v1/rooms")
   ).json()) as { items: Array<{ id: string; name: string; parent_id: string | null }> };
-  const names = new Set(rooms.items.map((room) => room.name));
-  expect(names.has("Storage")).toBeTruthy();
-  expect(names.has("Storage room 2")).toBeTruthy();
-  expect(names.has("Apartment")).toBeTruthy();
-  expect(names.has("Car")).toBeTruthy();
+  const byRoom = new Map(rooms.items.map((room) => [room.name, room]));
+  expect(byRoom.has("Storage")).toBeTruthy();
+  expect(byRoom.get("Storage room 2")?.parent_id).toBe(byRoom.get("Storage")?.id);
+  expect(byRoom.has("Apartment")).toBeFalsy();
+  expect(byRoom.has("Car")).toBeFalsy();
 
   const containers = (await (
     await request.get("/api/v1/containers?limit=200")
   ).json()) as {
     items: Array<{ id: string; legacy_identifier: string | null; name: string }>;
   };
-  const sto03 = containers.items.find(
-    (container) => container.legacy_identifier === "STO-03",
+  const sto = containers.items.filter((container) =>
+    container.legacy_identifier?.startsWith("STO-"),
   );
-  expect(sto03?.name).toBe("Cables and computer parts");
+  expect(sto.map((container) => container.legacy_identifier).sort()).toEqual([
+    "STO-01",
+    "STO-02",
+    "STO-03",
+    "STO-04",
+    "STO-05",
+    "STO-06",
+  ]);
+  const sto03 = sto.find((container) => container.legacy_identifier === "STO-03");
 
   const items = (await (
     await request.get("/api/v1/items?limit=100")
   ).json()) as {
-    items: Array<{ id: string; name: string; quantity: number; location: { id: string } }>;
+    items: Array<{ id: string; name: string; quantity: number; location: { id: string } | null }>;
     total: number;
   };
-  const keyboards = items.items.find((item) => item.name === "Keyboards");
+  const keyboards = items.items.find(
+    (item) => item.name === "Keyboards (incl. Dell keyboard)",
+  );
   expect(keyboards?.quantity).toBe(2);
-  expect(keyboards?.location.id).toBe(sto03?.id);
-  const ethernet = items.items.find((item) => item.name === "Ethernet cables");
-  expect(ethernet?.quantity).toBe(7);
+  expect(keyboards?.location?.id).toBe(sto03?.id);
+  const ethernet = items.items.find(
+    (item) => item.name === "Ethernet cables + long ethernet cable",
+  );
+  expect(ethernet?.quantity).toBe(8);
   expect(items.items.some((item) => item.name === "Sample item")).toBeFalsy();
-  expect(items.items.filter((item) => item.name === "Empty boxes")).toHaveLength(1);
+  expect(items.items.filter((item) => item.name === "Empty boxes (assorted)")).toHaveLength(1);
   const importedTotal = items.total;
+  const purchases = (await (
+    await request.get("/api/v1/purchases")
+  ).json()) as { total: number };
+  expect(purchases.total).toBe(0);
 
-  const duplicateBatch = await uploadFixture(request, `Hierarchy duplicate ${Date.now()}`);
+  const duplicateBatch = await uploadFixture(request, `Actual duplicate ${Date.now()}`);
   await waitForImport(request, duplicateBatch.id);
   await page.goto(`/imports/${duplicateBatch.id}`);
   const keyboardRow = page
     .locator("article")
-    .filter({ has: page.getByRole("heading", { name: "Keyboards" }) })
+    .filter({ has: page.getByRole("heading", { name: "Keyboards (incl. Dell keyboard)" }) })
     .first();
   await expect(keyboardRow.getByText("Possible duplicate")).toBeVisible();
-  await expect(keyboardRow.getByLabel("Action for Keyboards")).toHaveValue("skip");
+  await expect(
+    keyboardRow.getByLabel("Action for Keyboards (incl. Dell keyboard)"),
+  ).toHaveValue("skip");
 
   await keyboardRow
-    .getByRole("checkbox", { name: "Include Keyboards" })
+    .getByRole("checkbox", { name: "Include Keyboards (incl. Dell keyboard)" })
     .check();
   await page.getByRole("button", { name: /Approve .* entr/ }).click();
   await expect(page.getByText("Import applied")).toBeVisible({ timeout: 30_000 });

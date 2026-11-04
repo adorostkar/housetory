@@ -747,7 +747,7 @@ export interface ImportApplyResult {
 
 export interface AiStatus {
   provider: string;
-  mode: "disabled" | "local" | "cloud";
+  mode: "disabled" | "local" | "private" | "cloud";
   source?: "disabled" | "environment" | "database";
   task?: string;
   provider_id?: UUID | null;
@@ -798,7 +798,7 @@ export interface AiRecognition {
   location_id?: UUID | null;
   location_label?: string | null;
   suggestion_duplicates?: AiRecognitionDuplicateGroup[];
-  processing_mode?: "deterministic" | "local" | "cloud" | "unavailable";
+  processing_mode?: "deterministic" | "local" | "private" | "cloud" | "unavailable";
   applied_at?: string | null;
   applied_items?: Array<Record<string, unknown>>;
   created_at: string;
@@ -1046,6 +1046,7 @@ export interface AiProviderRecord {
   enabled: boolean;
   cloud_consent: boolean;
   is_local: boolean;
+  endpoint_scope: "local" | "private" | "remote";
   capabilities: string[];
   created_at: string;
   updated_at: string;
@@ -1095,6 +1096,7 @@ export interface AiRecognitionDuplicateGroup {
 export interface AiRecognitionApplyInput {
   entries: Array<{
     suggestion_index: number;
+    entry_key?: string;
     action: "create" | "update" | "reject";
     proposal?: AiRecognitionSuggestion | null;
     item_id?: UUID | null;
