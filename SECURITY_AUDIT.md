@@ -632,9 +632,9 @@ direct nginx TLS.
 - Fresh migration `c1a7e5d9f320` passes `alembic upgrade head` and `alembic check`.
 - Final dependency/image checks: production `pip-audit` clean, `npm audit` 0
   vulnerabilities, Trivy HIGH/CRITICAL 0 across API, worker, web and database
-  images (after `cryptography` 50.0.2). Backend tests: 169. Frontend: 36.
-  Playwright: 8 over HTTP and 8 over direct HTTPS, including the unchanged actual
-  Inventory.md acceptance path.
+  images (after `cryptography` 50.0.2). Backend tests: 171. Frontend: 42.
+  Playwright: 9 on a disposable HTTP stack, including the unchanged actual
+  Inventory.md acceptance path and quick-search household scoping.
 - Residual risk: real cloud/local-model behavior, rate-limit handling and model
   accuracy were not benchmarked; a real iPhone camera/PWA and physical printer
   were unavailable. The self-signed TLS rehearsal required a test-only browser

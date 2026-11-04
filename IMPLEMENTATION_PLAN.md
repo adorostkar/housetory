@@ -204,7 +204,8 @@ the product-facing numbering below follows the delivery brief.
 - [x] Room browsing, room detail, nested storage place management.
 - [x] Item collection with debounced search, filters, sorting, load more.
 - [x] Item create/edit, photographs, documents, purchase/warranty details.
-- [x] Global search page.
+- [x] Global search page and deterministic quick search for items, containers and
+      locations in the desktop sidebar and mobile overview.
 - [x] Settings: household rename, account details, appearance, storage use,
       sign out, iPhone install guidance.
 - [x] Light/dark/system themes, reduced-motion support.

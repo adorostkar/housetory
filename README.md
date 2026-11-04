@@ -73,6 +73,9 @@ Tailscale is optional.
   attachment resolution, broken-link reporting and vault structure.
 - A read-only grounded assistant using real household tools, with deterministic
   answers when no model is available, plus natural-language smart search.
+- A persistent quick search beneath **Add an item** on desktop and near the top
+  of the mobile overview, with grouped items, containers and locations, keyboard
+  navigation and a link to full results.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
   quantities, duplicate review, destination changes and approved bulk creation.
   Nothing is written automatically.
@@ -101,7 +104,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 169 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 171 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -112,12 +115,12 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 36 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 8 checked-in Playwright workflows pass both over HTTP and direct HTTPS on
-  disposable Compose stacks, covering the Phase 5 container/label/QR flows plus
-  provider configuration against a mocked local Ollama service, camera upload,
-  multi-object review/split/merge and approved creation, the actual Inventory.md
-  hierarchy, duplicate prevention and PWA/service-worker/deep-link routing.
+- 42 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 9 checked-in Playwright workflows pass on disposable Compose stacks, covering
+  the Phase 5 container/label/QR flows, provider configuration against a mocked
+  local Ollama service, camera upload, multi-object review/split/merge and
+  approved creation, the actual Inventory.md hierarchy, duplicate prevention,
+  PWA/service-worker/deep-link routing and desktop/mobile quick search.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -659,6 +662,9 @@ docker compose down                   # stop, keep data
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit
   approve/merge/skip/reject application.
+- Search exposes the deterministic quick-search endpoint for items, containers
+  and fixed locations, plus the existing dedicated search page and explicit
+  natural-language flow.
 - AI endpoints expose provider status, grounded assistant, smart search, photo
   recognition and read-only document relationship suggestions.
 - Containers expose create/bulk/convert, live detail, identifier lookup,

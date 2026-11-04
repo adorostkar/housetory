@@ -339,15 +339,16 @@ but it is no longer the acceptance fixture.
 
 ## 13. Test results
 
-- Backend: **169 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **171 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **36 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **42 Vitest tests** passed; strict TypeScript and production build
   passed.
-- Playwright: **8 workflows** passed on a fresh disposable stack at a separate
+- Playwright: **9 workflows** passed on a fresh disposable stack at a separate
   project, volume names and port. Coverage includes Phase 5 regressions, provider
   configuration with a mocked local Ollama service, camera upload, multi-object
   review/split/merge/approval, the actual Inventory.md hierarchy, duplicate
-  prevention and PWA routing.
+  prevention, PWA routing and desktop/mobile quick-search placement and
+  navigation.
 - Ruff checks passed for API and tests.
 
 ## 14. Security scans
