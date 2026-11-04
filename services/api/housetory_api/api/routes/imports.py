@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ...config import get_settings
 from ...db import get_db
 from ...domain import ImportSourceType, ImportStatus
-from ...models import ImportBatch, ImportEntry, ImportSourceFile
+from ...models import ImportBatch, ImportEntry, ImportSourceFile, Room, StorageLocation
 from ...schemas.imports import (
     ImportApplyRequest,
     ImportApplyResult,
@@ -105,6 +105,8 @@ def create_import(
     file: Annotated[UploadFile | None, File()] = None,
     text: Annotated[str | None, Form()] = None,
     title: Annotated[str | None, Form(max_length=200)] = None,
+    room_id: Annotated[uuid.UUID | None, Form()] = None,
+    location_id: Annotated[uuid.UUID | None, Form()] = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ImportBatchDetail:
@@ -140,6 +142,39 @@ def create_import(
             if suffix in IMAGE_EXTENSIONS
             else ImportSourceType.FILE
         )
+    context: dict[str, str] = {}
+    context_room: Room | None = None
+    context_location: StorageLocation | None = None
+    if room_id is not None:
+        context_room = db.scalar(
+            select(Room).where(Room.id == room_id, Room.household_id == auth.household.id)
+        )
+        if context_room is None:
+            raise ApiError(404, "room_not_found", "Room not found.")
+    if location_id is not None:
+        context_location = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.id == location_id,
+                StorageLocation.household_id == auth.household.id,
+            )
+        )
+        if context_location is None:
+            raise ApiError(404, "location_not_found", "Storage location not found.")
+        if context_room is not None and context_location.room_id != context_room.id:
+            raise ApiError(
+                422,
+                "context_mismatch",
+                "The selected place does not belong to the selected room.",
+            )
+        if context_room is None:
+            context_room = db.get(Room, context_location.room_id)
+    if context_room is not None:
+        context["room_id"] = str(context_room.id)
+        context["room_name"] = context_room.name
+    if context_location is not None:
+        context["location_id"] = str(context_location.id)
+        context["location_name"] = context_location.name
+        context["location_identifier"] = context_location.identifier or ""
     clean_title = (title or "").strip()
     if has_text and not clean_title:
         clean_title = "Pasted notes"
@@ -154,7 +189,7 @@ def create_import(
         original_filename=filename,
         content_type=content_type,
         warnings=[],
-        metadata_json={},
+        metadata_json={"context": context} if context else {},
     )
     db.add(batch)
     try:

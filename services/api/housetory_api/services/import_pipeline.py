@@ -36,6 +36,7 @@ from ..schemas.imports import (
     ImportBatchOut,
     ImportEntryOut,
     ImportSourceFileOut,
+    LocationProposal,
     ProposedItem,
 )
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
@@ -637,6 +638,64 @@ def _apply_ai_hierarchy(db: Session, household_id: uuid.UUID, hierarchy):
     return metadata
 
 
+def _context_destination(
+    db: Session, batch: ImportBatch
+) -> tuple[Room | None, StorageLocation | None]:
+    raw = (batch.metadata_json or {}).get("context") or {}
+    try:
+        room_id = uuid.UUID(str(raw.get("room_id"))) if raw.get("room_id") else None
+        location_id = uuid.UUID(str(raw.get("location_id"))) if raw.get("location_id") else None
+    except (ValueError, TypeError):
+        return None, None
+    room = db.get(Room, room_id) if room_id else None
+    location = db.get(StorageLocation, location_id) if location_id else None
+    if room is not None and room.household_id != batch.household_id:
+        room = None
+    if location is not None and location.household_id != batch.household_id:
+        location = None
+    if location is not None:
+        location_room = db.get(Room, location.room_id)
+        if room is None and location_room is not None:
+            room = location_room
+    return room, location
+
+
+def _apply_context_destination(
+    db: Session, batch: ImportBatch, proposed: ProposedItem
+) -> ProposedItem:
+    room, location = _context_destination(db, batch)
+    if room is None and location is None:
+        return proposed
+    updates: dict[str, Any] = {}
+    sources = dict(proposed.field_sources)
+    if proposed.room is None and room is not None:
+        updates["room"] = LocationProposal(
+            text=room.name,
+            entity_type="room",
+            status="matched",
+            matched_id=room.id,
+            name=room.name,
+            room_id=room.id,
+        )
+        sources["room"] = "inferred"
+    if proposed.storage_location is None and proposed.room is None and location is not None:
+        updates["storage_location"] = LocationProposal(
+            text=location.name,
+            entity_type="storage_location",
+            identifier=location.identifier,
+            status="matched",
+            matched_id=location.id,
+            name=location.name,
+            room_id=location.room_id,
+            parent_id=location.parent_id,
+        )
+        sources["storage_location"] = "inferred"
+    if not updates:
+        return proposed
+    updates["field_sources"] = sources
+    return proposed.model_copy(update=updates)
+
+
 def _create_hierarchy_entries(
     db: Session,
     batch: ImportBatch,
@@ -787,6 +846,7 @@ def process_import_batch(
                 )
                 for position, draft in enumerate(drafts):
                     proposed = to_proposed_item(draft, index)
+                    proposed = _apply_context_destination(db, batch, proposed)
                     duplicates = find_duplicates(db, batch.household_id, proposed)
                     source_file = file_mapping.get(draft.source_file_path or "")
                     entry = ImportEntry(
