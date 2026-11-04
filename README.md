@@ -138,7 +138,7 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 77 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 78 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 17 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -296,5 +296,26 @@ describe("VoicePage", () => {
     expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Upload audio/ })).toBeDisabled();
     expect(screen.getByText(/No transcription task is configured/)).toBeVisible();
+  });
+
+  it("explains unavailable microphone and unsupported upload formats", async () => {
+    const { container } = renderPage("/voice");
+    await userEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+    expect(
+      await screen.findByText(
+        /Microphone access requires HTTPS or localhost|This browser cannot record audio/,
+      ),
+    ).toBeVisible();
+
+    const input = container.querySelector<HTMLInputElement>("input[type='file']");
+    expect(input).not.toBeNull();
+    fireEvent.change(input as HTMLInputElement, {
+      target: {
+        files: [new File(["hello"], "notes.txt", { type: "text/plain" })],
+      },
+    });
+    expect(
+      await screen.findByText(/Choose a WebM, Ogg, WAV, MP3 or M4A audio file/),
+    ).toBeVisible();
   });
 });
