@@ -494,7 +494,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 167 pytest tests against a real PostgreSQL database. The test session
+- Backend: 169 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -510,7 +510,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   rotation, capability validation, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, hierarchical parsing/apply,
   duplicate prevention, legacy identifiers, the unchanged actual Inventory.md
-  upload/paste/apply/re-import path, AI-edit validation against source evidence,
+  upload/paste/apply/re-import path, semantic AI-edit validation against source
+  evidence (counts vs ages/dimensions/model tokens, exact content names, full
+  identifier boundaries),
   endpoint scope/consent/redirect safety, AI provider contracts, grounded
   tools, smart search, recognition fallback, document suggestions,
   prompt-injection resistance, upload content validation, malformed PDF/images,

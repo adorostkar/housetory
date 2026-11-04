@@ -30,7 +30,17 @@ task. Verification used a separate project, separate volume names and port 8092.
    private-network, and other hosts are remote. Private-network and remote
    endpoints require consent; redirects are refused and TLS verification remains
    enabled.
-4. **Remaining gaps closed.** Recognition suggestions have explicit merge/split
+4. **Semantic evidence validation remained too permissive after cycle 1.**
+   Quantity validation accepted any number in the source, so an age (`4 years`)
+   or dimension (`~1m`) could become a count. Name validation used fuzzy
+   similarity, so a fabricated close spelling could pass. Identifier validation
+   used substring membership, so `STO-0` could match `STO-03`. Validation now uses
+   the deterministic count parser (and never overrides an explicit deterministic
+   quantity), exact content/number token preservation for names, and full
+   token-boundary matching for identifiers. Document identifiers and AI search
+   names use boundary/exact matching too. Unsupported edits retain the
+   deterministic fact and emit review warnings.
+5. **Remaining gaps closed.** Recognition suggestions have explicit merge/split
    controls with idempotent entry keys. Natural-language search and document OCR
    now use their selected task models with validated, deterministic fallback. The
    iPhone settings guidance names trusted HTTPS, LAN and optional Tailscale
@@ -329,7 +339,7 @@ but it is no longer the acceptance fixture.
 
 ## 13. Test results
 
-- Backend: **167 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **169 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
 - Frontend: **36 Vitest tests** passed; strict TypeScript and production build
   passed.

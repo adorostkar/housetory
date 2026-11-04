@@ -101,15 +101,16 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 167 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 169 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
   import/duplicate/location review, encrypted provider credentials and rotation,
   provider adapters, task capabilities, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, split/merge idempotency, the
-  unchanged actual Inventory.md upload/paste path, AI-edit validation, endpoint
-  classification/redirect safety, hierarchical imports and exhaustive
+  unchanged actual Inventory.md upload/paste path, semantic AI-edit validation
+  (ages, dimensions, model tokens, similar names and truncated identifiers),
+  endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
 - 36 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 8 checked-in Playwright workflows pass both over HTTP and direct HTTPS on

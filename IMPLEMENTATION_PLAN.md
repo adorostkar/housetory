@@ -261,9 +261,11 @@ the product-facing numbering below follows the delivery brief.
       upload and paste both work without AI, including parenthesized quantities,
       nested context notes, a populated “Box list (template)” and excluded empty
       examples.
-- [x] AI hierarchy/document/search edits are validated against source evidence;
-      unsupported names, quantities, identifiers and entity changes are rejected
-      with reviewable warnings.
+- [x] AI hierarchy/document/search edits are validated against semantic source
+      evidence; ages/dimensions/model tokens cannot become counts, close-spelling
+      fabrications are rejected, and identifiers use full token boundaries.
+      Unsupported names, quantities, identifiers and entity changes retain the
+      deterministic fact and produce reviewable warnings.
 - [x] Index, instruction and empty-template content excluded from inventory.
 - [x] Obsidian ZIP export support through the ordinary Upload file action; the
       dedicated vault tab was removed.
