@@ -154,6 +154,38 @@ the product-facing numbering below follows the delivery brief.
       recognition and mobile walkthroughs; screenshots in
       `docs/PHASE_4_WALKTHROUGH.md`.
 
+## Phase 5 — Physical Storage, Smart Containers & QR Labels ✅
+
+- [x] Extend storage locations with movable container semantics rather than a
+      competing hierarchy: container type, optional name, permanent identifier,
+      notes and summary/label snapshots.
+- [x] Append-only migration for container fields, identifier uniqueness and
+      database-backed per-household/prefix counters.
+- [x] Atomic identifier allocation for single and bulk creation; identifiers are
+      immutable and never reused after deletion.
+- [x] Atomic cross-room movement of containers and descendants, including item
+      room membership, breadcrumbs, counts, search, financial breakdowns, exports,
+      imports and assistant/QR identity.
+- [x] Cycle prevention, self-parent prevention, destination validation, advisory
+      locking, row locking and rollback tests.
+- [x] Explicit conversion of existing storage places into containers preserving
+      UUIDs, items, children, documents and import provenance.
+- [x] Container creation/bulk creation, optional naming, fixed-place identifiers,
+      empty-container filtering, identifier lookup, detail and contents browsing.
+- [x] Authenticated opaque QR destinations, local SVG generation, configurable
+      `QR_BASE_URL`, localhost warnings and manual identifier lookup.
+- [x] Deterministic short/detailed summaries with quantity/category grouping,
+      staleness hashes, manual editing and optional grounded AI headline fallback.
+- [x] Vector PDF label generation with embedded fonts, compact/standard/detailed
+      layouts, verified L7160/L7163/L7165/L7651 presets, large/custom geometry,
+      copies, partial-sheet start positions, calibration offsets and calibration
+      sheets.
+- [x] Reverse search and assistant container queries through existing household
+      tools; imported items can match container identifiers.
+- [x] Backend/frontend/E2E tests, real Compose walkthrough, backup/restore and
+      security scans; screenshots and example PDFs in
+      `docs/PHASE_5_WALKTHROUGH.md`.
+
 ## Supporting platform — Background processing ✅
 
 - [x] PostgreSQL queue with `FOR UPDATE SKIP LOCKED`, retries/backoff, stale job
@@ -202,7 +234,7 @@ the product-facing numbering below follows the delivery brief.
       their tailnet; cannot be done from this repository).
 - [ ] Automated off-site backup scheduling (scripts are ready for cron/systemd).
 
-## Phase 5 — Desktop (next, not started)
+## Phase 6 — Tauri Desktop & Further Polish (next, not started)
 
 - [ ] Scaffold Tauri 2 in `apps/desktop` using the production web build.
 - [ ] macOS window chrome, menu bar, keyboard commands.
@@ -210,7 +242,7 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Code signing/notarization and update strategy.
 - [ ] Desktop-specific tests.
 
-## Phase 6 — Product depth (next)
+## Phase 7 — Product depth (later)
 
 ### Custom fields
 - [ ] CRUD endpoints and validation for custom field definitions and values.
@@ -268,16 +300,16 @@ the product-facing numbering below follows the delivery brief.
 - The API and UI for custom fields are not implemented; the database schema is.
 - Category and tag deletion/editing are API-only.
 - Multi-user membership management is modelled but not exposed.
-- The worker handles maintenance and document OCR; other media jobs are still
-  synchronous.
+- The worker handles maintenance, document OCR, imports and AI recognition;
+  photo thumbnailing and label PDF generation remain synchronous.
 - Password change/reset is not implemented.
 - Login throttling is in-process only; setup can be claimed before first setup.
 - Search is `ILIKE` based; adequate for personal scale but not optimised.
 - No antivirus scanning for documents; PDFs download as attachments. OCR and
   imports parse untrusted files locally and must be kept patched.
 - Backups are unencrypted unless the operator encrypts them.
-- No automated browser E2E suite is checked in; Phases 2 and 3 used manual
-  Playwright walkthroughs with zero console/network failures.
+- A checked-in Playwright suite covers Phase 5 critical workflows; broader
+  accessibility and visual-regression automation is not implemented.
 - Photo drag-reordering and captions are not implemented; users can choose a cover.
 - OCR is heuristic and English-first. It proposes values only and does not parse
   full line-item purchases; review is mandatory.
@@ -290,7 +322,8 @@ the product-facing numbering below follows the delivery brief.
   fallbacks and mocked provider contracts are tested.
 - Obsidian support does not execute plugins, Dataview queries or canvas files,
   and implements a practical YAML frontmatter subset rather than full YAML.
-- Tauri desktop is not started. AI and ownership are now stable enough to begin it.
+- Tauri desktop is not started; it is Phase 6. Physical printer alignment depends
+  on the printer and must be verified with the calibration sheet at 100% scale.
 - Offline mode is an app shell, not offline inventory data.
 
 ## Definition of done for Phase 2
@@ -328,10 +361,25 @@ the product-facing numbering below follows the delivery brief.
 7. Security, cross-household, prompt-injection and archive tests pass. ✅
 8. Desktop/iPhone walkthrough and honest AI limitations documented. ✅
 
+## Definition of done for Phase 5
+
+1. Unnamed boxes receive permanent, concurrent-safe identifiers. ✅
+2. Existing storage places can be converted explicitly without data loss. ✅
+3. Containers move across rooms atomically and keep UUID, identifier, QR,
+   contents, descendants, documents and import provenance. ✅
+4. QR codes are local, opaque and open authenticated live pages. ✅
+5. Summaries contain only actual inventory and have deterministic fallback. ✅
+6. Individual, selected, room and fixed-place labels print on verified A4
+   templates with partial-sheet and calibration support. ✅
+7. Reverse search, assistant tools and imports recognize containers. ✅
+8. Full tests, security scans, backup/restore and desktop/iPhone walkthroughs
+   pass. ✅
+
 ## Recommended next phase
 
-Do not start until explicitly approved. **Phase 5 — Tauri 2 macOS desktop** is the
-strongest next milestone now that the web application, imports and AI surfaces are
-stable. Advanced organisation (custom fields, taxonomy management and multi-user
-sharing) should follow. No AI assistant work is deferred any longer; Phase 4
-delivered the read-only assistant.
+Do not start until explicitly approved. **Phase 6 — Tauri 2 macOS desktop** is the
+strongest next milestone now that the web application, physical containers,
+imports and AI surfaces are stable. Further polish there should include a real
+Ollama benchmark on the target hardware, accessibility automation and visual
+regression tests. Advanced organisation (custom fields, taxonomy management and
+multi-user sharing) should follow in Phase 7.

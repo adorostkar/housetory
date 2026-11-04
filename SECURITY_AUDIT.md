@@ -296,20 +296,21 @@ remained intact. Household rename requires owner role.
 | `pip-audit` production requirements | No known vulnerabilities |
 | `pip-audit` including dev requirements | No known vulnerabilities (pytest upgraded to 9.2.0) |
 | `npm audit` (prod and all) | 0 vulnerabilities |
-| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each (Phase 4 rebuild) |
-| Bandit Python static analysis | No findings after assert cleanup |
+| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each (Phase 5 rebuild) |
+| Bandit Python static analysis | 0 High/Medium; 4 Low subprocess-path notes in the OCR wrapper |
 | Secret scan | No credentials in tracked files; `.env` ignored |
 | Compose port inspection | DB/API/worker unpublished; web loopback only |
 
-Trivy scan date: 2026-11-04 (re-run after the Phase 4 import/AI images).
+Trivy scan date: 2026-11-04 (re-run after the Phase 5 container/label images).
 Image vulnerabilities are time-sensitive.
 
 ## Verification performed
 
 - 67 backend pytest tests at audit sign-off; Phase 2 raised this to 72, Phase 3
-  to 104 and Phase 4 to 128, including new security regressions.
-- 11 frontend Vitest tests at audit sign-off; now 21 after Phases 2–4; strict
-  TypeScript check and production build pass.
+  to 104, Phase 4 to 128 and Phase 5 to 141, including new security regressions.
+- 11 frontend Vitest tests at audit sign-off; now 25 after Phases 2–5; strict
+  TypeScript check and production build pass. Four checked-in Playwright
+  workflows run against a disposable stack.
 - Headless Chromium walkthrough: setup, room/location, item create/edit,
   multipart photo upload, document upload, search, dark mode, settings and mobile
   layouts; zero console errors and zero failed responses.
@@ -497,10 +498,9 @@ Security implications reviewed:
 - AI is disabled by default. Deterministic import, keyword search, smart search and
   assistant answers continue when the provider is unavailable or returns invalid
   output. No models are downloaded automatically.
-- Backend tests increased to 128 and frontend tests to 21. The Phase 4 walkthrough
-  exercised a real Obsidian ZIP import through the Compose worker, inline room
-  creation, grounded assistant answers, smart search, OCR-fallback recognition and
-  mobile layouts with zero console/network errors.
+- Backend tests increased to 141 and frontend tests to 25. The Phase 5 walkthrough
+  exercised container creation/movement, QR, summaries, label PDFs and Phase 4
+  imports on desktop and mobile with zero console/network errors.
 - Final API/worker/web/database images scan with zero HIGH/CRITICAL findings.
   `npm audit` and production `pip-audit` report no known vulnerabilities.
 
@@ -522,6 +522,75 @@ Residual Phase 4 risks:
   data. Backups remain unencrypted unless the operator encrypts them.
 - AI/cloud configuration is environment-driven; changing it requires recreating
   services. Cloud provider retention/training policies are outside this repo.
+
+## Phase 5 follow-up
+
+Phase 5 added movable containers, permanent identifiers, cross-room movement,
+QR identity, deterministic/AI summaries and printable PDF labels. Security and
+integrity implications reviewed:
+
+- Every container, identifier lookup, conversion, move, summary, QR image and
+  label PDF route is authenticated and household-scoped. Cross-household tests
+  cover container detail, QR, movement and label generation; anonymous requests
+  return 401.
+- QR payloads contain only `QR_BASE_URL`/`APP_BASE_URL` plus the location UUID.
+  They contain no inventory data, no sequential identifier is used as
+  authentication, and the destination is an ordinary protected route. There is no
+  anonymous/public QR access.
+- Identifier allocation uses a database counter with atomic
+  `INSERT … ON CONFLICT DO UPDATE … RETURNING`; tests exercise 20 concurrent
+  allocations. Identifiers are unique per household, immutable and never reused
+  after an empty container is deleted. Bulk creation reserves one range in a
+  transaction.
+- Movement takes a per-household transaction advisory lock and deterministic row
+  locks, validates destination room/parent, rejects self-parenting and descendant
+  cycles, and updates the container subtree and linked item room membership in one
+  transaction. Tests cover rollback after a simulated item-update failure,
+  concurrent moves, cycle rejection and cross-household denial.
+- Existing-place conversion is explicit and preserves the UUID, items, children,
+  documents and import provenance. Fixed places are never converted implicitly.
+- Summaries are derived from real item records. The deterministic fallback is
+  authoritative for printed item lines. Optional AI returns a strict headline
+  schema only, uses the existing cloud-consent boundary, rejects digits and falls
+  back on invalid/unavailable output.
+- Label PDFs are generated locally with ReportLab/segno. Text is drawn with text
+  primitives rather than interpolated HTML/XML; QR payloads come from validated
+  base URLs plus a random UUID; content is clipped to each label rectangle; jobs
+  are capped at 1000 labels. PDFs are streamed `private, no-store` with `nosniff`.
+  The generated blob-preview iframe is allowed by CSP via `frame-src 'self'
+  blob:`; all other framing remains blocked by `frame-ancestors 'none'`.
+- DOCX/XLSX XML parsing was moved to `defusedxml` after Bandit identified
+  untrusted ElementTree parsing. Operator-configured AI/QR URLs are validated as
+  absolute http(s) URLs; urllib use is annotated with a narrow `nosec` rationale.
+- The Phase 5 schema is append-only (`4d8e1a6c2b90`). A destructive backup/restore
+  with the new tables/counters was rehearsed; containers, identifiers, items and
+  labels remained usable and the app role returned as a non-superuser.
+- Final API/worker/web/database images scan with zero HIGH/CRITICAL findings.
+  `npm audit`, production `pip-audit` and Bandit report no High/Medium findings.
+  Bandit retains four Low findings around the pre-existing Tesseract/Poppler
+  subprocess wrapper; the commands and arguments are application-controlled, not
+  model- or user-generated.
+- Backend tests increased to 141, frontend to 25, and four checked-in Playwright
+  workflows pass on a disposable Compose stack.
+
+Residual Phase 5 risks:
+
+- Physical printer alignment and a real iPhone camera scan were not performed.
+  PDF geometry and a rendered QR were verified, but local printer scaling/drift
+  remains operator-dependent; use the calibration sheet at 100% scale.
+- Printed text is a snapshot and can become stale. The UI flags it and the QR
+  always opens live data, but a person reading only the label may see old text.
+- Summaries and AI headlines are heuristic/user-editable. AI cannot add printed
+  item lines, but it can still phrase a headline poorly.
+- Container moves are serialized per household; large hierarchies or very large
+  item sets increase lock duration. Limits and transactional rollback prevent
+  corruption but not temporary contention.
+- Label PDFs are generated synchronously in the API process; the 1000-label cap
+  bounds CPU/memory but very large print runs still consume request time.
+- Custom label geometry is user-supplied; server validation prevents paper
+  overflow, but incorrect physical measurements still produce misaligned output.
+- QR availability depends on the configured external base URL and network access.
+  A localhost base is intentionally warned about, not silently rewritten.
 
 ## Conclusion
 

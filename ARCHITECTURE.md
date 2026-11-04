@@ -127,6 +127,8 @@ All application endpoints are versioned under `/api/v1`.
 | Household | `GET /household`, `PATCH /household` |
 | Rooms | `GET/POST /rooms`, `GET/PATCH/DELETE /rooms/{id}` |
 | Storage | `GET/POST /storage-locations`, `GET/PATCH/DELETE /storage-locations/{id}` |
+| Containers | `GET/POST /containers`, `POST /containers/bulk`, `POST /containers/convert`, `GET /containers/lookup/{identifier}`, `GET/PATCH /containers/{id}`, `POST /containers/{id}/move`, `POST /containers/{id}/identifier`, summary regenerate/edit/AI, `GET /containers/{id}/qr.svg`, `GET /containers/qr-config` |
+| Labels | `GET /labels/templates`, `POST /labels/pdf`, `GET/POST /labels/calibration.pdf` |
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
 | Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
@@ -197,7 +199,9 @@ users ──< household_members >── households
   │                                ├──< rooms ──< rooms (optional nesting)
   │                                │      │
   │                                ├──< storage_locations ──< storage_locations (nesting)
+  │                                │      │  (containers, identifiers, summaries)
   │                                │      │
+  │                                │      └──< location_identifier_counters
   │                                ├──< categories ──< categories (optional nesting)
   │                                ├──< tags ──< item_tags >── items
   │                                ├──< purchases ──< items
@@ -225,6 +229,32 @@ Key decisions:
 - **Storage locations** belong to exactly one room and may nest arbitrarily.
   Parent and child must share a room. Deleting a location that still has
   contents is rejected by the API.
+- **Movable containers** reuse the storage-location row and UUID. They add
+  `is_container`, `container_type`, a permanent household-unique `identifier`,
+  optional summary/headline snapshots and label timestamps. A container can be
+  unnamed; its display name falls back to the identifier. Fixed shelves,
+  cabinets and drawers remain non-container locations, optionally with their own
+  identifiers. Converting a place to a container is explicit and preserves its
+  UUID, children, items, documents and import provenance.
+- **Identifier allocation** uses `location_identifier_counters` keyed by
+  household and prefix. A single atomic `INSERT … ON CONFLICT DO UPDATE …
+  RETURNING` reserves a range, including bulk creation. Counters are never
+  decremented, so deleted identifiers are not reused; identifiers never change
+  when a container moves or is renamed.
+- **Container movement** is a single transaction protected by a per-household
+  `pg_advisory_xact_lock` and deterministic `FOR UPDATE` row locks. It validates
+  destination room/parent, self-parenting and descendant cycles, then updates the
+  moved subtree's `room_id`, the moved root's `parent_id`, and all linked items'
+  `room_id`. Counts, search, breadcrumbs, financial breakdowns, exports and the
+  QR payload derive from the updated rows and therefore remain consistent.
+- **Contents summaries** are deterministic snapshots built only from actual item
+  names, quantities and categories. A SHA-256 contents hash detects stale
+  summaries/labels. Optional AI produces only a short headline; item lines remain
+  deterministic. Manual edits are explicit snapshots.
+- **Labels** are generated server-side as vector PDFs. Verified A4 presets store
+  millimetre geometry (L7160/L7163/L7165/L7651); custom geometry is validated
+  against the paper. QR modules and DejaVu fonts are vector-embedded. The user
+  controls layout, copies, partial-sheet start position and calibration offsets.
 - **Items** optionally reference a room and a storage location. A location
   implicitly determines its room. Deleting a room/location does not delete
   items; foreign keys are `SET NULL`.
@@ -271,6 +301,12 @@ item is their sole attachment; shared documents remain available. Deleting a
 purchase detaches its items without deleting them. A deleted receipt or warranty
 document clears the reference through `SET NULL`.
 
+Phase 4 added migration `9b4f2c7a1e3d` for imports/recognition. Phase 5 adds the
+append-only migration `4d8e1a6c2b90` for container fields, identifier uniqueness,
+summary/label snapshots and the identifier-counter table. It extends the storage
+kind check constraint and adds container/identifier checks and indexes without
+rewriting existing migrations or records.
+
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
 `items.purchase_id`, points existing document originals at their safe copies, and
@@ -316,6 +352,12 @@ columns.
   uploads volume; the volume root is also `0700`.
 - Deleted files are removed best-effort after the database commit. Deleting an
   item removes its photographs and any documents only that item used.
+- Container/label PDFs are generated in memory and streamed with
+  `Content-Disposition: attachment`, `private, no-store` and `nosniff`; no
+  generated label is persisted as a public file. Label text is drawn with
+  ReportLab text primitives (no HTML/XML interpolation), QR payloads come from
+  `QR_BASE_URL`/`APP_BASE_URL` plus a random UUID, and output is clipped to each
+  label rectangle.
 - Backups capture the database, uploads volume and private imports volume. Backup
   directories are `0700` and files `0600`; restores verify checksums and refuse
   database or Compose-project mismatches. Uploads and imports archives are
@@ -362,8 +404,8 @@ deployment.
 - React Router 7 with route-level lazy loading and a protected shell.
 - Routes: overview, rooms, room detail, items, item create/edit/detail,
   documents, document detail/OCR review, purchases, warranties, imports, import
-  review/apply, assistant, recognition, keyword/smart search, settings, setup,
-  login, 404.
+  review/apply, containers, container detail, labels, assistant, recognition,
+  keyword/smart search, settings, setup, login, 404.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
@@ -380,6 +422,13 @@ deployment.
   Assistant answers render grounded references and cannot mutate data.
 - Smart search translates deterministic intent into safe filters and retains the
   ordinary keyword mode as a fallback.
+- Container list/detail, bulk creation, explicit fixed-place conversion,
+  cross-room move, deterministic/AI/manual summaries, QR dialog and label
+  builder/preview/calibration use the same typed client and query invalidation
+  model. The label preview is a generated PDF blob in a CSP-permitted iframe.
+- Item cards resolve the nearest container from `location_path`; item detail
+  links to container pages; room place menus link to container pages and show
+  identifiers.
 - Design system: warm ivory/stone light mode, deep charcoal dark mode, system
   SF typography with New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.
@@ -416,7 +465,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 128 pytest tests against a real PostgreSQL database. The test session
+- Backend: 141 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -432,16 +481,24 @@ development and nginx proxies in production. No CORS allowlist is needed.
   grounded tools, smart search, recognition fallback, document suggestions,
   prompt-injection resistance, upload content validation, malformed PDF/images,
   EXIF stripping, traversal filenames, upload size and permissions, archive
-  extraction safety, queue mechanics and migration freshness.
-- Frontend: 21 Vitest tests + Testing Library, including hierarchy utilities,
+  extraction safety, concurrent identifier allocation, non-reuse, conversion,
+  cross-room movement, rollback/cycle prevention, concurrent moves, summary
+  accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
+  offsets/calibration, QR authorization and migration freshness.
+- Frontend: 25 Vitest tests + Testing Library, including hierarchy utilities,
   location paths, nested room cards, the photo lightbox, document cards,
-  warranty labels/status text and calendar-month expiration. TypeScript is
+  warranty labels/status text and calendar-month expiration, plus container
+  creation/bulk/movement dialogs and nested-container resolution. TypeScript is
   checked in strict mode; the production build is part of verification.
+- Browser: 4 checked-in Playwright workflows cover unnamed/bulk creation,
+  cross-room movement, label preview/PDF/calibration downloads, QR and mobile
+  container/label views on a disposable stack.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
-- Not implemented: checked-in browser end-to-end tests (Playwright), load testing,
-  accessibility automation, visual regression tests.
+- Not implemented: automated accessibility audit, load testing and visual
+  regression testing. Playwright is checked in and executable; it is not run in
+  CI without a disposable stack and Chrome.
 
 ## 11. Deliberate limitations
 
@@ -453,6 +510,10 @@ development and nginx proxies in production. No CORS allowlist is needed.
 - The login rate limiter is process-local and resets on restart; it is not a
   substitute for Tailscale ACLs. Setup is not rate-limited and can be claimed
   before the first owner exists.
+- Container summaries/AI headlines can be stale until regenerated; labels show
+  a freshness warning, while the QR always opens live data. Actual physical printer
+  alignment depends on the printer and must be checked with the calibration
+  sheet at 100% scale.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
   attachments but may still contain malicious content when opened in a PDF
   reader. OCR parses untrusted documents locally in the worker; keep the worker

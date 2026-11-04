@@ -11,7 +11,7 @@ honest across multiple currencies.
 Designed for a CPU-only Linux server, reached securely through Tailscale, and
 installed on an iPhone as a PWA.
 
-![Status: AI intelligence and ownership complete](https://img.shields.io/badge/status-AI_intelligence_%2B_ownership_complete-56614f)
+![Status: physical storage and smart labels complete](https://img.shields.io/badge/status-physical_storage_%2B_smart_labels_complete-56614f)
 
 ## What is working
 
@@ -20,6 +20,21 @@ installed on an iPhone as a PWA.
   iPhone.
 - Rooms with optional nesting; shelves, cabinets, drawers and boxes with
   unlimited nesting.
+- Movable containers (boxes, plastic bins, crates, suitcases and bags) with
+  permanent human-readable identifiers such as `BOX-001`, optional names,
+  live contents and private authenticated QR codes.
+- Atomic cross-room moves that preserve the container UUID, identifier, QR
+  identity, contents, nested places, document links and import provenance.
+- Explicit conversion of existing storage places into containers; fixed shelves,
+  cabinets and drawers can also receive optional identifiers such as
+  `SHELF-001`.
+- Deterministic contents summaries with quantities and category grouping, plus an
+  optional AI headline that never replaces the actual item lines.
+- A4 adhesive label printing with verified Avery L7160/L7163/L7165/L7651
+  presets, compact/standard/detailed layouts, custom geometry, partial-sheet
+  starting positions, calibration offsets, PDF preview and vector QR codes.
+- Reverse search by `BOX-001` or item name, with container identifiers shown in
+  item cards, search results and assistant answers.
 - Hierarchy-aware browsing: room and place filters include descendants, counts
   aggregate nested items, and room selections are deep-linkable.
 - Items with search across room, place, category, tag and item fields; quantities,
@@ -68,13 +83,17 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 128 pytest tests pass against PostgreSQL, including the full Alembic chain,
-  authentication/abuse controls, hierarchy semantics, document metadata/search/
-  originals, OCR parsing and retries, shared purchases, warranty calculations,
-  currency separation, exports, archive security, import/duplicate/location
-  review, AI-provider contracts, grounded tools, smart search, recognition,
-  prompt-injection resistance and exhaustive cross-household access checks.
-- 21 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 141 pytest tests pass against PostgreSQL, including the full Alembic chain,
+  authentication/abuse controls, hierarchy semantics, concurrent identifier
+  allocation, container conversion, cross-room movement, rollback, cycles,
+  summaries, PDF geometry, label calibration, archive security,
+  import/duplicate/location review, AI-provider contracts, grounded tools, smart
+  search, recognition, prompt-injection resistance and exhaustive
+  cross-household access checks.
+- 25 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 4 checked-in Playwright workflows pass on a disposable Compose stack, covering
+  unnamed/bulk container creation, cross-room movement, label preview/download,
+  QR and mobile container views.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -85,8 +104,8 @@ stack, not just unit mocks:
   the photo viewer, hierarchy-aware filtering/search, document OCR review,
   shared purchases, warranty dashboards, ownership reports, a real Obsidian ZIP
   import with inline room creation, grounded assistant answers, smart search,
-  OCR-fallback recognition and mobile layouts with no console errors or failed
-  requests.
+  OCR-fallback recognition, Phase 5 container creation/movement, QR labels, PDF
+  label previews and mobile layouts with no console errors or failed requests.
 - Backup permissions, checksum verification, archive extraction safety, target
   checks and a full destructive restore were rehearsed locally, including
   authenticating and retrieving photos/documents after restore.
@@ -98,15 +117,18 @@ in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
 [`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md). The Phase 4 AI,
 import and Obsidian walkthrough is in
-[`docs/PHASE_4_WALKTHROUGH.md`](docs/PHASE_4_WALKTHROUGH.md).
+[`docs/PHASE_4_WALKTHROUGH.md`](docs/PHASE_4_WALKTHROUGH.md), and the Phase 5
+container, QR and label walkthrough is in
+[`docs/PHASE_5_WALKTHROUGH.md`](docs/PHASE_5_WALKTHROUGH.md).
 
 The pre-deployment security review, findings and remaining risks are in
 [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a
 guarantee of production security.
 
 The product is intentionally not finished. Custom fields, category/tag
-management UI, multi-user sharing, password changes, exchange-rate conversion,
-the Tauri macOS shell and a checked-in browser E2E suite are not implemented yet.
+management UI, multi-user sharing, password changes and exchange-rate conversion
+are not implemented yet. The Tauri macOS shell remains Phase 6. A checked-in
+Playwright suite now covers the critical Phase 5 workflows.
 AI extraction is review-only and heuristics remain approximate; no model is
 bundled or downloaded automatically. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
@@ -191,6 +213,7 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `HOUSETORY_APP_USER` | `housetory_app` | DML-only role used by API/worker |
 | `HOUSETORY_APP_PASSWORD` | — | **Required.** Separate app-role password (use hex) |
 | `APP_BASE_URL` | `http://localhost:8080` | Public origin used for cookie/origin checks |
+| `QR_BASE_URL` | empty | Address encoded in printed QR labels; defaults to `APP_BASE_URL` |
 | `COOKIE_SECURE` | `false` | Must be `true` behind Tailscale HTTPS |
 | `WEB_PORT` | `8080` | Loopback-only host port for nginx |
 | `SESSION_TTL_DAYS` | `30` | Login lifetime |
@@ -219,6 +242,13 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 `APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
 refuses to start with an insecure cookie configuration. Production also rejects
 remote plain-HTTP origins and `DEBUG=true`.
+
+Set `QR_BASE_URL` to the address a phone can actually reach, typically your
+Tailscale hostname or LAN address. When it is empty the app uses
+`APP_BASE_URL`. The UI warns before printing if the QR base points at
+`localhost` or another address a phone cannot reach. QR codes are generated
+locally and encode only `/containers/<uuid>`; they require sign-in and household
+authorization.
 
 The API and worker connect with `HOUSETORY_APP_USER`, a non-superuser role with
 DML privileges only. Alembic migrations use the admin role. Existing databases
@@ -406,6 +436,21 @@ npm run test
 npm run build
 ```
 
+Checked-in Playwright workflows use system Chrome and a **disposable** stack.
+They create data and must not be pointed at a live household:
+
+```bash
+cd apps/web
+npm install
+E2E_BASE_URL=http://localhost:8090 \
+E2E_EMAIL=phase5@example.com \
+E2E_PASSWORD=phase-five-password-2026 \
+npx playwright test
+```
+
+The global setup signs in, or performs first-run setup when the stack is empty.
+Set `E2E_CHANNEL` if Chrome is not installed under the default `chrome` channel.
+
 ### Useful Compose commands
 
 ```bash
@@ -437,6 +482,9 @@ docker compose down                   # stop, keep data
   approve/merge/skip/reject application.
 - AI endpoints expose provider status, grounded assistant, smart search, photo
   recognition and read-only document relationship suggestions.
+- Containers expose create/bulk/convert, live detail, identifier lookup,
+  cross-room move, deterministic/AI summary, QR SVG, label templates, label PDF
+  generation and calibration PDFs.
 
 The endpoint inventory and data model are documented in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -457,6 +505,10 @@ compose.dev.yaml        Loopback Postgres exposure for development only
 
 ## Security notes
 
+- Container QR destinations are authenticated, household-scoped and opaque
+  UUID-based. No public or anonymous QR sharing exists.
+- Container identifiers are allocated by a database counter with atomic
+  `INSERT … ON CONFLICT` updates; they are never reused or reassigned.
 - Only nginx binds a host port, and only to loopback. PostgreSQL and FastAPI are
   reachable only inside the Compose network.
 - Web, API, worker and migration containers run non-root. API, worker, web and
