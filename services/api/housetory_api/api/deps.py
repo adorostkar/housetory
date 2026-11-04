@@ -135,6 +135,28 @@ def validate_origin(request: Request) -> None:
     if settings.environment == "development":
         allowed.add("http://localhost:5173")
         allowed.add("http://127.0.0.1:5173")
+
+    # Treat the loopback spellings as equivalent. Browsers, terminal links and
+    # documentation disagree about "localhost" vs "127.0.0.1" vs "[::1]" even
+    # though they reach the same local instance. Only add aliases when the
+    # configured URL itself is loopback, and keep the same scheme/port.
+    parsed_base = urlsplit(settings.app_base_url)
+    if parsed_base.hostname in {"localhost", "127.0.0.1", "::1"}:
+        port = f":{parsed_base.port}" if parsed_base.port else ""
+        scheme = parsed_base.scheme
+        allowed.update(
+            {
+                f"{scheme}://localhost{port}",
+                f"{scheme}://127.0.0.1{port}",
+                f"{scheme}://[::1]{port}",
+            }
+        )
+
     normalized = {value.rstrip("/").lower() for value in allowed if value}
     if origin.rstrip("/").lower() not in normalized:
-        raise ApiError(403, "origin_not_allowed", "This origin is not allowed to change data.")
+        raise ApiError(
+            403,
+            "origin_not_allowed",
+            "This origin is not allowed to change data. Open Housetory at its "
+            "configured address, or add this origin to EXTRA_ORIGINS.",
+        )

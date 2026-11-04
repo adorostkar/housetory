@@ -384,7 +384,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 103 pytest tests against a real PostgreSQL database. The test session
+- Backend: 104 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/

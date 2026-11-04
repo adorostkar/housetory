@@ -53,7 +53,7 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 103 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 104 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, document metadata/search/
   originals, OCR parsing and retries, shared purchases, warranty calculations,
   currency separation, exports and exhaustive cross-household access checks.
@@ -114,6 +114,9 @@ docker compose up --build -d
 
 Then visit <http://localhost:8080>. On first launch Housetory asks you to create
 the single owner account and name your household. No demo data is inserted.
+When `APP_BASE_URL` is a loopback URL, `localhost`, `127.0.0.1` and `[::1]` are
+accepted interchangeably for local setup. If you reach the instance through a
+LAN hostname or another origin, add that exact origin to `EXTRA_ORIGINS`.
 
 Check the deployment:
 

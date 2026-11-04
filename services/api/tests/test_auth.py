@@ -188,6 +188,33 @@ def test_cross_site_mutation_is_rejected(owner_client):
     assert allowed_referer.status_code == 201
 
 
+def test_loopback_origin_spellings_are_equivalent(owner_client, monkeypatch):
+    from housetory_api.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "app_base_url", "http://localhost:8080")
+    for index, origin in enumerate(
+        [
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://[::1]:8080",
+        ]
+    ):
+        response = owner_client.post(
+            "/api/v1/rooms",
+            json={"name": f"Loopback room {index}"},
+            headers={"Origin": origin},
+        )
+        assert response.status_code == 201, (origin, response.text)
+
+    blocked = owner_client.post(
+        "/api/v1/rooms",
+        json={"name": "Remote room"},
+        headers={"Origin": "http://192.168.1.20:8080"},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "origin_not_allowed"
+
+
 def test_api_responses_are_not_cached(owner_client, anon_client):
     authenticated = owner_client.get("/api/v1/overview")
     assert authenticated.headers["cache-control"] == "no-store"

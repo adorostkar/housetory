@@ -165,7 +165,7 @@ authenticated session.
 
 ## Verification
 
-- **103 backend pytest tests passed** against PostgreSQL with the full Alembic
+- **104 backend pytest tests passed** against PostgreSQL with the full Alembic
   migration chain.
 - **20 frontend Vitest tests passed**; strict TypeScript check and production
   build passed.

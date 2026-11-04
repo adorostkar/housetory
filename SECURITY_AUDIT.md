@@ -307,7 +307,7 @@ Image vulnerabilities are time-sensitive.
 ## Verification performed
 
 - 67 backend pytest tests at audit sign-off; Phase 2 raised this to 72 and
-  Phase 3 to 103, including new security regressions.
+  Phase 3 to 104, including new security regressions.
 - 11 frontend Vitest tests at audit sign-off; now 20 after Phases 2 and 3; strict
   TypeScript check and production build pass.
 - Headless Chromium walkthrough: setup, room/location, item create/edit,
@@ -438,7 +438,7 @@ warranties, financial reporting and CSV exports. Security implications reviewed:
   the API and worker start, with a regression test. Restored originals, OCR
   metadata, documents and shared purchases were verified through authenticated
   endpoints; the role remained non-superuser and could not create databases.
-- Backend tests increased to 103 and frontend tests to 20. The Phase 3 walkthrough
+- Backend tests increased to 104 and frontend tests to 20. The Phase 3 walkthrough
   reported zero console errors and failed network requests and exercised real
   Tesseract OCR in Compose.
 
@@ -452,6 +452,17 @@ Residual Phase 3 risks:
 - OCR heuristics can propose wrong amounts/dates/serials. The review gate
   prevents silent inventory changes but does not guarantee extraction accuracy.
 - No exchange-rate conversion is configured; reports cannot combine currencies.
+
+## Post-Phase 3 local-origin fix
+
+Local registration exposed an origin-policy usability defect: opening the
+instance at `http://127.0.0.1:8080` while `APP_BASE_URL` was
+`http://localhost:8080` was rejected as a cross-site mutation. The origin check
+now treats `localhost`, `127.0.0.1` and `[::1]` as equivalent **only when the
+configured app URL is itself loopback**, and only with the same scheme and port.
+Remote LAN/tailnet origins still require an explicit `EXTRA_ORIGINS` entry and
+remain rejected otherwise. A regression test covers all three loopback spellings
+and an unrelated LAN origin. Backend tests are now 104.
 
 ## Conclusion
 
