@@ -87,6 +87,22 @@ def _match_named(question: str, records: list[Any]) -> Any | None:
     return max(matches, key=lambda record: len(record.name), default=None)
 
 
+def _normalize_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _exact_named(value: str, records: list[Any], *, include_identifier: bool = False) -> Any | None:
+    target = _normalize_label(value)
+    for record in records:
+        candidates = [record.name]
+        identifier = getattr(record, "identifier", None)
+        if include_identifier and identifier:
+            candidates.append(f"{record.name} ({identifier})")
+        if any(_normalize_label(candidate) == target for candidate in candidates):
+            return record
+    return None
+
+
 def _extract_after(question: str, markers: tuple[str, ...]) -> str | None:
     lowered = question.lower()
     for marker in markers:
@@ -528,18 +544,18 @@ def _ai_search_plan(
     updated = filters.model_copy(deep=True)
     notes: list[str] = []
     if plan.room_name:
-        match = _match_named(plan.room_name, index.rooms)
+        match = _exact_named(plan.room_name, index.rooms)
         if match:
             updated.room_id, updated.room_name = match.id, match.name
             notes.append(f"room: {match.name}")
     if plan.location_name:
-        match = _match_named(plan.location_name, index.locations)
+        match = _exact_named(plan.location_name, index.locations, include_identifier=True)
         if match:
             updated.location_id = match.id
             updated.location_name = match.identifier or match.name
             notes.append(f"storage place: {updated.location_name}")
     if plan.category_name:
-        match = _match_named(plan.category_name, index.categories)
+        match = _exact_named(plan.category_name, index.categories)
         if match:
             updated.category_id, updated.category_name = match.id, match.name
             notes.append(f"category: {match.name}")

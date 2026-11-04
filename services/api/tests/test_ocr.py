@@ -199,8 +199,8 @@ def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_clien
             "total_cents": 999,
             "currency": "EUR",
             "product_names": ["Espresso Machine", "Invented Rocket"],
-            "invoice_number": "INV-9001",
-            "serial_numbers": ["INVENTED-SERIAL"],
+            "invoice_number": "INV-900",
+            "serial_numbers": ["LM-2026-004"],
             "brand": "La Marzocco",
             "model": None,
         },
@@ -223,4 +223,13 @@ def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_clien
         assert "Invented Rocket" not in metadata["product_names"]
         assert "Espresso Machine" in metadata["product_names"]
         assert metadata["serial_numbers"] == ["LM-2026-0042"]
+        assert metadata["invoice_number"] == "INV-9001"
         assert any("Rejected AI total" in warning for warning in metadata["ai_warnings"])
+        assert any(
+            "invoice_number" in warning and "not present" in warning
+            for warning in metadata["ai_warnings"]
+        )
+        assert any(
+            "serial number" in warning and "not present" in warning
+            for warning in metadata["ai_warnings"]
+        )

@@ -457,8 +457,8 @@ def test_natural_search_rejects_invented_ai_names_and_falls_back(owner_client, m
         assistant_service.ai,
         "complete_json",
         lambda *args, **kwargs: {
-            "room_name": "Invented Penthouse",
-            "category_name": "Invented Category",
+            "room_name": "Attic penthouse",
+            "category_name": "Electronics accessories",
             "q": "camera",
         },
     )

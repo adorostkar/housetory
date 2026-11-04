@@ -5,6 +5,7 @@ exclusively through the explicit review/apply endpoint.
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,11 +37,22 @@ def _normalized(value: str) -> str:
     return " ".join(value.lower().split())
 
 
-def _supported_text(value: str | None, source: str) -> bool:
+def _supported_text(value: str | None, source: str, *, full_token: bool = False) -> bool:
     if value is None:
         return True
     normalized = _normalized(value)
-    return bool(normalized) and normalized in _normalized(source)
+    normalized_source = _normalized(source)
+    if not normalized:
+        return False
+    if not full_token:
+        return normalized in normalized_source
+    return (
+        re.search(
+            rf"(?<![a-z0-9-]){re.escape(normalized)}(?![a-z0-9-])",
+            normalized_source,
+        )
+        is not None
+    )
 
 
 def _apply_ai_document_metadata(
@@ -74,14 +86,16 @@ def _apply_ai_document_metadata(
     warnings: list[str] = []
     accepted = 0
 
-    def accept_text(field_name: str, proposed_value: str | None) -> None:
+    def accept_text(
+        field_name: str, proposed_value: str | None, *, full_token: bool = False
+    ) -> None:
         nonlocal accepted
         if proposed_value is None:
             return
         original = metadata.get(field_name)
         if proposed_value == original:
             return
-        if _supported_text(proposed_value, text):
+        if _supported_text(proposed_value, text, full_token=full_token):
             metadata[field_name] = proposed_value
             accepted += 1
         else:
@@ -90,9 +104,9 @@ def _apply_ai_document_metadata(
             )
 
     accept_text("merchant", proposed.merchant)
-    accept_text("invoice_number", proposed.invoice_number)
-    accept_text("brand", proposed.brand)
-    accept_text("model", proposed.model)
+    accept_text("invoice_number", proposed.invoice_number, full_token=True)
+    accept_text("brand", proposed.brand, full_token=True)
+    accept_text("model", proposed.model, full_token=True)
     if proposed.product_names is not None:
         supported = [name for name in proposed.product_names if _supported_text(name, text)]
         rejected = [name for name in proposed.product_names if name not in supported]
@@ -104,7 +118,11 @@ def _apply_ai_document_metadata(
             metadata["product_names"] = supported
             accepted += 1
     if proposed.serial_numbers is not None:
-        supported = [value for value in proposed.serial_numbers if _supported_text(value, text)]
+        supported = [
+            value
+            for value in proposed.serial_numbers
+            if _supported_text(value, text, full_token=True)
+        ]
         rejected = [value for value in proposed.serial_numbers if value not in supported]
         if rejected:
             warnings.append(

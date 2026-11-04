@@ -336,3 +336,114 @@ def test_actual_inventory_ai_normalizer_rejects_unsupported_edits(owner_client, 
     assert "name" in warnings
     assert "quantity" in warnings
     assert "entity_type" in warnings or "entity type" in warnings
+
+
+def _actual_parsed():
+    text = actual_text()
+    bundle = SourceBundle(
+        documents=[
+            ParsedDocument(
+                relative_path="Inventory.md",
+                title="Home Inventory",
+                text=text,
+                content_type="text/markdown",
+                source_format="markdown",
+            )
+        ],
+        source_format="markdown",
+    )
+    return text, parse_hierarchy(bundle)
+
+
+def test_ai_normalizer_rejects_age_dimension_model_token_and_similar_name_fabrications(
+    owner_client, monkeypatch
+):
+    from housetory_api.schemas.ai import AiStatus
+    from housetory_api.services import import_pipeline
+
+    text, parsed = _actual_parsed()
+    child = next(item for item in parsed.items if item.draft.name.startswith("Child car seat"))
+    wood = next(item for item in parsed.items if item.draft.name.startswith("Long wood pieces"))
+    magsafe = next(item for item in parsed.items if item.draft.name == "MagSafe 2 cable")
+    toner = next(item for item in parsed.items if item.draft.name == "Laser printer toner")
+    status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="test-model",
+        configured=True,
+        available=True,
+        privacy_note="Local test",
+    )
+    monkeypatch.setattr(import_pipeline.ai, "status_for", lambda *args, **kwargs: status)
+    monkeypatch.setattr(import_pipeline.ai, "config_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        import_pipeline.ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "nodes": [],
+            "items": [
+                {"key": child.key, "name": child.draft.name, "quantity": 4},
+                {"key": wood.key, "name": wood.draft.name, "quantity": 1},
+                {"key": magsafe.key, "name": "MagSafe cable", "quantity": 2},
+                {"key": toner.key, "name": "Laser printer tower", "quantity": 3},
+            ],
+            "warnings": [],
+        },
+    )
+    batch = upload_text(owner_client, text)
+    detail = process(owner_client, batch["id"])
+    assert detail["metadata"]["ai_consulted"] is True
+    assert detail["metadata"]["ai_used"] is False
+    assert detail["metadata"]["ai_validation_warnings"]
+    entries = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    assert entries["Child car seat (up to 4 years)"]["proposed"]["quantity"] == 1
+    assert entries["Long wood pieces (~1m)"]["proposed"]["quantity"] == 10
+    assert entries["MagSafe 2 cable"]["proposed"]["quantity"] == 1
+    assert entries["Laser printer toner"]["proposed"]["quantity"] == 3
+    assert "Laser printer tower" not in entries
+    fields = {warning["field"] for warning in detail["metadata"]["ai_validation_warnings"]}
+    assert {"name", "quantity"}.issubset(fields)
+
+
+def test_ai_normalizer_rejects_truncated_identifiers_at_token_boundaries(owner_client, monkeypatch):
+    from housetory_api.schemas.ai import AiStatus
+    from housetory_api.services import import_pipeline
+
+    text, parsed = _actual_parsed()
+    sto03 = next(node for node in parsed.nodes if node.legacy_identifier == "STO-03")
+    status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="test-model",
+        configured=True,
+        available=True,
+        privacy_note="Local test",
+    )
+    monkeypatch.setattr(import_pipeline.ai, "status_for", lambda *args, **kwargs: status)
+    monkeypatch.setattr(import_pipeline.ai, "config_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        import_pipeline.ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "nodes": [
+                {
+                    "key": sto03.key,
+                    "name": sto03.name,
+                    "entity_type": sto03.entity_type,
+                    "legacy_identifier": "STO-0",
+                    "container_type": "box",
+                }
+            ],
+            "items": [],
+            "warnings": [],
+        },
+    )
+    batch = upload_text(owner_client, text)
+    detail = process(owner_client, batch["id"])
+    container = next(entry for entry in detail["entries"] if entry["legacy_identifier"] == "STO-03")
+    assert container["legacy_identifier"] == "STO-03"
+    assert detail["metadata"]["ai_used"] is False
+    assert any(
+        warning["field"] == "legacy_identifier"
+        for warning in detail["metadata"]["ai_validation_warnings"]
+    )

@@ -41,7 +41,7 @@ from ..schemas.imports import (
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import ai, storage
 from .containers import create_containers
-from .import_hierarchy import parse_hierarchy
+from .import_hierarchy import _extract_quantity, parse_hierarchy
 from .import_matching import build_index, find_duplicates, to_proposed_item
 from .import_parse import ProposalDraft, parse_documents
 from .import_readers import read_source_bundle
@@ -361,30 +361,56 @@ CONTAINER_TYPE_WORDS = {
 }
 
 
-def _significant_tokens(value: str) -> set[str]:
-    tokens = set(re.findall(r"[a-z0-9]{3,}", value.lower()))
-    return {token[:-1] if token.endswith("s") and len(token) > 4 else token for token in tokens}
+def _stem(token: str) -> str:
+    if len(token) > 4 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def _name_tokens(value: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", value.lower())
+    return [
+        _stem(token)
+        for token in tokens
+        if token not in STOPWORDS
+        and any(character.isalpha() for character in token)
+        or token.isdigit()
+    ]
 
 
 def _supported_name(proposed: str, original: str, evidence: str) -> bool:
+    """Allow normalization only when no content or number is added or removed.
+
+    Spelling similarity is deliberately not evidence. A rename that changes a
+    word, adds a claim, drops a model number or changes a numeric token is
+    unsupported and must retain the deterministic name.
+    """
     proposed_clean = re.sub(r"\s+", " ", proposed).strip().lower()
     original_clean = re.sub(r"\s+", " ", original).strip().lower()
-    evidence_clean = re.sub(r"\s+", " ", evidence).strip().lower()
-    if not proposed_clean or proposed_clean == original_clean:
+    if not proposed_clean:
+        return False
+    if proposed_clean == original_clean:
         return True
-    if proposed_clean in evidence_clean:
-        return True
-    proposed_tokens = _significant_tokens(proposed) - STOPWORDS
-    if proposed_tokens and proposed_tokens <= _significant_tokens(evidence):
-        return True
-    return SequenceMatcher(None, proposed_clean, original_clean).ratio() >= 0.78
+    # The deterministic original is the source-supported fact. The proposed text
+    # may only differ through case, punctuation/pluralization or stopwords.
+    return _name_tokens(proposed) == _name_tokens(original)
 
 
-def _supported_quantity(proposed: int, original: int, evidence: str) -> bool:
+def _supported_quantity(
+    proposed: int,
+    original: int,
+    evidence: str,
+    *,
+    original_explicit: bool,
+) -> bool:
     if proposed == original:
         return True
-    numbers = {int(value) for value in re.findall(r"\b\d{1,5}\b", evidence)}
-    return proposed in numbers
+    if original_explicit:
+        # The deterministic parser already extracted an explicit count. A model
+        # must not override it using an age, dimension, model token or breakdown.
+        return False
+    _name, semantic_count, _notes = _extract_quantity(evidence)
+    return semantic_count is not None and proposed == semantic_count
 
 
 def _supported_identifier(proposed: str | None, original: str | None, evidence: str) -> bool:
@@ -392,7 +418,18 @@ def _supported_identifier(proposed: str | None, original: str | None, evidence: 
         return True
     if not proposed:
         return original is None
-    return proposed.upper() in evidence.upper()
+    pattern = re.escape(proposed.upper())
+    return (
+        re.search(
+            rf"(?<![A-Z0-9-]){pattern}(?![A-Z0-9-])",
+            evidence.upper(),
+        )
+        is not None
+    )
+
+
+def _contains_word(value: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}s?\b", value.lower()) is not None
 
 
 def _supported_entity_type(proposed: str, original: str, name: str, legacy: str | None) -> bool:
@@ -401,16 +438,18 @@ def _supported_entity_type(proposed: str, original: str, name: str, legacy: str 
     lowered = name.lower()
     if proposed == "container":
         return bool(legacy) or any(
-            word in lowered
+            _contains_word(lowered, word)
             for word in CONTAINER_TYPE_WORDS
             if CONTAINER_TYPE_WORDS[word] == "container"
         )
     if proposed == "location":
         return any(
-            word in lowered for word, kind in CONTAINER_TYPE_WORDS.items() if kind == "location"
+            _contains_word(lowered, word)
+            for word, kind in CONTAINER_TYPE_WORDS.items()
+            if kind == "location"
         )
     if proposed == "room":
-        return "room" in lowered
+        return _contains_word(lowered, "room")
     return False
 
 
@@ -419,7 +458,7 @@ def _supported_container_type(proposed: str | None, original: str | None, eviden
         return True
     if proposed == "other":
         return True
-    return proposed.lower() in evidence.lower()
+    return _contains_word(evidence, proposed)
 
 
 AI_HIERARCHY_SYSTEM = """Normalize the supplied deterministic inventory hierarchy.
@@ -565,7 +604,12 @@ def _apply_ai_hierarchy(db: Session, household_id: uuid.UUID, hierarchy):
         elif item.name != target.draft.name:
             target.draft.name = item.name
             accepted += 1
-        if not _supported_quantity(item.quantity, target.draft.quantity, evidence):
+        if not _supported_quantity(
+            item.quantity,
+            target.draft.quantity,
+            evidence,
+            original_explicit=target.draft.field_sources.get("quantity") == "explicit",
+        ):
             rejected.append(
                 {
                     "key": item.key,
