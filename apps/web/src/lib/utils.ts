@@ -235,3 +235,18 @@ export function roomPath(rooms: Room[], roomId: string): Room[] {
 export function isValidHexColor(value: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(value);
 }
+
+export function addMonthsIso(start: string, months: number): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isFinite(months)) return null;
+  const year = Number(start.slice(0, 4));
+  const month = Number(start.slice(5, 7));
+  const day = Number(start.slice(8, 10));
+  const monthIndex = month - 1 + months;
+  const targetYear = year + Math.floor(monthIndex / 12);
+  const targetMonth = ((monthIndex % 12) + 12) % 12;
+  const daysInMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(day, daysInMonth);
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(
+    targetDay,
+  ).padStart(2, "0")}`;
+}

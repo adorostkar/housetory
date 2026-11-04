@@ -15,6 +15,7 @@ import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
   useCategories,
+  useDocuments,
   useInvalidateInventory,
   useLocations,
   useRooms,
@@ -30,6 +31,11 @@ import type {
   Tag,
 } from "@/lib/types";
 import {
+  CURRENCIES,
+  DOCUMENT_TYPE_LABELS,
+} from "@/lib/labels";
+import {
+  addMonthsIso,
   cn,
   CONDITION_LABELS,
   flattenLocations,
@@ -37,8 +43,6 @@ import {
   LOCATION_KIND_LABELS,
   locationPath,
 } from "@/lib/utils";
-
-const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CHF", "SEK", "NZD", "SGD"];
 const CONDITIONS: ItemCondition[] = ["new", "excellent", "good", "fair", "poor", "unknown"];
 
 function FormSection({
@@ -80,6 +84,7 @@ export function ItemForm({
   const roomsQuery = useRooms();
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
+  const documentsQuery = useDocuments({}, 100);
 
   const [name, setName] = React.useState(item?.name ?? "");
   const [description, setDescription] = React.useState(item?.description ?? "");
@@ -105,10 +110,32 @@ export function ItemForm({
   );
   const [currency, setCurrency] = React.useState(item?.purchase?.currency ?? "USD");
   const [orderNumber, setOrderNumber] = React.useState(item?.purchase?.order_number ?? "");
+  const [purchaseNotes, setPurchaseNotes] = React.useState(item?.purchase?.notes ?? "");
+  const [receiptDocumentId, setReceiptDocumentId] = React.useState(
+    item?.purchase?.receipt_document_id ?? "",
+  );
+  const [currentValue, setCurrentValue] = React.useState(
+    item?.current_value_cents != null
+      ? (item.current_value_cents / 100).toFixed(2)
+      : "",
+  );
+  const [currentValueCurrency, setCurrentValueCurrency] = React.useState(
+    item?.current_value_currency ?? "USD",
+  );
 
   const [warrantyProvider, setWarrantyProvider] = React.useState(item?.warranty?.provider ?? "");
   const [warrantyStart, setWarrantyStart] = React.useState(item?.warranty?.start_date ?? "");
+  const [warrantyDuration, setWarrantyDuration] = React.useState(
+    item?.warranty?.duration_months != null ? String(item.warranty.duration_months) : "",
+  );
   const [warrantyEnd, setWarrantyEnd] = React.useState(item?.warranty?.end_date ?? "");
+  const [warrantyReminder, setWarrantyReminder] = React.useState(
+    item?.warranty?.reminder_days != null ? String(item.warranty.reminder_days) : "",
+  );
+  const [warrantyDocumentId, setWarrantyDocumentId] = React.useState(
+    item?.warranty?.document_id ?? "",
+  );
+  const [warrantyNotes, setWarrantyNotes] = React.useState(item?.warranty?.notes ?? "");
 
   const locationsQuery = useLocations(roomId || undefined);
   const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
@@ -121,8 +148,29 @@ export function ItemForm({
   const priceInvalid =
     price.trim().length > 0 &&
     (localPriceCents === null || !Number.isFinite(localPriceCents) || localPriceCents < 0);
+  const localCurrentValueCents = currentValue.trim()
+    ? Math.round(Number(currentValue) * 100)
+    : null;
+  const currentValueInvalid =
+    currentValue.trim().length > 0 &&
+    (localCurrentValueCents === null ||
+      !Number.isFinite(localCurrentValueCents) ||
+      localCurrentValueCents < 0);
+  const durationNumber = warrantyDuration.trim() ? Number(warrantyDuration) : null;
+  const durationInvalid =
+    warrantyDuration.trim().length > 0 &&
+    (durationNumber === null ||
+      !Number.isInteger(durationNumber) ||
+      durationNumber < 1 ||
+      durationNumber > 1200);
+  const computedWarrantyEnd =
+    (warrantyStart && durationNumber && !durationInvalid
+      ? addMonthsIso(warrantyStart, durationNumber)
+      : warrantyEnd) ?? "";
   const warrantyDatesInvalid =
-    warrantyStart.length > 0 && warrantyEnd.length > 0 && warrantyEnd < warrantyStart;
+    warrantyStart.length > 0 &&
+    computedWarrantyEnd.length > 0 &&
+    computedWarrantyEnd < warrantyStart;
   const quantityInvalid =
     quantity.trim().length === 0 ||
     !/^\d+$/.test(quantity) ||
@@ -154,15 +202,33 @@ export function ItemForm({
   });
 
   const hasPurchase = Boolean(
-    vendor.trim() || purchaseDate || price.trim() || orderNumber.trim(),
+    vendor.trim() ||
+      purchaseDate ||
+      price.trim() ||
+      orderNumber.trim() ||
+      purchaseNotes.trim() ||
+      receiptDocumentId,
   );
   const hasWarranty = Boolean(
-    warrantyProvider.trim() || warrantyStart || warrantyEnd,
+    warrantyProvider.trim() ||
+      warrantyStart ||
+      warrantyEnd ||
+      warrantyDuration ||
+      warrantyReminder ||
+      warrantyDocumentId ||
+      warrantyNotes.trim(),
   );
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || quantityInvalid || priceInvalid || warrantyDatesInvalid) {
+    if (
+      !name.trim() ||
+      quantityInvalid ||
+      priceInvalid ||
+      currentValueInvalid ||
+      durationInvalid ||
+      warrantyDatesInvalid
+    ) {
       return;
     }
     const payload: ItemInput = {
@@ -179,20 +245,28 @@ export function ItemForm({
       tag_ids: tagIds,
       purchase: hasPurchase
         ? {
-            vendor: vendor.trim() || null,
+            merchant: vendor.trim() || null,
             purchase_date: purchaseDate || null,
             price_cents: localPriceCents,
             currency,
             order_number: orderNumber.trim() || null,
+            notes: purchaseNotes.trim() || null,
+            receipt_document_id: receiptDocumentId || null,
           }
         : null,
       warranty: hasWarranty
         ? {
             provider: warrantyProvider.trim() || null,
             start_date: warrantyStart || null,
-            end_date: warrantyEnd || null,
+            duration_months: durationNumber,
+            end_date: durationNumber ? null : warrantyEnd || null,
+            reminder_days: warrantyReminder.trim() ? Number(warrantyReminder) : null,
+            document_id: warrantyDocumentId || null,
+            notes: warrantyNotes.trim() || null,
           }
         : null,
+      current_value_cents: localCurrentValueCents,
+      current_value_currency: currentValueCurrency,
     };
     save.mutate(payload);
   };
@@ -313,11 +387,17 @@ export function ItemForm({
               title="Purchase"
               description="A price and a receipt trail, when you have one."
             >
+              {item?.purchase?.is_shared && (
+                <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+                  This purchase is shared by {item.purchase.item_count} items. Editing
+                  the amount or merchant here updates the single shared record.
+                </div>
+              )}
               {priceInvalid && (
                 <FormError message="Enter a valid price, such as 129.00." />
               )}
               <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="Vendor" htmlFor="purchase-vendor" optional>
+                <Field label="Merchant" htmlFor="purchase-vendor" optional>
                   <Input
                     id="purchase-vendor"
                     maxLength={160}
@@ -362,15 +442,76 @@ export function ItemForm({
                   </Select>
                 </Field>
               </div>
-              <Field label="Order number" htmlFor="purchase-order" optional>
-                <Input
-                  id="purchase-order"
-                  maxLength={120}
-                  value={orderNumber}
-                  onChange={(event) => setOrderNumber(event.target.value)}
-                  placeholder="Order or receipt reference"
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Order number" htmlFor="purchase-order" optional>
+                  <Input
+                    id="purchase-order"
+                    maxLength={120}
+                    value={orderNumber}
+                    onChange={(event) => setOrderNumber(event.target.value)}
+                    placeholder="Order or receipt reference"
+                  />
+                </Field>
+                <Field label="Receipt document" htmlFor="purchase-receipt" optional>
+                  <Select
+                    id="purchase-receipt"
+                    value={receiptDocumentId}
+                    onChange={(event) => setReceiptDocumentId(event.target.value)}
+                  >
+                    <option value="">No receipt linked</option>
+                    {(documentsQuery.data?.items ?? []).map((document) => (
+                      <option key={document.id} value={document.id}>
+                        {document.title} · {DOCUMENT_TYPE_LABELS[document.document_type]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Field label="Purchase notes" htmlFor="purchase-notes" optional>
+                <Textarea
+                  id="purchase-notes"
+                  maxLength={4000}
+                  value={purchaseNotes}
+                  onChange={(event) => setPurchaseNotes(event.target.value)}
+                  placeholder="Return window, delivery details, who paid."
                 />
               </Field>
+            </FormSection>
+
+            <FormSection
+              title="Current value"
+              description="An optional estimate of what this item is worth today. It is kept separate from the purchase price."
+            >
+              {currentValueInvalid && (
+                <FormError message="Enter a valid current value, such as 129.00." />
+              )}
+              <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
+                <Field label="Estimated current value" htmlFor="current-value" optional>
+                  <Input
+                    id="current-value"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    value={currentValue}
+                    onChange={(event) => setCurrentValue(event.target.value)}
+                    placeholder="0.00"
+                  />
+                </Field>
+                <Field label="Currency" htmlFor="current-value-currency">
+                  <Select
+                    id="current-value-currency"
+                    value={currentValueCurrency}
+                    onChange={(event) => setCurrentValueCurrency(event.target.value)}
+                  >
+                    {CURRENCIES.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
             </FormSection>
 
             <FormSection
@@ -389,7 +530,7 @@ export function ItemForm({
                   placeholder="Manufacturer or retailer"
                 />
               </Field>
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid gap-5 sm:grid-cols-3">
                 <Field label="Starts" htmlFor="warranty-start" optional>
                   <Input
                     id="warranty-start"
@@ -398,16 +539,82 @@ export function ItemForm({
                     onChange={(event) => setWarrantyStart(event.target.value)}
                   />
                 </Field>
-                <Field label="Ends" htmlFor="warranty-end" optional>
+                <Field
+                  label="Duration (months)"
+                  htmlFor="warranty-duration"
+                  optional
+                  error={
+                    durationInvalid
+                      ? "Enter a whole number from 1 to 1,200."
+                      : undefined
+                  }
+                >
+                  <Input
+                    id="warranty-duration"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={1200}
+                    step={1}
+                    value={warrantyDuration}
+                    onChange={(event) => setWarrantyDuration(event.target.value)}
+                    placeholder="24"
+                  />
+                </Field>
+                <Field
+                  label="Ends"
+                  htmlFor="warranty-end"
+                  optional
+                  hint={durationNumber ? "Calculated from start + duration" : undefined}
+                >
                   <Input
                     id="warranty-end"
                     type="date"
                     min={warrantyStart || undefined}
-                    value={warrantyEnd}
+                    value={computedWarrantyEnd}
+                    disabled={Boolean(durationNumber)}
                     onChange={(event) => setWarrantyEnd(event.target.value)}
                   />
                 </Field>
               </div>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Reminder (days)" htmlFor="warranty-reminder" optional>
+                  <Input
+                    id="warranty-reminder"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={3650}
+                    step={1}
+                    value={warrantyReminder}
+                    onChange={(event) => setWarrantyReminder(event.target.value)}
+                    placeholder="Uses household setting"
+                  />
+                </Field>
+                <Field label="Warranty document" htmlFor="warranty-document" optional>
+                  <Select
+                    id="warranty-document"
+                    value={warrantyDocumentId}
+                    onChange={(event) => setWarrantyDocumentId(event.target.value)}
+                  >
+                    <option value="">No document linked</option>
+                    {(documentsQuery.data?.items ?? []).map((document) => (
+                      <option key={document.id} value={document.id}>
+                        {document.title} · {DOCUMENT_TYPE_LABELS[document.document_type]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Field label="Coverage notes" htmlFor="warranty-notes" optional>
+                <Textarea
+                  id="warranty-notes"
+                  maxLength={4000}
+                  value={warrantyNotes}
+                  onChange={(event) => setWarrantyNotes(event.target.value)}
+                  placeholder="What the warranty covers, exclusions, claim phone number."
+                />
+              </Field>
             </FormSection>
           </div>
 
@@ -569,7 +776,13 @@ export function ItemForm({
             type="submit"
             size="lg"
             disabled={
-              save.isPending || !name.trim() || quantityInvalid || priceInvalid || warrantyDatesInvalid
+              save.isPending ||
+              !name.trim() ||
+              quantityInvalid ||
+              priceInvalid ||
+              currentValueInvalid ||
+              durationInvalid ||
+              warrantyDatesInvalid
             }
           >
             {save.isPending && <Spinner />}

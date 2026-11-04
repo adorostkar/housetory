@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   CalendarDays,
   ChevronRight,
+  FileText,
   Hash,
   MapPin,
   MoreHorizontal,
@@ -35,6 +36,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useInvalidateInventory, useItem, useLocations } from "@/lib/queries";
 import type { ItemDetail } from "@/lib/types";
+import {
+  WARRANTY_STATUS_LABELS,
+  WARRANTY_STATUS_TONE,
+  warrantyRemainingLabel,
+} from "@/lib/labels";
 import {
   CONDITION_LABELS,
   formatCurrency,
@@ -83,7 +89,7 @@ export function ItemDetailPage() {
   }
 
   const item = itemQuery.data.item;
-  const warrantyStatus = getWarrantyStatus(item);
+  const warrantyStatus = item.warranty?.status ?? "unknown";
   const locationTrail = item.location
     ? locationPath(locationsQuery.data?.items ?? [], item.location.id)
     : [];
@@ -229,6 +235,22 @@ export function ItemDetailPage() {
                 {item.quantity} · {CONDITION_LABELS[item.condition]}
               </InfoRow>
 
+              <InfoRow icon={Wallet} label="Current value">
+                {item.current_value_cents != null ? (
+                  <span>
+                    {formatCurrency(
+                      item.current_value_cents,
+                      item.current_value_currency,
+                    )}
+                    <span className="ml-1.5 text-[0.68rem] text-muted-foreground">
+                      estimate
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Not estimated</span>
+                )}
+              </InfoRow>
+
               {item.serial_number && (
                 <InfoRow icon={Hash} label="Serial">
                   <span className="break-all">{item.serial_number}</span>
@@ -254,11 +276,16 @@ export function ItemDetailPage() {
           </section>
 
           <section className="surface p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <ReceiptText className="size-4 text-muted-foreground" strokeWidth={1.7} />
-              <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                Purchase
-              </h2>
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ReceiptText className="size-4 text-muted-foreground" strokeWidth={1.7} />
+                <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                  Purchase
+                </h2>
+              </div>
+              {item.purchase?.is_shared && (
+                <Badge variant="brass">Shared · {item.purchase.item_count}</Badge>
+              )}
             </div>
             {item.purchase ? (
               <>
@@ -267,11 +294,18 @@ export function ItemDetailPage() {
                     {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
                   </p>
                 )}
+                {item.purchase.is_shared && (
+                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+                    This amount is the shared purchase total, not a per-item price.
+                  </p>
+                )}
                 <dl className="mt-4 space-y-2.5 text-[0.8rem]">
-                  {item.purchase.vendor && (
+                  {(item.purchase.merchant || item.purchase.vendor) && (
                     <div className="flex justify-between gap-4">
-                      <dt className="text-muted-foreground">Vendor</dt>
-                      <dd className="text-right">{item.purchase.vendor}</dd>
+                      <dt className="text-muted-foreground">Merchant</dt>
+                      <dd className="text-right">
+                        {item.purchase.merchant || item.purchase.vendor}
+                      </dd>
                     </div>
                   )}
                   {item.purchase.purchase_date && (
@@ -287,6 +321,37 @@ export function ItemDetailPage() {
                     </div>
                   )}
                 </dl>
+                {item.purchase.notes && (
+                  <p className="mt-3 whitespace-pre-line border-t border-border/60 pt-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+                    {item.purchase.notes}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border/60 pt-3 text-[0.72rem]">
+                  {item.purchase.receipt ? (
+                    <Link
+                      to={`/documents/${item.purchase.receipt.id}`}
+                      className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      <FileText className="size-3.5" />
+                      {item.purchase.receipt.title}
+                    </Link>
+                  ) : (
+                    <Link
+                      to={`/items/${item.id}/edit`}
+                      className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      Link a receipt
+                    </Link>
+                  )}
+                  <Link
+                    to={`/purchases?q=${encodeURIComponent(
+                      item.purchase.merchant || item.purchase.vendor || "",
+                    )}`}
+                    className="ml-auto text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  >
+                    All purchases
+                  </Link>
+                </div>
               </>
             ) : (
               <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
@@ -309,19 +374,12 @@ export function ItemDetailPage() {
                   Warranty
                 </h2>
               </div>
-              <Badge
-                variant={
-                  warrantyStatus.tone === "active"
-                    ? "sage"
-                    : warrantyStatus.tone === "expired"
-                      ? "destructive"
-                      : "outline"
-                }
-              >
-                {warrantyStatus.label}
+              <Badge variant={WARRANTY_STATUS_TONE[warrantyStatus]}>
+                {WARRANTY_STATUS_LABELS[warrantyStatus]}
               </Badge>
             </div>
             {item.warranty ? (
+              <>
               <dl className="space-y-2.5 text-[0.8rem]">
                 {item.warranty.provider && (
                   <div className="flex justify-between gap-4">
@@ -335,13 +393,43 @@ export function ItemDetailPage() {
                     <dd>{formatDate(item.warranty.start_date)}</dd>
                   </div>
                 )}
+                {item.warranty.duration_months != null && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Duration</dt>
+                    <dd>{item.warranty.duration_months} months</dd>
+                  </div>
+                )}
                 {item.warranty.end_date && (
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Ends</dt>
                     <dd>{formatDate(item.warranty.end_date)}</dd>
                   </div>
                 )}
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd className="text-right">
+                    {warrantyRemainingLabel(
+                      item.warranty.days_remaining,
+                      item.warranty.status,
+                    )}
+                  </dd>
+                </div>
               </dl>
+              {item.warranty.notes && (
+                <p className="mt-3 whitespace-pre-line border-t border-border/60 pt-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+                  {item.warranty.notes}
+                </p>
+              )}
+              {item.warranty.document && (
+                <Link
+                  to={`/documents/${item.warranty.document.id}`}
+                  className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-3 text-[0.72rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  <FileText className="size-3.5" />
+                  {item.warranty.document.title}
+                </Link>
+              )}
+              </>
             ) : (
               <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
                 No warranty recorded.{" "}
@@ -394,21 +482,6 @@ function InfoRow({
       <dd className="min-w-0">{children}</dd>
     </div>
   );
-}
-
-function getWarrantyStatus(item: ItemDetail): {
-  label: string;
-  tone: "active" | "expired" | "none";
-} {
-  if (!item.warranty) return { label: "None", tone: "none" };
-  const end = item.warranty.end_date;
-  if (!end) return { label: "Open-ended", tone: "none" };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const endDate = new Date(`${end}T00:00:00`);
-  if (Number.isNaN(endDate.getTime())) return { label: "Recorded", tone: "none" };
-  if (endDate < today) return { label: "Expired", tone: "expired" };
-  return { label: "Active", tone: "active" };
 }
 
 function ItemDetailSkeleton() {

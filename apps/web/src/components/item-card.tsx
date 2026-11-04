@@ -8,7 +8,8 @@ import { cn, CONDITION_LABELS, formatCurrency, formatDate } from "@/lib/utils";
 export function ItemCard({ item, className }: { item: ItemSummary; className?: string }) {
   const photo = item.primary_photo;
   const price = item.purchase?.price_cents;
-  const warrantyEnd = item.warranty?.end_date;
+  const warrantyActive =
+    item.warranty?.status === "active" || item.warranty?.status === "expiring";
 
   return (
     <Link
@@ -41,13 +42,13 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
                 Archived
               </Badge>
             )}
-            {warrantyEnd && new Date(warrantyEnd) > new Date() && (
+            {warrantyActive && (
               <Badge
                 variant="secondary"
                 className="gap-1 bg-background/80 backdrop-blur-md"
               >
                 <ShieldCheck className="size-3 text-sage" />
-                Covered
+                {item.warranty?.status === "expiring" ? "Expiring" : "Covered"}
               </Badge>
             )}
           </div>
@@ -72,8 +73,16 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
             )}
           </div>
           {typeof price === "number" && (
-            <p className="shrink-0 text-[0.8rem] font-medium tabular-nums text-foreground/75">
+            <p
+              className="shrink-0 text-right text-[0.8rem] font-medium tabular-nums text-foreground/75"
+              title={item.purchase?.is_shared ? "Shared purchase total" : "Purchase price"}
+            >
               {formatCurrency(price, item.purchase?.currency)}
+              {item.purchase?.is_shared && (
+                <span className="block text-[0.6rem] font-normal text-muted-foreground">
+                  shared
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -149,6 +158,7 @@ export function ItemRow({ item }: { item: ItemSummary }) {
           {item.purchase?.price_cents != null && (
             <span className="text-muted-foreground/70">
               · {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
+              {item.purchase.is_shared ? " shared" : ""}
             </span>
           )}
         </p>

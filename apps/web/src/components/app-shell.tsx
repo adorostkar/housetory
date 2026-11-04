@@ -1,4 +1,13 @@
-import { DoorOpen, House, Package, Plus, Search } from "lucide-react";
+import {
+  DoorOpen,
+  FileText,
+  House,
+  Package,
+  Plus,
+  ReceiptText,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import { Suspense, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -13,6 +22,9 @@ const primaryNav = [
   { to: "/", label: "Overview", icon: House, end: true },
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
+  { to: "/documents", label: "Documents", icon: FileText, end: false },
+  { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
+  { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
 
@@ -20,6 +32,7 @@ const mobileNav = [
   { to: "/", label: "Home", icon: House, end: true },
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
+  { to: "/documents", label: "Docs", icon: FileText, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
 

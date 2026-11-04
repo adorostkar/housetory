@@ -31,19 +31,36 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
   const [householdName, setHouseholdName] = React.useState(session.data?.household?.name ?? "");
+  const [reminderDays, setReminderDays] = React.useState(
+    String(session.data?.household?.warranty_reminder_days ?? 30),
+  );
 
   React.useEffect(() => {
-    if (session.data?.household) setHouseholdName(session.data.household.name);
+    if (session.data?.household) {
+      setHouseholdName(session.data.household.name);
+      setReminderDays(String(session.data.household.warranty_reminder_days));
+    }
   }, [session.data?.household]);
 
-  const rename = useMutation({
-    mutationFn: () => api.patch<Household>("/household", { name: householdName.trim() }),
+  const reminderInvalid =
+    !/^\d+$/.test(reminderDays) ||
+    Number(reminderDays) < 1 ||
+    Number(reminderDays) > 3650;
+
+  const saveHousehold = useMutation({
+    mutationFn: () =>
+      api.patch<Household>("/household", {
+        name: householdName.trim(),
+        warranty_reminder_days: Number(reminderDays),
+      }),
     onSuccess: (household) => {
       queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
         current ? { ...current, household } : current,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.session });
-      toast.success("Household name updated");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.warranties });
+      toast.success("Household settings updated");
     },
   });
 
@@ -60,8 +77,12 @@ export function SettingsPage() {
   const user = session.data?.user;
   const household = session.data?.household;
   const isOwner = session.data?.role === "owner";
-  const fieldErrors = rename.error instanceof ApiError ? rename.error.fields : undefined;
-  const generalError = rename.error && !fieldErrors ? getApiErrorMessage(rename.error) : null;
+  const fieldErrors =
+    saveHousehold.error instanceof ApiError ? saveHousehold.error.fields : undefined;
+  const generalError =
+    saveHousehold.error && !fieldErrors
+      ? getApiErrorMessage(saveHousehold.error)
+      : null;
   const storageBytes = (overview.data?.photo_bytes ?? 0) + (overview.data?.document_bytes ?? 0);
 
   return (
@@ -81,24 +102,41 @@ export function SettingsPage() {
             The name that appears across your home.
           </p>
           <form
-            className="mt-5 flex max-w-md flex-col gap-4 sm:flex-row sm:items-end"
+            className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end"
             onSubmit={(event) => {
               event.preventDefault();
-              if (householdName.trim()) rename.mutate();
+              if (householdName.trim() && !reminderInvalid) saveHousehold.mutate();
             }}
           >
             <Field
               label="Household name"
               htmlFor="household-name"
-              className="flex-1"
               error={fieldErrors?.name}
             >
               <Input
                 id="household-name"
                 value={householdName}
                 maxLength={120}
-                disabled={!isOwner || rename.isPending}
+                disabled={!isOwner || saveHousehold.isPending}
                 onChange={(event) => setHouseholdName(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Warranty reminder"
+              htmlFor="warranty-reminder-days"
+              hint="Days before expiry"
+              error={reminderInvalid ? "Enter 1–3,650 days." : undefined}
+            >
+              <Input
+                id="warranty-reminder-days"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={3650}
+                step={1}
+                value={reminderDays}
+                disabled={!isOwner || saveHousehold.isPending}
+                onChange={(event) => setReminderDays(event.target.value)}
               />
             </Field>
             <Button
@@ -106,19 +144,21 @@ export function SettingsPage() {
               variant="outline"
               disabled={
                 !isOwner ||
-                rename.isPending ||
+                saveHousehold.isPending ||
                 !householdName.trim() ||
-                householdName.trim() === household?.name
+                reminderInvalid ||
+                (householdName.trim() === household?.name &&
+                  Number(reminderDays) === household?.warranty_reminder_days)
               }
             >
-              {rename.isPending && <Spinner />}
+              {saveHousehold.isPending && <Spinner />}
               Save
             </Button>
           </form>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
           {!isOwner && (
             <p className="mt-2 text-[0.72rem] text-muted-foreground">
-              Only the household owner can rename it.
+              Only the household owner can change these settings.
             </p>
           )}
         </section>

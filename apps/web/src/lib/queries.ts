@@ -3,13 +3,19 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, buildQuery } from "@/lib/api";
 import type {
   CategoryList,
+  DocumentList,
+  DocumentRecord,
+  FinancialOverview,
   ItemDetailResponse,
   ItemList,
   Overview,
+  PurchaseList,
   RoomList,
   SessionState,
   StorageLocationList,
   TagList,
+  WarrantyList,
+  WarrantyStatus,
 } from "@/lib/types";
 
 export const queryKeys = {
@@ -21,6 +27,13 @@ export const queryKeys = {
   tags: ["tags"] as const,
   items: ["items"] as const,
   item: (itemId: string) => ["item", itemId] as const,
+  documents: ["documents"] as const,
+  document: (documentId: string) => ["document", documentId] as const,
+  purchases: ["purchases"] as const,
+  purchase: (purchaseId: string) => ["purchase", purchaseId] as const,
+  warranties: ["warranties"] as const,
+  warrantyList: (status: string) => ["warranties", status] as const,
+  financial: ["financial"] as const,
 };
 
 export function useSession() {
@@ -118,6 +131,68 @@ export function useItem(itemId: string | undefined) {
   });
 }
 
+export interface DocumentFilters {
+  q?: string;
+  type?: string;
+  item_id?: string;
+  merchant?: string;
+  date_from?: string;
+  date_to?: string;
+  ocr_status?: string;
+  sort?: "created_desc" | "created_asc" | "document_date_desc" | "title_asc";
+}
+
+export function useDocuments(filters: DocumentFilters = {}, limit = 100) {
+  return useQuery({
+    queryKey: [...queryKeys.documents, filters, limit],
+    queryFn: () =>
+      api.get<DocumentList>(`/documents${buildQuery({ ...filters, limit })}`),
+  });
+}
+
+export function useDocument(documentId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.document(documentId ?? ""),
+    queryFn: () => api.get<DocumentRecord>(`/documents/${documentId}`),
+    enabled: Boolean(documentId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as DocumentRecord | undefined)?.ocr_status;
+      return status === "queued" || status === "processing" ? 2000 : false;
+    },
+  });
+}
+
+export interface PurchaseFilters {
+  q?: string;
+  item_id?: string;
+  currency?: string;
+  date_from?: string;
+  date_to?: string;
+  sort?: "purchase_date_desc" | "purchase_date_asc" | "created_desc" | "price_desc";
+}
+
+export function usePurchases(filters: PurchaseFilters = {}, limit = 100) {
+  return useQuery({
+    queryKey: [...queryKeys.purchases, filters, limit],
+    queryFn: () =>
+      api.get<PurchaseList>(`/purchases${buildQuery({ ...filters, limit })}`),
+  });
+}
+
+export function useWarranties(status: WarrantyStatus | "all" = "all") {
+  return useQuery({
+    queryKey: queryKeys.warrantyList(status),
+    queryFn: () => api.get<WarrantyList>(`/warranties${buildQuery({ status })}`),
+  });
+}
+
+export function useFinancialOverview() {
+  return useQuery({
+    queryKey: queryKeys.financial,
+    queryFn: () => api.get<FinancialOverview>("/financial-overview"),
+  });
+}
+
 export function useInvalidateInventory() {
   const queryClient = useQueryClient();
   return () => {
@@ -128,6 +203,12 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: ["item"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.categories });
     void queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.documents });
+    void queryClient.invalidateQueries({ queryKey: ["document"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.purchases });
+    void queryClient.invalidateQueries({ queryKey: ["purchase"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.warranties });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.financial });
   };
 }
 

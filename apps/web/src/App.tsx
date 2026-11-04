@@ -38,6 +38,20 @@ const ItemEditPage = React.lazy(() =>
 const ItemDetailPage = React.lazy(() =>
   import("@/pages/item-detail-page").then((module) => ({ default: module.ItemDetailPage })),
 );
+const DocumentsPage = React.lazy(() =>
+  import("@/pages/documents-page").then((module) => ({ default: module.DocumentsPage })),
+);
+const DocumentDetailPage = React.lazy(() =>
+  import("@/pages/document-detail-page").then((module) => ({
+    default: module.DocumentDetailPage,
+  })),
+);
+const PurchasesPage = React.lazy(() =>
+  import("@/pages/purchases-page").then((module) => ({ default: module.PurchasesPage })),
+);
+const WarrantiesPage = React.lazy(() =>
+  import("@/pages/warranties-page").then((module) => ({ default: module.WarrantiesPage })),
+);
 const SearchPage = React.lazy(() =>
   import("@/pages/search-page").then((module) => ({ default: module.SearchPage })),
 );
@@ -116,6 +130,10 @@ export default function App() {
             <Route path="items/new" element={<ItemNewPage />} />
             <Route path="items/:itemId" element={<ItemDetailPage />} />
             <Route path="items/:itemId/edit" element={<ItemEditPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="documents/:documentId" element={<DocumentDetailPage />} />
+            <Route path="purchases" element={<PurchasesPage />} />
+            <Route path="warranties" element={<WarrantiesPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />
