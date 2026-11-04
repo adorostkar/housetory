@@ -65,6 +65,11 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        if request.url.path.startswith(settings.api_prefix):
+            # Inventory JSON and error payloads can contain private household
+            # details. File responses set their own explicit no-store headers.
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     return app

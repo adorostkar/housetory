@@ -1,4 +1,4 @@
-def test_deleting_item_removes_exclusive_photos_and_documents(owner_client):
+def test_deleting_item_removes_exclusive_photos_and_documents(owner_client, pdf_bytes):
     from io import BytesIO
 
     from PIL import Image
@@ -15,7 +15,7 @@ def test_deleting_item_removes_exclusive_photos_and_documents(owner_client):
 
     document_response = owner_client.post(
         f"/api/v1/items/{item['id']}/documents",
-        files={"file": ("manual.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf")},
+        files={"file": ("manual.pdf", pdf_bytes, "application/pdf")},
         data={"title": "Printer manual"},
     )
     assert document_response.status_code == 201

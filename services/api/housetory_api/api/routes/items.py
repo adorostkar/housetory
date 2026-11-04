@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -118,8 +118,7 @@ def _resolve_location(
 def _apply_purchase(item: Item, payload: PurchaseIn, *, replace: bool) -> None:
     if replace or item.purchase is None:
         item.purchase = Purchase(currency="USD")
-    purchase = item.purchase
-    assert purchase is not None
+    purchase = cast(Purchase, item.purchase)
     for field in payload.model_fields_set:
         setattr(purchase, field, getattr(payload, field))
 
@@ -127,8 +126,7 @@ def _apply_purchase(item: Item, payload: PurchaseIn, *, replace: bool) -> None:
 def _apply_warranty(item: Item, payload: WarrantyIn, *, replace: bool) -> None:
     if replace or item.warranty is None:
         item.warranty = Warranty()
-    warranty = item.warranty
-    assert warranty is not None
+    warranty = cast(Warranty, item.warranty)
     for field in payload.model_fields_set:
         setattr(warranty, field, getattr(payload, field))
     if (
@@ -462,8 +460,9 @@ def get_photo_file(
         path,
         media_type=photo.content_type,
         headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
+            "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
         },
     )
 
@@ -482,8 +481,9 @@ def get_photo_thumbnail(
         path,
         media_type=media_type,
         headers={
-            "Cache-Control": "private, max-age=31536000, immutable",
+            "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
         },
     )
 
@@ -555,15 +555,11 @@ def get_document_file(
 ) -> FileResponse:
     document = _authorized_document(db, auth.household.id, document_id)
     path = storage.resolve_key(document.storage_key)
-    inline = document.content_type in {"application/pdf", "image/jpeg", "image/png", "image/webp"}
     headers = {
-        "Cache-Control": "private, max-age=86400",
+        "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": (
-            f'inline; filename="{document.original_filename}"'
-            if inline
-            else f'attachment; filename="{document.original_filename}"'
-        ),
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Content-Disposition": f'attachment; filename="{document.original_filename}"',
     }
     return FileResponse(path, media_type=document.content_type, headers=headers)
 

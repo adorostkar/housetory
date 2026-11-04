@@ -1,14 +1,14 @@
 import os
 import re
-import shutil
 import tempfile
 import uuid
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pypdf import PdfReader
 
 from ..api.errors import ApiError
 from ..config import get_settings
@@ -17,12 +17,15 @@ try:  # HEIC support matters for photos taken on an iPhone.
     from pillow_heif import register_heif_opener
 
     register_heif_opener()
-    HEIF_SUPPORTED = True
 except ImportError:  # pragma: no cover - optional at runtime
-    HEIF_SUPPORTED = False
+    pass
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
 warnings.simplefilter("error", Image.DecompressionBombWarning)
+
+# Decoder allowlist. Image.open() otherwise sniffs every registered codec,
+# including formats this application never accepts.
+SUPPORTED_IMAGE_FORMATS = ("JPEG", "PNG", "WEBP", "HEIF")
 
 PHOTO_FORMATS = {
     "JPEG": ("image/jpeg", "jpg"),
@@ -65,11 +68,21 @@ class StoredDocument:
 def _root() -> Path:
     root = get_settings().resolved_uploads_dir
     root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
     return root
 
 
 def ensure_storage() -> None:
     _root()
+
+
+def _mkdir_private(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+
+
+def _chmod_file(path: Path) -> None:
+    os.chmod(path, 0o600)
 
 
 def _safe_filename(filename: str | None) -> str:
@@ -78,10 +91,21 @@ def _safe_filename(filename: str | None) -> str:
     return candidate[:255]
 
 
+def _filename_with_extension(filename: str | None, extension: str) -> str:
+    safe = _safe_filename(filename)
+    stem = PurePosixPath(safe).stem or "document"
+    suffix = f".{extension}" if not extension.startswith(".") else extension
+    return f"{stem[: 255 - len(suffix)]}{suffix}"
+
+
+def _open_image(path: Path) -> Image.Image:
+    return Image.open(path, formats=list(SUPPORTED_IMAGE_FORMATS))
+
+
 def _write_temp(upload: UploadFile, max_bytes: int) -> tuple[Path, int]:
     root = _root()
     staging = root / ".staging"
-    staging.mkdir(parents=True, exist_ok=True)
+    _mkdir_private(staging)
     fd, temp_name = tempfile.mkstemp(prefix="upload-", dir=staging)
     temp_path = Path(temp_name)
     size = 0
@@ -119,7 +143,7 @@ def store_photo(item_id: uuid.UUID, upload: UploadFile) -> StoredPhoto:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             try:
-                with Image.open(temp_path) as image:
+                with _open_image(temp_path) as image:
                     image_format = image.format
                     width, height = image.size
                     image.verify()
@@ -141,32 +165,35 @@ def store_photo(item_id: uuid.UUID, upload: UploadFile) -> StoredPhoto:
         content_type = "image/jpeg" if normalized_heif else PHOTO_FORMATS[image_format][0]
         extension = "jpg" if normalized_heif else PHOTO_FORMATS[image_format][1]
 
-        base_dir.mkdir(parents=True, exist_ok=True)
+        _mkdir_private(base_dir)
         original_path = base_dir / f"{photo_id}.{extension}"
         thumbnail_path = base_dir / f"{photo_id}.webp"
 
-        with Image.open(temp_path) as image:
-            image = ImageOps.exif_transpose(image)
-            if normalized_heif:
-                if image.mode not in ("RGB", "L"):
-                    image = image.convert("RGB")
-                image.save(original_path, format="JPEG", quality=90, optimize=True)
-            else:
-                # Preserve the exact uploaded bytes for formats browsers can render.
-                if image_format == "JPEG" and image.mode not in ("RGB", "L", "CMYK"):
-                    image = image.convert("RGB")
-                image.save(
-                    original_path,
-                    format="JPEG" if image_format == "JPEG" else image_format,
-                    **({"quality": 90, "optimize": True} if image_format == "JPEG" else {}),
-                )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with _open_image(temp_path) as image:
+                image = ImageOps.exif_transpose(image)
+                if normalized_heif:
+                    if image.mode not in ("RGB", "L"):
+                        image = image.convert("RGB")
+                    image.save(original_path, format="JPEG", quality=90, optimize=True)
+                elif image_format == "JPEG":
+                    if image.mode not in ("RGB", "L", "CMYK"):
+                        image = image.convert("RGB")
+                    image.save(original_path, format="JPEG", quality=90, optimize=True)
+                elif image_format == "PNG":
+                    image.save(original_path, format="PNG", optimize=True)
+                else:
+                    image.save(original_path, format="WEBP", quality=90, method=4)
 
-            thumb = image.copy()
-            thumb.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
-            if thumb.mode not in ("RGB", "RGBA"):
-                thumb = thumb.convert("RGBA")
-            thumb.save(thumbnail_path, format="WEBP", quality=82, method=4)
+                thumb = image.copy()
+                thumb.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+                if thumb.mode not in ("RGB", "RGBA"):
+                    thumb = thumb.convert("RGBA")
+                thumb.save(thumbnail_path, format="WEBP", quality=82, method=4)
 
+        _chmod_file(original_path)
+        _chmod_file(thumbnail_path)
         final_size = original_path.stat().st_size
         relative_original = original_path.relative_to(_root()).as_posix()
         relative_thumbnail = thumbnail_path.relative_to(_root()).as_posix()
@@ -189,6 +216,77 @@ def store_photo(item_id: uuid.UUID, upload: UploadFile) -> StoredPhoto:
         temp_path.unlink(missing_ok=True)
 
 
+def _validate_pdf(path: Path) -> None:
+    try:
+        reader = PdfReader(str(path), strict=False)
+        if reader.is_encrypted:
+            raise ApiError(
+                422,
+                "encrypted_document",
+                "Encrypted PDFs are not supported. Upload an unlocked copy.",
+            )
+        if len(reader.pages) < 1:
+            raise ApiError(422, "invalid_document", "This PDF contains no pages.")
+    except ApiError:
+        raise
+    except Exception as exc:  # pypdf raises several parser-specific exceptions
+        raise ApiError(422, "invalid_document", "This PDF file appears to be invalid.") from exc
+
+
+def _normalize_document_image(
+    temp_path: Path,
+    destination_dir: Path,
+    document_id: uuid.UUID,
+    original_filename: str | None,
+) -> tuple[Path, str, str]:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with _open_image(temp_path) as image:
+                image_format = image.format
+                width, height = image.size
+                image.verify()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ApiError(
+            422, "invalid_document", "This image document appears to be invalid."
+        ) from exc
+
+    if image_format not in PHOTO_FORMATS:
+        raise ApiError(
+            422,
+            "unsupported_document_type",
+            "Document images must be JPEG, PNG, WebP, or HEIC files.",
+        )
+    if width < 1 or height < 1 or width * height > 40_000_000:
+        raise ApiError(422, "image_dimensions", "The image dimensions are not supported.")
+
+    _mkdir_private(destination_dir)
+    if image_format in {"HEIF", "HEIC"}:
+        extension, content_type = "jpg", "image/jpeg"
+    else:
+        extension, content_type = PHOTO_FORMATS[image_format][1], PHOTO_FORMATS[image_format][0]
+
+    destination = destination_dir / f"{document_id}.{extension}"
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with _open_image(temp_path) as image:
+                image = ImageOps.exif_transpose(image)
+                if content_type == "image/jpeg":
+                    if image.mode not in ("RGB", "L", "CMYK"):
+                        image = image.convert("RGB")
+                    image.save(destination, format="JPEG", quality=90, optimize=True)
+                elif image_format == "PNG":
+                    image.save(destination, format="PNG", optimize=True)
+                else:
+                    image.save(destination, format="WEBP", quality=90, method=4)
+        _chmod_file(destination)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return destination, content_type, _filename_with_extension(original_filename, extension)
+
+
 def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocument:
     settings = get_settings()
     declared_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
@@ -206,9 +304,7 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
     destination = destination_dir / f"{document_id}{extension}"
     try:
         if extension == ".pdf":
-            with temp_path.open("rb") as handle:
-                if handle.read(5) != b"%PDF-":
-                    raise ApiError(422, "invalid_document", "This PDF file appears to be invalid.")
+            _validate_pdf(temp_path)
         elif extension == ".txt":
             try:
                 temp_path.read_text(encoding="utf-8")
@@ -217,16 +313,22 @@ def store_document(household_id: uuid.UUID, upload: UploadFile) -> StoredDocumen
                     422, "invalid_document", "Text documents must be UTF-8 encoded."
                 ) from exc
         else:
-            try:
-                with Image.open(temp_path) as image:
-                    image.verify()
-            except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-                raise ApiError(
-                    422, "invalid_document", "This image document appears to be invalid."
-                ) from exc
+            destination, declared_type, original_filename = _normalize_document_image(
+                temp_path,
+                destination_dir,
+                document_id,
+                upload.filename,
+            )
+            return StoredDocument(
+                storage_key=destination.relative_to(_root()).as_posix(),
+                original_filename=original_filename,
+                content_type=declared_type,
+                byte_size=destination.stat().st_size,
+            )
 
-        destination_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(temp_path, destination)
+        _mkdir_private(destination_dir)
+        os.replace(temp_path, destination)
+        _chmod_file(destination)
         return StoredDocument(
             storage_key=destination.relative_to(_root()).as_posix(),
             original_filename=_safe_filename(upload.filename),

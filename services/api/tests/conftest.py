@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
 from sqlalchemy.engine import make_url
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -26,6 +28,7 @@ os.environ["UPLOADS_DIR"] = str(UPLOAD_ROOT)
 
 from sqlalchemy import text  # noqa: E402
 
+from housetory_api.api.abuse import login_limiter  # noqa: E402
 from housetory_api.db import engine  # noqa: E402
 from housetory_api.main import app  # noqa: E402
 
@@ -78,6 +81,7 @@ def clean_state(database: None) -> Iterator[None]:
             connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
     shutil.rmtree(UPLOAD_ROOT, ignore_errors=True)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    login_limiter.reset_all()
     yield
 
 
@@ -91,6 +95,20 @@ def client() -> Iterator[TestClient]:
 def anon_client() -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def upload_root() -> Path:
+    return UPLOAD_ROOT
+
+
+@pytest.fixture
+def pdf_bytes() -> bytes:
+    output = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(output)
+    return output.getvalue()
 
 
 @pytest.fixture

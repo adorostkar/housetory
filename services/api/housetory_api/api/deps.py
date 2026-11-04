@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 from fastapi import Depends, Request, Response
 from sqlalchemy import select, update
@@ -100,11 +101,12 @@ def set_session_cookie(response: Response, token: str, settings: Settings) -> No
     )
 
 
-def clear_session_cookie(response: Response) -> None:
+def clear_session_cookie(response: Response, settings: Settings) -> None:
     response.delete_cookie(
         key=SESSION_COOKIE,
         path="/",
         httponly=True,
+        secure=settings.cookie_secure,
         samesite="lax",
     )
 
@@ -117,13 +119,22 @@ def validate_origin(request: Request) -> None:
     """
     if request.method in {"GET", "HEAD", "OPTIONS"}:
         return
+
     origin = request.headers.get("origin")
     if not origin:
-        return
+        # Some browsers omit Origin on older form posts. Validate Referer when
+        # available; non-browser API clients without either header remain usable.
+        referer = request.headers.get("referer")
+        if not referer:
+            return
+        parsed_referer = urlsplit(referer)
+        origin = f"{parsed_referer.scheme}://{parsed_referer.netloc}"
+
     settings = get_settings()
     allowed = {settings.app_base_url, *(o.strip() for o in settings.extra_origins.split(",") if o)}
     if settings.environment == "development":
         allowed.add("http://localhost:5173")
         allowed.add("http://127.0.0.1:5173")
-    if origin.rstrip("/") not in allowed:
+    normalized = {value.rstrip("/").lower() for value in allowed if value}
+    if origin.rstrip("/").lower() not in normalized:
         raise ApiError(403, "origin_not_allowed", "This origin is not allowed to change data.")
