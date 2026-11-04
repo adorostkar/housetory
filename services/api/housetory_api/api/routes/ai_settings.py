@@ -72,10 +72,11 @@ def delete_provider(
 @router.get("/providers/{provider_id}/models", response_model=AiProviderModels)
 def provider_models(
     provider_id: uuid.UUID,
+    refresh: bool = False,
     auth: AuthContext = Depends(require_owner),
     db: Session = Depends(get_db),
 ) -> AiProviderModels:
-    return settings_service.provider_models(db, auth.household.id, provider_id)
+    return settings_service.provider_models(db, auth.household.id, provider_id, refresh=refresh)
 
 
 @router.post("/providers/{provider_id}/test", response_model=AiProviderTest)

@@ -1,5 +1,6 @@
 """Owner-managed AI provider settings, model discovery and credentials."""
 
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -11,6 +12,7 @@ from ..config import get_settings
 from ..domain import AiProviderType, AiTask
 from ..models import AiProvider, AiTaskSetting
 from ..schemas.ai_settings import (
+    AiModelOut,
     AiProviderCreate,
     AiProviderModels,
     AiProviderOut,
@@ -53,6 +55,45 @@ TASK_LABELS = {
     AiTask.VISION.value: "Image recognition",
     AiTask.LABELS.value: "Label summary headlines",
 }
+
+MODEL_CACHE_TTL_SECONDS = 300
+_MODEL_CACHE: dict[tuple[uuid.UUID, uuid.UUID, str, int], tuple[float, list[AiModelOut]]] = {}
+
+
+def _model_cache_key(
+    household_id: uuid.UUID, provider: AiProvider
+) -> tuple[uuid.UUID, uuid.UUID, str, int]:
+    return (
+        household_id,
+        provider.id,
+        provider.base_url or "",
+        provider.api_key_version,
+    )
+
+
+def _cached_model(provider: AiProvider, model_id: str | None) -> AiModelOut | None:
+    if not model_id:
+        return None
+    cached = _MODEL_CACHE.get(_model_cache_key(provider.household_id, provider))
+    if cached is None:
+        return None
+    return next((model for model in cached[1] if model.id == model_id), None)
+
+
+def _capabilities_for(provider: AiProvider, model_id: str | None) -> list[str]:
+    model = _cached_model(provider, model_id)
+    if model is not None:
+        return list(model.capabilities)
+    return model_capabilities(provider.provider, model_id)
+
+
+def _clear_model_cache(provider_id: uuid.UUID | None = None) -> None:
+    if provider_id is None:
+        _MODEL_CACHE.clear()
+        return
+    for key in [key for key in _MODEL_CACHE if key[1] == provider_id]:
+        _MODEL_CACHE.pop(key, None)
+
 
 TASK_CAPABILITY = {
     AiTask.ASSISTANT.value: "text",
@@ -99,7 +140,7 @@ def serialize_provider(provider: AiProvider) -> AiProviderOut:
         cloud_consent=provider.cloud_consent,
         is_local=scope == "local",
         endpoint_scope=scope,
-        capabilities=model_capabilities(provider.provider, provider.default_model),
+        capabilities=_capabilities_for(provider, provider.default_model),
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     )
@@ -138,7 +179,7 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
         provider_label=provider.display_name if provider else None,
         model=setting.model,
         enabled=setting.enabled,
-        capabilities=(model_capabilities(provider.provider, setting.model) if provider else []),
+        capabilities=(_capabilities_for(provider, setting.model) if provider else []),
         updated_at=setting.updated_at,
     )
 
@@ -228,6 +269,7 @@ def create_provider(db: Session, household_id: uuid.UUID, payload: AiProviderCre
     db.add(provider)
     db.flush()
     _assign_default_tasks(db, household_id, provider)
+    _clear_model_cache(provider.id)
     db.commit()
     db.refresh(provider)
     return provider
@@ -267,6 +309,7 @@ def update_provider(
     if provider.enabled and provider.provider in CLOUD_PROVIDERS and not provider.encrypted_api_key:
         raise ApiError(422, "api_key_required", "A cloud provider needs an API key.")
     _assign_default_tasks(db, household_id, provider)
+    _clear_model_cache(provider.id)
     db.commit()
     db.refresh(provider)
     return provider
@@ -280,6 +323,7 @@ def delete_provider(db: Session, household_id: uuid.UUID, provider_id: uuid.UUID
             AiTaskSetting.provider_id == provider.id,
         )
     )
+    _clear_model_cache(provider.id)
     db.delete(provider)
     db.commit()
 
@@ -297,17 +341,22 @@ def update_task(
     provider = None
     if payload.provider_id is not None:
         provider = _provider_or_404(db, household_id, payload.provider_id)
-    if (
-        payload.enabled
-        and provider is not None
-        and TASK_CAPABILITY[task]
-        not in model_capabilities(provider.provider, payload.model or provider.default_model)
-    ):
-        raise ApiError(
-            422,
-            "model_capability_mismatch",
-            f"The selected model does not advertise the {TASK_CAPABILITY[task]} capability.",
-        )
+    if payload.enabled and provider is not None:
+        selected_model = payload.model or provider.default_model
+        cached_model = _cached_model(provider, selected_model)
+        capabilities = _capabilities_for(provider, selected_model)
+        if cached_model is not None and cached_model.kind != "chat":
+            raise ApiError(
+                422,
+                "model_not_chat_capable",
+                "The selected catalog model is not a chat/completion model.",
+            )
+        if TASK_CAPABILITY[task] not in capabilities:
+            raise ApiError(
+                422,
+                "model_capability_mismatch",
+                f"The selected model does not advertise the {TASK_CAPABILITY[task]} capability.",
+            )
     setting = db.scalar(
         select(AiTaskSetting).where(
             AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
@@ -325,23 +374,42 @@ def update_task(
 
 
 def provider_models(
-    db: Session, household_id: uuid.UUID, provider_id: uuid.UUID
+    db: Session,
+    household_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    *,
+    refresh: bool = False,
 ) -> AiProviderModels:
     provider = _provider_or_404(db, household_id, provider_id)
+    cache_key = _model_cache_key(household_id, provider)
+    now = time.monotonic()
+    cached = _MODEL_CACHE.get(cache_key)
+    if not refresh and cached and now - cached[0] < MODEL_CACHE_TTL_SECONDS:
+        return AiProviderModels(
+            provider_id=provider.id,
+            models=[model.model_copy(deep=True) for model in cached[1]],
+            cached=True,
+        )
     config = config_for_provider(provider, require_consent=False)
     try:
-        models = ai.available_models(config)
+        discovered = ai.discover_models(config)
     except ai.AiError as exc:
         return AiProviderModels(provider_id=provider.id, models=[], error=str(exc))
+    models = [
+        AiModelOut(
+            id=model.id,
+            display_name=model.display_name,
+            kind=model.kind,
+            capabilities=list(model.capabilities),
+            capability_source=model.capability_source,
+        )
+        for model in discovered
+    ]
+    _MODEL_CACHE[cache_key] = (now, models)
     return AiProviderModels(
         provider_id=provider.id,
-        models=[
-            {
-                "id": model,
-                "capabilities": model_capabilities(provider.provider, model),
-            }
-            for model in models
-        ],
+        models=[model.model_copy(deep=True) for model in models],
+        cached=False,
     )
 
 
@@ -356,7 +424,7 @@ def test_provider(
     if not config.enabled:
         return AiProviderTest(ok=False, message=config.error or "Provider is disabled.")
     try:
-        models = ai.available_models(config)
+        models = [item.id for item in ai.discover_models(config)]
     except ai.AiError as exc:
         return AiProviderTest(ok=False, message=str(exc))
     selected = model or provider.default_model
@@ -394,6 +462,7 @@ def rotate_credentials(db: Session, household_id: uuid.UUID) -> tuple[int, int]:
             rotated += 1
         except CredentialError:
             failed += 1
+    _clear_model_cache()
     db.commit()
     return rotated, failed
 

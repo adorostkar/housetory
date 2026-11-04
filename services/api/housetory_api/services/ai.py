@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,15 @@ class AiUnavailable(AiError):
 
 class AiInvalidOutput(AiError):
     pass
+
+
+@dataclass(frozen=True)
+class DiscoveredModel:
+    id: str
+    display_name: str | None
+    kind: str
+    capabilities: tuple[str, ...]
+    capability_source: str
 
 
 def _settings():
@@ -203,6 +213,184 @@ def available_models(config: AiRuntimeConfig) -> list[str]:
     return sorted(
         str(entry.get("id") or "") for entry in data if isinstance(entry, dict) and entry.get("id")
     )
+
+
+def _classify_model_kind(model_id: str, *, methods: list[str] | None = None) -> str:
+    lowered = model_id.lower()
+    if methods is not None and methods and "generateContent" not in methods:
+        if any("embed" in method.lower() for method in methods):
+            return "embedding"
+        return "other"
+    if any(token in lowered for token in ("embedding", "embed-", "-embed", "rerank", "moderation")):
+        return "embedding"
+    if any(
+        token in lowered
+        for token in ("whisper", "speech", "transcribe", "tts", "-audio", "audio-", "voice")
+    ):
+        return "speech"
+    if any(
+        token in lowered
+        for token in ("dall-e", "stable-diffusion", "flux-", "image-generation", "gpt-image")
+    ):
+        return "image"
+    return "chat"
+
+
+def _metadata_capabilities(
+    provider: str, model_id: str, entry: dict[str, Any]
+) -> tuple[tuple[str, ...], str]:
+    capabilities = set(model_capabilities(provider, model_id))
+    source = "heuristic"
+    architecture = entry.get("architecture")
+    if isinstance(architecture, dict):
+        source = "provider_metadata"
+        inputs = architecture.get("input_modalities")
+        if isinstance(inputs, list):
+            capabilities.discard("vision")
+            if any(str(value).lower() in {"image", "img", "file"} for value in inputs):
+                capabilities.add("vision")
+        outputs = architecture.get("output_modalities")
+        if isinstance(outputs, list) and "text" not in {str(value).lower() for value in outputs}:
+            capabilities.discard("text")
+    supported = entry.get("supported_parameters")
+    if isinstance(supported, list):
+        source = "provider_metadata"
+        params = {str(value).lower() for value in supported}
+        if "tools" in params or "tool_choice" in params:
+            capabilities.add("tools")
+        else:
+            capabilities.discard("tools")
+        if params & {"structured_outputs", "response_format", "json_schema"}:
+            capabilities.add("structured")
+        else:
+            capabilities.discard("structured")
+    methods = entry.get("supportedGenerationMethods")
+    if isinstance(methods, list):
+        source = "provider_metadata"
+        if "generateContent" not in {str(value) for value in methods}:
+            capabilities.discard("text")
+    order = ["text", "vision", "structured", "tools"]
+    return tuple(capability for capability in order if capability in capabilities), source
+
+
+def discover_models(config: AiRuntimeConfig) -> list[DiscoveredModel]:
+    """Fetch provider catalog metadata only; no inference/completion calls."""
+    discovered: list[DiscoveredModel] = []
+    if config.provider == AiProviderType.OLLAMA.value:
+        response = _request_json(_url(config, "/api/tags"), None, method="GET", timeout=5)
+        for entry in response.get("models") or []:
+            if not isinstance(entry, dict):
+                continue
+            model_id = str(entry.get("name") or entry.get("model") or "").strip()
+            if not model_id:
+                continue
+            kind = _classify_model_kind(model_id)
+            capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
+            discovered.append(
+                DiscoveredModel(
+                    id=model_id,
+                    display_name=str(entry.get("name") or model_id),
+                    kind=kind,
+                    capabilities=capabilities,
+                    capability_source=source,
+                )
+            )
+    elif config.provider == AiProviderType.ANTHROPIC.value:
+        after_id: str | None = None
+        for _page in range(20):
+            suffix = f"&after_id={after_id}" if after_id else ""
+            response = _request_json(
+                _url(config, f"/models?limit=100{suffix}"),
+                None,
+                method="GET",
+                headers=_headers(config),
+                timeout=10,
+            )
+            data = response.get("data") or []
+            for entry in data:
+                if not isinstance(entry, dict) or not entry.get("id"):
+                    continue
+                model_id = str(entry["id"])
+                kind = _classify_model_kind(model_id)
+                capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
+                discovered.append(
+                    DiscoveredModel(
+                        id=model_id,
+                        display_name=str(entry.get("display_name") or model_id),
+                        kind=kind,
+                        capabilities=capabilities,
+                        capability_source=source,
+                    )
+                )
+            if not response.get("has_more") or not response.get("last_id"):
+                break
+            after_id = str(response["last_id"])
+    elif config.provider == AiProviderType.GEMINI.value:
+        page_token: str | None = None
+        for _page in range(20):
+            suffix = f"&pageToken={page_token}" if page_token else ""
+            response = _request_json(
+                _url(config, f"/models?key={config.api_key or ''}{suffix}"),
+                None,
+                method="GET",
+                timeout=10,
+            )
+            models = response.get("models") or []
+            for entry in models:
+                if not isinstance(entry, dict) or not entry.get("name"):
+                    continue
+                model_id = str(entry["name"]).removeprefix("models/")
+                kind = _classify_model_kind(
+                    model_id,
+                    methods=[
+                        str(value)
+                        for value in entry.get("supportedGenerationMethods") or []
+                        if isinstance(value, str)
+                    ],
+                )
+                capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
+                discovered.append(
+                    DiscoveredModel(
+                        id=model_id,
+                        display_name=str(entry.get("displayName") or model_id),
+                        kind=kind,
+                        capabilities=capabilities,
+                        capability_source=source,
+                    )
+                )
+            if not response.get("nextPageToken"):
+                break
+            page_token = str(response["nextPageToken"])
+    else:
+        response = _request_json(
+            _url(config, "/models"),
+            None,
+            method="GET",
+            headers=_headers(config),
+            timeout=10,
+        )
+        data = response.get("data") or []
+        for entry in data:
+            if not isinstance(entry, dict) or not entry.get("id"):
+                continue
+            model_id = str(entry["id"])
+            kind = _classify_model_kind(model_id)
+            capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
+            discovered.append(
+                DiscoveredModel(
+                    id=model_id,
+                    display_name=str(entry.get("name") or entry.get("display_name") or model_id),
+                    kind=kind,
+                    capabilities=capabilities,
+                    capability_source=source,
+                )
+            )
+    deduped: dict[str, DiscoveredModel] = {}
+    for model in discovered:
+        deduped.setdefault(model.id, model)
+    return sorted(deduped.values(), key=lambda model: (model.display_name or model.id).lower())[
+        :2_000
+    ]
 
 
 def _probe(config: AiRuntimeConfig) -> tuple[bool, list[str], str | None]:

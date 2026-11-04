@@ -49,13 +49,17 @@ class AiProviderOut(BaseModel):
 
 class AiModelOut(BaseModel):
     id: str
+    display_name: str | None = None
+    kind: Literal["chat", "embedding", "speech", "image", "other"] = "chat"
     capabilities: list[str] = Field(default_factory=list)
+    capability_source: Literal["provider_metadata", "heuristic"] = "heuristic"
 
 
 class AiProviderModels(BaseModel):
     provider_id: uuid.UUID
     models: list[AiModelOut]
     error: str | None = None
+    cached: bool = False
 
 
 class AiProviderTest(BaseModel):

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from housetory_api.db import SessionLocal
 from housetory_api.models import AiProvider, AiTaskSetting
 from housetory_api.services import ai
+from housetory_api.services.ai import DiscoveredModel
 from housetory_api.services.ai_credentials import decrypt_secret
 from housetory_api.services.ai_runtime import AiRuntimeConfig
 
@@ -64,8 +65,30 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
 def test_provider_models_test_and_consent_gate(owner_client, monkeypatch):
     monkeypatch.setattr(
         ai,
-        "available_models",
-        lambda config: ["gpt-4o", "gpt-4o-mini", "text-embedding-3-small"],
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="gpt-4o",
+                display_name="GPT-4o",
+                kind="chat",
+                capabilities=("text", "vision", "structured", "tools"),
+                capability_source="heuristic",
+            ),
+            DiscoveredModel(
+                id="gpt-4o-mini",
+                display_name="GPT-4o mini",
+                kind="chat",
+                capabilities=("text", "vision", "structured", "tools"),
+                capability_source="heuristic",
+            ),
+            DiscoveredModel(
+                id="text-embedding-3-small",
+                display_name="Text embedding 3 small",
+                kind="embedding",
+                capabilities=(),
+                capability_source="heuristic",
+            ),
+        ],
     )
     response = owner_client.post(
         "/api/v1/ai/providers",
@@ -82,10 +105,14 @@ def test_provider_models_test_and_consent_gate(owner_client, monkeypatch):
 
     models = owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models")
     assert models.status_code == 200, models.text
-    assert {entry["id"] for entry in models.json()["models"]} >= {
-        "gpt-4o",
-        "gpt-4o-mini",
-    }
+    model_rows = {entry["id"]: entry for entry in models.json()["models"]}
+    assert set(model_rows) >= {"gpt-4o", "gpt-4o-mini", "text-embedding-3-small"}
+    assert model_rows["gpt-4o"]["display_name"] == "GPT-4o"
+    assert model_rows["gpt-4o"]["kind"] == "chat"
+    assert model_rows["gpt-4o"]["capability_source"] == "heuristic"
+    assert "vision" in model_rows["gpt-4o"]["capabilities"]
+    assert model_rows["text-embedding-3-small"]["kind"] == "embedding"
+    assert models.json()["cached"] is False
     tested = owner_client.post(f"/api/v1/ai/providers/{provider['id']}/test?model=gpt-4o")
     assert tested.status_code == 200
     assert tested.json()["ok"] is True
@@ -376,3 +403,262 @@ def test_provider_requests_do_not_follow_redirects(monkeypatch):
         target.shutdown()
         redirect.server_close()
         target.server_close()
+
+
+def test_model_discovery_metadata_is_cached_and_invalidated(owner_client, monkeypatch):
+    from tests.test_cross_household import _other_household_headers
+
+    calls: list[str] = []
+
+    def catalog(config):
+        calls.append(config.base_url)
+        return [
+            DiscoveredModel(
+                id="catalog-chat",
+                display_name="Catalog Chat",
+                kind="chat",
+                capabilities=("text", "vision"),
+                capability_source="provider_metadata",
+            ),
+            DiscoveredModel(
+                id="catalog-embedding",
+                display_name="Catalog Embedding",
+                kind="embedding",
+                capabilities=(),
+                capability_source="provider_metadata",
+            ),
+        ]
+
+    monkeypatch.setattr(ai, "discover_models", catalog)
+    provider = owner_client.post(
+        "/api/v1/ai/providers", json=provider_payload(cloud_consent=False)
+    ).json()
+    endpoint = f"/api/v1/ai/providers/{provider['id']}/models"
+    first = owner_client.get(endpoint)
+    assert first.status_code == 200, first.text
+    assert first.json()["cached"] is False
+    assert len(first.json()["models"]) == 2
+    assert calls == ["https://api.openai.com/v1"]
+
+    cached = owner_client.get(endpoint)
+    assert cached.status_code == 200
+    assert cached.json()["cached"] is True
+    assert calls == ["https://api.openai.com/v1"]
+
+    refreshed = owner_client.get(endpoint, params={"refresh": "true"})
+    assert refreshed.status_code == 200
+    assert refreshed.json()["cached"] is False
+    assert len(calls) == 2
+
+    patched = owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}",
+        json={"base_url": "https://example.test/v1"},
+    )
+    assert patched.status_code == 200, patched.text
+    after_update = owner_client.get(endpoint)
+    assert after_update.status_code == 200
+    assert len(calls) == 3
+    assert calls[-1] == "https://example.test/v1"
+
+    other = _other_household_headers()
+    denied = owner_client.get(endpoint, headers=other["headers"])
+    assert denied.status_code == 404
+
+
+def test_discovery_uses_provider_catalog_metadata_without_inference(monkeypatch):
+    def config(provider: str) -> AiRuntimeConfig:
+        return AiRuntimeConfig(
+            provider=provider,
+            base_url="https://provider.test/v1",
+            api_key="secret",
+            model=None,
+            task="assistant",
+            provider_id=None,
+            display_name="Test",
+            mode="cloud",
+            source="database",
+            enabled=True,
+            cloud_consent=False,
+            configured=True,
+        )
+
+    responses = {
+        "openai": {
+            "data": [
+                {
+                    "id": "openrouter/vision",
+                    "name": "Vision Router",
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                    "supported_parameters": ["tools", "structured_outputs"],
+                }
+            ]
+        },
+        "anthropic": {
+            "data": [
+                {
+                    "id": "claude-test",
+                    "display_name": "Claude Test",
+                    "type": "model",
+                }
+            ],
+            "has_more": False,
+        },
+        "gemini": {
+            "models": [
+                {
+                    "name": "models/gemini-test",
+                    "displayName": "Gemini Test",
+                    "supportedGenerationMethods": ["generateContent"],
+                },
+                {
+                    "name": "models/embedding-test",
+                    "displayName": "Embedding Test",
+                    "supportedGenerationMethods": ["embedContent"],
+                },
+            ]
+        },
+        "ollama": {
+            "models": [
+                {"name": "llava:latest", "details": {"family": "llava"}},
+            ]
+        },
+    }
+
+    # Use explicit URL markers instead of relying on provider type inside the fake.
+    def routed(url, payload, **kwargs):
+        if "/api/tags" in url:
+            return responses["ollama"]
+        return responses["openai"]
+
+    monkeypatch.setattr(ai, "_request_json", routed)
+    openrouter = ai.discover_models(config("openrouter"))
+    assert {model.id for model in openrouter} == {"openrouter/vision"}
+    model = openrouter[0]
+    assert model.display_name == "Vision Router"
+    assert model.kind == "chat"
+    assert set(model.capabilities) == {"text", "vision", "structured", "tools"}
+    assert model.capability_source == "provider_metadata"
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda url, payload, **kwargs: (
+            responses["ollama"] if "/api/tags" in url else responses["anthropic"]
+        ),
+    )
+    anthropic = ai.discover_models(config("anthropic"))
+    assert anthropic[0].display_name == "Claude Test"
+    assert anthropic[0].kind == "chat"
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda url, payload, **kwargs: responses["gemini"],
+    )
+    gemini = {model.id: model for model in ai.discover_models(config("gemini"))}
+    assert gemini["gemini-test"].display_name == "Gemini Test"
+    assert gemini["gemini-test"].kind == "chat"
+    assert gemini["embedding-test"].kind == "embedding"
+    assert "text" not in gemini["embedding-test"].capabilities
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda url, payload, **kwargs: responses["ollama"],
+    )
+    ollama = ai.discover_models(config("ollama"))
+    assert ollama[0].id == "llava:latest"
+    assert "vision" in ollama[0].capabilities
+    assert ollama[0].capability_source == "heuristic"
+
+
+def test_new_provider_can_discover_before_choosing_a_default(owner_client, monkeypatch):
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="discovered-chat",
+                display_name="Discovered Chat",
+                kind="chat",
+                capabilities=("text", "vision"),
+                capability_source="provider_metadata",
+            )
+        ],
+    )
+    created = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(default_model=None),
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    assert provider["default_model"] is None
+    models = owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models")
+    assert models.status_code == 200, models.text
+    assert models.json()["models"][0]["display_name"] == "Discovered Chat"
+    updated = owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}",
+        json={"default_model": "discovered-chat"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["default_model"] == "discovered-chat"
+
+
+def test_editing_provider_with_blank_key_preserves_encrypted_credential(owner_client, monkeypatch):
+    monkeypatch.setattr(ai, "discover_models", lambda config: [])
+    provider = owner_client.post(
+        "/api/v1/ai/providers", json=provider_payload(default_model=None)
+    ).json()
+    updated = owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}",
+        json={"default_model": "gpt-4o-mini"},
+    )
+    assert updated.status_code == 200, updated.text
+    with SessionLocal() as db:
+        stored = db.get(AiProvider, provider["id"])
+        assert stored is not None
+        assert decrypt_secret(stored.encrypted_api_key) == "sk-test-secret-never-returned"
+        assert stored.api_key_version == 1
+
+
+def test_cached_catalog_metadata_controls_task_capability_validation(owner_client, monkeypatch):
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="text-chat",
+                display_name="Text Chat",
+                kind="chat",
+                capabilities=("text",),
+                capability_source="provider_metadata",
+            ),
+            DiscoveredModel(
+                id="embedding-chat",
+                display_name="Embedding",
+                kind="embedding",
+                capabilities=(),
+                capability_source="provider_metadata",
+            ),
+        ],
+    )
+    provider = owner_client.post(
+        "/api/v1/ai/providers", json=provider_payload(default_model=None)
+    ).json()
+    discovered = owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models")
+    assert discovered.status_code == 200
+    vision = owner_client.put(
+        "/api/v1/ai/tasks/vision",
+        json={"provider_id": provider["id"], "model": "text-chat", "enabled": True},
+    )
+    assert vision.status_code == 422
+    assert vision.json()["detail"]["code"] == "model_capability_mismatch"
+    embedding = owner_client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={"provider_id": provider["id"], "model": "embedding-chat", "enabled": True},
+    )
+    assert embedding.status_code == 422
+    assert embedding.json()["detail"]["code"] == "model_not_chat_capable"
