@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.12-alpine AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -14,16 +14,18 @@ COPY services/api/alembic ./alembic
 COPY services/api/housetory_api ./housetory_api
 RUN uv sync --frozen --no-dev
 
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-alpine AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
-RUN groupadd --system housetory \
-    && useradd --system --gid housetory --create-home --home-dir /home/housetory housetory \
+RUN apk add --no-cache libstdc++ \
+    && addgroup -S housetory \
+    && adduser -S -G housetory -h /home/housetory housetory \
     && mkdir -p /data/uploads \
-    && chown -R housetory:housetory /data
+    && chown -R housetory:housetory /data \
+    && chmod 700 /data /data/uploads
 
 WORKDIR /app
 COPY --from=builder /app /app
