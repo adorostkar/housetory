@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from datetime import UTC, date, datetime
 from difflib import SequenceMatcher
@@ -328,6 +329,99 @@ def _apply_ai_enhancement(
     return drafts, metadata
 
 
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "the",
+    "of",
+    "for",
+    "with",
+    "in",
+    "on",
+    "to",
+    "set",
+    "sets",
+    "assorted",
+    "misc",
+}
+
+CONTAINER_TYPE_WORDS = {
+    "box": "container",
+    "bin": "container",
+    "crate": "container",
+    "suitcase": "container",
+    "bag": "container",
+    "cabinet": "location",
+    "shelf": "location",
+    "drawer": "location",
+    "cupboard": "location",
+    "location": "location",
+    "room": "room",
+}
+
+
+def _significant_tokens(value: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]{3,}", value.lower()))
+    return {token[:-1] if token.endswith("s") and len(token) > 4 else token for token in tokens}
+
+
+def _supported_name(proposed: str, original: str, evidence: str) -> bool:
+    proposed_clean = re.sub(r"\s+", " ", proposed).strip().lower()
+    original_clean = re.sub(r"\s+", " ", original).strip().lower()
+    evidence_clean = re.sub(r"\s+", " ", evidence).strip().lower()
+    if not proposed_clean or proposed_clean == original_clean:
+        return True
+    if proposed_clean in evidence_clean:
+        return True
+    proposed_tokens = _significant_tokens(proposed) - STOPWORDS
+    if proposed_tokens and proposed_tokens <= _significant_tokens(evidence):
+        return True
+    return SequenceMatcher(None, proposed_clean, original_clean).ratio() >= 0.78
+
+
+def _supported_quantity(proposed: int, original: int, evidence: str) -> bool:
+    if proposed == original:
+        return True
+    numbers = {int(value) for value in re.findall(r"\b\d{1,5}\b", evidence)}
+    return proposed in numbers
+
+
+def _supported_identifier(proposed: str | None, original: str | None, evidence: str) -> bool:
+    if proposed == original:
+        return True
+    if not proposed:
+        return original is None
+    return proposed.upper() in evidence.upper()
+
+
+def _supported_entity_type(proposed: str, original: str, name: str, legacy: str | None) -> bool:
+    if proposed == original:
+        return True
+    lowered = name.lower()
+    if proposed == "container":
+        return bool(legacy) or any(
+            word in lowered
+            for word in CONTAINER_TYPE_WORDS
+            if CONTAINER_TYPE_WORDS[word] == "container"
+        )
+    if proposed == "location":
+        return any(
+            word in lowered for word, kind in CONTAINER_TYPE_WORDS.items() if kind == "location"
+        )
+    if proposed == "room":
+        return "room" in lowered
+    return False
+
+
+def _supported_container_type(proposed: str | None, original: str | None, evidence: str) -> bool:
+    if proposed == original or not proposed:
+        return True
+    if proposed == "other":
+        return True
+    return proposed.lower() in evidence.lower()
+
+
 AI_HIERARCHY_SYSTEM = """Normalize the supplied deterministic inventory hierarchy.
 Return JSON exactly shaped as:
 {"nodes":[{"key":"existing key","name":"...","entity_type":"room|container|location",
@@ -376,22 +470,126 @@ def _apply_ai_hierarchy(db: Session, household_id: uuid.UUID, hierarchy):
     node_by_key = {node.key: node for node in hierarchy.nodes}
     item_by_key = {item.key: item for item in hierarchy.items}
     allowed_types = {"room", "container", "location"}
+    rejected: list[dict[str, Any]] = []
+    accepted = 0
     for node in normalized.nodes:
         target = node_by_key.get(node.key)
         if target is None or node.entity_type not in allowed_types:
+            rejected.append(
+                {
+                    "key": node.key,
+                    "field": "entity_type",
+                    "proposed": node.entity_type,
+                    "reason": "Unknown node or unsupported entity type.",
+                }
+            )
             continue
-        target.name = node.name
-        target.entity_type = node.entity_type
-        target.legacy_identifier = node.legacy_identifier
-        target.container_type = node.container_type
+        evidence = f"{target.name} {target.source_excerpt}"
+        if not _supported_name(node.name, target.name, evidence):
+            rejected.append(
+                {
+                    "key": node.key,
+                    "field": "name",
+                    "proposed": node.name,
+                    "original": target.name,
+                    "reason": "Name is not supported by the source evidence.",
+                }
+            )
+        elif node.name != target.name:
+            target.name = node.name
+            accepted += 1
+        if not _supported_entity_type(
+            node.entity_type, target.entity_type, target.name, target.legacy_identifier
+        ):
+            rejected.append(
+                {
+                    "key": node.key,
+                    "field": "entity_type",
+                    "proposed": node.entity_type,
+                    "original": target.entity_type,
+                    "reason": "Entity type is not supported by the source heading.",
+                }
+            )
+        elif node.entity_type != target.entity_type:
+            target.entity_type = node.entity_type
+            accepted += 1
+        if not _supported_identifier(node.legacy_identifier, target.legacy_identifier, evidence):
+            rejected.append(
+                {
+                    "key": node.key,
+                    "field": "legacy_identifier",
+                    "proposed": node.legacy_identifier,
+                    "original": target.legacy_identifier,
+                    "reason": "Identifier is not present in the source evidence.",
+                }
+            )
+        elif node.legacy_identifier != target.legacy_identifier:
+            target.legacy_identifier = node.legacy_identifier
+            accepted += 1
+        if not _supported_container_type(node.container_type, target.container_type, evidence):
+            rejected.append(
+                {
+                    "key": node.key,
+                    "field": "container_type",
+                    "proposed": node.container_type,
+                    "original": target.container_type,
+                    "reason": "Container type is not supported by the source evidence.",
+                }
+            )
+        elif node.container_type != target.container_type:
+            target.container_type = node.container_type
+            accepted += 1
     for item in normalized.items:
         target = item_by_key.get(item.key)
         if target is None:
+            rejected.append(
+                {
+                    "key": item.key,
+                    "field": "item",
+                    "proposed": item.name,
+                    "reason": "Unknown item key.",
+                }
+            )
             continue
-        target.draft.name = item.name
-        target.draft.quantity = item.quantity
-    metadata["ai_used"] = True
-    metadata["ai_warnings"] = normalized.warnings
+        evidence = f"{target.draft.name} {target.draft.source_excerpt or ''}"
+        if not _supported_name(item.name, target.draft.name, evidence):
+            rejected.append(
+                {
+                    "key": item.key,
+                    "field": "name",
+                    "proposed": item.name,
+                    "original": target.draft.name,
+                    "reason": "Name is not supported by the source evidence.",
+                }
+            )
+        elif item.name != target.draft.name:
+            target.draft.name = item.name
+            accepted += 1
+        if not _supported_quantity(item.quantity, target.draft.quantity, evidence):
+            rejected.append(
+                {
+                    "key": item.key,
+                    "field": "quantity",
+                    "proposed": item.quantity,
+                    "original": target.draft.quantity,
+                    "reason": "Quantity is not supported by the source evidence.",
+                }
+            )
+        elif item.quantity != target.draft.quantity:
+            target.draft.quantity = item.quantity
+            target.draft.field_sources["quantity"] = "ai-validated"
+            accepted += 1
+    metadata["ai_used"] = accepted > 0
+    metadata["ai_consulted"] = True
+    metadata["ai_accepted_edits"] = accepted
+    metadata["ai_validation_warnings"] = rejected
+    metadata["ai_warnings"] = [
+        *normalized.warnings,
+        *(
+            f"AI edit rejected: {entry['field']} → {entry['proposed']!r} ({entry['reason']})"
+            for entry in rejected
+        ),
+    ]
     return metadata
 
 
@@ -511,16 +709,28 @@ def process_import_batch(
                 hierarchy_ai = _apply_ai_hierarchy(db, batch.household_id, hierarchy)
                 ai_metadata = {
                     "ai_used": hierarchy_ai.get("ai_used", False),
+                    "ai_consulted": hierarchy_ai.get("ai_consulted", False),
                     "ai_error": hierarchy_ai.get("ai_error"),
                     "ai_provider": None,
                     "ai_model": None,
                     "ai_warnings": hierarchy_ai.get("ai_warnings", []),
+                    "ai_validation_warnings": hierarchy_ai.get("ai_validation_warnings", []),
                 }
                 entry_count = _create_hierarchy_entries(
                     db, batch, hierarchy, bundle, file_mapping, index
                 )
                 drafts = [item.draft for item in hierarchy.items]
                 warnings = [*hierarchy.warnings]
+                for rejected in hierarchy_ai.get("ai_validation_warnings", []):
+                    warnings.append(
+                        {
+                            "type": "ai_rejected_edit",
+                            "message": (
+                                f"AI {rejected.get('field', 'edit')} was rejected: "
+                                f"{rejected.get('reason', 'unsupported by source evidence.')}"
+                            ),
+                        }
+                    )
                 ignored_notes = [*parsed.ignored_notes, *hierarchy.ignored]
                 hierarchy_metadata = {
                     "hierarchy": True,
