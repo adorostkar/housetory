@@ -247,6 +247,9 @@ the product-facing numbering below follows the delivery brief.
       fail-closed decryption and no secret serialization/logging.
 - [x] Separate task models for assistant, imports, documents, search, vision and
       label headlines, capability warnings and connection/model discovery.
+- [x] Discovered-model pickers for provider defaults and every task, with search,
+      readable names, model-kind filtering, cached/refresh behavior, capability
+      provenance and manual exact-ID fallback.
 - [x] Explicit per-provider remote-processing consent, local/private/remote
       endpoint scope, redirect refusal and task-aware AI status/privacy notes.
 - [x] Direct camera and library photo actions for items, rooms and storage

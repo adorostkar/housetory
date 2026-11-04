@@ -107,7 +107,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 175 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 180 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -118,7 +118,7 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 48 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 56 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 10 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
@@ -374,9 +374,11 @@ household owner and open **Settings → AI providers**.
 
 1. Add a provider: OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
    OpenRouter or Ollama (local, private-network or external).
-2. Enter the API key (cloud) or local endpoint (Ollama), choose a default model,
-   and test the connection. Model discovery uses the provider's official models
-   endpoint where supported.
+2. Enter the API key (cloud) or local endpoint (Ollama), then save the provider.
+   Housetory discovers catalog metadata from the provider's official model-list
+   endpoint. Choose the default from a searchable picker; **Refresh models** is
+   available after endpoint or credential changes. Manual exact-ID entry remains
+   available for private/custom models.
 3. Enable remote-processing consent separately for each cloud or non-local
    endpoint. Saving an API key does **not** authorize sending household data.
    Ollama on loopback/`host.docker.internal`/a Compose service name is local; LAN,
@@ -385,7 +387,10 @@ household owner and open **Settings → AI providers**.
    followed.
 4. Assign a provider and model to assistant, smart imports, document
    interpretation, natural-language search, image recognition and optional label
-   headlines. Vision tasks reject models that do not advertise vision capability.
+   headlines. Each task uses the searchable discovered catalog and switches
+   catalogs when its provider changes. Known non-chat models are excluded, vision
+   tasks flag incompatible models, and unknown capability metadata is marked for
+   verification. Existing task assignments are preserved if discovery fails.
 5. Replace a key, disable a provider or remove it without editing files.
 
 The database stores only Fernet-encrypted credentials. All calls originate from
@@ -407,6 +412,12 @@ precedence. If no database provider exists, deterministic imports, search,
 recognition fallback and assistant answers continue to work. Ollama setup:
 `ollama serve`, `ollama pull <chosen model>`, then configure the endpoint in the
 UI (`http://host.docker.internal:11434` from Compose).
+
+Model discovery only requests provider catalog metadata. It does not send
+inventory, documents, photos or prompts and does not require household-data
+consent. Catalogs are cached briefly server-side per household/provider and
+invalidated when credentials or endpoints change. Actual inference still requires
+the established consent rules.
 
 Official provider APIs use API keys, bearer tokens or local endpoints. Housetory
 does not reuse consumer-account cookies, subscription tokens or unofficial OAuth.

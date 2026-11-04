@@ -287,9 +287,13 @@ Key decisions:
 - **AI providers** are household-scoped rows containing provider type, base URL,
   default model, encrypted API key, key version, enabled state and separate
   remote-processing consent. `ai_task_settings` assigns a provider/model to
-  assistant, imports, documents, search, vision and label tasks. Ollama endpoints
-  are scoped as local, private-network or remote from their host; only local
-  endpoints are described as staying on the server. Credentials are
+  assistant, imports, documents, search, vision and label tasks. Model discovery
+  fetches only the provider's catalog metadata, returns display names/kind and
+  capability provenance, and is cached briefly per household/provider with
+  credential/endpoint invalidation. Known non-chat models are excluded from task
+  selection; unknown capability metadata is explicitly marked as heuristic.
+  Ollama endpoints are scoped as local, private-network or remote from their host;
+  only local endpoints are described as staying on the server. Credentials are
   Fernet-encrypted with an environment key held outside PostgreSQL; no secret is
   serialized to clients.
 - **Documents** are household-owned files with type, merchant, document date,
@@ -495,7 +499,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 175 pytest tests against a real PostgreSQL database. The test session
+- Backend: 180 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -522,8 +526,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 48 Vitest tests + Testing Library, including the unified Add items
-  chooser, contextual destinations, quick-search grouping,
+- Frontend: 56 Vitest tests + Testing Library, including searchable model
+  discovery pickers, task catalog switching, the unified Add items chooser,
+  contextual destinations, quick-search grouping,
   keyboard selection, Escape/outside dismissal, loading/empty/error/stale
   responses and query preservation, provider settings and remote-Ollama consent,
   camera preview/retake/cancel, multi-object review, split/merge and bulk

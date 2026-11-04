@@ -54,8 +54,10 @@ task. Verification used a separate project, separate volume names and port 8092.
 - Add, edit, enable, disable and remove OpenAI, Anthropic Claude, Google Gemini,
   xAI Grok, OpenRouter and Ollama providers with local, private-network or remote
   endpoints.
-- API key or local endpoint, default model, connection test and model discovery
-  against the provider's official API.
+- API key or local endpoint, connection test and model discovery against the
+  provider's official catalog API, with searchable default/task model pickers,
+  display names, model kinds, capability provenance, refresh/cache behavior and
+  explicit manual-ID fallback.
 - Separate provider/model defaults for assistant, smart imports, document
   interpretation, natural-language search, image recognition and optional label
   headlines.
@@ -339,9 +341,9 @@ but it is no longer the acceptance fixture.
 
 ## 13. Test results
 
-- Backend: **175 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **180 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **48 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **56 Vitest tests** passed; strict TypeScript and production build
   passed.
 - Playwright: **10 workflows** passed on a fresh disposable stack at a separate
   project, volume names and port. Coverage includes Phase 5 regressions, provider
@@ -411,6 +413,14 @@ container and label views. Real Safari/iPhone hardware was unavailable.
   the model name exactly matches the provider's model list, and the API key is
   current. Loopback/container-host Ollama needs no remote consent; LAN, Tailscale
   and external endpoints do. The API/worker must be able to reach the endpoint.
+- **No models appear after saving a provider:** confirm the key or local
+  endpoint is valid, then use **Refresh models**. Discovery requests only catalog
+  metadata and does not require household-data consent. If a private/custom model
+  is absent, type its exact ID and press Enter; discovery can be retried later
+  without clearing the saved selection.
+- **A model capability looks uncertain:** capabilities marked “Heuristic —
+  verify” are inferred from the provider/model name, not proven by listing the
+  model. Prefer a model whose provider metadata or a real test confirms the task.
 - **An AI-proposed item edit disappeared:** it did not match the source evidence.
   The deterministic value is retained and the import warnings list the rejected
   edit for review.
