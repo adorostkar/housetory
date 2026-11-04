@@ -90,6 +90,7 @@ class LocationBrief(ORMModel):
     id: uuid.UUID
     name: str
     kind: str
+    parent_id: uuid.UUID | None = None
 
 
 class ItemCreate(BaseModel):

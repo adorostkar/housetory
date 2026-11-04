@@ -97,6 +97,48 @@ def test_invalid_photo_is_rejected_without_orphans(owner_client):
     assert owner_client.get(f"/api/v1/items/{item['id']}/photos").json()["items"] == []
 
 
+def test_set_cover_photo_reorders_gallery(owner_client, anon_client):
+    item = create_item(owner_client)
+    uploaded = owner_client.post(
+        f"/api/v1/items/{item['id']}/photos",
+        files=[
+            ("files", ("one.jpg", jpeg_bytes((10, 20, 30)), "image/jpeg")),
+            ("files", ("two.jpg", jpeg_bytes((40, 50, 60)), "image/jpeg")),
+            ("files", ("three.jpg", jpeg_bytes((70, 80, 90)), "image/jpeg")),
+        ],
+    ).json()["items"]
+    assert [photo["sort_order"] for photo in uploaded] == [0, 1, 2]
+
+    response = owner_client.post(f"/api/v1/items/{item['id']}/photos/{uploaded[2]['id']}/primary")
+    assert response.status_code == 200, response.text
+    reordered = response.json()["items"]
+    assert reordered[0]["id"] == uploaded[2]["id"]
+    assert [photo["sort_order"] for photo in reordered] == [0, 1, 2]
+
+    detail = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
+    assert detail["primary_photo"]["id"] == uploaded[2]["id"]
+    assert [photo["id"] for photo in detail["photos"]][0] == uploaded[2]["id"]
+
+    assert (
+        anon_client.post(
+            f"/api/v1/items/{item['id']}/photos/{uploaded[0]['id']}/primary"
+        ).status_code
+        == 401
+    )
+
+
+def test_cover_photo_must_belong_to_item(owner_client):
+    first = create_item(owner_client)
+    second = create_item(owner_client)
+    photo = owner_client.post(
+        f"/api/v1/items/{first['id']}/photos",
+        files=[("files", ("one.jpg", jpeg_bytes(), "image/jpeg"))],
+    ).json()["items"][0]
+    response = owner_client.post(f"/api/v1/items/{second['id']}/photos/{photo['id']}/primary")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "photo_not_found"
+
+
 def test_document_upload_download_and_delete(owner_client, anon_client, pdf_bytes):
     item = create_item(owner_client)
     response = owner_client.post(

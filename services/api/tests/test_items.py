@@ -9,6 +9,73 @@ def setup_taxonomy(client):
     return room, location, category, tag
 
 
+def test_search_and_filters_understand_room_location_hierarchy(owner_client):
+    house = owner_client.post("/api/v1/rooms", json={"name": "House"}).json()
+    kitchen = owner_client.post(
+        "/api/v1/rooms", json={"name": "Kitchen", "parent_id": house["id"]}
+    ).json()
+    pantry = owner_client.post(
+        "/api/v1/rooms", json={"name": "Pantry", "parent_id": kitchen["id"]}
+    ).json()
+    cabinet = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": kitchen["id"], "name": "Pantry Cabinet", "kind": "cabinet"},
+    ).json()
+    shelf = owner_client.post(
+        "/api/v1/storage-locations",
+        json={
+            "room_id": kitchen["id"],
+            "name": "Spice Shelf",
+            "kind": "shelf",
+            "parent_id": cabinet["id"],
+        },
+    ).json()
+    category = owner_client.post("/api/v1/categories", json={"name": "Kitchenware"}).json()
+
+    kitchen_item = owner_client.post(
+        "/api/v1/items",
+        json={"name": "Cast Iron Pan", "room_id": kitchen["id"], "category_id": category["id"]},
+    ).json()["item"]
+    pantry_item = owner_client.post(
+        "/api/v1/items", json={"name": "Rice Jar", "room_id": pantry["id"]}
+    ).json()["item"]
+    shelf_item = owner_client.post(
+        "/api/v1/items",
+        json={
+            "name": "Saffron",
+            "room_id": kitchen["id"],
+            "storage_location_id": shelf["id"],
+        },
+    ).json()["item"]
+
+    exact_room = owner_client.get("/api/v1/items", params={"room_id": kitchen["id"]}).json()
+    assert exact_room["total"] == 2
+    assert {item["id"] for item in exact_room["items"]} == {kitchen_item["id"], shelf_item["id"]}
+
+    nested_room = owner_client.get(
+        "/api/v1/items",
+        params={"room_id": kitchen["id"], "include_descendants": "true"},
+    ).json()
+    assert nested_room["total"] == 3
+    assert pantry_item["id"] in {item["id"] for item in nested_room["items"]}
+
+    exact_location = owner_client.get("/api/v1/items", params={"location_id": cabinet["id"]}).json()
+    assert exact_location["total"] == 0
+
+    nested_location = owner_client.get(
+        "/api/v1/items",
+        params={"location_id": cabinet["id"], "include_descendants": "true"},
+    ).json()
+    assert nested_location["total"] == 1
+    assert nested_location["items"][0]["id"] == shelf_item["id"]
+
+    assert owner_client.get("/api/v1/items", params={"q": "Kitchen"}).json()["total"] == 3
+    assert owner_client.get("/api/v1/items", params={"q": "Pantry Cabinet"}).json()["total"] == 1
+    assert owner_client.get("/api/v1/items", params={"q": "Spice Shelf"}).json()["total"] == 1
+    assert owner_client.get("/api/v1/items", params={"q": "Kitchenware"}).json()["total"] == 1
+    assert owner_client.get("/api/v1/items", params={"q": "   "}).json()["total"] == 3
+
+
 def test_create_item_with_purchase_warranty_and_tags(owner_client):
     room, location, category, tag = setup_taxonomy(owner_client)
     response = owner_client.post(
@@ -145,6 +212,38 @@ def test_item_validation_and_location_coherence(owner_client):
     )
     assert inferred_room.status_code == 201
     assert inferred_room.json()["item"]["room"]["id"] == garage["id"]
+
+
+def test_item_update_response_reflects_location_move(owner_client):
+    room = owner_client.post("/api/v1/rooms", json={"name": "Workshop"}).json()
+    first = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": room["id"], "name": "Bench", "kind": "shelf"},
+    ).json()
+    second = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": room["id"], "name": "Toolbox", "kind": "box"},
+    ).json()
+    item = owner_client.post(
+        "/api/v1/items",
+        json={
+            "name": "Drill",
+            "room_id": room["id"],
+            "storage_location_id": first["id"],
+        },
+    ).json()["item"]
+
+    updated = owner_client.patch(
+        f"/api/v1/items/{item['id']}",
+        json={"storage_location_id": second["id"]},
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()["item"]
+    assert body["location"]["id"] == second["id"]
+    assert body["location"]["name"] == "Toolbox"
+
+    refreshed = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
+    assert refreshed["location"]["id"] == second["id"]
 
 
 def test_delete_item(owner_client):

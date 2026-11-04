@@ -30,6 +30,7 @@ from ...schemas.items import (
     WarrantyIn,
 )
 from ...services import storage
+from ...services.hierarchy import descendant_ids
 from ...services.serializers import (
     document_out,
     item_detail,
@@ -146,6 +147,7 @@ def list_items(
     location_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    include_descendants: bool = False,
     include_archived: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -160,27 +162,72 @@ def list_items(
         conditions.append(Item.is_archived.is_(False))
     if room_id is not None:
         _room(db, auth.household.id, room_id)
-        conditions.append(Item.room_id == room_id)
+        if include_descendants:
+            rows = db.execute(
+                select(Room.id, Room.parent_id).where(Room.household_id == auth.household.id)
+            ).all()
+            conditions.append(Item.room_id.in_(descendant_ids(rows, room_id)))
+        else:
+            conditions.append(Item.room_id == room_id)
     if location_id is not None:
         _location(db, auth.household.id, location_id)
-        conditions.append(Item.storage_location_id == location_id)
+        if include_descendants:
+            rows = db.execute(
+                select(StorageLocation.id, StorageLocation.parent_id).where(
+                    StorageLocation.household_id == auth.household.id
+                )
+            ).all()
+            conditions.append(Item.storage_location_id.in_(descendant_ids(rows, location_id)))
+        else:
+            conditions.append(Item.storage_location_id == location_id)
     if category_id is not None:
         _category(db, auth.household.id, category_id)
         conditions.append(Item.category_id == category_id)
     if tag_id is not None:
         conditions.append(Item.tags.any(Tag.id == tag_id))
-    if q:
-        search = f"%{q.strip()}%"
-        conditions.append(
-            or_(
-                Item.name.ilike(search),
-                Item.description.ilike(search),
-                Item.brand.ilike(search),
-                Item.model.ilike(search),
-                Item.serial_number.ilike(search),
-                Item.tags.any(Tag.name.ilike(search)),
+    term = (q or "").strip()
+    if term:
+        search = f"%{term}%"
+        room_rows = db.execute(
+            select(Room.id, Room.parent_id).where(Room.household_id == auth.household.id)
+        ).all()
+        matched_room_ids: set[uuid.UUID] = set()
+        for matched_id in db.scalars(
+            select(Room.id).where(
+                Room.household_id == auth.household.id,
+                Room.name.ilike(search),
             )
-        )
+        ):
+            matched_room_ids.update(descendant_ids(room_rows, matched_id))
+
+        location_rows = db.execute(
+            select(StorageLocation.id, StorageLocation.parent_id).where(
+                StorageLocation.household_id == auth.household.id
+            )
+        ).all()
+        matched_location_ids: set[uuid.UUID] = set()
+        for matched_id in db.scalars(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == auth.household.id,
+                StorageLocation.name.ilike(search),
+            )
+        ):
+            matched_location_ids.update(descendant_ids(location_rows, matched_id))
+
+        search_conditions = [
+            Item.name.ilike(search),
+            Item.description.ilike(search),
+            Item.brand.ilike(search),
+            Item.model.ilike(search),
+            Item.serial_number.ilike(search),
+            Item.category.has(Category.name.ilike(search)),
+            Item.tags.any(Tag.name.ilike(search)),
+        ]
+        if matched_room_ids:
+            search_conditions.append(Item.room_id.in_(matched_room_ids))
+        if matched_location_ids:
+            search_conditions.append(Item.storage_location_id.in_(matched_location_ids))
+        conditions.append(or_(*search_conditions))
 
     total = int(db.scalar(select(func.count(Item.id)).where(*conditions)) or 0)
     ordering = {
@@ -321,6 +368,10 @@ def update_item(
             _apply_warranty(item, payload.warranty, replace=item.warranty is None)
 
     db.commit()
+    # Relationships may already be loaded on the identity-mapped object; force a
+    # fresh read so a moved item's room/location/category are reflected in the
+    # response.
+    db.expire_all()
     item = _get_item(db, auth.household.id, item.id)
     return ItemDetailResponse(item=item_detail(item))
 
@@ -414,6 +465,25 @@ def upload_photos(
         raise
 
     return PhotoList(items=[photo_out(photo) for photo in created])
+
+
+@router.post("/items/{item_id}/photos/{photo_id}/primary", response_model=PhotoList)
+def set_primary_photo(
+    item_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> PhotoList:
+    item = _get_item(db, auth.household.id, item_id)
+    active_photos = sorted(item.photos, key=lambda photo: (photo.sort_order, photo.created_at))
+    selected = next((photo for photo in active_photos if photo.id == photo_id), None)
+    if selected is None:
+        raise ApiError(404, "photo_not_found", "Photo not found.")
+    reordered = [selected, *(photo for photo in active_photos if photo.id != photo_id)]
+    for index, photo in enumerate(reordered):
+        photo.sort_order = index
+    db.commit()
+    return PhotoList(items=[photo_out(photo) for photo in reordered])
 
 
 @router.delete("/photos/{photo_id}", status_code=204)

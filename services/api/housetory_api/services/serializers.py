@@ -86,6 +86,7 @@ def item_summary(item: Item) -> ItemSummary:
                 id=item.storage_location.id,
                 name=item.storage_location.name,
                 kind=item.storage_location.kind,
+                parent_id=item.storage_location.parent_id,
             )
             if item.storage_location
             else None

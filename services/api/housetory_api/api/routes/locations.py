@@ -12,6 +12,7 @@ from ...schemas.locations import (
     StorageLocationOut,
     StorageLocationUpdate,
 )
+from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -90,20 +91,29 @@ def _ensure_unique_name(
         raise ApiError(409, "location_name_taken", "A location with this name already exists here.")
 
 
-def _counts(db: Session, household_id: uuid.UUID) -> dict:
-    return dict(
+def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
+    direct = dict(
         db.execute(
             select(Item.storage_location_id, func.count(Item.id))
             .where(
                 Item.household_id == household_id,
                 Item.storage_location_id.is_not(None),
+                Item.is_archived.is_(False),
             )
             .group_by(Item.storage_location_id)
         ).all()
     )
+    rows = db.execute(
+        select(StorageLocation.id, StorageLocation.parent_id).where(
+            StorageLocation.household_id == household_id
+        )
+    ).all()
+    return direct, descendant_totals(rows, direct)
 
 
-def _to_out(location: StorageLocation, counts: dict) -> StorageLocationOut:
+def _to_out(
+    location: StorageLocation, direct_counts: dict, total_counts: dict
+) -> StorageLocationOut:
     return StorageLocationOut(
         id=location.id,
         room_id=location.room_id,
@@ -112,7 +122,8 @@ def _to_out(location: StorageLocation, counts: dict) -> StorageLocationOut:
         description=location.description,
         kind=location.kind,
         sort_order=location.sort_order,
-        item_count=counts.get(location.id, 0),
+        item_count=direct_counts.get(location.id, 0),
+        total_item_count=total_counts.get(location.id, 0),
         created_at=location.created_at,
         updated_at=location.updated_at,
     )
@@ -135,8 +146,8 @@ def list_locations(
             func.lower(StorageLocation.name),
         )
     ).all()
-    counts = _counts(db, auth.household.id)
-    return StorageLocationList(items=[_to_out(location, counts) for location in locations])
+    direct, totals = _counts(db, auth.household.id)
+    return StorageLocationList(items=[_to_out(location, direct, totals) for location in locations])
 
 
 @router.post("", response_model=StorageLocationOut, status_code=201)
@@ -170,7 +181,7 @@ def create_location(
     )
     db.add(location)
     db.commit()
-    return _to_out(location, {})
+    return _to_out(location, {}, {})
 
 
 @router.get("/{location_id}", response_model=StorageLocationOut)
@@ -180,7 +191,8 @@ def get_location(
     db: Session = Depends(get_db),
 ) -> StorageLocationOut:
     location = _get_location(db, auth.household.id, location_id)
-    return _to_out(location, _counts(db, auth.household.id))
+    direct, totals = _counts(db, auth.household.id)
+    return _to_out(location, direct, totals)
 
 
 @router.patch("/{location_id}", response_model=StorageLocationOut)
@@ -227,7 +239,8 @@ def update_location(
         location.parent_id = new_parent_id
 
     db.commit()
-    return _to_out(location, _counts(db, auth.household.id))
+    direct, totals = _counts(db, auth.household.id)
+    return _to_out(location, direct, totals)
 
 
 @router.delete("/{location_id}", status_code=204)

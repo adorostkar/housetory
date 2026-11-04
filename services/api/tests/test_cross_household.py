@@ -141,6 +141,11 @@ def test_every_household_endpoint_rejects_cross_household_access(
         ("PATCH", f"/api/v1/items/{data['item']['id']}", {"name": "Stolen"}),
         ("DELETE", f"/api/v1/items/{data['item']['id']}", None),
         ("DELETE", f"/api/v1/photos/{data['photo']['id']}", None),
+        (
+            "POST",
+            f"/api/v1/items/{data['item']['id']}/photos/{data['photo']['id']}/primary",
+            None,
+        ),
         ("DELETE", f"/api/v1/documents/{data['document']['id']}", None),
         (
             "POST",
@@ -281,6 +286,18 @@ def test_cross_household_ids_cannot_be_attached_to_new_records(
     )
 
     assert anon_client.get("/api/v1/items", headers=headers).json()["total"] == 0
+    assert (
+        anon_client.get("/api/v1/items", headers=headers, params={"q": "Private Room"}).json()[
+            "total"
+        ]
+        == 0
+    )
+    assert (
+        anon_client.get("/api/v1/items", headers=headers, params={"q": "Private Category"}).json()[
+            "total"
+        ]
+        == 0
+    )
 
 
 def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
@@ -302,6 +319,9 @@ def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
     for path in paths:
         response = anon_client.get(path)
         assert response.status_code == 401, (path, response.status_code, response.text)
+
+    primary = anon_client.post(f"/api/v1/items/{random_id}/photos/{random_id}/primary")
+    assert primary.status_code == 401
 
 
 def test_member_cannot_change_household_settings(owner_client, anon_client):

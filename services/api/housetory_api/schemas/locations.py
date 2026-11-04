@@ -33,6 +33,7 @@ class StorageLocationOut(ORMModel):
     kind: str
     sort_order: int
     item_count: int = 0
+    total_item_count: int = 0
     created_at: datetime
     updated_at: datetime
 

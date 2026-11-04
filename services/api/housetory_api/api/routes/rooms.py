@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...models import Item, Room, StorageLocation
 from ...schemas.rooms import RoomCreate, RoomList, RoomOut, RoomUpdate
+from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -64,7 +65,11 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
     item_counts = dict(
         db.execute(
             select(Item.room_id, func.count(Item.id))
-            .where(Item.household_id == household_id, Item.room_id.is_not(None))
+            .where(
+                Item.household_id == household_id,
+                Item.room_id.is_not(None),
+                Item.is_archived.is_(False),
+            )
             .group_by(Item.room_id)
         ).all()
     )
@@ -78,7 +83,23 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
     return item_counts, location_counts
 
 
-def _to_out(room: Room, item_counts: dict, location_counts: dict) -> RoomOut:
+def _aggregate_counts(
+    rooms: list[Room], item_counts: dict, location_counts: dict
+) -> tuple[dict, dict]:
+    rows = [(room.id, room.parent_id) for room in rooms]
+    return (
+        descendant_totals(rows, item_counts),
+        descendant_totals(rows, location_counts),
+    )
+
+
+def _to_out(
+    room: Room,
+    item_counts: dict,
+    location_counts: dict,
+    total_items: dict,
+    total_locations: dict,
+) -> RoomOut:
     return RoomOut(
         id=room.id,
         name=room.name,
@@ -87,6 +108,8 @@ def _to_out(room: Room, item_counts: dict, location_counts: dict) -> RoomOut:
         sort_order=room.sort_order,
         item_count=item_counts.get(room.id, 0),
         location_count=location_counts.get(room.id, 0),
+        total_item_count=total_items.get(room.id, 0),
+        total_location_count=total_locations.get(room.id, 0),
         created_at=room.created_at,
         updated_at=room.updated_at,
     )
@@ -103,7 +126,13 @@ def list_rooms(
         .order_by(Room.sort_order, func.lower(Room.name))
     ).all()
     item_counts, location_counts = _counts(db, auth.household.id)
-    return RoomList(items=[_to_out(room, item_counts, location_counts) for room in rooms])
+    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
+    return RoomList(
+        items=[
+            _to_out(room, item_counts, location_counts, total_items, total_locations)
+            for room in rooms
+        ]
+    )
 
 
 @router.post("", response_model=RoomOut, status_code=201)
@@ -123,7 +152,7 @@ def create_room(
     )
     db.add(room)
     db.commit()
-    return _to_out(room, {}, {})
+    return _to_out(room, {}, {}, {}, {})
 
 
 @router.get("/{room_id}", response_model=RoomOut)
@@ -133,8 +162,10 @@ def get_room(
     db: Session = Depends(get_db),
 ) -> RoomOut:
     room = _get_room(db, auth.household.id, room_id)
+    rooms = db.scalars(select(Room).where(Room.household_id == auth.household.id)).all()
     item_counts, location_counts = _counts(db, auth.household.id)
-    return _to_out(room, item_counts, location_counts)
+    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
+    return _to_out(room, item_counts, location_counts, total_items, total_locations)
 
 
 @router.patch("/{room_id}", response_model=RoomOut)
@@ -178,8 +209,10 @@ def update_room(
         room.parent_id = new_parent_id
 
     db.commit()
+    rooms = db.scalars(select(Room).where(Room.household_id == auth.household.id)).all()
     item_counts, location_counts = _counts(db, auth.household.id)
-    return _to_out(room, item_counts, location_counts)
+    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
+    return _to_out(room, item_counts, location_counts, total_items, total_locations)
 
 
 @router.delete("/{room_id}", status_code=204)

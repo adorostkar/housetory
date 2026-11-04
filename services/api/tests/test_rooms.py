@@ -53,6 +53,67 @@ def test_room_update_moves_and_clears_description(owner_client):
     assert cleared.json()["parent_id"] == living["id"]
 
 
+def test_nested_hierarchy_counts_include_descendants(owner_client):
+    house = create_room(owner_client, "House")
+    kitchen = create_room(owner_client, "Kitchen", parent_id=house["id"])
+    pantry = create_room(owner_client, "Pantry", parent_id=kitchen["id"])
+    cabinet = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": kitchen["id"], "name": "Cabinet", "kind": "cabinet"},
+    ).json()
+    shelf = owner_client.post(
+        "/api/v1/storage-locations",
+        json={
+            "room_id": kitchen["id"],
+            "name": "Top Shelf",
+            "kind": "shelf",
+            "parent_id": cabinet["id"],
+        },
+    ).json()
+
+    for payload in [
+        {"name": "Kitchen Item", "room_id": kitchen["id"]},
+        {"name": "Pantry Item", "room_id": pantry["id"]},
+        {"name": "Cabinet Item", "room_id": kitchen["id"], "storage_location_id": cabinet["id"]},
+        {"name": "Shelf Item", "room_id": kitchen["id"], "storage_location_id": shelf["id"]},
+    ]:
+        response = owner_client.post("/api/v1/items", json=payload)
+        assert response.status_code == 201, response.text
+
+    archived = owner_client.post(
+        "/api/v1/items",
+        json={"name": "Archived Pantry Item", "room_id": pantry["id"]},
+    ).json()["item"]
+    assert (
+        owner_client.patch(
+            f"/api/v1/items/{archived['id']}", json={"is_archived": True}
+        ).status_code
+        == 200
+    )
+
+    rooms = {room["name"]: room for room in owner_client.get("/api/v1/rooms").json()["items"]}
+    assert rooms["House"]["item_count"] == 0
+    assert rooms["House"]["total_item_count"] == 4
+    assert rooms["House"]["total_location_count"] == 2
+    assert rooms["Kitchen"]["item_count"] == 3
+    assert rooms["Kitchen"]["total_item_count"] == 4
+    assert rooms["Kitchen"]["location_count"] == 2
+    assert rooms["Kitchen"]["total_location_count"] == 2
+    assert rooms["Pantry"]["item_count"] == 1
+    assert rooms["Pantry"]["total_item_count"] == 1
+
+    locations = {
+        location["name"]: location
+        for location in owner_client.get(
+            "/api/v1/storage-locations", params={"room_id": kitchen["id"]}
+        ).json()["items"]
+    }
+    assert locations["Cabinet"]["item_count"] == 1
+    assert locations["Cabinet"]["total_item_count"] == 2
+    assert locations["Top Shelf"]["item_count"] == 1
+    assert locations["Top Shelf"]["total_item_count"] == 1
+
+
 def test_room_and_location_counts(owner_client):
     kitchen = create_room(owner_client, "Kitchen")
     location = owner_client.post(
