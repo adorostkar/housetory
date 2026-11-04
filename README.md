@@ -11,7 +11,7 @@ honest across multiple currencies.
 Designed for a CPU-only Linux server, reached securely through Tailscale, and
 installed on an iPhone as a PWA.
 
-![Status: core inventory and ownership complete](https://img.shields.io/badge/status-core_inventory_%2B_ownership_complete-56614f)
+![Status: AI intelligence and ownership complete](https://img.shields.io/badge/status-AI_intelligence_%2B_ownership_complete-56614f)
 
 ## What is working
 
@@ -43,7 +43,22 @@ installed on an iPhone as a PWA.
 - Multi-currency reporting that never adds currencies together; there is no
   implicit exchange rate.
 - CSV exports for documents, purchases, warranties and inventory.
-- PostgreSQL-backed background worker for maintenance and OCR jobs.
+- AI-assisted bulk inventory import from pasted text, TXT, Markdown, CSV, XLSX,
+  DOCX, PDF, OCR images and complete Obsidian ZIP vaults.
+- Import review with per-field provenance, source context, inline missing-room and
+  missing-place creation, duplicate candidates, merge/skip/reject decisions,
+  partial approval, retry safety and import history.
+- First-class Obsidian parsing: YAML frontmatter, properties, wikilinks and
+  aliases, embeds, nested tags, Markdown tables, checklists, nested folders,
+  attachment resolution, broken-link reporting and vault structure.
+- A read-only grounded assistant using real household tools, with deterministic
+  answers when no model is available, plus natural-language smart search.
+- AI item recognition from photographs, with a deterministic OCR fallback and
+  explicit create/update review.
+- Document-to-item relationship suggestions that require explicit linking.
+- Optional local Ollama or consented OpenAI-compatible inference. AI is disabled by
+  default and ordinary Housetory functionality does not depend on it.
+- PostgreSQL-backed background worker for maintenance, OCR, import and AI jobs.
 - Docker Compose deployment with health checks, migrations, backups and
   Tailscale HTTPS guidance.
 - Automated backend and frontend tests.
@@ -53,21 +68,25 @@ installed on an iPhone as a PWA.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 104 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 128 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, document metadata/search/
   originals, OCR parsing and retries, shared purchases, warranty calculations,
-  currency separation, exports and exhaustive cross-household access checks.
-- 20 Vitest tests pass; strict TypeScript typecheck and production build pass.
+  currency separation, exports, archive security, import/duplicate/location
+  review, AI-provider contracts, grounded tools, smart search, recognition,
+  prompt-injection resistance and exhaustive cross-household access checks.
+- 21 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - `docker compose up --build` brings all services healthy; the worker processed
-  real queued maintenance and OCR jobs.
+  real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
   (merchant, date, total, currency, invoice and serial), and the confirmed review
   created the purchase and attached the receipt.
 - Headless Chrome walkthroughs covered first-run setup, nested rooms/places,
   item creation and editing, multi-photo and document uploads, cover selection,
   the photo viewer, hierarchy-aware filtering/search, document OCR review,
-  shared purchases, warranty dashboards, ownership reports and mobile layouts
-  with no console errors or failed requests.
+  shared purchases, warranty dashboards, ownership reports, a real Obsidian ZIP
+  import with inline room creation, grounded assistant answers, smart search,
+  OCR-fallback recognition and mobile layouts with no console errors or failed
+  requests.
 - Backup permissions, checksum verification, archive extraction safety, target
   checks and a full destructive restore were rehearsed locally, including
   authenticating and retrieving photos/documents after restore.
@@ -77,7 +96,9 @@ stack, not just unit mocks:
 The Phase 2 desktop/iPhone walkthrough, screenshots and remaining limitations are
 in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
-[`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md).
+[`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md). The Phase 4 AI,
+import and Obsidian walkthrough is in
+[`docs/PHASE_4_WALKTHROUGH.md`](docs/PHASE_4_WALKTHROUGH.md).
 
 The pre-deployment security review, findings and remaining risks are in
 [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a
@@ -86,8 +107,10 @@ guarantee of production security.
 The product is intentionally not finished. Custom fields, category/tag
 management UI, multi-user sharing, password changes, exchange-rate conversion,
 the Tauri macOS shell and a checked-in browser E2E suite are not implemented yet.
-See [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped
-work from remaining work and states the OCR and multi-currency limitations
+AI extraction is review-only and heuristics remain approximate; no model is
+bundled or downloaded automatically. See
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
+from remaining work and states the OCR, AI and multi-currency limitations
 honestly.
 
 ## Quick start with Docker Compose
@@ -177,6 +200,21 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `EXTRA_ORIGINS` | empty | Comma-separated extra allowed origins (normally empty) |
 | `OCR_LANGUAGE` | `eng` | Tesseract language code installed in the worker image |
 | `OCR_MAX_PDF_PAGES` | `5` | Maximum scanned PDF pages rendered for OCR |
+| `AI_PROVIDER` | `disabled` | `disabled`, `ollama`, or `openai_compatible` |
+| `AI_MODEL` | empty | Local Ollama model name |
+| `AI_BASE_URL` | `http://host.docker.internal:11434` | Ollama endpoint |
+| `AI_TIMEOUT_SECONDS` | `90` | Inference request timeout |
+| `AI_MAX_CONCURRENCY` | `1` | In-process inference concurrency limit |
+| `AI_CLOUD_ENABLED` | `false` | Enable an OpenAI-compatible endpoint |
+| `AI_CLOUD_CONSENT` | `false` | Must also be true before household data leaves the server |
+| `AI_CLOUD_BASE_URL` | empty | OpenAI-compatible base URL, including `/v1` |
+| `AI_CLOUD_MODEL` | empty | Cloud model name |
+| `AI_CLOUD_API_KEY` | empty | Optional cloud bearer token |
+| `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
+| `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
+| `IMPORT_MAX_FILES` | `2000` | Maximum files accepted from one vault ZIP |
+| `IMPORT_MAX_TOTAL_MB` | `50` | Maximum decompressed vault size |
+| `IMPORT_MAX_FILE_MB` | `10` | Maximum single extracted vault file |
 
 `APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
 refuses to start with an insecure cookie configuration. Production also rejects
@@ -192,8 +230,32 @@ docker compose up -d --force-recreate api worker
 ```
 
 Inside the containers the API uses `DATABASE_URL`, `DATA_DIR=/data`,
-`UPLOADS_DIR=/data/uploads` and `ENVIRONMENT=production`. Secrets are never
-committed.
+`UPLOADS_DIR=/data/uploads`, `IMPORTS_DIR=/data/imports` and
+`ENVIRONMENT=production`. Secrets are never committed.
+
+### Optional local AI with Ollama
+
+Housetory does not ship or download a model. To use local AI on a machine that
+already has Ollama:
+
+```bash
+ollama serve
+ollama pull <a CPU-friendly model you have chosen>
+```
+
+Set in `.env`:
+
+```dotenv
+AI_PROVIDER=ollama
+AI_MODEL=<that model>
+AI_BASE_URL=http://host.docker.internal:11434
+```
+
+Then rebuild/recreate the API and worker. The Settings screen shows provider
+status, the selected model and whether it is available. If the model is missing
+or unreachable, ordinary import, search, smart search and the assistant continue
+with deterministic grounded tools. Cloud inference remains disabled unless both
+`AI_CLOUD_ENABLED=true` and `AI_CLOUD_CONSENT=true` are explicitly configured.
 
 Changing `APP_BASE_URL` requires recreating the API container and signing in
 again if the cookie domain policy changes.
@@ -202,11 +264,13 @@ again if the cookie domain policy changes.
 
 Persistent named volumes:
 
-- `housetory_pgdata` — PostgreSQL, including document metadata and OCR output
+- `housetory_pgdata` — PostgreSQL, including document/import metadata and OCR output
 - `housetory_uploads` — item photographs, normalized document downloads and
   preserved original uploads under `households/*/documents/originals/`
+- `housetory_imports` — private original import sources, extracted Obsidian notes
+  and attachments
 
-Create a verified backup (PostgreSQL custom dump + uploads tar + SHA-256 sums):
+Create a verified backup (PostgreSQL custom dump + uploads/imports tars + SHA-256 sums):
 
 ```bash
 ./scripts/backup.sh
@@ -231,17 +295,18 @@ The restore script:
 - checks the backup's database name and Compose project against the live target
   and refuses to overwrite a mismatched database unless
   `--allow-target-mismatch` is explicitly supplied;
-- validates the uploads archive and rejects absolute paths, `..` traversal,
-  links, devices and duplicate entries before stopping services;
+- validates the uploads and imports archives and rejects absolute paths, `..`
+  traversal, links, devices and duplicate entries before stopping services;
 - requires typed confirmation unless `--yes` is supplied;
-- stops the API and worker, recreates the database, restores files, reapplies
-  the least-privilege application role grants, runs migrations and restarts the
-  stack.
+- stops the API and worker, recreates the database, restores uploads and private
+  import sources, reapplies the least-privilege application role grants, runs
+  migrations and restarts the stack.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the non-atomic snapshot trade-off.
 
-The uploads archive includes normalized files and preserved originals. Never
-delete a Docker volume unless you intend to lose data. To reset a development
+The uploads archive includes normalized files and preserved originals; the
+imports archive includes vault notes and attachments. Never delete a Docker
+volume unless you intend to lose data. To reset a development
 environment only:
 
 ```bash
@@ -277,8 +342,9 @@ uv run uvicorn housetory_api.main:app --reload --port 8000
 ```
 
 In a second terminal, run the worker from the repository root. Real OCR needs
-the `tesseract` and `pdftoppm` binaries on the host; without them the worker still
-starts and records a clear OCR failure instead of crashing:
+the `tesseract` and `pdftoppm` binaries on the host; import parsing, DOCX/XLSX and
+AI fallback use the standard library or configured provider. Without OCR binaries
+the worker still starts and records a clear OCR failure instead of crashing:
 
 ```bash
 # macOS: brew install tesseract poppler
@@ -363,10 +429,14 @@ docker compose down                   # stop, keep data
 - Structured errors: `{"detail": {"code", "message", "fields"}}`.
 - Uploaded files and preserved originals are only served through authenticated,
   no-store endpoints.
-- Documents support metadata/search/filtering, original downloads, OCR retry and
-  an explicit review/apply endpoint.
+- Documents support metadata/search/filtering, original downloads, OCR retry,
+  explicit review/apply and related-item suggestions.
 - Purchases, warranties, ownership reports and CSV exports have dedicated
   household-scoped endpoints.
+- Imports expose upload, history, source/file downloads, retry and explicit
+  approve/merge/skip/reject application.
+- AI endpoints expose provider status, grounded assistant, smart search, photo
+  recognition and read-only document relationship suggestions.
 
 The endpoint inventory and data model are documented in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -404,8 +474,8 @@ compose.dev.yaml        Loopback Postgres exposure for development only
 - Login failures are throttled per email and proxy address with a documented
   in-process limiter. It resets on restart and is single-process only.
 - Cross-household access is denied for rooms, storage locations, categories,
-  tags, items, photos, documents, purchases, warranties and exports (covered by
-  tests).
+  tags, items, photos, documents, purchases, warranties, exports, imports,
+  recognition records and AI answers (covered by tests).
 - Uploads are validated by content with an image-decoder allowlist and a PDF
   parser, size-capped, and stored with `0600` permissions under `0700`
   directories. Safe downloads are re-encoded to strip metadata; exact original
@@ -414,6 +484,12 @@ compose.dev.yaml        Loopback Postgres exposure for development only
 - OCR runs locally in the worker over validated files. Tesseract/Poppler parse
   untrusted input in a CPU-only container with no network dependency; the
   residual parser/malware risk is documented in the security audit.
+- Vault ZIPs reject traversal, symlinks, unsafe/encrypted entries, file-count and
+  decompressed-size excess. Imported notes are never executed. AI sees delimited
+  untrusted data, returns strict validated JSON, and has no write/SQL/shell tools.
+- The worker mounts document/photo uploads read-only and has a separate writable
+  private imports volume for extracted vault files. AI is disabled by default;
+  cloud calls require explicit enablement and consent.
 - Keep the host patched, rebuild images periodically, leave Tailscale Funnel
   off, use a private tailnet ACL, and encrypt backups before taking them
   off-server.

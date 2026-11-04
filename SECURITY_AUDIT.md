@@ -296,19 +296,19 @@ remained intact. Household rename requires owner role.
 | `pip-audit` production requirements | No known vulnerabilities |
 | `pip-audit` including dev requirements | No known vulnerabilities (pytest upgraded to 9.2.0) |
 | `npm audit` (prod and all) | 0 vulnerabilities |
-| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each (Phase 3 rebuild) |
+| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each (Phase 4 rebuild) |
 | Bandit Python static analysis | No findings after assert cleanup |
 | Secret scan | No credentials in tracked files; `.env` ignored |
 | Compose port inspection | DB/API/worker unpublished; web loopback only |
 
-Trivy scan date: 2026-11-04 (re-run after the Phase 3 worker OCR packages).
+Trivy scan date: 2026-11-04 (re-run after the Phase 4 import/AI images).
 Image vulnerabilities are time-sensitive.
 
 ## Verification performed
 
-- 67 backend pytest tests at audit sign-off; Phase 2 raised this to 72 and
-  Phase 3 to 104, including new security regressions.
-- 11 frontend Vitest tests at audit sign-off; now 20 after Phases 2 and 3; strict
+- 67 backend pytest tests at audit sign-off; Phase 2 raised this to 72, Phase 3
+  to 104 and Phase 4 to 128, including new security regressions.
+- 11 frontend Vitest tests at audit sign-off; now 21 after Phases 2–4; strict
   TypeScript check and production build pass.
 - Headless Chromium walkthrough: setup, room/location, item create/edit,
   multipart photo upload, document upload, search, dark mode, settings and mobile
@@ -463,6 +463,65 @@ configured app URL is itself loopback**, and only with the same scheme and port.
 Remote LAN/tailnet origins still require an explicit `EXTRA_ORIGINS` entry and
 remain rejected otherwise. A regression test covers all three loopback spellings
 and an unrelated LAN origin. Backend tests are now 104.
+
+## Phase 4 follow-up
+
+Phase 4 added AI-assisted import, Obsidian vault handling, grounded assistant
+tools, smart search, photo recognition and document relationship suggestions.
+Security implications reviewed:
+
+- Every import, source file, entry application, recognition, assistant answer and
+  natural-search result is household-scoped. Cross-household tests cover import
+  detail/source/apply/retry/delete, recognition image/original/retry/delete,
+  assistant queries, smart search and document relation suggestions.
+- Vault ZIP handling rejects absolute paths, traversal, symlinks, encrypted
+  entries, unsafe/unsupported files, excessive file counts and decompressed-size
+  excess before reading content. Notes are never executed; `.obsidian` and plugin
+  files are skipped. Original sources and extracted notes/attachments stay in a
+  private `0700/0600` import volume.
+- The worker keeps `/data/uploads` read-only. A separate `housetory_imports`
+  volume is writable for extracted vault files, avoiding a broader write capability
+  over documents and photos. Imports are included in backup/restore; destructive
+  restore was rehearsed with vault note retrieval.
+- OCR/import/vision jobs use the existing durable queue with retries, stale-job
+  recovery and idempotent apply. Applying an import uses the shared item creation
+  service and savepoints per entry; retries do not duplicate imported items.
+- Uploaded documents, Markdown, filenames, OCR text and inventory descriptions are
+  framed as untrusted data in prompts. Model output must pass strict Pydantic
+  schemas with extra fields forbidden. The model has no SQL, shell, write or
+  arbitrary tool access; the server executes only allowlisted read-only tools with
+  auth-derived household scope.
+- Cloud inference is disabled unless both `AI_CLOUD_ENABLED` and
+  `AI_CLOUD_CONSENT` are true. Tests assert that no HTTP request is made when
+  consent is missing. Local Ollama is preferred and does not send data externally.
+- AI is disabled by default. Deterministic import, keyword search, smart search and
+  assistant answers continue when the provider is unavailable or returns invalid
+  output. No models are downloaded automatically.
+- Backend tests increased to 128 and frontend tests to 21. The Phase 4 walkthrough
+  exercised a real Obsidian ZIP import through the Compose worker, inline room
+  creation, grounded assistant answers, smart search, OCR-fallback recognition and
+  mobile layouts with zero console/network errors.
+- Final API/worker/web/database images scan with zero HIGH/CRITICAL findings.
+  `npm audit` and production `pip-audit` report no known vulnerabilities.
+
+Residual Phase 4 risks:
+
+- No real local model was installed on the review machine, so model quality,
+  latency and hallucination behavior remain unmeasured. Provider contract tests use
+  controlled/mocked outputs; deterministic fallback is the verified path.
+- Prompt injection remains a defense-in-depth problem. Strict schemas and
+  read-only tools limit impact, but model-written prose can still be misleading;
+  references and source context must be reviewed.
+- Malicious PDFs, archives, images or Office files can consume CPU or exploit
+  parser/OCR/model-runtime vulnerabilities. Limits reduce but do not eliminate
+  this. Keep images patched and rebuild regularly.
+- Obsidian support is not a full YAML/Markdown runtime: plugins, Dataview, canvas
+  files and arbitrary HTML/JavaScript are not executed. Broken links and ignored
+  notes are reported for review.
+- Import source files and extracted vault attachments are sensitive household
+  data. Backups remain unencrypted unless the operator encrypts them.
+- AI/cloud configuration is environment-driven; changing it requires recreating
+  services. Cloud provider retention/training policies are outside this repo.
 
 ## Conclusion
 

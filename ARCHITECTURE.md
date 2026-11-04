@@ -136,6 +136,9 @@ All application endpoints are versioned under `/api/v1`.
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
+| Imports | `GET/POST /imports`, `GET/DELETE /imports/{id}`, `GET /imports/{id}/source`, `GET /imports/{id}/files/{file_id}/download`, `POST /imports/{id}/retry`, `POST /imports/{id}/apply` |
+| Documents/AI | `GET /documents/{id}/related-items` |
+| AI | `GET /ai/status`, `POST /assistant/query`, `POST /search/natural`, `GET/POST /ai/recognitions`, recognition image/original/retry/delete |
 
 OpenAPI documentation is available in development at `/api/docs`. It is
 disabled when `ENVIRONMENT=production`.
@@ -209,6 +212,9 @@ users ──< household_members >── households
 items ──< item_custom_values >── custom_field_definitions
 purchases ──> documents (receipt)      warranties ──> documents (certificate)
 documents (OCR metadata, original + normalized storage)
+import_batches ──< import_entries ──> items (imported/matched)
+import_batches ──< import_source_files (notes/attachments)
+ai_recognitions (private photo, status, suggestions)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -245,6 +251,15 @@ Key decisions:
 - **Custom fields** are modelled as typed definitions
   (`text|number|date|boolean|select`) and per-item JSONB values. API and UI for
   custom fields are deferred; the schema is present in migration `0001`.
+- **Import batches** are household-owned sources with status, counts, warnings,
+  vault tree, ignored notes and broken links. **Import entries** carry proposed
+  JSON fields, per-field provenance, duplicate candidates, explicit resolution and
+  the resulting item. **Import source files** preserve extracted notes and
+  attachments. Application is explicit and idempotent; no inventory is created by
+  extraction.
+- **AI recognition records** store a private normalized/original photo, status,
+  validated suggestions, model metadata and errors. Applying a suggestion uses the
+  existing item APIs only after user confirmation.
 - **Jobs** carry task name, JSON payload, status, priority, run time, attempts,
   max attempts and worker lock fields.
 
@@ -264,7 +279,11 @@ columns.
 
 ## 6. File storage
 
-- Root is `UPLOADS_DIR` (default `/data/uploads` in Docker).
+- Upload/media root is `UPLOADS_DIR` (default `/data/uploads` in Docker).
+- Import sources and extracted vault files use a separate `IMPORTS_DIR`
+  (`/data/imports`). The API can write both; the worker mounts uploads read-only
+  and the imports volume writable so OCR remains unable to alter document/photo
+  storage.
 - Generated object keys, never user filenames, determine paths:
   `items/<item_uuid>/photos/<photo_uuid>.<ext>`,
   `households/<household_uuid>/documents/<document_uuid>.<ext>` and preserved
@@ -297,13 +316,14 @@ columns.
   uploads volume; the volume root is also `0700`.
 - Deleted files are removed best-effort after the database commit. Deleting an
   item removes its photographs and any documents only that item used.
-- Backups capture both the database and the uploads volume. Backup directories
-  are `0700` and files `0600`; restores verify checksums and refuse database or
-  Compose-project mismatches. Uploads archives are validated for traversal,
-  links, devices and duplicate entries and extracted with Python's safe tar
-  filter. Because recreating the database discards its CONNECT, table, sequence
-  and default-privilege grants, restore reapplies the least-privilege app role
-  before the API and worker start.
+- Backups capture the database, uploads volume and private imports volume. Backup
+  directories are `0700` and files `0600`; restores verify checksums and refuse
+  database or Compose-project mismatches. Uploads and imports archives are
+  validated for traversal, links, devices and duplicate entries and extracted
+  with Python's safe tar filter. Because recreating the database discards its
+  CONNECT, table, sequence and default-privilege grants, restore reapplies the
+  least-privilege app role before the API and worker start. Older backups without
+  `imports.tar.gz` remain restorable.
 
 ## 7. Background jobs
 
@@ -319,8 +339,8 @@ deployment.
 - Stale `running` jobs (worker crash) are requeued on startup and periodically.
 - The worker writes a heartbeat file; its Docker health check fails if the
   heartbeat is stale.
-- Current handlers: prune expired sessions, prune old finished jobs and
-  `documents.ocr`. A maintenance job is enqueued every six hours. OCR jobs are
+- Current handlers: prune expired sessions, prune old finished jobs,
+  `documents.ocr`, `imports.process` and `ai.recognize`. A maintenance job is enqueued every six hours. OCR jobs are
   enqueued in the same transaction as an upload, claimable by the worker, and
   retried with backoff. The handler marks the document processing, extracts text
   with embedded PDF text or Tesseract/Poppler, stores proposals in JSONB, and
@@ -328,7 +348,10 @@ deployment.
   separate authenticated endpoint that changes purchases/items explicitly.
 - The worker image installs Alpine Tesseract with English language data and
   Poppler utilities. No GPU, external OCR API or network service is required.
-  OCR language and scanned-PDF page count are configurable. The queue is
+  OCR language and scanned-PDF page count are configurable. Import jobs safely
+  read text/Markdown/PDF/DOCX/XLSX/CSV/image sources and Obsidian ZIPs, store
+  private extracted files, match locations/duplicates and produce review entries.
+  Recognition jobs use a configured vision model or the OCR fallback. The queue is
   deliberately general so future export/media jobs can reuse it.
 
 ## 8. Frontend
@@ -338,8 +361,9 @@ deployment.
 - TanStack Query owns server state; there is no global state store.
 - React Router 7 with route-level lazy loading and a protected shell.
 - Routes: overview, rooms, room detail, items, item create/edit/detail,
-  documents, document detail/OCR review, purchases, warranties, search, settings,
-  setup, login, 404.
+  documents, document detail/OCR review, purchases, warranties, imports, import
+  review/apply, assistant, recognition, keyword/smart search, settings, setup,
+  login, 404.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
@@ -347,9 +371,15 @@ deployment.
   full-screen viewer with keyboard/thumbnail navigation, and an iPhone camera
   capture action.
 - Document library, OCR review, purchase management with multi-item selection,
-  warranty dashboards and an ownership/financial overview use the same typed API
-  client and React Query invalidation model. OCR status polls while queued or
-  processing and stops after a terminal state.
+  warranty dashboards, ownership/financial overview, import review, assistant and
+  recognition use the same typed API client and React Query invalidation model.
+  OCR/import/recognition status polls while queued or processing and stops after a
+  terminal state.
+- Import review preserves per-field provenance, source excerpts and vault context;
+  missing locations can be created inline but only by explicit user action.
+  Assistant answers render grounded references and cannot mutate data.
+- Smart search translates deterministic intent into safe filters and retains the
+  ordinary keyword mode as a fallback.
 - Design system: warm ivory/stone light mode, deep charcoal dark mode, system
   SF typography with New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.
@@ -370,12 +400,14 @@ development and nginx proxies in production. No CORS allowlist is needed.
   permissions headers. API JSON and authenticated media are `no-store`.
 - The application port binds only to loopback. Tailscale Serve is the only
   intended entry point. Tailscale Funnel is explicitly not used.
-- Only PostgreSQL (`db`) and uploads (`api`) own persistent data. The worker
-  image adds Tesseract, English language data and Poppler for CPU-only OCR. The
-  PostgreSQL image is rebuilt with a current Go-built `gosu`; API and worker
+- PostgreSQL (`db`), uploads (`api`) and private imports (`api`/`worker`) own
+  persistent data. The worker mounts uploads read-only and imports writable. The
+  worker image adds Tesseract, English language data and Poppler for CPU-only OCR.
+  The PostgreSQL image is rebuilt with a current Go-built `gosu`; API and worker
   images use Alpine Python to keep the runtime high/critical package count at
-  zero in the audit performed. Backups use `pg_dump` plus a tar of the uploads because
-  snapshots cannot be atomic across both; restore stops the API and worker first.
+  zero in the audit performed. Backups use `pg_dump` plus tars of uploads and
+  imports because snapshots cannot be atomic across them; restore stops the API
+  and worker first.
 - The database admin role is used only for migrations, backup and restore. API
   and worker connect with a separate non-superuser role that has DML privileges
   only and cannot create databases, roles or schema objects. A fresh volume
@@ -384,7 +416,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 104 pytest tests against a real PostgreSQL database. The test session
+- Backend: 128 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -394,10 +426,14 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document metadata/search/types/originals, HEIC normalization, OCR parsing,
   job completion and failure/retry, confirmed OCR application, shared purchase
   associations, warranty duration/status/reminders, currency separation, CSV
-  exports, upload content validation, malformed PDF/images, EXIF stripping,
-  traversal filenames, upload size and permissions, archive extraction safety,
-  queue mechanics and migration freshness.
-- Frontend: 20 Vitest tests + Testing Library, including hierarchy utilities,
+  exports, archive traversal/symlink/bomb limits, import extraction for text,
+  Markdown, Obsidian, CSV/XLSX/DOCX, duplicate/location review, partial approval,
+  retry safety, source traceability, AI provider contracts, cloud consent,
+  grounded tools, smart search, recognition fallback, document suggestions,
+  prompt-injection resistance, upload content validation, malformed PDF/images,
+  EXIF stripping, traversal filenames, upload size and permissions, archive
+  extraction safety, queue mechanics and migration freshness.
+- Frontend: 21 Vitest tests + Testing Library, including hierarchy utilities,
   location paths, nested room cards, the photo lightbox, document cards,
   warranty labels/status text and calendar-month expiration. TypeScript is
   checked in strict mode; the production build is part of verification.
@@ -421,6 +457,16 @@ development and nginx proxies in production. No CORS allowlist is needed.
   attachments but may still contain malicious content when opened in a PDF
   reader. OCR parses untrusted documents locally in the worker; keep the worker
   image rebuilt and patched.
+- AI extraction/recognition is heuristic and provider-dependent. Deterministic
+  fallback works without a model, but real model quality, latency and hardware
+  requirements were not measured because no model is bundled or installed by the
+  repository. All AI changes require explicit review.
+- Obsidian support covers practical Markdown/frontmatter, links, tags, tables,
+  checklists, folders and attachments, but not executable plugins, Dataview
+  queries, canvas files or full YAML semantics.
+- Import jobs can consume CPU proportional to vault size and configured AI chunk
+  count; limits bound files, decompressed bytes and AI chunks but there is no
+  operator-facing queue UI.
 - OCR extraction is heuristic and English-first, limited to configured PDF page
   counts and installed language packs. It proposes values only; review is
   mandatory.

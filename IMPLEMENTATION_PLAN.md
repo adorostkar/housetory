@@ -122,13 +122,46 @@ the product-facing numbering below follows the delivery brief.
 - [x] Desktop and iPhone walkthrough with real Compose OCR and zero console/
       network errors, documented in `docs/PHASE_3_WALKTHROUGH.md`.
 
+## Phase 4 — AI Intelligence, Smart Import & Inventory Automation ✅
+
+- [x] Append-only migration for import batches, import source files, import
+      entries and AI recognition records.
+- [x] Bulk import from pasted text, TXT, Markdown, CSV, XLSX, DOCX, PDF, OCR
+      images and Obsidian ZIP vaults.
+- [x] Obsidian parsing for frontmatter/properties, wikilinks and aliases, embeds,
+      nested tags, Markdown tables, checklists, nested folders, attachments,
+      broken links and vault structure.
+- [x] Deterministic extraction with explicit/inferred/missing field provenance.
+- [x] Location/category matching, missing-location suggestions with inline
+      user-approved creation, and duplicate candidates.
+- [x] Review workflow with per-entry editing, selection, skip/reject/merge,
+      partial approval, retries and import history.
+- [x] Idempotent apply using the shared item creation service and source
+      traceability on item detail.
+- [x] Private import-source volume, original/vault preservation, safe ZIP limits
+      and backup/restore support.
+- [x] Optional Ollama/OpenAI-compatible provider abstraction with strict schemas,
+      timeouts, concurrency limits, cloud consent gates and no automatic model
+      download.
+- [x] Read-only grounded assistant tools with deterministic fallback, household
+      scoping, references and no SQL/write access.
+- [x] Natural-language smart search with safe filters and keyword fallback.
+- [x] AI/OCR-fallback item recognition with explicit create/update review.
+- [x] Document-to-item relationship suggestions with explicit linking.
+- [x] Prompt-injection, malformed provider output, unavailable model, timeout,
+      archive traversal/symlink/limit, cross-household and retry-safety tests.
+- [x] Real Obsidian import, assistant, smart search, document suggestions,
+      recognition and mobile walkthroughs; screenshots in
+      `docs/PHASE_4_WALKTHROUGH.md`.
+
 ## Supporting platform — Background processing ✅
 
 - [x] PostgreSQL queue with `FOR UPDATE SKIP LOCKED`, retries/backoff, stale job
       recovery, heartbeat health check.
 - [x] Worker container, scheduled session cleanup and finished-job pruning.
 - [x] Document OCR handler, local Tesseract/Poppler runtime and retry behavior.
-- [x] Queue mechanics and OCR failure/retry tests.
+- [x] Bulk import and AI recognition job handlers.
+- [x] Queue mechanics, import retry and OCR failure/retry tests.
 
 ## Supporting platform — Web application shell ✅
 
@@ -169,7 +202,7 @@ the product-facing numbering below follows the delivery brief.
       their tailnet; cannot be done from this repository).
 - [ ] Automated off-site backup scheduling (scripts are ready for cron/systemd).
 
-## Phase 4 — Desktop (next, not started)
+## Phase 5 — Desktop (next, not started)
 
 - [ ] Scaffold Tauri 2 in `apps/desktop` using the production web build.
 - [ ] macOS window chrome, menu bar, keyboard commands.
@@ -177,7 +210,7 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Code signing/notarization and update strategy.
 - [ ] Desktop-specific tests.
 
-## Phase 5 — Product depth (next)
+## Phase 6 — Product depth (next)
 
 ### Custom fields
 - [ ] CRUD endpoints and validation for custom field definitions and values.
@@ -198,6 +231,7 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Photo reordering and captions.
 - [x] Document rename/edit and document library view.
 - [x] Original upload preservation and authenticated original downloads.
+- [x] OCR-assisted document relationship suggestions with explicit approval.
 - [ ] Move thumbnail/re-encoding to the job queue with progress reporting.
 - [ ] Optional AVIF/TIFF support.
 - [ ] Virus scanning hook for documents.
@@ -208,8 +242,8 @@ the product-facing numbering below follows the delivery brief.
 - [ ] PostgreSQL `pg_trgm`/full-text indexes and ranked results.
 - [x] Warranty status views and filters.
 - [x] Export inventory, documents, purchases and warranties to CSV.
+- [x] Natural-language search with safe structured filters and keyword fallback.
 - [ ] Add PDF report export and optional exchange-rate configuration.
-- [ ] Natural-language search with optional Ollama, disabled by default.
 
 ### Reliability
 - [ ] Playwright end-to-end suite against Compose.
@@ -239,8 +273,8 @@ the product-facing numbering below follows the delivery brief.
 - Password change/reset is not implemented.
 - Login throttling is in-process only; setup can be claimed before first setup.
 - Search is `ILIKE` based; adequate for personal scale but not optimised.
-- No antivirus scanning for documents; PDFs download as attachments. OCR parses
-  untrusted files locally and must be kept patched.
+- No antivirus scanning for documents; PDFs download as attachments. OCR and
+  imports parse untrusted files locally and must be kept patched.
 - Backups are unencrypted unless the operator encrypts them.
 - No automated browser E2E suite is checked in; Phases 2 and 3 used manual
   Playwright walkthroughs with zero console/network failures.
@@ -251,8 +285,12 @@ the product-facing numbering below follows the delivery brief.
   purchases are allocated equally for category/room breakdowns.
 - Legacy documents created before Phase 3 retain only their already-sanitized
   copy; exact originals are preserved for new uploads.
-- Tauri desktop is not started. Ownership is now stable enough to begin it.
-- The AI assistant is intentionally not started.
+- No AI model is bundled or downloaded automatically. Real model quality/latency
+  is unmeasured on the review machine; deterministic import/search/assistant
+  fallbacks and mocked provider contracts are tested.
+- Obsidian support does not execute plugins, Dataview queries or canvas files,
+  and implements a practical YAML frontmatter subset rather than full YAML.
+- Tauri desktop is not started. AI and ownership are now stable enough to begin it.
 - Offline mode is an app shell, not offline inventory data.
 
 ## Definition of done for Phase 2
@@ -278,9 +316,22 @@ the product-facing numbering below follows the delivery brief.
 6. Exports, backup/restore, cross-household isolation and all earlier tests pass. ✅
 7. Desktop/iPhone walkthrough and honest limitations documented. ✅
 
+## Definition of done for Phase 4
+
+1. Bulk import works end-to-end with review, duplicate and location handling. ✅
+2. Obsidian vaults preserve structure, notes, attachments and relationships. ✅
+3. The assistant is grounded, read-only, household-scoped and functional without
+   AI availability. ✅
+4. Natural-language search uses safe structured filters. ✅
+5. Recognition and document suggestions require explicit approval. ✅
+6. Import jobs are retry-safe, traceable and included in backup/restore. ✅
+7. Security, cross-household, prompt-injection and archive tests pass. ✅
+8. Desktop/iPhone walkthrough and honest AI limitations documented. ✅
+
 ## Recommended next phase
 
-Do not start until explicitly approved. The strongest next candidates are the
-Tauri 2 macOS shell, advanced organisation (custom fields and taxonomy
-management), and deeper document/OCR workflows. The AI assistant remains
-explicitly deferred.
+Do not start until explicitly approved. **Phase 5 — Tauri 2 macOS desktop** is the
+strongest next milestone now that the web application, imports and AI surfaces are
+stable. Advanced organisation (custom fields, taxonomy management and multi-user
+sharing) should follow. No AI assistant work is deferred any longer; Phase 4
+delivered the read-only assistant.
