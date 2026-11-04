@@ -18,6 +18,7 @@ from .routes import (
     ownership,
     purchases,
     rooms,
+    search,
     taxonomy,
     warranties,
 )
@@ -29,6 +30,7 @@ api_router.include_router(household.router)
 api_router.include_router(overview.router)
 api_router.include_router(ownership.router)
 api_router.include_router(rooms.router)
+api_router.include_router(search.router)
 api_router.include_router(locations.router)
 api_router.include_router(containers.router)
 api_router.include_router(labels.router)
