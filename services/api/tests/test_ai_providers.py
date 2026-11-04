@@ -662,3 +662,70 @@ def test_cached_catalog_metadata_controls_task_capability_validation(owner_clien
     )
     assert embedding.status_code == 422
     assert embedding.json()["detail"]["code"] == "model_not_chat_capable"
+
+
+def test_status_catalog_check_is_compact_and_never_serializes_models(owner_client, monkeypatch):
+    catalog = [f"model-{index:03d}" for index in range(500)]
+    monkeypatch.setattr(ai, "available_models", lambda config: catalog)
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(default_model="model-250"),
+    ).json()
+
+    status = owner_client.get("/api/v1/ai/status?task=assistant")
+    assert status.status_code == 200, status.text
+    body = status.json()
+    assert body["configured"] is True
+    assert body["catalog_checked"] is True
+    assert body["catalog_count"] == 500
+    assert body["available"] is True
+    assert "models" not in body
+    assert "model-499" not in status.text
+
+    saved_label = owner_client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={
+            "provider_id": provider["id"],
+            "model": "GPT-6 Luna",
+            "enabled": True,
+        },
+    )
+    assert saved_label.status_code == 200, saved_label.text
+    mismatch = owner_client.get("/api/v1/ai/status?task=assistant")
+    assert mismatch.status_code == 200, mismatch.text
+    mismatch_body = mismatch.json()
+    assert mismatch_body["catalog_checked"] is True
+    assert mismatch_body["catalog_count"] == 500
+    assert mismatch_body["available"] is False
+    assert "was not listed" in mismatch_body["error"]
+    assert "GPT-6 Luna" in mismatch_body["error"]
+    assert "models" not in mismatch_body
+
+    monkeypatch.setattr(ai, "available_models", lambda config: [])
+    empty = owner_client.get("/api/v1/ai/status?task=assistant").json()
+    assert empty["catalog_checked"] is True
+    assert empty["catalog_count"] == 0
+    assert empty["available"] is False
+    assert "empty model catalog" in empty["error"]
+    assert "models" not in empty
+
+
+def test_status_catalog_failure_is_not_reported_as_model_mismatch(owner_client, monkeypatch):
+    owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(default_model="gpt-4o"),
+    )
+
+    def unavailable(config):
+        raise ai.AiUnavailable("Provider returned HTTP 503: upstream unavailable")
+
+    monkeypatch.setattr(ai, "available_models", unavailable)
+    status = owner_client.get("/api/v1/ai/status?task=assistant")
+    assert status.status_code == 200, status.text
+    body = status.json()
+    assert body["configured"] is True
+    assert body["catalog_checked"] is False
+    assert body["catalog_count"] == 0
+    assert body["available"] is False
+    assert "503" in body["error"]
+    assert "models" not in body

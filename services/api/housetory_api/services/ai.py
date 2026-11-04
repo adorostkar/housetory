@@ -393,28 +393,40 @@ def discover_models(config: AiRuntimeConfig) -> list[DiscoveredModel]:
     ]
 
 
-def _probe(config: AiRuntimeConfig) -> tuple[bool, list[str], str | None]:
+def _probe(config: AiRuntimeConfig) -> tuple[bool, list[str], str | None, bool]:
+    """Check catalog listing only; never call an inference/completion endpoint."""
     if not config.configured:
-        return False, [], config.error
+        return False, [], config.error, False
     try:
         models = available_models(config)
     except AiError as exc:
-        return False, [], str(exc)
+        return False, [], str(exc), False
     model = config.model or ""
+    if not model:
+        return False, models, "No model is selected for this task.", True
     available = any(
         candidate == model
         or candidate.split(":")[0] == model.split(":")[0]
         or candidate.endswith(f"/{model}")
         for candidate in models
     )
-    if not available and models:
+    if not available:
+        if not models:
+            return (
+                False,
+                [],
+                "The provider returned an empty model catalog, so the selected model "
+                "could not be verified. Check the endpoint or enter the exact API model name.",
+                True,
+            )
         return (
             False,
             models,
-            f"Model {model!r} is not available from this provider. "
+            f"Model {model!r} was not listed in the provider catalog. "
             "Choose a discovered model or enter the exact API model name.",
+            True,
         )
-    return True, models, None
+    return True, models, None, True
 
 
 def provider_status(
@@ -428,8 +440,9 @@ def provider_status(
     models: list[str] = []
     error = config.error
     available = False
+    catalog_checked = False
     if config.configured and probe:
-        available, models, probe_error = _probe(config)
+        available, models, probe_error, catalog_checked = _probe(config)
         error = error or probe_error
     return status_from_config(
         config,
@@ -437,6 +450,7 @@ def provider_status(
         models=models,
         probe_error=None,
         available=available,
+        catalog_checked=catalog_checked,
     ).model_copy(update={"error": error})
 
 

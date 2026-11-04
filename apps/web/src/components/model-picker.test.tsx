@@ -73,7 +73,7 @@ function Harness({
 
 describe("ModelPicker", () => {
   it("filters a large catalog and selects with keyboard navigation", async () => {
-    const models = Array.from({ length: 60 }).map((_, index) =>
+    const models = Array.from({ length: 500 }).map((_, index) =>
       model({
         id: `model-${index}`,
         display_name: `Model ${index}`,
@@ -83,12 +83,12 @@ describe("ModelPicker", () => {
     const input = screen.getByRole("combobox", { name: "Test model" });
     await userEvent.click(input);
     expect(screen.getAllByRole("option")).toHaveLength(50);
-    expect(screen.getByText(/Showing 50 of 60/)).toBeVisible();
-    await userEvent.type(input, "model-47");
-    expect(screen.getByRole("option", { name: /Model 47/ })).toBeVisible();
+    expect(screen.getByText(/Showing 50 of 500/)).toBeVisible();
+    await userEvent.type(input, "model-447");
+    expect(screen.getByRole("option", { name: /Model 447/ })).toBeVisible();
     await userEvent.keyboard("{ArrowDown}{Enter}");
     await waitFor(() =>
-      expect(screen.getByTestId("value")).toHaveTextContent("model-47"),
+      expect(screen.getByTestId("value")).toHaveTextContent("model-447"),
     );
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });

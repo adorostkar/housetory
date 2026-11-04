@@ -107,7 +107,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 180 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 182 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -118,7 +118,7 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 56 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 61 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 10 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
@@ -378,7 +378,9 @@ household owner and open **Settings → AI providers**.
    Housetory discovers catalog metadata from the provider's official model-list
    endpoint. Choose the default from a searchable picker; **Refresh models** is
    available after endpoint or credential changes. Manual exact-ID entry remains
-   available for private/custom models.
+   available for private/custom models. General Settings shows only a compact
+   provider/model/mode/consent summary and a catalog count; browse and select the
+   full catalog on the AI providers page.
 3. Enable remote-processing consent separately for each cloud or non-local
    endpoint. Saving an API key does **not** authorize sending household data.
    Ollama on loopback/`host.docker.internal`/a Compose service name is local; LAN,
@@ -391,6 +393,9 @@ household owner and open **Settings → AI providers**.
    catalogs when its provider changes. Known non-chat models are excluded, vision
    tasks flag incompatible models, and unknown capability metadata is marked for
    verification. Existing task assignments are preserved if discovery fails.
+   General Settings verifies whether a saved task model appears in the provider
+   catalog. A catalog listing is not an inference, billing or quality check, and
+   Housetory does not send a test prompt to validate a model.
 5. Replace a key, disable a provider or remove it without editing files.
 
 The database stores only Fernet-encrypted credentials. All calls originate from

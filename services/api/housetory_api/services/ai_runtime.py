@@ -430,6 +430,7 @@ def status_from_config(
     models: list[str] | None = None,
     probe_error: str | None = None,
     available: bool = False,
+    catalog_checked: bool = False,
 ) -> AiStatus:
     model = config.model or None
     error = config.error or probe_error
@@ -458,6 +459,8 @@ def status_from_config(
         model=model,
         configured=config.configured,
         available=available,
+        catalog_checked=catalog_checked,
+        catalog_count=len(models or []),
         models=models or [],
         cloud_enabled=config.mode in {"private", "cloud"},
         cloud_consent=config.cloud_consent,

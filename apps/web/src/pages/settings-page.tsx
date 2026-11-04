@@ -29,7 +29,7 @@ import {
   useOverview,
   useSession,
 } from "@/lib/queries";
-import type { Household, SessionState } from "@/lib/types";
+import type { AiStatus, Household, SessionState } from "@/lib/types";
 import { cn, formatFileSize } from "@/lib/utils";
 
 const THEME_OPTIONS = [
@@ -38,10 +38,55 @@ const THEME_OPTIONS = [
   { value: "system", label: "System", icon: Monitor },
 ] as const;
 
+type AiStatusBadge = {
+  label: string;
+  variant: "sage" | "brass" | "outline";
+};
+
+function summarizeAiStatus(status: AiStatus): AiStatusBadge {
+  if (!status.configured) {
+    const error = (status.error ?? "").toLowerCase();
+    if (error.includes("disabled for this task")) {
+      return { label: "Task disabled", variant: "outline" };
+    }
+    if (error.includes("consent")) {
+      return { label: "Consent required", variant: "outline" };
+    }
+    if (error.includes("credential")) {
+      return { label: "Credential unavailable", variant: "outline" };
+    }
+    if (error.includes("no longer exists")) {
+      return { label: "Provider missing", variant: "outline" };
+    }
+    return { label: "Not configured", variant: "outline" };
+  }
+  if (!status.catalog_checked) {
+    return { label: "Catalog check failed", variant: "brass" };
+  }
+  return status.available
+    ? { label: "Model listed by provider", variant: "sage" }
+    : { label: "Model not listed", variant: "brass" };
+}
+
+function processingLabel(mode: AiStatus["mode"]) {
+  if (mode === "local") return "Local — on this server or its Docker host";
+  if (mode === "private") return "Private network — leaves this server";
+  if (mode === "cloud") return "Remote/cloud — leaves this server";
+  return "Disabled";
+}
+
+function consentLabel(status: AiStatus) {
+  if (status.mode === "disabled") return "Not applicable";
+  if (status.mode === "local") return "Not required — stays local";
+  return status.cloud_consent
+    ? "Given for remote inference"
+    : "Not given — remote inference blocked";
+}
+
 export function SettingsPage() {
   const session = useSession();
   const overview = useOverview();
-  const aiStatus = useAiStatus();
+  const aiStatus = useAiStatus("assistant", { refetchOnMount: "always" });
   const logout = useLogout();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -305,8 +350,8 @@ export function SettingsPage() {
                         ? "Remote AI"
                         : "AI disabled"}
                 </Badge>
-                <Badge variant={aiStatus.data.available ? "sage" : "outline"}>
-                  {aiStatus.data.available ? "Model available" : "No model available"}
+                <Badge variant={summarizeAiStatus(aiStatus.data).variant}>
+                  {summarizeAiStatus(aiStatus.data).label}
                 </Badge>
                 {aiStatus.data.data_leaves_server && (
                   <Badge variant="brass">Data leaves this server</Badge>
@@ -315,17 +360,40 @@ export function SettingsPage() {
               <dl className="divide-y divide-border/60 rounded-xl border border-border/60">
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Provider</dt>
-                  <dd>{aiStatus.data.provider}</dd>
+                  <dd className="min-w-0 break-words text-right">
+                    {aiStatus.data.provider_label ??
+                      (aiStatus.data.mode === "disabled"
+                        ? "Not configured"
+                        : aiStatus.data.provider)}
+                  </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Selected model</dt>
-                  <dd>{aiStatus.data.model ?? "None"}</dd>
+                  <dd className="min-w-0 break-words text-right">
+                    {aiStatus.data.model ?? "None"}
+                  </dd>
                 </div>
-                {aiStatus.data.models.length > 0 && (
-                  <div className="flex items-start justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
-                    <dt className="shrink-0 text-muted-foreground">Available models</dt>
-                    <dd className="min-w-0 break-words text-right">
-                      {aiStatus.data.models.join(", ")}
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                  <dt className="text-muted-foreground">Processing</dt>
+                  <dd className="min-w-0 break-words text-right">
+                    {processingLabel(aiStatus.data.mode)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                  <dt className="text-muted-foreground">Data consent</dt>
+                  <dd className="min-w-0 break-words text-right">
+                    {consentLabel(aiStatus.data)}
+                  </dd>
+                </div>
+                {aiStatus.data.catalog_checked && (
+                  <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                    <dt className="text-muted-foreground">Provider catalog</dt>
+                    <dd className="min-w-0 text-right">
+                      {aiStatus.data.catalog_count > 0
+                        ? `${aiStatus.data.catalog_count} model${
+                            aiStatus.data.catalog_count === 1 ? "" : "s"
+                          } listed`
+                        : "Empty"}
                     </dd>
                   </div>
                 )}
@@ -333,16 +401,17 @@ export function SettingsPage() {
               <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
                 {aiStatus.data.privacy_note}
               </p>
+              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+                Status checks provider configuration and, when configured, the
+                provider&apos;s model catalog. A listed model is not proof of inference
+                access, billing eligibility or output quality; Housetory does not send a
+                test prompt. Choose or search models on the AI providers page.
+              </p>
               {aiStatus.data.error && (
                 <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
                   {aiStatus.data.error}
                 </p>
               )}
-              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
-                Configure providers, encrypted API keys, per-task models and cloud consent
-                in the dedicated AI settings page. Housetory never downloads models
-                automatically and does not require a GPU.
-              </p>
               {isOwner && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/settings/ai">Manage AI providers</Link>

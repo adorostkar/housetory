@@ -290,8 +290,12 @@ Key decisions:
   assistant, imports, documents, search, vision and label tasks. Model discovery
   fetches only the provider's catalog metadata, returns display names/kind and
   capability provenance, and is cached briefly per household/provider with
-  credential/endpoint invalidation. Known non-chat models are excluded from task
-  selection; unknown capability metadata is explicitly marked as heuristic.
+  credential/endpoint invalidation. Status responses expose only a catalog count
+  and whether the saved model was listed; the full catalog is not serialized in
+  the general Settings status. A catalog match is not treated as proof of
+  inference access or billing eligibility. Known non-chat models are excluded
+  from task selection; unknown capability metadata is explicitly marked as
+  heuristic.
   Ollama endpoints are scoped as local, private-network or remote from their host;
   only local endpoints are described as staying on the server. Credentials are
   Fernet-encrypted with an environment key held outside PostgreSQL; no secret is
@@ -499,7 +503,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 180 pytest tests against a real PostgreSQL database. The test session
+- Backend: 182 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -526,8 +530,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 56 Vitest tests + Testing Library, including searchable model
-  discovery pickers, task catalog switching, the unified Add items chooser,
+- Frontend: 61 Vitest tests + Testing Library, including compact Intelligence
+  status, searchable model discovery pickers, task catalog switching, the
+  unified Add items chooser,
   contextual destinations, quick-search grouping,
   keyboard selection, Escape/outside dismissal, loading/empty/error/stale
   responses and query preservation, provider settings and remote-Ollama consent,

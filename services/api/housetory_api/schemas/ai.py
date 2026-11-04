@@ -32,7 +32,10 @@ class AiStatus(BaseModel):
     model: str | None
     configured: bool
     available: bool
-    models: list[str] = Field(default_factory=list)
+    catalog_checked: bool = False
+    catalog_count: int = 0
+    # Kept for internal compatibility, but never serialize a provider catalog.
+    models: list[str] = Field(default_factory=list, exclude=True)
     cloud_enabled: bool = False
     cloud_consent: bool = False
     data_leaves_server: bool = False

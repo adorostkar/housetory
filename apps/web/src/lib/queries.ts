@@ -261,11 +261,15 @@ export function useImportBatch(batchId: string | undefined) {
   });
 }
 
-export function useAiStatus(task = "assistant") {
+export function useAiStatus(
+  task = "assistant",
+  options: { refetchOnMount?: boolean | "always" } = {},
+) {
   return useQuery({
     queryKey: [...queryKeys.aiStatus, task],
     queryFn: () => api.get<AiStatus>(`/ai/status?task=${encodeURIComponent(task)}`),
     staleTime: 30_000,
+    refetchOnMount: options.refetchOnMount ?? true,
     retry: false,
   });
 }

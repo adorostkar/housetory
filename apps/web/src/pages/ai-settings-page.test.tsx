@@ -123,13 +123,14 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <AiSettingsPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return client;
 }
 
 beforeEach(() => {
@@ -194,7 +195,8 @@ describe("AiSettingsPage", () => {
     vi.mocked(api.put).mockResolvedValue({
       ...task("assistant", "provider-openai", "gpt-4o-mini"),
     });
-    renderPage();
+    const client = renderPage();
+    client.setQueryData(["ai", "status", "assistant"], { available: true });
     const input = screen.getByLabelText("General assistant model");
     await userEvent.click(input);
     await userEvent.type(input, "gpt-4o-mini{Enter}");
@@ -205,6 +207,11 @@ describe("AiSettingsPage", () => {
         "/ai/tasks/assistant",
         expect.objectContaining({ model: "gpt-4o-mini", enabled: true }),
       ),
+    );
+    await waitFor(() =>
+      expect(
+        client.getQueryState(["ai", "status", "assistant"])?.isInvalidated,
+      ).toBe(true),
     );
   });
 
@@ -235,7 +242,8 @@ describe("AiSettingsPage", () => {
       ...created,
       default_model: "gpt-4o",
     });
-    renderPage();
+    const client = renderPage();
+    client.setQueryData(["ai", "status", "assistant"], { available: false });
     await userEvent.click(screen.getByRole("button", { name: "Add provider" }));
     const dialog = screen.getByRole("dialog");
     await userEvent.clear(within(dialog).getByLabelText("Display name"));
@@ -253,6 +261,11 @@ describe("AiSettingsPage", () => {
           api_key: "sk-new-secret",
         }),
       ),
+    );
+    await waitFor(() =>
+      expect(
+        client.getQueryState(["ai", "status", "assistant"])?.isInvalidated,
+      ).toBe(true),
     );
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith(

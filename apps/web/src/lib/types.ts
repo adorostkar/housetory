@@ -756,7 +756,8 @@ export interface AiStatus {
   model: string | null;
   configured: boolean;
   available: boolean;
-  models: string[];
+  catalog_checked: boolean;
+  catalog_count: number;
   cloud_enabled: boolean;
   cloud_consent: boolean;
   data_leaves_server: boolean;

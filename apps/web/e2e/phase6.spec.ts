@@ -266,6 +266,18 @@ test("configures an Ollama provider through Settings with a mocked local service
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("heading", { name: "Intelligence", level: 2 }),
+  ).toBeVisible();
+  await expect(page.getByText("Model listed by provider")).toBeVisible();
+  await expect(page.getByText("2 models listed")).toBeVisible();
+  await expect(page.getByText("Available models")).toHaveCount(0);
+  await expect(page.getByText(/does not send a test prompt/i)).toBeVisible();
+  await page.getByRole("button", { name: /Check provider/ }).click();
+  await expect(page.getByText("Model listed by provider")).toBeVisible();
+  await expect(page.getByText("2 models listed")).toBeVisible();
+
   const settings = await request.get("/api/v1/ai/settings");
   const body = (await settings.json()) as {
     providers: Array<{ provider: string; has_api_key: boolean; cloud_consent: boolean }>;

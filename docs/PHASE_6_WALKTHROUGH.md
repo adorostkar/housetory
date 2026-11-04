@@ -56,8 +56,9 @@ task. Verification used a separate project, separate volume names and port 8092.
   endpoints.
 - API key or local endpoint, connection test and model discovery against the
   provider's official catalog API, with searchable default/task model pickers,
-  display names, model kinds, capability provenance, refresh/cache behavior and
-  explicit manual-ID fallback.
+  display names, model kinds, capability provenance, refresh/cache behavior,
+  explicit manual-ID fallback and a compact general-Settings summary that shows
+  only provider/model/mode/consent plus a catalog count.
 - Separate provider/model defaults for assistant, smart imports, document
   interpretation, natural-language search, image recognition and optional label
   headlines.
@@ -341,9 +342,9 @@ but it is no longer the acceptance fixture.
 
 ## 13. Test results
 
-- Backend: **180 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **182 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **56 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **61 Vitest tests** passed; strict TypeScript and production build
   passed.
 - Playwright: **10 workflows** passed on a fresh disposable stack at a separate
   project, volume names and port. Coverage includes Phase 5 regressions, provider
@@ -421,6 +422,12 @@ container and label views. Real Safari/iPhone hardware was unavailable.
 - **A model capability looks uncertain:** capabilities marked “Heuristic —
   verify” are inferred from the provider/model name, not proven by listing the
   model. Prefer a model whose provider metadata or a real test confirms the task.
+- **General Settings says “Model not listed” while a model is selected:** the
+  status check compares the saved task model against the provider's exact catalog
+  IDs. A readable label such as “GPT-6 Luna” is not necessarily the API model ID
+  (for example `~openai/gpt-luna-latest`). Open **Manage AI providers**, choose
+  the task model from the discovered picker, and save. General Settings never
+  prints the full catalog and does not send an inference prompt to verify access.
 - **An AI-proposed item edit disappeared:** it did not match the source evidence.
   The deterministic value is retained and the import warnings list the rejected
   edit for review.
