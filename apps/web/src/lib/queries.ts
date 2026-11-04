@@ -2,10 +2,16 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 
 import { api, buildQuery } from "@/lib/api";
 import type {
+  AiRecognition,
+  AiRecognitionList,
+  AiStatus,
   CategoryList,
   DocumentList,
   DocumentRecord,
+  DocumentRelations,
   FinancialOverview,
+  ImportBatchDetail,
+  ImportBatchList,
   ItemDetailResponse,
   ItemList,
   Overview,
@@ -34,6 +40,11 @@ export const queryKeys = {
   warranties: ["warranties"] as const,
   warrantyList: (status: string) => ["warranties", status] as const,
   financial: ["financial"] as const,
+  imports: ["imports"] as const,
+  importBatch: (batchId: string) => ["imports", batchId] as const,
+  aiStatus: ["ai", "status"] as const,
+  recognitions: ["ai", "recognitions"] as const,
+  recognition: (recognitionId: string) => ["ai", "recognition", recognitionId] as const,
 };
 
 export function useSession() {
@@ -150,6 +161,15 @@ export function useDocuments(filters: DocumentFilters = {}, limit = 100) {
   });
 }
 
+export function useDocumentRelations(documentId: string | undefined) {
+  return useQuery({
+    queryKey: [...queryKeys.document(documentId ?? ""), "relations"],
+    queryFn: () => api.get<DocumentRelations>(`/documents/${documentId}/related-items`),
+    enabled: Boolean(documentId),
+    staleTime: 30_000,
+  });
+}
+
 export function useDocument(documentId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.document(documentId ?? ""),
@@ -193,6 +213,53 @@ export function useFinancialOverview() {
   });
 }
 
+export function useImports(limit = 50) {
+  return useQuery({
+    queryKey: [...queryKeys.imports, limit],
+    queryFn: () => api.get<ImportBatchList>(`/imports${buildQuery({ limit })}`),
+  });
+}
+
+export function useImportBatch(batchId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.importBatch(batchId ?? ""),
+    queryFn: () => api.get<ImportBatchDetail>(`/imports/${batchId}`),
+    enabled: Boolean(batchId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as ImportBatchDetail | undefined)?.status;
+      return status === "queued" || status === "processing" ? 2000 : false;
+    },
+  });
+}
+
+export function useAiStatus() {
+  return useQuery({
+    queryKey: queryKeys.aiStatus,
+    queryFn: () => api.get<AiStatus>("/ai/status"),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useRecognitions(limit = 20) {
+  return useQuery({
+    queryKey: [...queryKeys.recognitions, limit],
+    queryFn: () => api.get<AiRecognitionList>(`/ai/recognitions${buildQuery({ limit })}`),
+  });
+}
+
+export function useRecognition(recognitionId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.recognition(recognitionId ?? ""),
+    queryFn: () => api.get<AiRecognition>(`/ai/recognitions/${recognitionId}`),
+    enabled: Boolean(recognitionId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as AiRecognition | undefined)?.status;
+      return status === "queued" || status === "processing" ? 1500 : false;
+    },
+  });
+}
+
 export function useInvalidateInventory() {
   const queryClient = useQueryClient();
   return () => {
@@ -209,6 +276,8 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: ["purchase"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.warranties });
     void queryClient.invalidateQueries({ queryKey: queryKeys.financial });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.imports });
+    void queryClient.invalidateQueries({ queryKey: ["ai", "recognitions"] });
   };
 }
 

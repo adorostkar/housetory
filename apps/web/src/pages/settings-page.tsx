@@ -1,5 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, LogOut, Monitor, Moon, Smartphone, Sun } from "lucide-react";
+import {
+  Check,
+  LogOut,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Smartphone,
+  Sparkles,
+  Sun,
+} from "lucide-react";
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -13,7 +22,13 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
-import { queryKeys, useLogout, useOverview, useSession } from "@/lib/queries";
+import {
+  queryKeys,
+  useAiStatus,
+  useLogout,
+  useOverview,
+  useSession,
+} from "@/lib/queries";
 import type { Household, SessionState } from "@/lib/types";
 import { cn, formatFileSize } from "@/lib/utils";
 
@@ -26,6 +41,7 @@ const THEME_OPTIONS = [
 export function SettingsPage() {
   const session = useSession();
   const overview = useOverview();
+  const aiStatus = useAiStatus();
   const logout = useLogout();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -239,6 +255,96 @@ export function SettingsPage() {
             Back up your database and uploads regularly with{" "}
             <code className="rounded bg-secondary px-1.5 py-0.5 text-[0.7rem]">scripts/backup.sh</code>.
           </p>
+        </section>
+
+        <section className="surface p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
+              <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                Intelligence
+              </h2>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={aiStatus.isFetching}
+              onClick={() => void aiStatus.refetch()}
+            >
+              {aiStatus.isFetching ? <Spinner /> : <RefreshCw />}
+              Check provider
+            </Button>
+          </div>
+          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+            Optional local or cloud inference. Ordinary inventory, import, OCR and
+            keyword search work without it.
+          </p>
+          {aiStatus.isPending ? (
+            <Skeleton className="mt-4 h-24 rounded-xl" />
+          ) : aiStatus.isError ? (
+            <div className="mt-4">
+              <FormError message={getApiErrorMessage(aiStatus.error)} />
+            </div>
+          ) : aiStatus.data ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant={
+                    aiStatus.data.mode === "local"
+                      ? "sage"
+                      : aiStatus.data.mode === "cloud"
+                        ? "brass"
+                        : "outline"
+                  }
+                >
+                  {aiStatus.data.mode === "local"
+                    ? "Local AI"
+                    : aiStatus.data.mode === "cloud"
+                      ? "Cloud AI"
+                      : "AI disabled"}
+                </Badge>
+                <Badge variant={aiStatus.data.available ? "sage" : "outline"}>
+                  {aiStatus.data.available ? "Model available" : "No model available"}
+                </Badge>
+                {aiStatus.data.data_leaves_server && (
+                  <Badge variant="brass">Data leaves this server</Badge>
+                )}
+              </div>
+              <dl className="divide-y divide-border/60 rounded-xl border border-border/60">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                  <dt className="text-muted-foreground">Provider</dt>
+                  <dd>{aiStatus.data.provider}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                  <dt className="text-muted-foreground">Selected model</dt>
+                  <dd>{aiStatus.data.model ?? "None"}</dd>
+                </div>
+                {aiStatus.data.models.length > 0 && (
+                  <div className="flex items-start justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                    <dt className="shrink-0 text-muted-foreground">Available models</dt>
+                    <dd className="min-w-0 break-words text-right">
+                      {aiStatus.data.models.join(", ")}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+              <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+                {aiStatus.data.privacy_note}
+              </p>
+              {aiStatus.data.error && (
+                <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+                  {aiStatus.data.error}
+                </p>
+              )}
+              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+                Configure <code className="rounded bg-secondary px-1.5 py-0.5">AI_PROVIDER</code>,{" "}
+                <code className="rounded bg-secondary px-1.5 py-0.5">AI_MODEL</code>,{" "}
+                <code className="rounded bg-secondary px-1.5 py-0.5">AI_BASE_URL</code> and the
+                cloud consent flags in <code className="rounded bg-secondary px-1.5 py-0.5">.env</code>.
+                Housetory never downloads models automatically and does not require a GPU.
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <section className="surface p-5 sm:p-6">

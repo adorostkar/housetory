@@ -1,4 +1,4 @@
-import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Camera, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -145,12 +145,20 @@ export function ItemsPage() {
             : "Everything in your home, in one considered place."
         }
         actions={
-          <Button asChild>
-            <Link to="/items/new">
-              <Plus />
-              Add an item
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/recognize">
+                <Camera />
+                Recognise photo
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/items/new">
+                <Plus />
+                Add an item
+              </Link>
+            </Button>
+          </>
         }
       />
 

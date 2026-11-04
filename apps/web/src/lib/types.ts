@@ -268,10 +268,21 @@ export interface ItemSummary {
   updated_at: string;
 }
 
+export interface ImportSourceBrief {
+  batch_id: UUID;
+  title: string;
+  source_path: string | null;
+  note_title: string | null;
+  source_excerpt: string | null;
+  created_at: string;
+  url: string;
+}
+
 export interface ItemDetail extends ItemSummary {
   serial_number: string | null;
   photos: Photo[];
   documents: DocumentRecord[];
+  import_source: ImportSourceBrief | null;
 }
 
 export interface ItemList {
@@ -499,4 +510,347 @@ export interface OcrApplyResponse {
 
 export interface ApiFieldErrors {
   [field: string]: string;
+}
+
+
+export type ImportStatus =
+  | "queued"
+  | "processing"
+  | "review"
+  | "applying"
+  | "completed"
+  | "failed";
+export type ImportSourceType = "text" | "file" | "vault" | "image";
+export type ImportEntryStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "imported"
+  | "skipped"
+  | "merged"
+  | "failed";
+export type DuplicateResolution = "new" | "skip" | "merge";
+
+export interface LocationCandidate {
+  id: UUID;
+  name: string;
+  kind: string | null;
+  room_id: UUID | null;
+  parent_id: UUID | null;
+  score: number;
+}
+
+export interface LocationProposal {
+  text: string;
+  entity_type: "room" | "storage_location";
+  status: "matched" | "ambiguous" | "missing" | "none";
+  matched_id: UUID | null;
+  name: string | null;
+  room_id: UUID | null;
+  parent_id: UUID | null;
+  suggested_parent_id: UUID | null;
+  candidates: LocationCandidate[];
+}
+
+export interface NamedMatch {
+  text: string;
+  status: "matched" | "ambiguous" | "missing" | "none";
+  matched_id: UUID | null;
+  name: string | null;
+  candidates: LocationCandidate[];
+}
+
+export interface ProposedPurchase {
+  purchase_date: string | null;
+  price_cents: number | null;
+  currency: string | null;
+  merchant: string | null;
+  order_number: string | null;
+  notes: string | null;
+}
+
+export interface ProposedWarranty {
+  provider: string | null;
+  start_date: string | null;
+  duration_months: number | null;
+  end_date: string | null;
+  notes: string | null;
+}
+
+export interface ProposedItem {
+  name: string;
+  description: string | null;
+  quantity: number;
+  category: NamedMatch | null;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  room: LocationProposal | null;
+  storage_location: LocationProposal | null;
+  purchase: ProposedPurchase | null;
+  warranty: ProposedWarranty | null;
+  tags: string[];
+  notes: string | null;
+  collection: string | null;
+  relationships: Record<string, unknown>;
+  field_sources: Record<string, string>;
+  confidence: number | null;
+}
+
+export interface DuplicateCandidate {
+  item_id: UUID;
+  name: string;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  room_name: string | null;
+  location_name: string | null;
+  purchase_date: string | null;
+  score: number;
+  reasons: string[];
+}
+
+export interface ImportEntry {
+  id: UUID;
+  source_file_id: UUID | null;
+  source_path: string | null;
+  source_excerpt: string | null;
+  note_title: string | null;
+  proposed: ProposedItem;
+  field_sources: Record<string, string>;
+  confidence: number | null;
+  status: ImportEntryStatus;
+  duplicate_candidates: DuplicateCandidate[];
+  duplicate_resolution: DuplicateResolution | null;
+  matched_item_id: UUID | null;
+  imported_item_id: UUID | null;
+  error: string | null;
+  position: number;
+}
+
+export interface ImportSourceFile {
+  id: UUID;
+  relative_path: string;
+  kind: "note" | "attachment";
+  content_type: string;
+  byte_size: number;
+  is_referenced: boolean;
+  url: string;
+}
+
+export interface ImportBatch {
+  id: UUID;
+  title: string;
+  source_type: ImportSourceType;
+  status: ImportStatus;
+  original_filename: string | null;
+  content_type: string | null;
+  byte_size: number | null;
+  error: string | null;
+  warnings: Array<Record<string, unknown>>;
+  total_entries: number;
+  imported_entries: number;
+  skipped_entries: number;
+  failed_entries: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  source_url: string | null;
+  entry_count: number;
+}
+
+export interface ImportBatchDetail extends ImportBatch {
+  entries: ImportEntry[];
+  files: ImportSourceFile[];
+  vault_tree: Array<{
+    name: string;
+    path: string;
+    type: "file" | "folder";
+    children?: Array<{
+      name: string;
+      path: string;
+      type: "file" | "folder";
+      children?: unknown[];
+    }>;
+  }>;
+  ignored_notes: Array<{ path: string; title: string; reason: string }>;
+  broken_links: Array<{ note: string; target: string }>;
+  metadata: Record<string, unknown>;
+}
+
+export interface ImportBatchList {
+  items: ImportBatch[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type ImportEntryAction = "import" | "skip" | "reject" | "merge";
+export type ImportMergeField =
+  | "name"
+  | "description"
+  | "brand"
+  | "model"
+  | "serial_number"
+  | "quantity"
+  | "category"
+  | "room"
+  | "storage_location"
+  | "purchase"
+  | "warranty"
+  | "tags"
+  | "notes";
+
+export interface ImportApplyEntry {
+  id: UUID;
+  action: ImportEntryAction;
+  proposed?: ProposedItem;
+  merge_item_id?: UUID | null;
+  merge_fields?: ImportMergeField[];
+}
+
+export interface ImportApplyResult {
+  batch: ImportBatchDetail;
+  created: number;
+  merged: number;
+  skipped: number;
+  rejected: number;
+  failed: number;
+  failures: Array<{ entry_id: UUID; message: string }>;
+}
+
+export interface AiStatus {
+  provider: "disabled" | "ollama" | "openai_compatible";
+  mode: "disabled" | "local" | "cloud";
+  model: string | null;
+  configured: boolean;
+  available: boolean;
+  models: string[];
+  cloud_enabled: boolean;
+  cloud_consent: boolean;
+  data_leaves_server: boolean;
+  error: string | null;
+  privacy_note: string;
+}
+
+export interface AiRecognitionSuggestion {
+  name: string;
+  description: string | null;
+  category: string | null;
+  brand: string | null;
+  model: string | null;
+  tags: string[];
+  notes: string | null;
+  confidence: number | null;
+  field_sources: Record<string, string>;
+}
+
+export interface AiRecognition {
+  id: UUID;
+  status: "queued" | "processing" | "succeeded" | "failed";
+  original_filename: string;
+  content_type: string;
+  width: number;
+  height: number;
+  result: {
+    suggestions?: AiRecognitionSuggestion[];
+    warnings?: string[];
+  };
+  field_sources: Record<string, string>;
+  confidence: number | null;
+  error: string | null;
+  model_provider: string | null;
+  model_name: string | null;
+  created_at: string;
+  completed_at: string | null;
+  image_url: string;
+  original_url: string;
+}
+
+export interface AiRecognitionList {
+  items: AiRecognition[];
+}
+
+export interface AssistantReference {
+  type: "item" | "document" | "room" | "location" | "purchase" | "warranty";
+  id: UUID;
+  title: string;
+  subtitle: string | null;
+  url: string;
+}
+
+export interface AssistantResponse {
+  answer: string;
+  mode: "deterministic" | "ai";
+  tool: string | null;
+  filters: Record<string, unknown>;
+  items: ItemSummary[];
+  documents: Array<{
+    id: string;
+    title: string;
+    type: string;
+    merchant: string | null;
+    document_date: string | null;
+    items: string[];
+    url: string;
+  }>;
+  locations: Array<{
+    id: string;
+    type: "room" | "storage_location";
+    name: string;
+    url: string;
+    room?: string | null;
+    item_count?: number;
+  }>;
+  references: AssistantReference[];
+  notices: string[];
+  ai_status: AiStatus;
+}
+
+export interface NaturalSearchFilters {
+  q: string | null;
+  room_id: UUID | null;
+  room_name: string | null;
+  exclude_room_id: UUID | null;
+  location_id: UUID | null;
+  location_name: string | null;
+  category_id: UUID | null;
+  category_name: string | null;
+  tag: string | null;
+  missing_purchase: boolean;
+  missing_serial: boolean;
+  warranty_status: "active" | "expiring" | "expired" | null;
+  purchased_after: string | null;
+  purchased_before: string | null;
+  min_purchase_cents: number | null;
+  max_purchase_cents: number | null;
+  sort: "relevance" | "purchase_desc" | "purchase_asc" | "name_asc";
+}
+
+export interface NaturalSearchResponse {
+  question: string;
+  interpretation: string;
+  filters: NaturalSearchFilters;
+  items: ItemSummary[];
+  total: number;
+  mode: "deterministic" | "ai";
+  ai_available: boolean;
+}
+
+export interface DocumentRelationSuggestion {
+  item: ItemSummary;
+  score: number;
+  reasons: string[];
+}
+
+export interface DocumentRelations {
+  items: DocumentRelationSuggestion[];
+  suggested_item_ids: UUID[];
+}
+
+export interface ImportDecision {
+  include: boolean;
+  action: ImportEntryAction;
+  mergeItemId: string;
+  mergeFields: ImportMergeField[];
 }

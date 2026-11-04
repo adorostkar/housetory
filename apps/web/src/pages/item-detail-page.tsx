@@ -450,6 +450,28 @@ export function ItemDetailPage() {
         <ItemDocuments item={item} />
       </div>
 
+      {item.import_source && (
+        <div className="surface mt-4 flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Import source
+            </p>
+            <p className="mt-1 text-[0.8rem]">
+              {item.import_source.title}
+              {item.import_source.source_path
+                ? ` · ${item.import_source.source_path}`
+                : ""}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={item.import_source.url}>
+              Open import
+              <ChevronRight className="size-3.5" />
+            </Link>
+          </Button>
+        </div>
+      )}
+
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

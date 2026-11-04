@@ -75,3 +75,41 @@ export function warrantyRemainingLabel(
 export function isImageContentType(contentType: string): boolean {
   return contentType.startsWith("image/");
 }
+
+export const IMPORT_STATUS_LABELS: Record<string, string> = {
+  queued: "Queued",
+  processing: "Processing",
+  review: "Ready for review",
+  applying: "Applying",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+export const IMPORT_STATUS_TONE: Record<
+  string,
+  "sage" | "brass" | "destructive" | "outline" | "secondary"
+> = {
+  queued: "brass",
+  processing: "brass",
+  review: "outline",
+  applying: "brass",
+  completed: "sage",
+  failed: "destructive",
+};
+
+export const IMPORT_SOURCE_LABELS: Record<string, string> = {
+  text: "Pasted notes",
+  file: "File",
+  vault: "Obsidian vault",
+  image: "Image",
+};
+
+export const IMPORT_ENTRY_STATUS_LABELS: Record<string, string> = {
+  proposed: "Proposed",
+  approved: "Approved",
+  rejected: "Rejected",
+  imported: "Imported",
+  skipped: "Skipped",
+  merged: "Merged",
+  failed: "Failed",
+};

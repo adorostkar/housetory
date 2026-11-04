@@ -55,6 +55,22 @@ const WarrantiesPage = React.lazy(() =>
 const SearchPage = React.lazy(() =>
   import("@/pages/search-page").then((module) => ({ default: module.SearchPage })),
 );
+const ImportsPage = React.lazy(() =>
+  import("@/pages/imports-page").then((module) => ({ default: module.ImportsPage })),
+);
+const ImportDetailPage = React.lazy(() =>
+  import("@/pages/import-detail-page").then((module) => ({
+    default: module.ImportDetailPage,
+  })),
+);
+const AssistantPage = React.lazy(() =>
+  import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
+);
+const RecognitionPage = React.lazy(() =>
+  import("@/pages/recognition-page").then((module) => ({
+    default: module.RecognitionPage,
+  })),
+);
 const SettingsPage = React.lazy(() =>
   import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })),
 );
@@ -134,6 +150,10 @@ export default function App() {
             <Route path="documents/:documentId" element={<DocumentDetailPage />} />
             <Route path="purchases" element={<PurchasesPage />} />
             <Route path="warranties" element={<WarrantiesPage />} />
+            <Route path="imports" element={<ImportsPage />} />
+            <Route path="imports/:batchId" element={<ImportDetailPage />} />
+            <Route path="assistant" element={<AssistantPage />} />
+            <Route path="recognize" element={<RecognitionPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />

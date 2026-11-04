@@ -47,6 +47,7 @@ import {
 import {
   queryKeys,
   useDocument,
+  useDocumentRelations,
   useInvalidateInventory,
   useItem,
 } from "@/lib/queries";
@@ -61,17 +62,35 @@ import { useQueryClient } from "@tanstack/react-query";
 export function DocumentDetailPage() {
   const { documentId = "" } = useParams();
   const documentQuery = useDocument(documentId);
+  const relationsQuery = useDocumentRelations(documentId);
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [suggestedToLink, setSuggestedToLink] = React.useState<string[]>([]);
 
   const retry = useMutation({
     mutationFn: () => api.post<DocumentRecord>(`/documents/${documentId}/ocr`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.document(documentId) });
       toast.success("OCR queued");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const linkSuggestions = useMutation({
+    mutationFn: (itemIds: string[]) =>
+      api.patch<DocumentRecord>(`/documents/${documentId}`, { item_ids: itemIds }),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.document(documentId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.document(documentId), "relations"],
+      });
+      toast.success("Items linked");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -86,6 +105,20 @@ export function DocumentDetailPage() {
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
+  const linkedIds = new Set(
+    (documentQuery.data?.items ?? []).map((item) => item.id),
+  );
+  const suggestions = (relationsQuery.data?.items ?? []).filter(
+    (suggestion) => !linkedIds.has(suggestion.item.id),
+  );
+
+  React.useEffect(() => {
+    setSuggestedToLink(suggestions.map((suggestion) => suggestion.item.id));
+    // Suggest newly detected items by default, but never overwrite a choice while
+    // the user is reviewing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relationsQuery.dataUpdatedAt]);
+
   if (documentQuery.isPending) return <DocumentDetailSkeleton />;
   if (documentQuery.isError) {
     return (
@@ -96,8 +129,8 @@ export function DocumentDetailPage() {
       />
     );
   }
-
   const document = documentQuery.data;
+  if (!document) return <DocumentDetailSkeleton />;
   const busy = retry.isPending || remove.isPending;
 
   return (
@@ -253,6 +286,73 @@ export function DocumentDetailPage() {
               )}
             </div>
           </section>
+
+          {suggestions.length > 0 && (
+            <section className="surface p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                    Suggested items
+                  </h2>
+                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                    Matched from extracted text, serials and merchant information.
+                  </p>
+                </div>
+                <Badge variant="brass">{suggestions.length}</Badge>
+              </div>
+              <div className="mt-3 space-y-2">
+                {suggestions.map((suggestion) => {
+                  const selected = suggestedToLink.includes(suggestion.item.id);
+                  return (
+                    <label
+                      key={suggestion.item.id}
+                      className="flex items-start gap-2 rounded-lg border border-border/60 px-3 py-2 text-[0.75rem]"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 size-3.5 accent-primary"
+                        checked={selected}
+                        disabled={linkSuggestions.isPending}
+                        onChange={(event) =>
+                          setSuggestedToLink((current) =>
+                            event.target.checked
+                              ? [...current, suggestion.item.id]
+                              : current.filter((id) => id !== suggestion.item.id),
+                          )
+                        }
+                      />
+                      <span className="min-w-0 flex-1">
+                        <Link
+                          to={`/items/${suggestion.item.id}`}
+                          className="font-medium underline-offset-4 hover:underline"
+                        >
+                          {suggestion.item.name}
+                        </Link>
+                        <span className="block text-[0.66rem] text-muted-foreground">
+                          {suggestion.reasons.join(" · ")} · {suggestion.score}% match
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                disabled={linkSuggestions.isPending || suggestedToLink.length === 0}
+                onClick={() => {
+                  linkSuggestions.mutate([
+                    ...document.items.map((item) => item.id),
+                    ...suggestedToLink,
+                  ]);
+                }}
+              >
+                {linkSuggestions.isPending ? <Spinner /> : <Link2 />}
+                Link selected items
+              </Button>
+            </section>
+          )}
 
           <section className="surface p-5">
             <div className="flex items-center justify-between gap-3">

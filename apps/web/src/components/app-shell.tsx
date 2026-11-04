@@ -1,4 +1,5 @@
 import {
+  Camera,
   DoorOpen,
   FileText,
   House,
@@ -7,6 +8,8 @@ import {
   ReceiptText,
   Search,
   ShieldCheck,
+  Sparkles,
+  Upload,
 } from "lucide-react";
 import { Suspense, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -25,6 +28,9 @@ const primaryNav = [
   { to: "/documents", label: "Documents", icon: FileText, end: false },
   { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
+  { to: "/imports", label: "Import", icon: Upload, end: false },
+  { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
+  { to: "/recognize", label: "Recognise", icon: Camera, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
 
@@ -33,7 +39,8 @@ const mobileNav = [
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
   { to: "/documents", label: "Docs", icon: FileText, end: false },
-  { to: "/search", label: "Search", icon: Search, end: false },
+  { to: "/imports", label: "Import", icon: Upload, end: false },
+  { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
 ] as const;
 
 export function AppShell() {
@@ -110,6 +117,11 @@ export function AppShell() {
               </span>
             </Link>
             <div className="flex items-center gap-0.5">
+              <Button asChild variant="ghost" size="icon" aria-label="Search">
+                <Link to="/search">
+                  <Search className="size-[1.1rem]" />
+                </Link>
+              </Button>
               <ThemeToggle />
               <Button asChild variant="ghost" size="icon" aria-label="Add an item">
                 <Link to="/items/new">
@@ -141,7 +153,7 @@ export function AppShell() {
                 end={item.end}
                 className={({ isActive }) =>
                   cn(
-                    "relative flex min-w-[4.25rem] flex-col items-center gap-1.5 rounded-xl px-3 py-2 text-[0.65rem] font-medium tracking-[0.01em] transition-colors",
+                    "relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1.5 py-2 text-[0.59rem] font-medium tracking-[0.01em] transition-colors",
                     isActive ? "text-foreground" : "text-muted-foreground",
                   )
                 }

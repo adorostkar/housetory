@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   DOCUMENT_TYPE_LABELS,
+  IMPORT_SOURCE_LABELS,
+  IMPORT_STATUS_LABELS,
+  IMPORT_STATUS_TONE,
   WARRANTY_STATUS_LABELS,
   warrantyRemainingLabel,
 } from "@/lib/labels";
@@ -32,5 +35,12 @@ describe("ownership labels", () => {
       "other",
     ]);
     expect(WARRANTY_STATUS_LABELS.expiring).toBe("Expiring soon");
+  });
+
+  it("labels import states and sources", () => {
+    expect(IMPORT_STATUS_LABELS.review).toBe("Ready for review");
+    expect(IMPORT_STATUS_LABELS.failed).toBe("Failed");
+    expect(IMPORT_STATUS_TONE.completed).toBe("sage");
+    expect(IMPORT_SOURCE_LABELS.vault).toBe("Obsidian vault");
   });
 });
