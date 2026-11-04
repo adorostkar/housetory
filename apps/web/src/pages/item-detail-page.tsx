@@ -33,19 +33,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useInvalidateInventory, useItem } from "@/lib/queries";
+import { useInvalidateInventory, useItem, useLocations } from "@/lib/queries";
 import type { ItemDetail } from "@/lib/types";
 import {
   CONDITION_LABELS,
   formatCurrency,
   formatDate,
   formatRelativeDate,
+  locationPath,
 } from "@/lib/utils";
 import { useState } from "react";
 
 export function ItemDetailPage() {
   const { itemId = "" } = useParams();
   const itemQuery = useItem(itemId);
+  const locationsQuery = useLocations(itemQuery.data?.item.room?.id);
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -82,6 +84,9 @@ export function ItemDetailPage() {
 
   const item = itemQuery.data.item;
   const warrantyStatus = getWarrantyStatus(item);
+  const locationTrail = item.location
+    ? locationPath(locationsQuery.data?.items ?? [], item.location.id)
+    : [];
 
   return (
     <div className="animate-fade-up">
@@ -176,12 +181,27 @@ export function ItemDetailPage() {
                     >
                       {item.room.name}
                     </Link>
-                    {item.location && (
-                      <>
-                        <ChevronRight className="size-3 text-muted-foreground/50" />
-                        <span>{item.location.name}</span>
-                      </>
-                    )}
+                    {locationTrail.length > 0
+                      ? locationTrail.map((location) => (
+                          <span
+                            key={location.id}
+                            className="inline-flex items-center gap-1"
+                          >
+                            <ChevronRight className="size-3 text-muted-foreground/50" />
+                            <Link
+                              to={`/rooms/${item.room?.id}?location_id=${location.id}`}
+                              className="underline-offset-4 hover:underline"
+                            >
+                              {location.name}
+                            </Link>
+                          </span>
+                        ))
+                      : item.location && (
+                          <>
+                            <ChevronRight className="size-3 text-muted-foreground/50" />
+                            <span>{item.location.name}</span>
+                          </>
+                        )}
                   </span>
                 ) : (
                   <span className="text-muted-foreground">Not assigned</span>

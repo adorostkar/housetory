@@ -15,7 +15,12 @@ const item: ItemSummary = {
   condition: "excellent",
   is_archived: false,
   room: { id: "room-1", name: "Kitchen" },
-  location: { id: "location-1", name: "Coffee Shelf", kind: "shelf" },
+  location: {
+    id: "location-1",
+    name: "Coffee Shelf",
+    kind: "shelf",
+    parent_id: null,
+  },
   category: { id: "category-1", name: "Kitchenware", color: "#8A9A82" },
   tags: [{ id: "tag-1", name: "daily" }],
   primary_photo: {

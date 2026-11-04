@@ -9,7 +9,7 @@ import { RoomDialog } from "@/components/room-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRooms } from "@/lib/queries";
-import { buildRoomTree, pluralize } from "@/lib/utils";
+import { buildRoomTree, pluralize, roomDescendantsWithDepth } from "@/lib/utils";
 
 export function RoomsPage() {
   const roomsQuery = useRooms();
@@ -57,7 +57,11 @@ export function RoomsPage() {
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {roots.map((room) => (
-            <RoomCard key={room.id} room={room} childRooms={room.children} />
+            <RoomCard
+              key={room.id}
+              room={room}
+              nestedRooms={roomDescendantsWithDepth(rooms, room.id)}
+            />
           ))}
         </div>
       )}

@@ -23,7 +23,7 @@ const iconMap: Array<{ test: RegExp; icon: LucideIcon }> = [
   { test: /kitchen|cook|pantry/i, icon: CookingPot },
   { test: /bed|primary|guest/i, icon: BedDouble },
   { test: /bath|wash/i, icon: Bath },
-  { test: /living|lounge|den|family/i, icon: Armchair },
+  { test: /\b(living|lounge|den|family)\b/i, icon: Armchair },
   { test: /office|study|studio/i, icon: Monitor },
   { test: /garage|car|parking/i, icon: Car },
   { test: /closet|wardrobe|dress/i, icon: Shirt },
@@ -38,11 +38,11 @@ export function roomIcon(name: string): LucideIcon {
 
 export function RoomCard({
   room,
-  childRooms = [],
+  nestedRooms = [],
   className,
 }: {
   room: Room;
-  childRooms?: Room[];
+  nestedRooms?: Array<{ room: Room; depth: number }>;
   className?: string;
 }) {
   const Icon = roomIcon(room.name);
@@ -67,8 +67,8 @@ export function RoomCard({
           {room.name}
         </h3>
         <p className="mt-1.5 text-[0.78rem] text-muted-foreground">
-          {pluralize(room.item_count, "item")}
-          {room.location_count > 0 && ` · ${pluralize(room.location_count, "place")}`}
+          {pluralize(room.total_item_count, "item")}
+          {room.total_location_count > 0 && ` · ${pluralize(room.total_location_count, "place")}`}
         </p>
         {room.description && (
           <p className="mt-3 line-clamp-2 text-[0.8rem] leading-relaxed text-muted-foreground/90">
@@ -77,19 +77,25 @@ export function RoomCard({
         )}
       </Link>
 
-      {childRooms.length > 0 && (
+      {nestedRooms.length > 0 && (
         <div className="border-t border-border/60 px-3 py-2">
-          {childRooms.map((child) => (
+          {nestedRooms.map(({ room: child, depth }) => (
             <Link
               key={child.id}
               to={`/rooms/${child.id}`}
               className="flex items-center justify-between rounded-lg px-2.5 py-2 text-[0.78rem] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              style={{
+                marginLeft: `${depth * 18}px`,
+                paddingLeft: "10px",
+              }}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="size-1.5 shrink-0 rounded-full bg-border" />
                 <span className="truncate">{child.name}</span>
               </span>
-              <span className="shrink-0 text-[0.68rem] tabular-nums">{child.item_count}</span>
+              <span className="shrink-0 text-[0.68rem] tabular-nums">
+                {child.total_item_count}
+              </span>
             </Link>
           ))}
         </div>

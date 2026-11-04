@@ -9,7 +9,9 @@ import {
   formatFileSize,
   greetingForHour,
   initials,
+  locationPath,
   pluralize,
+  roomDescendantsWithDepth,
   roomPath,
 } from "@/lib/utils";
 
@@ -22,6 +24,8 @@ function room(id: string, name: string, parentId: string | null = null): Room {
     sort_order: 0,
     item_count: 0,
     location_count: 0,
+    total_item_count: 0,
+    total_location_count: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -66,6 +70,31 @@ describe("room hierarchy", () => {
       "House",
       "Kitchen",
       "Pantry",
+    ]);
+  });
+
+  it("lists all nested rooms with relative depth", () => {
+    expect(
+      roomDescendantsWithDepth(rooms, "house").map((entry) => [
+        entry.room.name,
+        entry.depth,
+      ]),
+    ).toEqual([
+      ["Kitchen", 1],
+      ["Pantry", 2],
+    ]);
+  });
+
+  it("keeps a location path from root to leaf", () => {
+    const locations = [
+      { id: "cabinet", parent_id: null, name: "Cabinet" },
+      { id: "shelf", parent_id: "cabinet", name: "Top Shelf" },
+      { id: "box", parent_id: "shelf", name: "Spice Box" },
+    ];
+    expect(locationPath(locations, "box").map((entry) => entry.name)).toEqual([
+      "Cabinet",
+      "Top Shelf",
+      "Spice Box",
     ]);
   });
 });

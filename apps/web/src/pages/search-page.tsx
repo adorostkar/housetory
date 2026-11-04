@@ -42,7 +42,7 @@ export function SearchPage() {
       <PageHeader
         eyebrow="Search"
         title="Find anything"
-        description="Search across names, brands, models, serial numbers and tags."
+        description="Search names, brands, serial numbers, tags, rooms and storage places."
       />
 
       <div className="relative mx-auto max-w-3xl">
@@ -70,8 +70,8 @@ export function SearchPage() {
               Look for something specific
             </h2>
             <p className="mt-2 max-w-sm text-pretty text-[0.85rem] leading-relaxed text-muted-foreground">
-              Try a brand, a model, a serial number, or a tag like “camping”. Results
-              appear as you type.
+              Try a brand, a model, a serial number, a room, a storage place, or a tag.
+              Results appear as you type.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Button variant="outline" size="sm" asChild>

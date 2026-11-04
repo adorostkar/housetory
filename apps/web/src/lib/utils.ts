@@ -121,6 +121,30 @@ export function buildRoomTree(rooms: Room[]): RoomNode[] {
   return roots;
 }
 
+export interface RoomDescendant {
+  room: Room;
+  depth: number;
+}
+
+export function roomDescendantsWithDepth(rooms: Room[], rootId: string): RoomDescendant[] {
+  const children = new Map<string, Room[]>();
+  for (const room of rooms) {
+    if (!room.parent_id) continue;
+    const siblings = children.get(room.parent_id) ?? [];
+    siblings.push(room);
+    children.set(room.parent_id, siblings);
+  }
+  const result: RoomDescendant[] = [];
+  const walk = (parentId: string, depth: number) => {
+    for (const room of children.get(parentId) ?? []) {
+      result.push({ room, depth });
+      walk(room.id, depth + 1);
+    }
+  };
+  walk(rootId, 1);
+  return result;
+}
+
 export interface FlatRoomOption {
   room: Room;
   depth: number;
@@ -177,6 +201,22 @@ export function flattenLocations<T extends { id: string; parent_id: string | nul
   };
   walk(null, 0);
   return result;
+}
+
+export function locationPath<T extends { id: string; parent_id: string | null }>(
+  locations: T[],
+  locationId: string,
+): T[] {
+  const byId = new Map(locations.map((location) => [location.id, location]));
+  const path: T[] = [];
+  let cursor = byId.get(locationId);
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor.id)) {
+    path.unshift(cursor);
+    seen.add(cursor.id);
+    cursor = cursor.parent_id ? byId.get(cursor.parent_id) : undefined;
+  }
+  return path;
 }
 
 export function roomPath(rooms: Room[], roomId: string): Room[] {

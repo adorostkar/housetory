@@ -7,8 +7,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -41,6 +41,7 @@ import {
   cn,
   flattenLocations,
   pluralize,
+  roomDescendantsWithDepth,
   roomPath,
 } from "@/lib/utils";
 
@@ -50,11 +51,13 @@ export function RoomDetailPage() {
   const invalidate = useInvalidateInventory();
   const roomsQuery = useRooms();
   const locationsQuery = useLocations(roomId);
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedLocationId = searchParams.get("location_id");
   const itemsQuery = useItems(
     {
       room_id: roomId || undefined,
-      location_id: selectedLocationId ?? undefined,
+      location_id: requestedLocationId ?? undefined,
+      include_descendants: true,
       sort: "created_desc",
     },
     24,
@@ -70,12 +73,36 @@ export function RoomDetailPage() {
   const rooms = roomsQuery.data?.items ?? [];
   const room = rooms.find((entry) => entry.id === roomId);
   const childRooms = rooms.filter((entry) => entry.parent_id === roomId);
+  const nestedRooms = roomDescendantsWithDepth(rooms, roomId);
   const locations = locationsQuery.data?.items ?? [];
   const flatLocations = flattenLocations(locations);
   const path = room ? roomPath(rooms, room.id) : [];
   const parent = path.length > 1 ? path[path.length - 2] : undefined;
-  const selectedLocation = locations.find((location) => location.id === selectedLocationId);
+  const selectedLocation = locations.find((location) => location.id === requestedLocationId);
+  const selectedLocationId = selectedLocation?.id ?? null;
   const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+
+  const selectLocation = (locationId: string | null) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (locationId) next.set("location_id", locationId);
+        else next.delete("location_id");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    if (
+      requestedLocationId &&
+      locationsQuery.isSuccess &&
+      !locations.some((location) => location.id === requestedLocationId)
+    ) {
+      selectLocation(null);
+    }
+  }, [requestedLocationId, locationsQuery.isSuccess, locations]);
 
   const deleteRoom = useMutation({
     mutationFn: () => api.delete<void>(`/rooms/${roomId}`),
@@ -218,7 +245,7 @@ export function RoomDetailPage() {
 
             <button
               type="button"
-              onClick={() => setSelectedLocationId(null)}
+              onClick={() => selectLocation(null)}
               className={cn(
                 "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[0.8rem] transition-colors",
                 selectedLocationId === null
@@ -227,7 +254,7 @@ export function RoomDetailPage() {
               )}
             >
               <span>Everything in {room.name}</span>
-              <span className="text-[0.68rem] tabular-nums">{room.item_count}</span>
+              <span className="text-[0.68rem] tabular-nums">{room.total_item_count}</span>
             </button>
 
             {flatLocations.length === 0 ? (
@@ -245,11 +272,11 @@ export function RoomDetailPage() {
                         "group flex items-center gap-0.5 rounded-lg pr-1 transition-colors",
                         active ? "bg-secondary" : "hover:bg-secondary/60",
                       )}
-                      style={{ marginLeft: `${depth * 13}px` }}
+                      style={{ marginLeft: `${depth * 18}px` }}
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedLocationId(active ? null : location.id)}
+                        onClick={() => selectLocation(active ? null : location.id)}
                         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left"
                         aria-pressed={active}
                       >
@@ -269,7 +296,7 @@ export function RoomDetailPage() {
                           {location.name}
                         </span>
                         <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground/80">
-                          {location.item_count}
+                          {location.total_item_count}
                         </span>
                       </button>
                       <DropdownMenu>
@@ -335,13 +362,17 @@ export function RoomDetailPage() {
                 </button>
               </div>
               <div className="space-y-0.5">
-                {childRooms.map((child) => {
+                {nestedRooms.map(({ room: child, depth }) => {
                   const Icon = roomIcon(child.name);
                   return (
                     <Link
                       key={child.id}
                       to={`/rooms/${child.id}`}
                       className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8rem] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+                      style={{
+                        marginLeft: `${depth * 18}px`,
+                        paddingLeft: "10px",
+                      }}
                     >
                       <Icon className="size-3.5 shrink-0 opacity-70" />
                       <span className="min-w-0 flex-1 truncate">{child.name}</span>
@@ -363,7 +394,7 @@ export function RoomDetailPage() {
               {selectedLocation && (
                 <button
                   type="button"
-                  onClick={() => setSelectedLocationId(null)}
+                  onClick={() => selectLocation(null)}
                   className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[0.68rem] text-muted-foreground transition-colors hover:text-foreground"
                 >
                   Clear
@@ -469,7 +500,7 @@ export function RoomDetailPage() {
         onConfirm={async () => {
           if (!deletingLocation) return;
           await deleteLocation.mutateAsync(deletingLocation.id);
-          if (selectedLocationId === deletingLocation.id) setSelectedLocationId(null);
+          if (selectedLocationId === deletingLocation.id) selectLocation(null);
           setDeletingLocation(null);
         }}
       />

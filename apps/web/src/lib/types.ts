@@ -42,6 +42,8 @@ export interface Room {
   sort_order: number;
   item_count: number;
   location_count: number;
+  total_item_count: number;
+  total_location_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +61,7 @@ export interface StorageLocation {
   kind: LocationKind;
   sort_order: number;
   item_count: number;
+  total_item_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +117,7 @@ export interface LocationBrief {
   id: UUID;
   name: string;
   kind: LocationKind;
+  parent_id: UUID | null;
 }
 
 export interface Purchase {

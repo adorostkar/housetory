@@ -13,8 +13,20 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { useCategories, useItems, useRooms, useTags } from "@/lib/queries";
-import { flattenRoomTree, pluralize } from "@/lib/utils";
+import {
+  useCategories,
+  useItems,
+  useLocations,
+  useRooms,
+  useTags,
+} from "@/lib/queries";
+import {
+  flattenLocations,
+  flattenRoomTree,
+  locationPath,
+  pluralize,
+  roomPath,
+} from "@/lib/utils";
 
 const SORTS = {
   created_desc: "Newest first",
@@ -33,6 +45,7 @@ export function ItemsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const qParam = searchParams.get("q") ?? "";
   const roomFilter = searchParams.get("room_id") ?? "";
+  const locationFilter = searchParams.get("location_id") ?? "";
   const categoryFilter = searchParams.get("category_id") ?? "";
   const tagFilter = searchParams.get("tag_id") ?? "";
   const archived = searchParams.get("archived") === "1";
@@ -42,6 +55,7 @@ export function ItemsPage() {
   const [search, setSearch] = useState(qParam);
   const debouncedSearch = useDebouncedValue(search, 300);
   const roomsQuery = useRooms();
+  const locationsQuery = useLocations(roomFilter || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
 
@@ -62,22 +76,55 @@ export function ItemsPage() {
   const filters = {
     q: qParam || undefined,
     room_id: roomFilter || undefined,
+    location_id: locationFilter || undefined,
     category_id: categoryFilter || undefined,
     tag_id: tagFilter || undefined,
     include_archived: archived,
+    include_descendants: true,
     sort,
   };
   const itemsQuery = useItems(filters, 24);
   const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const total = itemsQuery.data?.pages[0]?.total ?? 0;
-  const hasFilters = Boolean(qParam || roomFilter || categoryFilter || tagFilter || archived);
+  const hasFilters = Boolean(
+    qParam || roomFilter || locationFilter || categoryFilter || tagFilter || archived,
+  );
   const roomOptions = flattenRoomTree(roomsQuery.data?.items ?? []);
+  const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
+
+  useEffect(() => {
+    if (!locationFilter) return;
+    const invalid =
+      !roomFilter ||
+      (locationsQuery.isSuccess &&
+        !locationsQuery.data.items.some((location) => location.id === locationFilter));
+    if (invalid) {
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          next.delete("location_id");
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [locationFilter, roomFilter, locationsQuery.isSuccess, locationsQuery.data, setSearchParams]);
 
   const updateParam = (key: string, value: string) => {
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
       if (value) next.set(key, value);
       else next.delete(key);
+      return next;
+    });
+  };
+
+  const updateRoomFilter = (roomId: string) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (roomId) next.set("room_id", roomId);
+      else next.delete("room_id");
+      next.delete("location_id");
       return next;
     });
   };
@@ -140,14 +187,34 @@ export function ItemsPage() {
             <Select
               aria-label="Filter by room"
               value={roomFilter}
-              onChange={(event) => updateParam("room_id", event.target.value)}
+              onChange={(event) => updateRoomFilter(event.target.value)}
               className="h-9 rounded-lg text-[0.8rem]"
             >
               <option value="">All rooms</option>
-              {roomOptions.map(({ room, depth }) => (
+              {roomOptions.map(({ room }) => (
                 <option key={room.id} value={room.id}>
-                  {depth > 0 ? `${"— ".repeat(depth)}` : ""}
-                  {room.name}
+                  {roomPath(roomsQuery.data?.items ?? [], room.id)
+                    .map((entry) => entry.name)
+                    .join(" / ")}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="min-w-[160px] shrink-0 sm:min-w-0">
+            <Select
+              aria-label="Filter by storage location"
+              value={locationFilter}
+              disabled={!roomFilter}
+              onChange={(event) => updateParam("location_id", event.target.value)}
+              className="h-9 rounded-lg text-[0.8rem]"
+            >
+              <option value="">{roomFilter ? "All places" : "Choose a room"}</option>
+              {locationOptions.map(({ location }) => (
+                <option key={location.id} value={location.id}>
+                  {locationPath(locationsQuery.data?.items ?? [], location.id)
+                    .map((entry) => entry.name)
+                    .join(" / ")}
                 </option>
               ))}
             </Select>

@@ -33,7 +33,9 @@ import {
   cn,
   CONDITION_LABELS,
   flattenLocations,
+  flattenRoomTree,
   LOCATION_KIND_LABELS,
+  locationPath,
 } from "@/lib/utils";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "JPY", "CHF", "SEK", "NZD", "SGD"];
@@ -110,6 +112,11 @@ export function ItemForm({
 
   const locationsQuery = useLocations(roomId || undefined);
   const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
+  const roomOptions = flattenRoomTree(roomsQuery.data?.items ?? []);
+  const selectedLocationPath = locationPath(
+    locationsQuery.data?.items ?? [],
+    locationId,
+  );
   const localPriceCents = price.trim() ? Math.round(Number(price) * 100) : null;
   const priceInvalid =
     price.trim().length > 0 &&
@@ -419,8 +426,9 @@ export function ItemForm({
                   }}
                 >
                   <option value="">No room yet</option>
-                  {(roomsQuery.data?.items ?? []).map((room) => (
+                  {roomOptions.map(({ room, depth }) => (
                     <option key={room.id} value={room.id}>
+                      {depth > 0 ? `${"— ".repeat(depth)}` : ""}
                       {room.name}
                     </option>
                   ))}
@@ -446,6 +454,11 @@ export function ItemForm({
                     </option>
                   ))}
                 </Select>
+                {selectedLocationPath.length > 1 && (
+                  <p className="mt-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+                    {selectedLocationPath.map((location) => location.name).join(" / ")}
+                  </p>
+                )}
               </Field>
 
               <Field label="Category" htmlFor="item-category" error={fieldErrors?.category_id}>

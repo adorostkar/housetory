@@ -12,7 +12,13 @@ import { StatCard } from "@/components/stat-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview, useRooms, useSession } from "@/lib/queries";
-import { buildRoomTree, formatCurrency, greetingForHour, pluralize } from "@/lib/utils";
+import {
+  buildRoomTree,
+  formatCurrency,
+  greetingForHour,
+  pluralize,
+  roomDescendantsWithDepth,
+} from "@/lib/utils";
 
 export function OverviewPage() {
   const session = useSession();
@@ -143,7 +149,11 @@ export function OverviewPage() {
               />
               <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {rootRooms.map((room) => (
-                  <RoomCard key={room.id} room={room} childRooms={room.children} />
+                  <RoomCard
+                    key={room.id}
+                    room={room}
+                    nestedRooms={roomDescendantsWithDepth(rooms, room.id)}
+                  />
                 ))}
               </div>
             </section>
@@ -181,7 +191,11 @@ export function OverviewPage() {
             {rootRooms.length > 0 ? (
               <div className="stagger space-y-3.5">
                 {rootRooms.slice(0, 4).map((room) => (
-                  <RoomCard key={room.id} room={room} childRooms={room.children} />
+                  <RoomCard
+                    key={room.id}
+                    room={room}
+                    nestedRooms={roomDescendantsWithDepth(rooms, room.id)}
+                  />
                 ))}
               </div>
             ) : (
