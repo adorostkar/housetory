@@ -119,7 +119,13 @@ export function EntityPhotoManager({
 
   return (
     <section aria-label={`${name} photographs`}>
-      <div className="group relative aspect-[16/10] overflow-hidden rounded-2xl border border-border/75 bg-secondary/50">
+      <div
+        data-testid="entity-photo-frame"
+        className={cn(
+          "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
+          active ? "h-52 sm:h-64 lg:h-72" : "min-h-[176px]",
+        )}
+      >
         {active ? (
           <button
             type="button"
@@ -127,20 +133,27 @@ export function EntityPhotoManager({
             className="size-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
             aria-label={`View ${name} photograph full screen`}
           >
-            <img src={active.url} alt={`${name} photograph`} className="size-full object-cover" />
+            <img
+              src={active.url}
+              alt={`${name} photograph`}
+              className="size-full object-cover"
+            />
           </button>
         ) : (
-          <div className="flex size-full flex-col items-center justify-center px-5 py-8 text-center">
-            <span className="flex size-12 items-center justify-center rounded-full bg-background/60 text-muted-foreground">
+          <div className="flex min-h-[176px] flex-col items-center justify-center gap-3 px-4 py-5 text-center sm:min-h-[184px] sm:flex-row sm:justify-start sm:gap-4 sm:text-left">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-background/60 text-muted-foreground">
               <ImageOff className="size-5" />
             </span>
-            <p className="mt-3 font-display text-xl tracking-[-0.02em] text-foreground/75">
-              Add a photograph
-            </p>
-            <p className="mt-1 max-w-xs text-[0.75rem] leading-relaxed text-muted-foreground">
-              Take a photo of the room or place so it is easier to recognise while standing in front of it.
-            </p>
-            <div className="mt-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-lg tracking-[-0.02em] text-foreground/80">
+                Add a photograph
+              </p>
+              <p className="mt-0.5 max-w-md text-[0.72rem] leading-relaxed text-muted-foreground">
+                Take or choose a photo so this {kind === "room" ? "room" : "place"} is easier
+                to recognise later.
+              </p>
+            </div>
+            <div className="shrink-0">
               <CameraUpload
                 busy={upload.isPending}
                 onUpload={async (file) => {
@@ -212,32 +225,41 @@ export function EntityPhotoManager({
           </div>
         )}
       </div>
-      <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-        {photos.map((photo, index) => (
-          <button
-            key={photo.id}
-            type="button"
-            onClick={() => setActiveId(photo.id)}
-            className={cn(
-              "relative size-16 shrink-0 overflow-hidden rounded-xl border-2",
-              photo.id === active?.id ? "border-foreground/70" : "border-transparent opacity-70",
-            )}
-            aria-label={`View photograph ${index + 1}`}
-            aria-pressed={photo.id === active?.id}
-          >
-            <img src={photo.thumbnail_url} alt="" className="size-full object-cover" loading="lazy" />
-          </button>
-        ))}
-        {photos.length < 20 && (
-          <CameraUpload
-            compact
-            busy={upload.isPending}
-            onUpload={async (file) => {
-              await upload.mutateAsync(file);
-            }}
-          />
-        )}
-      </div>
+      {photos.length > 0 && (
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          {photos.map((photo, index) => (
+            <button
+              key={photo.id}
+              type="button"
+              onClick={() => setActiveId(photo.id)}
+              className={cn(
+                "relative size-16 shrink-0 overflow-hidden rounded-xl border-2",
+                photo.id === active?.id
+                  ? "border-foreground/70"
+                  : "border-transparent opacity-70",
+              )}
+              aria-label={`View photograph ${index + 1}`}
+              aria-pressed={photo.id === active?.id}
+            >
+              <img
+                src={photo.thumbnail_url}
+                alt=""
+                className="size-full object-cover"
+                loading="lazy"
+              />
+            </button>
+          ))}
+          {photos.length < 20 && (
+            <CameraUpload
+              compact
+              busy={upload.isPending}
+              onUpload={async (file) => {
+                await upload.mutateAsync(file);
+              }}
+            />
+          )}
+        </div>
+      )}
       <PhotoLightbox
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}

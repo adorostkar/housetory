@@ -342,11 +342,11 @@ but it is no longer the acceptance fixture.
 
 ## 13. Test results
 
-- Backend: **182 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **187 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **62 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **73 Vitest tests** passed; strict TypeScript and production build
   passed.
-- Playwright: **11 workflows** passed on a fresh disposable stack at a separate
+- Playwright: **13 workflows** passed on a fresh disposable stack at a separate
   project, volume names and port. Coverage includes Phase 5 regressions, provider
   configuration with a mocked local Ollama service, camera upload, multi-object
   review/split/merge/approval, the actual Inventory.md hierarchy, duplicate
@@ -422,6 +422,19 @@ container and label views. Real Safari/iPhone hardware was unavailable.
 - **Escape closes the provider dialog while the model list is open:** the first
   Escape closes only the model list and preserves the dialog input; a second
   Escape closes the provider dialog deliberately.
+- **A photo scan returns OCR-only text or says vision is unavailable:** the
+  vision task is not explicitly configured, consent is missing, or the request
+  failed. Open **Settings → AI providers → Task defaults**, assign **Image
+  recognition** to a vision-capable model, and retry. Configuring the assistant
+  model alone is not enough; Housetory will not silently use it for photos.
+- **A window, radiator or other fixture appears in a scan:** fixed architectural
+  features are flagged for review and are not preselected. Confirm the object is
+  movable before including it. A portable heater can be a possession; a built-in
+  radiator usually is not.
+- **Labels do not contain item names or counts:** this is intentional. Labels
+  print the permanent identifier, optional display name and a QR code. The QR
+  opens the current authenticated contents, so moving items never makes the label
+  wrong.
 - **No models appear after saving a provider:** confirm the key or local
   endpoint is valid, then use **Refresh models**. Discovery requests only catalog
   metadata and does not require household-data consent. If a private/custom model

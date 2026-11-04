@@ -34,6 +34,9 @@ Tailscale is optional.
 - A4 adhesive label printing with verified Avery L7160/L7163/L7165/L7651
   presets, compact/standard/detailed layouts, custom geometry, partial-sheet
   starting positions, calibration offsets, PDF preview and vector QR codes.
+  Standard labels print only the permanent identifier, optional display name and
+  a QR link to the live authenticated contents; item names, counts, summaries and
+  current rooms are never printed.
 - Reverse search by `BOX-001` or item name, with container identifiers shown in
   item cards, search results and assistant answers.
 - Hierarchy-aware browsing: room and place filters include descendants, counts
@@ -42,7 +45,8 @@ Tailscale is optional.
   condition, categories and tags.
 - Multiple item, room and container photographs with validation, thumbnail
   generation, EXIF stripping, HEIC conversion, cover selection, explicit
-  reordering and a full-screen viewer.
+  reordering and a full-screen viewer. Room/container photo areas use a compact
+  bounded empty state, then a responsive cover and compact thumbnails.
 - Direct **Take Photo** and **Choose Photo** actions for items, movable
   containers, rooms and storage locations, with preview, retake, cancel and
   upload progress.
@@ -80,8 +84,9 @@ Tailscale is optional.
   of the mobile overview, with grouped items, containers and locations, keyboard
   navigation and a link to full results.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
-  quantities, duplicate review, destination changes and approved bulk creation.
-  Nothing is written automatically.
+  quantities, duplicate review, room-only or room-plus-container destinations,
+  per-suggestion overrides and approved bulk creation. Fixed fixtures are flagged
+  for review and are not preselected. Nothing is written automatically.
 - A conservative hierarchy importer that understands rooms, boxes, nested
   containers, legacy identifiers such as `STO-01` and their contents. Index
   pages and empty templates are skipped, and the tree is reviewed before apply.
@@ -107,7 +112,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 182 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 187 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -118,8 +123,8 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 62 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 11 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 73 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 13 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, the actual Inventory.md hierarchy, duplicate prevention,
@@ -440,17 +445,30 @@ retry. The photo is uploaded directly; it does not need to be saved to the
 iPhone photo library first. Existing secure image processing normalizes
 orientation, strips metadata and converts HEIC/HEIF to a browser-safe format.
 Room and storage-location photos reuse the same authenticated storage pipeline.
+Their empty state is a compact card with one Take photo / Choose photo group; it
+does not reserve a cover-sized blank canvas. Existing photos use a bounded cover
+and a compact thumbnail/add row.
 
 ### AI Scan Items
 
-Open **AI scan** from the navigation, an item list, a room or a container. With a
-container context, the destination defaults to that container. After upload, a
-vision-capable model returns separate editable suggestions. Review name,
-quantity, category, brand/model, confidence, possible duplicates and destination;
-then approve only the selected suggestions. Apply is explicit, idempotent and
-reports partial failures. The source photograph is retained as provenance and is
-not automatically used as every item's cover. Without a vision model, OCR can
-offer limited text-based suggestions and the UI labels that fallback honestly.
+Open **AI scan** from the navigation, an item list, a room or a container. The
+default destination can be a room by itself or a room plus an optional
+container/storage location; each suggestion can override both before approval.
+After upload, an explicitly configured vision task returns separate editable
+suggestions. Review name, quantity, category, brand/model, confidence, review
+flags, possible duplicates and destination; then approve only the selected
+suggestions. Apply is explicit, idempotent and reports partial failures. The
+source photograph is retained as provenance and is not automatically used as
+every item's cover.
+
+The vision task is separate from the assistant/default model. If no vision task is
+assigned, Housetory does not silently call the assistant model: it reports the
+actionable configuration error and may fall back to OCR-readable text. AI or OCR
+fallback, unavailable, empty and failed states are labelled explicitly. Fixed
+architecture such as windows, walls, doors and installed radiators is flagged for
+review and excluded from approval by default; ambiguous observations are marked
+for review rather than promoted to confident possessions. The QR/manifest and
+vision path are described further in the walkthrough.
 
 ### Hierarchical imports
 

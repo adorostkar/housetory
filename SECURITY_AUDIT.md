@@ -632,8 +632,8 @@ direct nginx TLS.
 - Fresh migration `c1a7e5d9f320` passes `alembic upgrade head` and `alembic check`.
 - Final dependency/image checks: production `pip-audit` clean, `npm audit` 0
   vulnerabilities, Trivy HIGH/CRITICAL 0 across API, worker, web and database
-  images (after `cryptography` 50.0.2). Backend tests: 182. Frontend: 62.
-  Playwright: 11 on a disposable HTTP stack, including responsive
+  images (after `cryptography` 50.0.2). Backend tests: 187. Frontend: 73.
+  Playwright: 13 on a disposable HTTP stack, including responsive
   provider-dialog layout, discovered-model pickers,
   contextual import destinations, the unchanged actual Inventory.md acceptance
   path and quick-search household scoping.

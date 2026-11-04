@@ -1,5 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const photoPath = path.resolve(here, "../public/icons/icon-192.png");
 
 async function createRoom(request: APIRequestContext, name: string) {
   const response = await request.post("/api/v1/rooms", { data: { name } });
@@ -86,6 +91,9 @@ test("previews, downloads and calibrates a label sheet", async ({ page, request 
   await page.goto(`/labels?ids=${container.id}`);
   await expect(page.getByRole("heading", { name: "Labels", level: 1 })).toBeVisible();
   await expect(page.getByText("Avery L7165")).toBeVisible();
+  await expect(
+    page.getByText(/Labels never print item names, counts, contents, or the current room/i),
+  ).toBeVisible();
   await page.getByLabel("Layout").selectOption("detailed");
   await page.getByLabel("First empty position").selectOption("3");
   await expect(page.locator("iframe[title='Label sheet preview']")).toBeVisible({ timeout: 30_000 });
@@ -128,4 +136,113 @@ test("shows an authenticated QR destination and mobile container view", async ({
   await mobilePage.goto("/labels");
   await expect(mobilePage.getByText("Printer checklist")).toBeVisible();
   await mobile.close();
+});
+
+
+async function uploadRoomPhoto(request: APIRequestContext, roomId: string, name: string) {
+  const response = await request.post(`/api/v1/rooms/${roomId}/photos`, {
+    multipart: {
+      files: {
+        name,
+        mimeType: "image/png",
+        buffer: fs.readFileSync(photoPath),
+      },
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+async function uploadContainerPhoto(
+  request: APIRequestContext,
+  containerId: string,
+  name: string,
+) {
+  const response = await request.post(`/api/v1/locations/${containerId}/photos`, {
+    multipart: {
+      files: {
+        name,
+        mimeType: "image/png",
+        buffer: fs.readFileSync(photoPath),
+      },
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+async function expectPhotoFrame(
+  page: Page,
+  state: "empty" | "photo",
+  limits: { min: number; max: number },
+) {
+  const frame = page.getByTestId("entity-photo-frame");
+  await expect(frame).toBeVisible();
+  if (state === "empty") {
+    await expect(frame.getByText("Add a photograph")).toBeVisible();
+  } else {
+    await expect(
+      page.getByRole("button", { name: /photograph full screen$/ }),
+    ).toBeVisible();
+  }
+  const box = await frame.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeGreaterThanOrEqual(limits.min);
+  expect(box!.height).toBeLessThanOrEqual(limits.max);
+  const metrics = await frame.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  const documentMetrics = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(
+    documentMetrics.clientWidth + 1,
+  );
+}
+
+test("keeps room and container photo areas compact for empty and populated states", async ({
+  page,
+  request,
+}) => {
+  const room = await createRoom(request, `Photos ${Date.now()}`);
+  const container = await createContainer(request, room.id);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/rooms/${room.id}`);
+  await expectPhotoFrame(page, "empty", { min: 160, max: 220 });
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 393, height: 852 });
+  await expectPhotoFrame(page, "empty", { min: 160, max: 230 });
+
+  await uploadRoomPhoto(request, room.id, "room-one.png");
+  await page.reload();
+  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
+  await expect(page.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
+  await uploadRoomPhoto(request, room.id, "room-two.png");
+  await page.reload();
+  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
+  await expect(page.getByRole("button", { name: /^View photograph \d/ })).toHaveCount(2);
+
+  await page.goto(`/containers/${container.id}`);
+  await expectPhotoFrame(page, "empty", { min: 160, max: 220 });
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
+  await uploadContainerPhoto(request, container.id, "container-one.png");
+  await page.reload();
+  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
+  await expect(page.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+
+  await page.setViewportSize({ width: 393, height: 852 });
+  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
 });

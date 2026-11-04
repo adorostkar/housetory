@@ -427,7 +427,10 @@ deployment.
   OCR language and scanned-PDF page count are configurable. Import jobs safely
   read text/Markdown/PDF/DOCX/XLSX/CSV/image sources and Obsidian ZIPs, store
   private extracted files, match locations/duplicates and produce review entries.
-  Recognition jobs use a configured vision model or the OCR fallback. The queue is
+  Recognition jobs require an explicitly configured vision task; they never fall
+  back silently to the assistant/default model. Missing configuration, request
+  failure, OCR fallback, empty and failed paths are recorded and labelled. Fixed
+  fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 
 ## 8. Frontend
@@ -503,7 +506,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 182 pytest tests against a real PostgreSQL database. The test session
+- Backend: 187 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -530,9 +533,10 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 62 Vitest tests + Testing Library, including compact Intelligence
-  status, searchable model discovery pickers, task catalog switching, the
-  unified Add items chooser,
+- Frontend: 73 Vitest tests + Testing Library, including compact Intelligence
+  status, searchable model discovery pickers, room-only scan destinations,
+  fixture review, bounded room/container photo areas, the unified Add items
+  chooser,
   contextual destinations, quick-search grouping,
   keyboard selection, Escape/outside dismissal, loading/empty/error/stale
   responses and query preservation, provider settings and remote-Ollama consent,
@@ -542,7 +546,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 11 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 13 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
   routing, quick search and the unified Add items chooser with contextual
@@ -564,8 +568,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
 - The login rate limiter is process-local and resets on restart; it is not a
   substitute for Tailscale ACLs. Setup is not rate-limited and can be claimed
   before the first owner exists.
-- Container summaries/AI headlines can be stale until regenerated; labels show
-  a freshness warning, while the QR always opens live data. Actual physical printer
+- Container summaries/AI headlines can be stale until regenerated. Printed
+  labels intentionally show only the permanent identifier, optional name and live
+  QR, so content movement does not invalidate them. Actual physical printer
   alignment depends on the printer and must be checked with the calibration
   sheet at 100% scale.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
