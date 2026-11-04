@@ -12,7 +12,7 @@ import {
   WARRANTY_STATUS_TONE,
   warrantyRemainingLabel,
 } from "@/lib/labels";
-import { useWarranties } from "@/lib/queries";
+import { useCanWrite, useWarranties } from "@/lib/queries";
 import type { WarrantyStatus } from "@/lib/types";
 import { formatDate, pluralize } from "@/lib/utils";
 
@@ -31,6 +31,7 @@ export function WarrantiesPage() {
     ? (requested as WarrantyStatus | "all")
     : "all";
   const warrantiesQuery = useWarranties(status);
+  const canWrite = useCanWrite();
   const data = warrantiesQuery.data;
   const warranties = data?.items ?? [];
 
@@ -145,7 +146,7 @@ export function WarrantiesPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    {warranty.item && (
+                    {canWrite && warranty.item && (
                       <Button variant="outline" size="sm" asChild>
                         <Link to={`/items/${warranty.item.id}/edit`}>
                           <Pencil />

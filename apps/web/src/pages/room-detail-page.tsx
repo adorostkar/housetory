@@ -38,6 +38,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import {
+  useCanWrite,
   useInvalidateInventory,
   useItems,
   useLocations,
@@ -53,6 +54,7 @@ import {
 } from "@/lib/utils";
 
 export function RoomDetailPage() {
+  const canWrite = useCanWrite();
   const { roomId = "" } = useParams();
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
@@ -197,19 +199,21 @@ export function RoomDetailPage() {
                 Containers
               </Link>
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setEditingLocation(undefined);
-                setLocationParentId(undefined);
-                setLocationDialogOpen(true);
-              }}
-            >
-              <Plus />
-              Add a place
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditingLocation(undefined);
+                  setLocationParentId(undefined);
+                  setLocationDialogOpen(true);
+                }}
+              >
+                <Plus />
+                Add a place
+              </Button>
+            )}
             <AddItemsButton context={addItemsContext} />
-            <DropdownMenu>
+            {canWrite && <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label="Room options">
                   <MoreHorizontal />
@@ -231,7 +235,7 @@ export function RoomDetailPage() {
                   Delete room
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
+            </DropdownMenu>}
           </>
         }
       />
@@ -247,18 +251,20 @@ export function RoomDetailPage() {
               <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 Places in this room
               </h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingLocation(undefined);
-                  setLocationParentId(undefined);
-                  setLocationDialogOpen(true);
-                }}
-                className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                aria-label="Add place"
-              >
-                <Plus className="size-4" />
-              </button>
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingLocation(undefined);
+                    setLocationParentId(undefined);
+                    setLocationDialogOpen(true);
+                  }}
+                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  aria-label="Add place"
+                >
+                  <Plus className="size-4" />
+                </button>
+              )}
             </div>
 
             <button
@@ -336,33 +342,37 @@ export function RoomDetailPage() {
                               Open container page
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setEditingLocation(location);
-                              setLocationDialogOpen(true);
-                            }}
-                          >
-                            <Pencil />
-                            Edit place
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setEditingLocation(undefined);
-                              setLocationParentId(location.id);
-                              setLocationDialogOpen(true);
-                            }}
-                          >
-                            <Plus />
-                            Add nested place
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            destructive
-                            onSelect={() => attemptLocationDelete(location)}
-                          >
-                            <Trash2 />
-                            Delete place
-                          </DropdownMenuItem>
+                          {canWrite && (
+                            <>
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setEditingLocation(location);
+                                  setLocationDialogOpen(true);
+                                }}
+                              >
+                                <Pencil />
+                                Edit place
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setEditingLocation(undefined);
+                                  setLocationParentId(location.id);
+                                  setLocationDialogOpen(true);
+                                }}
+                              >
+                                <Plus />
+                                Add nested place
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                destructive
+                                onSelect={() => attemptLocationDelete(location)}
+                              >
+                                <Trash2 />
+                                Delete place
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -378,14 +388,16 @@ export function RoomDetailPage() {
                 <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                   Inside this room
                 </h2>
-                <button
-                  type="button"
-                  onClick={() => setRoomEditTarget("child")}
-                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  aria-label="Add sub-room"
-                >
-                  <Plus className="size-4" />
-                </button>
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => setRoomEditTarget("child")}
+                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    aria-label="Add sub-room"
+                  >
+                    <Plus className="size-4" />
+                  </button>
+                )}
               </div>
               <div className="space-y-0.5">
                 {nestedRooms.map(({ room: child, depth }) => {

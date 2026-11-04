@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
+  useCanWrite,
   useLocationPhotos,
   useRoomPhotos,
 } from "@/lib/queries";
@@ -28,6 +29,7 @@ export function EntityPhotoManager({
   name: string;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useCanWrite();
   const roomPhotos = useRoomPhotos(kind === "room" ? entityId : undefined);
   const locationPhotos = useLocationPhotos(kind === "location" ? entityId : undefined);
   const photos = (kind === "room" ? roomPhotos.data : locationPhotos.data)?.items ?? [];
@@ -153,14 +155,20 @@ export function EntityPhotoManager({
                 to recognise later.
               </p>
             </div>
-            <div className="shrink-0">
-              <CameraUpload
-                busy={upload.isPending}
-                onUpload={async (file) => {
-                  await upload.mutateAsync(file);
-                }}
-              />
-            </div>
+            {canWrite ? (
+              <div className="shrink-0">
+                <CameraUpload
+                  busy={upload.isPending}
+                  onUpload={async (file) => {
+                    await upload.mutateAsync(file);
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+                Viewers can browse photographs but cannot upload or change them.
+              </p>
+            )}
           </div>
         )}
         {active && activeIsCover && (
@@ -168,7 +176,7 @@ export function EntityPhotoManager({
             <Star className="size-3 fill-current" /> Cover
           </Badge>
         )}
-        {active && (
+        {active && canWrite && (
           <div className="absolute right-3 top-3 flex gap-1.5">
             <Button
               type="button"
@@ -219,7 +227,7 @@ export function EntityPhotoManager({
             </Button>
           </div>
         )}
-        {upload.isPending && (
+        {canWrite && upload.isPending && (
           <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background/65 text-[0.78rem] backdrop-blur-sm">
             <Spinner /> Uploading photograph…
           </div>
@@ -249,7 +257,7 @@ export function EntityPhotoManager({
               />
             </button>
           ))}
-          {photos.length < 20 && (
+          {canWrite && photos.length < 20 && (
             <CameraUpload
               compact
               busy={upload.isPending}

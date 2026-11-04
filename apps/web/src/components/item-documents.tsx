@@ -10,12 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/labels";
-import { useInvalidateInventory } from "@/lib/queries";
+import { useCanWrite, useInvalidateInventory } from "@/lib/queries";
 import type { DocumentRecord, ItemDetail } from "@/lib/types";
 import { formatDate, formatFileSize } from "@/lib/utils";
 
 export function ItemDocuments({ item }: { item: ItemDetail }) {
   const invalidate = useInvalidateInventory();
+  const canWrite = useCanWrite();
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] = React.useState<DocumentRecord | null>(null);
 
@@ -44,26 +45,34 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
           <Button variant="ghost" size="sm" asChild>
             <Link to="/documents">Library</Link>
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
-            <Plus />
-            Attach
-          </Button>
+          {canWrite && (
+            <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+              <Plus />
+              Attach
+            </Button>
+          )}
         </div>
       </div>
 
       <div className="mt-5">
         {item.documents.length === 0 ? (
-          <button
-            type="button"
-            onClick={() => setUploadOpen(true)}
-            className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center transition-colors hover:bg-secondary/40"
-          >
-            <Paperclip className="size-5 text-muted-foreground/70" strokeWidth={1.5} />
-            <span className="mt-3 text-[0.8rem] font-medium">Attach a document</span>
-            <span className="mt-1 text-[0.72rem] text-muted-foreground">
-              PDF, JPEG, PNG, WebP, HEIC or plain text
-            </span>
-          </button>
+          canWrite ? (
+            <button
+              type="button"
+              onClick={() => setUploadOpen(true)}
+              className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center transition-colors hover:bg-secondary/40"
+            >
+              <Paperclip className="size-5 text-muted-foreground/70" strokeWidth={1.5} />
+              <span className="mt-3 text-[0.8rem] font-medium">Attach a document</span>
+              <span className="mt-1 text-[0.72rem] text-muted-foreground">
+                PDF, JPEG, PNG, WebP, HEIC or plain text
+              </span>
+            </button>
+          ) : (
+            <p className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[0.76rem] text-muted-foreground">
+              No documents attached.
+            </p>
+          )
         ) : (
           <ul className="divide-y divide-border/60">
             {item.documents.map((document) => (
@@ -98,14 +107,16 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
                 >
                   <Download className="size-3.5" />
                 </a>
-                <button
-                  type="button"
-                  onClick={() => setDocumentToDelete(document)}
-                  className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={`Delete ${document.title}`}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => setDocumentToDelete(document)}
+                    className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`Delete ${document.title}`}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

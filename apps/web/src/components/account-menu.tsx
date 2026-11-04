@@ -1,4 +1,4 @@
-import { ChevronUp, LogOut, Settings, UserRound } from "lucide-react";
+import { ChevronUp, LogOut, Settings, UserRound, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -74,6 +74,16 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           <Settings />
           Settings
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => navigate("/settings/account")}>
+          <UserRound />
+          Account settings
+        </DropdownMenuItem>
+        {session?.role === "owner" && (
+          <DropdownMenuItem onSelect={() => navigate("/settings/members")}>
+            <Users />
+            Members & invitations
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem destructive disabled={logout.isPending} onSelect={onLogout}>
           <LogOut />

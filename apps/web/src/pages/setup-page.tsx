@@ -53,7 +53,7 @@ export function SetupPage() {
   return (
     <AuthLayout
       title="Make this home yours."
-      subtitle="Create the single account that looks after this Housetory. Your records stay on your own server."
+      subtitle="Create the household owner account. You can invite other people after setup."
     >
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
         {generalError && <FormError message={generalError} />}
@@ -125,7 +125,8 @@ export function SetupPage() {
         </Button>
 
         <p className="text-pretty text-center text-[0.72rem] leading-relaxed text-muted-foreground">
-          This server accepts one account. Setup can only be completed once.
+          This creates the first owner. Setup can only be completed once; additional
+          people join through household invitations.
         </p>
       </form>
     </AuthLayout>

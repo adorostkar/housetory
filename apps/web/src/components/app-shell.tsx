@@ -19,6 +19,7 @@ import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 const primaryNav = [
@@ -53,6 +54,7 @@ export function AppShell() {
 function AppShellLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const canWrite = useCanWrite();
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -146,6 +148,13 @@ function AppShellLayout() {
         </header>
 
         <main className="mx-auto min-h-[calc(100dvh-4rem)] w-full max-w-[1320px] px-5 pb-28 pt-7 sm:px-8 sm:pt-9 lg:min-h-dvh lg:px-12 lg:pb-20 lg:pt-12">
+          {!canWrite && (
+            <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+              <span className="font-medium text-brass">Viewer access.</span> You can browse
+              and search this household. Inventory changes, scans, imports and settings are
+              disabled; ask an owner if you need member access.
+            </div>
+          )}
           <div key={location.pathname} className="animate-fade-in">
             <Suspense fallback={<PageFallback />}>
               <Outlet />

@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
+  useCanWrite,
   useCategories,
   useItems,
   useLocations,
@@ -44,6 +45,7 @@ function isSortKey(value: string | null): value is SortKey {
 
 export function ItemsPage() {
   const { openAddItems } = useAddItems();
+  const canWrite = useCanWrite();
   const [searchParams, setSearchParams] = useSearchParams();
   const qParam = searchParams.get("q") ?? "";
   const roomFilter = searchParams.get("room_id") ?? "";
@@ -311,9 +313,13 @@ export function ItemsPage() {
         ) : (
           <EmptyState
             title="A place for everything, starting here."
-            description="Add your first item and record its room, its exact shelf, and as much or as little detail as you like."
-            actionLabel="Add items"
-            onAction={() => openAddItems()}
+            description={
+              canWrite
+                ? "Add your first item and record its room, its exact shelf, and as much or as little detail as you like."
+                : "This household does not have any inventory items yet."
+            }
+            actionLabel={canWrite ? "Add items" : undefined}
+            onAction={canWrite ? () => openAddItems() : undefined}
           />
         )
       ) : (

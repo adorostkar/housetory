@@ -7,12 +7,14 @@ import type { Photo } from "@/lib/types";
 
 const photoState = vi.hoisted(() => ({
   photos: [] as Photo[],
+  canWrite: true,
 }));
 
 vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
   return {
     ...actual,
+    useCanWrite: () => photoState.canWrite,
     useRoomPhotos: () => ({
       data: { items: photoState.photos },
       isPending: false,
@@ -52,6 +54,7 @@ function renderManager(kind: "room" | "location" = "room") {
 
 beforeEach(() => {
   photoState.photos = [];
+  photoState.canWrite = true;
 });
 
 describe("EntityPhotoManager", () => {
@@ -75,6 +78,20 @@ describe("EntityPhotoManager", () => {
     expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
     expect(screen.queryByText("Add a photograph")).not.toBeInTheDocument();
+  });
+
+  it("keeps photos visible but hides upload and edit controls for viewers", () => {
+    photoState.canWrite = false;
+    photoState.photos = [photo("photo-1")];
+    renderManager();
+    expect(
+      screen.getByRole("button", { name: "View Office photograph full screen" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Take a photo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Choose a photo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move photograph earlier" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete photograph" })).not.toBeInTheDocument();
   });
 
   it("shows compact thumbnails for multiple photos on containers too", () => {

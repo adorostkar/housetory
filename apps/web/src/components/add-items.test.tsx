@@ -1,13 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AddItemsButton,
   AddItemsProvider,
   useRegisterAddItemsContext,
 } from "@/components/add-items";
+
+vi.mock("@/lib/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/queries")>();
+  return { ...actual, useCanWrite: () => true };
+});
 
 function LocationProbe() {
   const location = useLocation();

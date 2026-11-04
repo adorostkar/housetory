@@ -46,6 +46,7 @@ import {
 } from "@/lib/labels";
 import {
   queryKeys,
+  useCanWrite,
   useDocument,
   useDocumentRelations,
   useInvalidateInventory,
@@ -66,6 +67,7 @@ export function DocumentDetailPage() {
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const canWrite = useCanWrite();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [suggestedToLink, setSuggestedToLink] = React.useState<string[]>([]);
@@ -161,18 +163,22 @@ export function DocumentDetailPage() {
                 Original
               </a>
             </Button>
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <Pencil />
-              Edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Delete document"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 />
-            </Button>
+            {canWrite && (
+              <>
+                <Button variant="outline" onClick={() => setEditOpen(true)}>
+                  <Pencil />
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Delete document"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 />
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -418,20 +424,22 @@ export function DocumentDetailPage() {
                 No OCR run yet. Start one to propose fields from this document.
               </p>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-3"
-              disabled={
-                busy ||
-                document.ocr_status === "queued" ||
-                document.ocr_status === "processing"
-              }
-              onClick={() => retry.mutate()}
-            >
-              {retry.isPending ? <Spinner /> : <RefreshCw />}
-              {document.ocr_status === "succeeded" ? "Run OCR again" : "Run OCR"}
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                disabled={
+                  busy ||
+                  document.ocr_status === "queued" ||
+                  document.ocr_status === "processing"
+                }
+                onClick={() => retry.mutate()}
+              >
+                {retry.isPending ? <Spinner /> : <RefreshCw />}
+                {document.ocr_status === "succeeded" ? "Run OCR again" : "Run OCR"}
+              </Button>
+            )}
           </section>
 
           <section className="surface p-5">
@@ -624,6 +632,7 @@ function EditDocumentDialog({
 
 function OcrReview({ document }: { document: DocumentRecord }) {
   const invalidate = useInvalidateInventory();
+  const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const metadata = document.extracted_metadata;
   const [itemIds, setItemIds] = React.useState(document.items.map((item) => item.id));
@@ -756,6 +765,15 @@ function OcrReview({ document }: { document: DocumentRecord }) {
   const appliedItemCount = Array.isArray(metadata.applied_item_ids)
     ? metadata.applied_item_ids.length
     : 0;
+
+  if (!canWrite) {
+    return (
+      <div className="mt-5 rounded-xl border border-border/70 bg-secondary/25 p-4 text-[0.75rem] leading-relaxed text-muted-foreground">
+        Extracted fields are visible to viewers for reference. Applying OCR changes requires
+        member access.
+      </div>
+    );
+  }
 
   return (
     <div className="mt-5 space-y-5">

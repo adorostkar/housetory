@@ -8,6 +8,7 @@ import {
   Smartphone,
   Sparkles,
   Sun,
+  Users,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -217,9 +218,16 @@ export function SettingsPage() {
             </Button>
           </form>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
-          {!isOwner && (
+          {isOwner ? (
+            <Button variant="outline" size="sm" className="mt-4" asChild>
+              <Link to="/settings/members">
+                <Users />
+                Members & invitations
+              </Link>
+            </Button>
+          ) : (
             <p className="mt-2 text-[0.72rem] text-muted-foreground">
-              Only the household owner can change these settings.
+              Only the household owner can change these settings or manage members.
             </p>
           )}
         </section>
@@ -246,6 +254,9 @@ export function SettingsPage() {
               </dd>
             </div>
           </dl>
+          <Button variant="outline" size="sm" className="mt-4" asChild>
+            <Link to="/settings/account">Account settings</Link>
+          </Button>
         </section>
 
         <section className="surface p-5 sm:p-6">

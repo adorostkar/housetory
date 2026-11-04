@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import * as React from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { AuthLayout } from "@/components/auth-layout";
 import { Field, FormError } from "@/components/form-field";
@@ -95,6 +95,15 @@ export function LoginPage() {
           {login.isPending ? "Signing in…" : "Sign in"}
           {!login.isPending && <ArrowRight className="ml-auto" />}
         </Button>
+
+        <div className="text-center">
+          <Link
+            to="/forgot-password"
+            className="text-[0.75rem] font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            Forgot password?
+          </Link>
+        </div>
       </form>
     </AuthLayout>
   );

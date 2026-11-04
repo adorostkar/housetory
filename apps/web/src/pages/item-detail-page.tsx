@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useInvalidateInventory, useItem, useLocations } from "@/lib/queries";
+import { useCanWrite, useInvalidateInventory, useItem, useLocations } from "@/lib/queries";
 import type { ItemDetail } from "@/lib/types";
 import {
   WARRANTY_STATUS_LABELS,
@@ -56,6 +56,7 @@ export function ItemDetailPage() {
   const locationsQuery = useLocations(itemQuery.data?.item.room?.id);
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
+  const canWrite = useCanWrite();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const archive = useMutation({
@@ -109,33 +110,37 @@ export function ItemDetailPage() {
         actions={
           <>
             {item.is_archived && <Badge variant="secondary">Archived</Badge>}
-            <Button variant="outline" asChild>
-              <Link to={`/items/${item.id}/edit`}>
-                <Pencil />
-                Edit
-              </Link>
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Item options">
-                  <MoreHorizontal />
+            {canWrite && (
+              <>
+                <Button variant="outline" asChild>
+                  <Link to={`/items/${item.id}/edit`}>
+                    <Pencil />
+                    Edit
+                  </Link>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  disabled={archive.isPending}
-                  onSelect={() => archive.mutate(item)}
-                >
-                  {item.is_archived ? <ArchiveRestore /> : <Archive />}
-                  {item.is_archived ? "Restore item" : "Archive item"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)}>
-                  <Trash2 />
-                  Delete item
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label="Item options">
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      disabled={archive.isPending}
+                      onSelect={() => archive.mutate(item)}
+                    >
+                      {item.is_archived ? <ArchiveRestore /> : <Archive />}
+                      {item.is_archived ? "Restore item" : "Archive item"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)}>
+                      <Trash2 />
+                      Delete item
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
           </>
         }
       />
@@ -154,11 +159,19 @@ export function ItemDetailPage() {
               </p>
             ) : (
               <p className="mt-3 text-[0.85rem] leading-relaxed text-muted-foreground">
-                No description yet.{" "}
-                <Link to={`/items/${item.id}/edit`} className="underline underline-offset-4 hover:text-foreground">
-                  Add a little context
-                </Link>
-                .
+                No description yet.
+                {canWrite && (
+                  <>
+                    {" "}
+                    <Link
+                      to={`/items/${item.id}/edit`}
+                      className="underline underline-offset-4 hover:text-foreground"
+                    >
+                      Add a little context
+                    </Link>
+                    .
+                  </>
+                )}
               </p>
             )}
           </section>
@@ -170,12 +183,14 @@ export function ItemDetailPage() {
               <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 Details
               </h2>
-              <Link
-                to={`/items/${item.id}/edit`}
-                className="text-[0.7rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                Edit
-              </Link>
+              {canWrite && (
+                <Link
+                  to={`/items/${item.id}/edit`}
+                  className="text-[0.7rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  Edit
+                </Link>
+              )}
             </div>
             <dl className="space-y-4">
               <InfoRow icon={MapPin} label="Place">

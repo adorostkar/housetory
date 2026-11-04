@@ -8,11 +8,12 @@ import { RoomCard } from "@/components/room-card";
 import { RoomDialog } from "@/components/room-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useRooms } from "@/lib/queries";
+import { useCanWrite, useRooms } from "@/lib/queries";
 import { buildRoomTree, pluralize, roomDescendantsWithDepth } from "@/lib/utils";
 
 export function RoomsPage() {
   const roomsQuery = useRooms();
+  const canWrite = useCanWrite();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   if (roomsQuery.isPending) return <RoomsSkeleton />;
@@ -40,19 +41,25 @@ export function RoomsPage() {
             : "The rooms and corners that make up your home."
         }
         actions={
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus />
-            Add a room
-          </Button>
+          canWrite ? (
+            <Button onClick={() => setDialogOpen(true)}>
+              <Plus />
+              Add a room
+            </Button>
+          ) : undefined
         }
       />
 
       {roots.length === 0 ? (
         <EmptyState
-          title="Begin with a room."
-          description="Kitchen, bedroom, garage, a single shelf by the door. Rooms are the first layer of finding everything again."
-          actionLabel="Add your first room"
-          onAction={() => setDialogOpen(true)}
+          title="No rooms yet."
+          description={
+            canWrite
+              ? "Kitchen, bedroom, garage, a single shelf by the door. Rooms are the first layer of finding everything again."
+              : "This household does not have any rooms yet."
+          }
+          actionLabel={canWrite ? "Add your first room" : undefined}
+          onAction={canWrite ? () => setDialogOpen(true) : undefined}
         />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

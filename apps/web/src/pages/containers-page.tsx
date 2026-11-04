@@ -29,6 +29,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
+  useCanWrite,
   useContainers,
   useInvalidateInventory,
   useLocations,
@@ -82,6 +83,7 @@ export function ContainersPage() {
     empty: empty === "all" ? undefined : empty === "empty",
     include_fixed: true,
   });
+  const canWrite = useCanWrite();
   const allContainers = containersQuery.data?.items ?? [];
   const containers = allContainers.filter((container) =>
     view === "containers" ? container.is_container : !container.is_container,
@@ -148,16 +150,20 @@ export function ContainersPage() {
         description="Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to={selectedIds.length ? `/labels?ids=${selectedIds.join(",")}` : "/labels"}>
-                <Printer />
-                Print labels
-              </Link>
-            </Button>
-            <Button onClick={() => setCreateOpen(true)}>
-              <Boxes />
-              New container
-            </Button>
+            {canWrite && (
+              <Button variant="outline" asChild>
+                <Link to={selectedIds.length ? `/labels?ids=${selectedIds.join(",")}` : "/labels"}>
+                  <Printer />
+                  Print labels
+                </Link>
+              </Button>
+            )}
+            {canWrite && (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Boxes />
+                New container
+              </Button>
+            )}
           </>
         }
       />
@@ -395,6 +401,7 @@ function ContainerCard({
   busy: boolean;
 }) {
   const identifier = container.identifier ?? container.name;
+  const canWrite = useCanWrite();
   return (
     <article
       className={cn(
@@ -403,13 +410,15 @@ function ContainerCard({
       )}
     >
       <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggle}
-          aria-label={`Select ${identifier}`}
-          className="mt-1 size-4 shrink-0 accent-primary"
-        />
+        {canWrite && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggle}
+            aria-label={`Select ${identifier}`}
+            className="mt-1 size-4 shrink-0 accent-primary"
+          />
+        )}
         <Link to={`/containers/${container.id}`} className="min-w-0 flex-1 group">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-display text-[1.65rem] leading-none tracking-[-0.03em]">
@@ -458,17 +467,17 @@ function ContainerCard({
               : "Optional fixed label"}
         </span>
         <div className="flex flex-wrap items-center gap-1">
-          {container.is_container && (
+          {canWrite && container.is_container && (
             <Button variant="ghost" size="sm" onClick={onMove}>
               Move
             </Button>
           )}
-          {!container.is_container && !container.identifier && (
+          {canWrite && !container.is_container && !container.identifier && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={onAssignIdentifier}>
               Assign ID
             </Button>
           )}
-          {!container.is_container && (
+          {canWrite && !container.is_container && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={onConvert}>
               Make movable
             </Button>
@@ -477,12 +486,14 @@ function ContainerCard({
             <QrCode />
             QR
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/labels?ids=${container.id}`}>
-              <Printer />
-              Label
-            </Link>
-          </Button>
+          {canWrite && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/labels?ids=${container.id}`}>
+                <Printer />
+                Label
+              </Link>
+            </Button>
+          )}
           <Button variant="ghost" size="icon" asChild aria-label={`Open ${identifier}`}>
             <Link to={`/containers/${container.id}`}>
               <ArrowRight className="size-4" />

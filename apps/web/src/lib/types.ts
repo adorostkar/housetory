@@ -1,6 +1,6 @@
 export type UUID = string;
 
-export type MemberRole = "owner" | "member";
+export type MemberRole = "owner" | "member" | "viewer";
 
 export type LocationKind =
   | "room"
@@ -55,6 +55,43 @@ export interface SessionState {
   user: User | null;
   household: Household | null;
   role: MemberRole | null;
+}
+
+export interface HouseholdMember {
+  user_id: UUID;
+  name: string;
+  email: string;
+  role: MemberRole;
+  joined_at: string;
+}
+
+export interface MemberList {
+  members: HouseholdMember[];
+  email_configured: boolean;
+}
+
+export interface HouseholdInvitation {
+  id: UUID;
+  email: string;
+  role: MemberRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expires_at: string;
+  last_sent_at: string | null;
+  created_at: string;
+}
+
+export interface InvitationList {
+  items: HouseholdInvitation[];
+  email_configured: boolean;
+}
+
+export interface InvitationPublic {
+  household_name: string;
+  email: string;
+  role: MemberRole;
+  expires_at: string;
+  account_exists: boolean;
+  authenticated_email_matches: boolean;
 }
 
 export interface Room {

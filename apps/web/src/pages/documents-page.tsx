@@ -16,6 +16,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { useCanWrite } from "@/lib/queries";
 import { DOCUMENT_TYPE_OPTIONS } from "@/lib/labels";
 import { useDocuments, useInvalidateInventory } from "@/lib/queries";
 import type { DocumentRecord } from "@/lib/types";
@@ -27,6 +28,7 @@ export function DocumentsPage() {
   const invalidate = useInvalidateInventory();
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
   const debouncedSearch = useDebouncedValue(search, 250);
+  const canWrite = useCanWrite();
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] = React.useState<DocumentRecord | null>(null);
 
@@ -92,10 +94,12 @@ export function DocumentsPage() {
                 Export
               </a>
             </Button>
-            <Button onClick={() => setUploadOpen(true)}>
-              <Plus />
-              Add document
-            </Button>
+            {canWrite && (
+              <Button onClick={() => setUploadOpen(true)}>
+                <Plus />
+                Add document
+              </Button>
+            )}
           </>
         }
       />
@@ -222,7 +226,9 @@ export function DocumentsPage() {
                 : "Add a receipt, invoice, warranty certificate or manual. Housetory keeps the original file and extracts useful details locally."
             }
             actionLabel={hasFilters ? "Clear filters" : "Add your first document"}
-            onAction={hasFilters ? clearFilters : () => setUploadOpen(true)}
+            onAction={
+              hasFilters ? clearFilters : canWrite ? () => setUploadOpen(true) : undefined
+            }
             secondary={
               !hasFilters ? (
                 <Button variant="ghost" asChild>
@@ -240,7 +246,7 @@ export function DocumentsPage() {
               <DocumentCard
                 key={document.id}
                 document={document}
-                onDelete={setDocumentToDelete}
+                onDelete={canWrite ? setDocumentToDelete : undefined}
               />
             ))}
           </div>

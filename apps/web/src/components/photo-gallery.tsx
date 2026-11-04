@@ -12,9 +12,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
 import type { ItemDetail, ItemDetailResponse, Photo, PhotoList } from "@/lib/types";
+import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 export function PhotoGallery({ item }: { item: ItemDetail }) {
+  const canWrite = useCanWrite();
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(item.photos[0]?.id ?? null);
@@ -157,24 +159,26 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
             <p className="mt-1 max-w-xs text-[0.78rem] leading-relaxed text-muted-foreground">
               Add one or more images so this item is easy to recognise at a glance.
             </p>
-            <div className="mt-5 flex items-center gap-2">
-              <label
-                htmlFor="photo-upload-empty"
+            {canWrite && (
+              <div className="mt-5 flex items-center gap-2">
+                <label
+                  htmlFor="photo-upload-empty"
                 className={cn(buttonVariants({ size: "sm" }), "cursor-pointer")}
               >
                 <Plus />
                 Add photographs
               </label>
-              <CameraUpload
-                compact
-                showLibrary={false}
-                label="Add item photograph"
-                busy={upload.isPending}
-                onUpload={async (file) => {
-                  await upload.mutateAsync([file]);
-                }}
-              />
-            </div>
+                <CameraUpload
+                  compact
+                  showLibrary={false}
+                  label="Add item photograph"
+                  busy={upload.isPending}
+                  onUpload={async (file) => {
+                    await upload.mutateAsync([file]);
+                  }}
+                />
+              </div>
+            )}
             <input
               id="photo-upload-empty"
               type="file"
@@ -197,7 +201,7 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
                 Cover
               </Badge>
             )}
-            <div className="absolute right-3 top-3 z-10 flex gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            {canWrite && <div className="absolute right-3 top-3 z-10 flex gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <button
                 type="button"
                 onClick={() => moveActive(-1)}
@@ -239,11 +243,11 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
               >
                 <Trash2 className="size-4" />
               </button>
-            </div>
+            </div>}
           </>
         )}
 
-        {upload.isPending && (
+        {canWrite && upload.isPending && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/65 backdrop-blur-sm">
             <Spinner className="size-5" />
             <span className="text-[0.75rem] font-medium text-foreground">
@@ -282,7 +286,7 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
           </button>
         ))}
 
-        {!atLimit && (
+        {canWrite && !atLimit && (
           <>
             <label
               htmlFor="photo-upload"

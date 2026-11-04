@@ -5,6 +5,9 @@ import type {
   AiRecognition,
   AiRecognitionList,
   AiSettings,
+  InvitationList,
+  InvitationPublic,
+  MemberList,
   AiStatus,
   CategoryList,
   ContainerDetail,
@@ -50,6 +53,9 @@ export const queryKeys = {
   importBatch: (batchId: string) => ["imports", batchId] as const,
   aiStatus: ["ai", "status"] as const,
   aiSettings: ["ai", "settings"] as const,
+  householdMembers: ["household", "members"] as const,
+  householdInvitations: ["household", "invitations"] as const,
+  invitation: (token: string) => ["invitation", token] as const,
   recognitions: ["ai", "recognitions"] as const,
   recognition: (recognitionId: string) => ["ai", "recognition", recognitionId] as const,
   aiProviderModels: (providerId: string) => ["ai", "provider", providerId, "models"] as const,
@@ -393,5 +399,40 @@ export function useLocationPhotos(locationId: string | undefined) {
     queryKey: queryKeys.locationPhotos(locationId ?? ""),
     queryFn: () => api.get<PhotoList>(`/locations/${locationId}/photos`),
     enabled: Boolean(locationId),
+  });
+}
+
+
+export function useCanWrite() {
+  const session = useSession();
+  return session.data?.role === "owner" || session.data?.role === "member";
+}
+
+export function useIsOwner() {
+  const session = useSession();
+  return session.data?.role === "owner";
+}
+
+
+export function useHouseholdMembers() {
+  return useQuery({
+    queryKey: queryKeys.householdMembers,
+    queryFn: () => api.get<MemberList>("/household/members"),
+  });
+}
+
+export function useHouseholdInvitations() {
+  return useQuery({
+    queryKey: queryKeys.householdInvitations,
+    queryFn: () => api.get<InvitationList>("/household/invitations"),
+  });
+}
+
+export function useInvitation(token: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.invitation(token ?? ""),
+    queryFn: () => api.get<InvitationPublic>(`/invitations/${encodeURIComponent(token ?? "")}`),
+    enabled: Boolean(token),
+    retry: false,
   });
 }

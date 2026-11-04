@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 export interface AddItemsContext {
@@ -129,7 +130,9 @@ export function AddItemsButton({
   className?: string;
   iconOnly?: boolean;
 }) {
+  const canWrite = useCanWrite();
   const { openAddItems } = useAddItems();
+  if (!canWrite) return null;
   return (
     <Button
       type="button"

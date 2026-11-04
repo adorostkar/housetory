@@ -30,6 +30,7 @@ import {
   warrantyRemainingLabel,
 } from "@/lib/labels";
 import {
+  useCanWrite,
   useFinancialOverview,
   useOverview,
   useRooms,
@@ -52,6 +53,7 @@ export function OverviewPage() {
   const roomsQuery = useRooms();
   const [roomDialogOpen, setRoomDialogOpen] = useState(false);
   const { openAddItems } = useAddItems();
+  const canWrite = useCanWrite();
 
   if (overview.isPending) return <OverviewSkeleton />;
   if (overview.isError) {
@@ -222,13 +224,19 @@ export function OverviewPage() {
         <div className="mt-9">
           <EmptyState
             title="Your home, ready for its first story."
-            description="Add something you own — a camera, a favourite pan, the keys by the door. Then give it a room, an exact place, and a paper trail."
-            actionLabel="Add items"
-            onAction={() => openAddItems()}
+            description={
+              canWrite
+                ? "Add something you own — a camera, a favourite pan, the keys by the door. Then give it a room, an exact place, and a paper trail."
+                : "This household does not have any inventory items yet."
+            }
+            actionLabel={canWrite ? "Add items" : undefined}
+            onAction={canWrite ? () => openAddItems() : undefined}
             secondary={
-              <Button variant="ghost" onClick={() => setRoomDialogOpen(true)}>
-                {rootRooms.length > 0 ? "Add another room" : "Add a room first"}
-              </Button>
+              canWrite ? (
+                <Button variant="ghost" onClick={() => setRoomDialogOpen(true)}>
+                  {rootRooms.length > 0 ? "Add another room" : "Add a room first"}
+                </Button>
+              ) : undefined
             }
           />
           {rootRooms.length > 0 && (

@@ -36,6 +36,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { useCanWrite } from "@/lib/queries";
 import { CURRENCIES, DOCUMENT_TYPE_LABELS } from "@/lib/labels";
 import {
   useDocuments,
@@ -53,6 +54,7 @@ export function PurchasesPage() {
   const [currency, setCurrency] = React.useState(searchParams.get("currency") ?? "");
   const [dateFrom, setDateFrom] = React.useState(searchParams.get("date_from") ?? "");
   const [dateTo, setDateTo] = React.useState(searchParams.get("date_to") ?? "");
+  const canWrite = useCanWrite();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Purchase | null>(null);
   const [purchaseToDelete, setPurchaseToDelete] = React.useState<Purchase | null>(null);
@@ -105,10 +107,12 @@ export function PurchasesPage() {
                 Export
               </a>
             </Button>
-            <Button onClick={openCreate}>
-              <Plus />
-              Add purchase
-            </Button>
+            {canWrite && (
+              <Button onClick={openCreate}>
+                <Plus />
+                Add purchase
+              </Button>
+            )}
           </>
         }
       />
@@ -262,27 +266,29 @@ export function PurchasesPage() {
                     ) : (
                       <p className="text-[0.75rem] text-muted-foreground">No amount</p>
                     )}
-                    <div className="mt-2 flex justify-end gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditing(purchase);
-                          setDialogOpen(true);
-                        }}
-                        className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                        aria-label={`Edit purchase from ${purchase.merchant ?? "unknown merchant"}`}
-                      >
-                        <Pencil className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPurchaseToDelete(purchase)}
-                        className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        aria-label={`Delete purchase from ${purchase.merchant ?? "unknown merchant"}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
+                    {canWrite && (
+                      <div className="mt-2 flex justify-end gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditing(purchase);
+                            setDialogOpen(true);
+                          }}
+                          className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                          aria-label={`Edit purchase from ${purchase.merchant ?? "unknown merchant"}`}
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPurchaseToDelete(purchase)}
+                          className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={`Delete purchase from ${purchase.merchant ?? "unknown merchant"}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 

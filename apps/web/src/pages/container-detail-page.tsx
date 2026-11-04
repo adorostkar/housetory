@@ -47,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
+  useCanWrite,
   useContainer,
   useInvalidateInventory,
   useLocations,
@@ -64,6 +65,7 @@ import {
 const TYPES: ContainerType[] = ["box", "bin", "crate", "suitcase", "bag", "other"];
 
 export function ContainerDetailPage() {
+  const canWrite = useCanWrite();
   const { containerId = "" } = useParams();
   const containerQuery = useContainer(containerId);
   const roomsQuery = useRooms();
@@ -199,17 +201,19 @@ export function ContainerDetailPage() {
         backLabel="Containers"
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to={`/labels?ids=${detail.id}`}>
-                <Printer />
-                Print label
-              </Link>
-            </Button>
+            {canWrite && (
+              <Button variant="outline" asChild>
+                <Link to={`/labels?ids=${detail.id}`}>
+                  <Printer />
+                  Print label
+                </Link>
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setQrOpen(true)}>
               <QrCode />
               QR
             </Button>
-            {detail.is_container && (
+            {canWrite && detail.is_container && (
               <Button variant="outline" onClick={() => setMoveOpen(true)}>
                 <Truck />
                 Move
@@ -255,10 +259,12 @@ export function ContainerDetailPage() {
                 : ""}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <Pencil />
-            Edit
-          </Button>
+          {canWrite && (
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil />
+              Edit
+            </Button>
+          )}
         </div>
         {detail.description && (
           <p className="mt-4 max-w-3xl whitespace-pre-line text-[0.82rem] leading-relaxed text-foreground/75">
@@ -285,30 +291,32 @@ export function ContainerDetailPage() {
                 : " · not generated yet"}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={regenerate.isPending}
-              onClick={() => regenerate.mutate()}
-            >
-              {regenerate.isPending ? <Spinner /> : <Sparkles />}
-              Regenerate
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={aiSummary.isPending}
-              onClick={() => aiSummary.mutate()}
-            >
-              {aiSummary.isPending ? <Spinner /> : <Sparkles />}
-              AI headline
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setSummaryEditing(true)}>
-              <Pencil />
-              Edit summary
-            </Button>
-          </div>
+          {canWrite && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={regenerate.isPending}
+                onClick={() => regenerate.mutate()}
+              >
+                {regenerate.isPending ? <Spinner /> : <Sparkles />}
+                Regenerate
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={aiSummary.isPending}
+                onClick={() => aiSummary.mutate()}
+              >
+                {aiSummary.isPending ? <Spinner /> : <Sparkles />}
+                AI headline
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSummaryEditing(true)}>
+                <Pencil />
+                Edit summary
+              </Button>
+            </div>
+          )}
         </div>
 
         {detail.summary.stale && (
