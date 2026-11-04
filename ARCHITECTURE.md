@@ -125,7 +125,10 @@ All application endpoints are versioned under `/api/v1`.
 | Area | Endpoints |
 | --- | --- |
 | Health | `GET /health/live`, `GET /health/ready`, `GET /healthz` (container liveness alias) |
-| Auth | `GET /auth/session`, `POST /auth/setup`, `POST /auth/login`, `POST /auth/logout` |
+| Auth | `GET /auth/session`, `POST /auth/setup`, `POST /auth/login`, `POST /auth/logout`, password-reset request/status/confirm |
+| Accounts | `GET/PATCH /account`, `POST /account/password` |
+| Invitations | `GET/POST /household/invitations`, resend/revoke, public invitation read and accept |
+| Members | `GET /household/members`, role update/remove |
 | Household | `GET /household`, `PATCH /household` |
 | Rooms | `GET/POST /rooms`, `GET/PATCH/DELETE /rooms/{id}` |
 | Storage | `GET/POST /storage-locations`, `GET/PATCH/DELETE /storage-locations/{id}` |
@@ -166,6 +169,9 @@ Health semantics:
   the Argon2 parameters change.
 - Sessions are opaque 40-byte random tokens. Only a SHA-256 hash of the token is
   stored in `auth_sessions`; the raw value lives solely in an HttpOnly cookie.
+  A session stores the selected household id but never a global role. Membership
+  is resolved from `household_members` on every request, so revoked access and
+  role changes take effect immediately.
 - Cookie defaults: `HttpOnly`, `SameSite=Lax`, `Path=/`, configurable `Secure`.
   Settings validation refuses to start when `APP_BASE_URL` is HTTPS and
   `COOKIE_SECURE` is false. Production also rejects remote plain-HTTP origins
@@ -182,17 +188,33 @@ Health semantics:
   resets on restart; it must become PostgreSQL-backed before multiple API
   replicas. Behind Tailscale Serve, the proxy address is shared, which makes the
   limit effectively global as well as per-account. Setup itself is not throttled.
-- Authorization is role-ready (`owner` / `member`). Household rename requires
-  owner; multi-user invitations are not implemented.
+- Authorization has three household-scoped roles: owner, member and viewer.
+  Owner-only routes cover household settings, AI/credentials and member
+  administration. A router-level write guard rejects unsafe methods for viewers;
+  assistant questions and natural-language search remain read-only POST
+  exceptions. The complete matrix is in `docs/PERMISSIONS.md`.
+- Member mutations lock the household row, making last-owner demotion/removal
+  safe under concurrent requests. Removing a membership deletes that account's
+  sessions for the selected household.
+- Invitations and password-reset tokens are random, hashed at rest, expiring and
+  single-use. Invitations bind household/email/role; acceptance may only create
+  the invited account identity or attach the matching signed-in account. Reset
+  consumption invalidates outstanding reset tokens and all account sessions.
+- Email is a provider-neutral SMTP transport with STARTTLS or implicit TLS,
+  server-side credentials, validated `APP_BASE_URL` links and a captured
+  development/test transport. Production does not report success when SMTP is
+  unconfigured or delivery fails.
 - **First-run claim:** before an owner exists, any client that can reach the
   setup endpoint can claim the instance. Tailscale ACLs must restrict access and
   setup should be completed immediately after deployment.
 
-Not in the foundation: password reset/change UI, 2FA, SSO, idle timeout and
-multi-device session management. Deployment choice determines the access
-boundary: keep the default loopback bind for a private install, use Tailscale for
-a private tailnet, or expose nginx TLS publicly only with a trusted certificate,
-strong credentials, prompt first-run setup and host patching.
+Not in this milestone: household creation/switching, email-change verification,
+2FA, SSO, idle timeout, drag-and-drop member administration or PostgreSQL-backed
+rate limiting. The in-process limiter resets on restart. Deployment choice
+determines the access boundary: keep the default loopback bind for a private
+install, use Tailscale for a private tailnet, or expose nginx TLS publicly only
+with a trusted certificate, strong credentials, prompt first-run setup and host
+patching.
 
 ## 5. Data model
 
@@ -225,6 +247,8 @@ documents (OCR metadata, original + normalized storage)
 import_batches ──< import_entries ──> items (imported/matched)
 import_batches ──< import_source_files (notes/attachments)
 ai_recognitions (private photo, status, mode, suggestions, applied items)
+household_invitations (hashed token, email, role, expiry, lifecycle)
+password_reset_tokens (hashed token, expiry, use)
 recognition_item_links >── items
 room_photos / location_photos (entity photographs)
 ai_providers (encrypted credentials, consent, provider endpoint)
@@ -506,7 +530,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 187 pytest tests against a real PostgreSQL database. The test session
+- Backend: 204 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -533,7 +557,8 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 73 Vitest tests + Testing Library, including compact Intelligence
+- Frontend: 74 Vitest tests + Testing Library, including membership/recovery
+  forms, compact Intelligence
   status, searchable model discovery pickers, room-only scan destinations,
   fixture review, bounded room/container photo areas, the unified Add items
   chooser,
@@ -546,7 +571,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 13 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 16 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
   routing, quick search and the unified Add items chooser with contextual

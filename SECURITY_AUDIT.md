@@ -289,6 +289,26 @@ household-scoped endpoint with a second household's session:
 All foreign-object requests returned 401/404/422 without data; owner records
 remained intact. Household rename requires owner role.
 
+Additional account/membership tests cover:
+
+- viewer mutation rejection across routers, including uploads, imports, scans
+  and labels;
+- member ordinary inventory writes but not household/member/security settings;
+- owner-only member and invitation administration;
+- cross-household membership isolation;
+- last-owner demotion/removal safety, including concurrent requests;
+- immediate session revocation after membership removal;
+- invitation hashing, expiry, revocation, resend, replay, duplicate and
+  wrong-email rejection;
+- recovery response non-enumeration, single-use tokens, older-token
+  invalidation and session revocation;
+- invite/recovery rate limiting;
+- captured-test email, SMTP STARTTLS/implicit TLS configuration, delivery
+  failure and canonical `APP_BASE_URL` links.
+
+Invitation and reset links are never written to application logs. Mail secrets
+remain environment-only and are not returned by the API.
+
 ## Dependency and static analysis results
 
 | Check | Result |
@@ -629,11 +649,15 @@ direct nginx TLS.
 - Recognition apply and hierarchy apply are explicit, household-scoped,
   transactional/per-savepoint and idempotent. AI cannot create records without
   reviewed approval.
-- Fresh migration `c1a7e5d9f320` passes `alembic upgrade head` and `alembic check`.
+- Fresh migrations through `f3c1a9b7d245` pass `alembic upgrade head` and
+  `alembic check`. The account migration only adds tables/columns, backfills
+  session household ids and extends the role constraint; it does not rewrite
+  household records.
 - Final dependency/image checks: production `pip-audit` clean, `npm audit` 0
   vulnerabilities, Trivy HIGH/CRITICAL 0 across API, worker, web and database
-  images (after `cryptography` 50.0.2). Backend tests: 187. Frontend: 73.
-  Playwright: 13 on a disposable HTTP stack, including responsive
+  images (after `cryptography` 50.0.2). Backend tests: 204. Frontend: 74.
+  Playwright: 16 on a disposable HTTP stack, including account/member/recovery
+  flows, responsive
   provider-dialog layout, discovered-model pickers,
   contextual import destinations, the unchanged actual Inventory.md acceptance
   path and quick-search household scoping.

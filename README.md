@@ -26,6 +26,9 @@ Tailscale is optional.
   live contents and private authenticated QR codes.
 - Atomic cross-room moves that preserve the container UUID, identifier, QR
   identity, contents, nested places, document links and import provenance.
+- One shared household with independent accounts, owner/member/viewer membership
+  roles, owner-managed invitations, account-level password recovery and
+  provider-neutral SMTP delivery (Resend is an example provider, not a default).
 - Explicit conversion of existing storage places into containers; fixed shelves,
   cabinets and drawers can also receive optional identifiers such as
   `SHELF-001`.
@@ -112,7 +115,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 187 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 204 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -123,8 +126,8 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 73 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 13 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 74 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 16 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, the actual Inventory.md hierarchy, duplicate prevention,
@@ -320,6 +323,14 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `TLS_CERT_PATH` | empty | PEM certificate chain mounted read-only by `compose.tls.yaml` |
 | `TLS_KEY_PATH` | empty | Matching PEM private key mounted read-only |
 | `SESSION_TTL_DAYS` | `30` | Login lifetime |
+| `SMTP_HOST` | empty | Provider-neutral SMTP host; empty disables outgoing mail |
+| `SMTP_PORT` | `587` | SMTP port (587 STARTTLS, 465 implicit TLS) |
+| `SMTP_TLS_MODE` | `starttls` | `starttls`, `ssl` or local-only `none` |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | SMTP credentials, server-side only |
+| `SMTP_FROM_NAME` / `SMTP_FROM_ADDRESS` | `Housetory` / empty | From identity for invitations/reset mail |
+| `SMTP_TIMEOUT_SECONDS` | `10` | SMTP connect/send timeout |
+| `INVITATION_TTL_HOURS` | `168` | Invitation lifetime |
+| `PASSWORD_RESET_TTL_MINUTES` | `60` | Password reset lifetime |
 | `MAX_UPLOAD_MB` | `25` | Per-file upload cap |
 | `LOGIN_MAX_FAILURES` | `10` | Failed sign-ins per email/IP before throttling |
 | `LOGIN_WINDOW_SECONDS` | `900` | Sliding throttle window |
@@ -433,6 +444,63 @@ the established consent rules.
 
 Official provider APIs use API keys, bearer tokens or local endpoints. Housetory
 does not reuse consumer-account cookies, subscription tokens or unofficial OAuth.
+
+## Accounts, household membership and email
+
+Housetory now supports one shared household with independent accounts. The
+household owner creates the first account during setup, then invites other
+people. Accounts are not tied to a household; authorization comes from a
+household membership with one of three roles:
+
+- **Owner** — inventory plus household settings, member administration, AI and
+  credential configuration.
+- **Member** — ordinary inventory, photos, documents, imports, scans and
+  reports; no member/security administration.
+- **Viewer** — read-only browsing, search, assistant and exports. Mutations are
+  rejected server-side and most mutation controls are hidden.
+
+The full matrix is in [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). The UI
+continues to show one shared household; there is no household creation or
+switching flow yet. Cross-household isolation remains enforced on every
+household-scoped route.
+
+Owners invite people under **Settings → Members & invitations**. Invitations are
+single-use, expiring links bound to the invited email and assigned role. New
+accounts choose their own password; existing accounts must sign in with the
+invited email first. Password recovery is account-level and returns the same
+response whether or not an account exists. Both token types are hashed at rest,
+and resetting a password revokes existing sessions.
+
+Email is provider-neutral SMTP. Set `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_TLS_MODE`, credentials and `SMTP_FROM_ADDRESS` in `.env`; Resend is only one
+example provider in `.env.example`, not an application default. The configured
+`APP_BASE_URL` is used for absolute links. When email is unconfigured, login and
+inventory continue to work, owners see an explicit invitation warning, and
+password recovery keeps its non-enumerating response. Development/test mail is
+captured locally instead of sent in development (`data/mail-capture/`) and kept
+in memory in tests. Automated tests never deliver real email.
+
+A Resend example, using the operator's separately supplied restricted key and
+their own sending domain, is:
+
+```dotenv
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_TLS_MODE=starttls
+SMTP_USERNAME=resend
+SMTP_PASSWORD=<restricted-key-supplied-separately>
+SMTP_FROM_NAME=Housetory
+SMTP_FROM_ADDRESS=noreply@mail.dorostkar.net
+```
+
+This is documentation, not a default. The sending domain was added in the Resend
+dashboard at the time of writing, but DNS/domain verification was still pending
+and has not been verified by Housetory. Do not claim delivery succeeds until the
+provider shows the domain verified and a test message is delivered.
+
+Account settings are under **Settings → Account settings**. Household settings
+and member administration remain separate under Settings and **Members &
+invitations**.
 
 ## Camera, AI Scan Items and hierarchical imports
 

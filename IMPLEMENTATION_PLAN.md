@@ -452,11 +452,78 @@ the product-facing numbering below follows the delivery brief.
 13. Phase 4 and Phase 5 regressions pass. ✅
 14. Backend/frontend/Playwright tests and security scans pass. ✅
 
+## Staged milestone — accounts, invitations and recovery
+
+This milestone adds multi-user access without changing the existing shared
+household model or renumbering earlier phases.
+
+### Stage A — membership and authorization foundation
+
+- [x] Keep accounts (`users`) separate from household membership
+      (`household_members`); roles are scoped per household.
+- [x] Add the `viewer` role and make sessions select a household id while
+      revalidating membership on every request.
+- [x] Document and enforce owner/member/viewer permissions across inventory,
+      photos, documents, imports, scans, AI, labels, exports and account routes.
+- [x] Restrict household settings, AI/credential configuration and member
+      administration to owners.
+- [x] Serialize member role/removal changes with a household row lock and prevent
+      zero-owner households under concurrent requests.
+- [x] Revoke a removed member's household sessions immediately and re-read roles
+      so demotions take effect without waiting for session expiry.
+- [x] Preserve cross-household isolation tests and add viewer/member boundary
+      tests.
+- [x] Separate account settings from household/member administration in the UI.
+- [x] Keep one shared household visible; no household creation/switching flow.
+
+### Stage B — provider-neutral email infrastructure
+
+- [x] Add a transport interface with standard SMTP STARTTLS/implicit TLS,
+      timeout, username/password and from identity support.
+- [x] Keep SMTP secrets server-side; no email credentials are returned to the UI
+      or logged.
+- [x] Use validated `APP_BASE_URL` for invitation/reset links, never the Host
+      header.
+- [x] Add a captured development/test transport and explicit unconfigured and
+      delivery-failure states.
+- [x] Document environment configuration with Resend only as an example; no
+      provider or domain is hardcoded.
+- [x] Keep inventory/login working when email is unconfigured.
+
+### Stage C — invitations and password recovery
+
+- [x] Owners can invite an email with a household role, list pending invites,
+      resend, revoke and manage members.
+- [x] Invitations are hashed, expiring, single-use and bound to household, email
+      and role; duplicate/replay/wrong-account paths are rejected.
+- [x] New accounts choose their own password; existing accounts must authenticate
+      with the invited email before accepting.
+- [x] Password recovery is account-level, uses uniform responses, expiring hashed
+      single-use tokens and revokes sessions when consumed.
+- [x] Add meaningful rate limits to invite, acceptance and recovery endpoints.
+- [x] Keep first-run/setup protections and avoid open registration or
+      unauthenticated household/member discovery.
+- [x] Provide useful invalid/expired/revoked link states and email-unconfigured
+      guidance.
+
+### Stage D — verification and local delivery
+
+- [x] Backend tests for role boundaries, cross-household isolation, last-owner
+      safety, invitation replay/expiry/wrong account, recovery non-enumeration
+      and session revocation, SMTP capture/configuration/failure.
+- [x] Frontend/component tests for the new account, invitation, recovery and
+      read-only states.
+- [x] Browser tests for account/member separation, recovery messaging, invitation
+      forms and existing inventory flows.
+- [ ] Run all repository checks and deploy locally after backup/rollback
+      recording; the remote server is explicitly out of scope.
+
 ## Recommended next phase
 
 Do not start until explicitly approved. **Phase 7 — Tauri 2 macOS desktop** is the
 strongest next milestone now that the web application, physical containers,
 imports, AI providers and camera workflows are stable. Further work should also
 include a real Ollama/cloud-model benchmark, real iPhone PWA/camera verification,
-accessibility automation and visual-regression tests. Advanced organisation (custom fields, taxonomy management and multi-user
-sharing) should follow afterwards.
+accessibility automation and visual-regression tests. Advanced organisation
+(custom fields and taxonomy management) and household switching/creation should
+follow afterwards; accounts, invitations and recovery now exist.
