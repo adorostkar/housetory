@@ -64,6 +64,7 @@ const TASK_LABELS: Record<string, string> = {
   search: "Natural-language search",
   vision: "Image recognition",
   labels: "Label summary headlines",
+  transcription: "Voice transcription",
 };
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -71,6 +72,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   vision: "Vision",
   structured: "Structured JSON",
   tools: "Tool calling",
+  audio: "Audio input",
 };
 
 interface ProviderDraft {
@@ -557,8 +559,9 @@ export function AiSettingsPage() {
         </div>
         <p className="mt-1 text-[0.75rem] text-muted-foreground">
           Choose a provider and model per task. Vision tasks require a model that advertises
-          vision capability. Capability detection is conservative and can be corrected by
-          entering the exact provider model name.
+          vision capability. Voice transcription requires OpenAI audio transcriptions or a
+          Gemini model with audio input. Capability detection is conservative and can be
+          corrected by entering the exact provider model name.
         </p>
         <div className="mt-5 space-y-3">
           {Object.values(tasks)
@@ -621,7 +624,13 @@ export function AiSettingsPage() {
                       value={task.model ?? ""}
                       models={providerModels}
                       disabled={!provider}
-                      requiredCapability={task.task === "vision" ? "vision" : undefined}
+                      requiredCapability={
+                        task.task === "vision"
+                          ? "vision"
+                          : task.task === "transcription"
+                            ? "audio"
+                            : undefined
+                      }
                       loading={providerModelStatus?.loading}
                       error={providerModelStatus?.error}
                       cached={providerModelStatus?.cached}
@@ -894,8 +903,10 @@ export function AiSettingsPage() {
                   </span>
                   <span className="block text-[0.68rem] leading-relaxed text-muted-foreground">
                     This endpoint is not on the Housetory host. Prompts, inventory excerpts,
-                    documents and photographs for selected tasks will leave this server.
-                    You can revoke consent here at any time.
+                    documents, photographs, recordings and transcripts for selected tasks
+                    will leave this server. Audio is sent only for the Voice transcription
+                    task, and transcripts only for the task that interprets them. You can
+                    revoke consent here at any time.
                   </span>
                 </span>
               </label>

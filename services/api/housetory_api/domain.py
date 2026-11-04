@@ -163,6 +163,19 @@ class AiTask(StrEnum):
     SEARCH = "search"
     VISION = "vision"
     LABELS = "labels"
+    TRANSCRIPTION = "transcription"
+
+
+class VoiceNoteStatus(StrEnum):
+    QUEUED = "queued"
+    TRANSCRIBING = "transcribing"
+    TRANSCRIBED = "transcribed"
+    INTERPRETING = "interpreting"
+    REVIEW = "review"
+    APPLYING = "applying"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ImportEntityType(StrEnum):

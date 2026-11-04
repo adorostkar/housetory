@@ -56,7 +56,8 @@ class AiTaskSetting(Base):
     __tablename__ = "ai_task_settings"
     __table_args__ = (
         CheckConstraint(
-            "task in ('assistant', 'imports', 'documents', 'search', 'vision', 'labels')",
+            "task in ('assistant', 'imports', 'documents', 'search', 'vision', "
+            "'labels', 'transcription')",
             name="valid_task",
         ),
     )

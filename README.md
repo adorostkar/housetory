@@ -12,7 +12,7 @@ Designed for a CPU-only Linux server, reachable over a private tailnet, a truste
 LAN address or a public HTTPS hostname, and installable on an iPhone as a PWA.
 Tailscale is optional.
 
-![Status: AI intelligence, mobile camera and smart imports complete](https://img.shields.io/badge/status-AI_%2B_mobile_camera_complete-56614f)
+![Status: AI intelligence, mobile camera, imports and voice notes complete](https://img.shields.io/badge/status-AI_%2B_camera_%2B_voice_complete-56614f)
 
 ## What is working
 
@@ -90,6 +90,14 @@ Tailscale is optional.
   quantities, duplicate review, room-only or room-plus-container destinations,
   per-suggestion overrides and approved bulk creation. Fixed fixtures are flagged
   for review and are not preselected. Nothing is written automatically.
+- **Voice-note inventory entry** through **Add items**: record with explicit
+  microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
+  then review structured item groups. Repeated mentions such as “ethernet cable,
+  ethernet cable, another ethernet cable” become one suggestion with quantity 3.
+  Explicit counts, corrections, recap summaries, variants, rooms/containers,
+  duplicate decisions and grouped-suggestion splitting are supported. Audio is
+  deleted after transcription; nothing is written before explicit confirmation.
+  See [`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md).
 - A conservative hierarchy importer that understands rooms, boxes, nested
   containers, legacy identifiers such as `STO-01` and their contents. Index
   pages and empty templates are skipped, and the tree is reviewed before apply.
@@ -97,9 +105,11 @@ Tailscale is optional.
   OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
   **Settings → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
-- Separate task models for assistant, imports, documents, search, vision and
-  label headlines, with capability warnings and explicit remote-processing
-  consent. Local, private-network and remote endpoints are labelled separately.
+- Separate task models for assistant, imports, documents, search, vision,
+  voice transcription and label headlines, with capability warnings and explicit
+  remote-processing consent. Local, private-network and remote endpoints are
+  labelled separately. Voice transcription is opt-in and uses OpenAI audio
+  transcriptions or Gemini audio input; it never reuses a chat model by accident.
 - Optional direct HTTPS with nginx, or Tailscale Serve as an optional private
   access layer. PWA and camera features work in secure contexts.
 - Document-to-item relationship suggestions that require explicit linking.
@@ -115,24 +125,27 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 204 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 222 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
   import/duplicate/location review, encrypted provider credentials and rotation,
   provider adapters, task capabilities, consent enforcement, entity photos,
-  multi-object recognition/apply/idempotency, split/merge idempotency, the
-  unchanged actual Inventory.md upload/paste path, semantic AI-edit validation
+  multi-object recognition/apply/idempotency, voice-note grouping/corrections/
+  duplicate resolution/split/idempotent confirmation, OpenAI/Gemini transcription
+  adapters, audio validation and cleanup, the unchanged actual Inventory.md
+  upload/paste path, semantic AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 74 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 16 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 77 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 17 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
-  approved creation, the actual Inventory.md hierarchy, duplicate prevention,
-  PWA/service-worker/deep-link routing, quick search and the unified Add items
-  chooser with contextual destinations.
+  approved creation, voice-note review/split/confirm with grouped quantities, the
+  actual Inventory.md hierarchy, duplicate prevention, PWA/service-worker/deep-link
+  routing, quick search and the unified Add items chooser with contextual
+  destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -144,15 +157,18 @@ stack, not just unit mocks:
   shared purchases, warranty dashboards, ownership reports, a real Obsidian ZIP
   import with inline room creation, grounded assistant answers, smart search,
   OCR-fallback recognition, Phase 5 container creation/movement, QR labels, PDF
-  label previews and mobile layouts with no console errors or failed requests.
+  label previews, voice-note review and mobile layouts with no console errors or
+  failed requests.
 - Backup permissions, checksum verification, archive extraction safety, target
   checks and a full destructive restore were rehearsed locally, including
   authenticating and retrieving photos/documents after restore.
 - Production dependency audits report no known Python or npm vulnerabilities.
   Final application images scan with zero fixable HIGH/CRITICAL vulnerabilities.
 
-The Phase 2 desktop/iPhone walkthrough, screenshots and remaining limitations are
-in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
+The voice-note provider/format/retention configuration and walkthrough are in
+[`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md). The Phase 2 desktop/iPhone
+walkthrough, screenshots and remaining limitations are in
+[`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
 [`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md). The Phase 4 AI,
 import and Obsidian walkthrough is in
@@ -171,7 +187,9 @@ management UI, multi-user sharing, password changes and exchange-rate conversion
 are not implemented yet. The Tauri macOS shell is deferred to Phase 7. A
 checked-in Playwright suite covers the critical Phase 5 and Phase 6 workflows.
 AI extraction is review-only and heuristics remain approximate; no model is
-bundled or downloaded automatically. See
+bundled or downloaded automatically. Voice transcription requires an operator-
+configured OpenAI-compatible or Gemini provider; paid-provider and physical-
+microphone smoke tests still require the operator's credentials and hardware. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
 from remaining work and states the OCR, AI and multi-currency limitations
 honestly.

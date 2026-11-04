@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     import_max_files: int = Field(default=2000, ge=1, le=10000)
     import_max_total_mb: int = Field(default=50, ge=1, le=500)
     import_max_file_mb: int = Field(default=10, ge=1, le=100)
+    voice_max_upload_mb: int = Field(default=15, ge=1, le=50)
+    voice_max_duration_seconds: int = Field(default=120, ge=10, le=300)
+    voice_max_active_notes: int = Field(default=10, ge=1, le=100)
+    voice_max_suggestions: int = Field(default=50, ge=1, le=100)
+    voice_max_transcript_chars: int = Field(default=12000, ge=500, le=50000)
 
     smtp_host: str = ""
     smtp_port: int = Field(default=587, ge=1, le=65535)
@@ -174,6 +179,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def voice_max_upload_bytes(self) -> int:
+        return self.voice_max_upload_mb * 1024 * 1024
 
     @property
     def is_production(self) -> bool:

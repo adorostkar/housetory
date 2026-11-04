@@ -30,7 +30,7 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
     body = settings.json()
     assert body["credential_key_configured"] is True
     assert body["providers"] == []
-    assert len(body["tasks"]) == 6
+    assert len(body["tasks"]) == 7
     assert {task["task"] for task in body["tasks"]} == {
         "assistant",
         "imports",
@@ -38,6 +38,7 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
         "search",
         "vision",
         "labels",
+        "transcription",
     }
 
     response = owner_client.post("/api/v1/ai/providers", json=provider_payload())
@@ -763,3 +764,32 @@ def test_vision_task_must_be_explicitly_configured(owner_client, monkeypatch):
     disabled_status = owner_client.get("/api/v1/ai/status?task=vision").json()
     assert disabled_status["configured"] is False
     assert "disabled" in (disabled_status["error"] or "").lower()
+
+
+def test_transcription_task_status_is_explicit_and_accepts_audio_capability(owner_client):
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(
+            provider="openai",
+            display_name="OpenAI transcription",
+            default_model="whisper-1",
+        ),
+    ).json()
+    status = owner_client.get("/api/v1/ai/status?task=transcription")
+    assert status.status_code == 200, status.text
+    body = status.json()
+    assert body["task"] == "transcription"
+    assert body["configured"] is False
+    assert "No transcription task is configured" in body["error"]
+
+    saved = owner_client.put(
+        "/api/v1/ai/tasks/transcription",
+        json={
+            "provider_id": provider["id"],
+            "model": "whisper-1",
+            "enabled": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["task"] == "transcription"
+    assert saved.json()["model"] == "whisper-1"

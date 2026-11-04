@@ -56,6 +56,7 @@ describe("AddItems", () => {
   it.each([
     ["Enter manually", "/items/new"],
     ["Scan a photo", "/scan"],
+    ["Record a voice note", "/voice"],
     ["Import a list or file", "/imports"],
   ])("opens %s with the preserved room and place context", async (choice, path) => {
     renderChooser({

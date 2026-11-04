@@ -7,7 +7,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..domain import AiProviderType, AiTask
 from ..schemas.common import Name, trimmed
 
-AiTaskName = Literal["assistant", "imports", "documents", "search", "vision", "labels"]
+AiTaskName = Literal[
+    "assistant",
+    "imports",
+    "documents",
+    "search",
+    "vision",
+    "labels",
+    "transcription",
+]
 
 
 class AiProviderCreate(BaseModel):

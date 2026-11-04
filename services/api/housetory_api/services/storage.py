@@ -589,3 +589,68 @@ def store_ai_image(household_id: uuid.UUID, upload: UploadFile) -> StoredAiImage
         raise
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+VOICE_AUDIO_TYPES = {
+    "webm": ("audio/webm", ".webm"),
+    "ogg": ("audio/ogg", ".ogg"),
+    "wav": ("audio/wav", ".wav"),
+    "mp3": ("audio/mpeg", ".mp3"),
+    "mp4": ("audio/mp4", ".m4a"),
+}
+
+
+def _sniff_audio(temp_path: Path) -> tuple[str, str]:
+    with temp_path.open("rb") as source:
+        header = source.read(32)
+    if header.startswith(b"\x1aE\xdf\xa3"):
+        return VOICE_AUDIO_TYPES["webm"]
+    if header.startswith(b"OggS"):
+        return VOICE_AUDIO_TYPES["ogg"]
+    if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+        return VOICE_AUDIO_TYPES["wav"]
+    if header.startswith(b"ID3") or (
+        len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0
+    ):
+        return VOICE_AUDIO_TYPES["mp3"]
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        return VOICE_AUDIO_TYPES["mp4"]
+    raise ApiError(
+        422,
+        "unsupported_audio_type",
+        "Use a WebM, Ogg, WAV, MP3 or M4A audio file.",
+    )
+
+
+def store_voice_audio(
+    household_id: uuid.UUID, voice_note_id: uuid.UUID, upload: UploadFile
+) -> StoredImportFile:
+    settings = get_settings()
+    temp_path, size = _write_temp(upload, settings.voice_max_upload_bytes)
+    try:
+        content_type, extension = _sniff_audio(temp_path)
+        safe_name = _filename_with_extension(upload.filename, extension)
+        base_dir = (
+            _import_root()
+            / "households"
+            / str(household_id)
+            / "voice"
+            / str(voice_note_id)
+            / "source"
+        )
+        destination = base_dir / f"{uuid.uuid4().hex}-{safe_name}"
+        _mkdir_private(base_dir)
+        shutil.copyfile(temp_path, destination)
+        _chmod_file(destination)
+        return StoredImportFile(
+            storage_key=destination.relative_to(_import_root()).as_posix(),
+            original_filename=safe_name,
+            content_type=content_type,
+            byte_size=size,
+        )
+    except Exception:
+        if "destination" in locals():
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)

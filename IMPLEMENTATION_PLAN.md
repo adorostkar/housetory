@@ -518,12 +518,135 @@ household model or renumbering earlier phases.
 - [x] Run all repository checks and deploy locally after backup/rollback
       recording; the remote server is explicitly out of scope.
 
-## Recommended next phase
+## Staged milestone — voice-note inventory entry
 
-Do not start until explicitly approved. **Phase 7 — Tauri 2 macOS desktop** is the
-strongest next milestone now that the web application, physical containers,
-imports, AI providers and camera workflows are stable. Further work should also
-include a real Ollama/cloud-model benchmark, real iPhone PWA/camera verification,
-accessibility automation and visual-regression tests. Advanced organisation
-(custom fields and taxonomy management) and household switching/creation should
-follow afterwards; accounts, invitations and recovery now exist.
+This milestone extends the existing **Add items** entry point without changing
+manual entry, imports, photo recognition, quantities or authorization semantics.
+
+### Stage A — transcription and voice-note foundation
+
+- [x] Dedicated `voice_notes` record with household scoping, statuses, transcript,
+      interpretation metadata, suggestions, warnings, applied links and timestamps.
+- [x] Add the explicit `transcription` AI task and a migration that extends the
+      existing task check constraint without altering existing task assignments.
+- [x] Private audio storage under the imports volume, signature validation for
+      WebM/Ogg/WAV/MP3/M4A, size/duration limits and active-note concurrency limits.
+- [x] Actual OpenAI `/audio/transcriptions` and Gemini inline-audio adapters with
+      capability checks, no silent provider fallback and no fake transcription.
+- [x] Delete source audio after successful transcription or cancellation; retain
+      failed audio only for explicit retry.
+- [x] Worker handlers for transcription and interpretation jobs with cancellation
+      checks and no transcript/audio content in logs.
+
+### Stage B — deterministic grouping and review contract
+
+- [x] Structured, schema-validated AI mentions with exact transcript evidence,
+      optional explicit quantities, variants, locations, corrections and summaries.
+- [x] Server-side grouping by normalized name, meaningful attributes and resolved
+      room/container; repeated mentions become one quantity-bearing suggestion.
+- [x] Explicit counts, correction replacement, summary suppression, variant
+      separation and same-item/different-location separation with tests.
+- [x] Natural spoken location matching (`box two` / `Box 2` / identifiers),
+      ambiguity flags, room-only destinations and transcript location evidence.
+- [x] Duplicate candidates and explicit create-new/add-quantity/skip resolution;
+      no silent quantity increment or duplicate insert.
+- [x] Unsupported move statements are flagged for manual action and never turned
+      into new inventory.
+- [x] Editable names, quantities, rooms, containers and explicit new-room/new-box
+      choices that respect existing uniqueness and hierarchy rules.
+- [x] Split grouped suggestions with stable child IDs and idempotent retry.
+- [x] Atomic per-suggestion apply, partial-failure reporting and retry safety.
+
+### Stage C — recorder and review UI
+
+- [x] **Record a voice note** choice in the unified Add items dialog with preserved
+      room/container context.
+- [x] Browser microphone capture with permission/secure-context errors, supported
+      format selection, timer, stop, cancel, retake and upload alternative.
+- [x] Editable transcript step before interpretation and clear interpretation
+      configuration/unavailable states.
+- [x] Review cards showing combined mention counts, explicit-count provenance,
+      transcript evidence, location evidence, warnings and duplicate candidates.
+- [x] Mobile-friendly destination controls with explicit create-room/create-box
+      choices, split control and confirm-selected action.
+- [x] Separate Voice transcription and Smart imports task configuration in
+      Settings, with audio capability support in model discovery/pickers and
+      consent wording that names recordings and transcripts.
+- [x] Honest setup, cancellation, failure, partial-result and confirmed states.
+
+### Stage D — verification and local delivery
+
+- [x] Backend tests for repeated mentions, explicit counts, corrections, summaries,
+      variants, multiple locations, ambiguity, moves, duplicate resolution,
+      add-quantity, split/idempotent confirmation, invalid AI output, audio
+      validation, cancellation/cleanup, viewer permissions and cross-household IDOR.
+- [x] Mocked adapter tests for OpenAI multipart transcription and Gemini inline
+      audio; unsupported providers fail clearly.
+- [x] Frontend component tests for grouped quantity display, splitting, confirm
+      payloads and the unconfigured setup state; Add items coverage includes voice.
+- [x] Backend suite, frontend tests, strict TypeScript typecheck and production
+      build pass.
+- [x] Document providers, formats, limits, retention, privacy, grouping rules,
+      walkthrough and limitations in `docs/VOICE_NOTES.md`.
+- [x] Local deployment after backup; remote server remains untouched.
+- [ ] Real paid-provider transcription and physical microphone smoke tests require
+      the operator's credentials and hardware.
+
+## Agreed product roadmap — 2026-11-04
+
+This sequence supersedes the previous desktop-app recommendation. These are
+planned milestones, not completed capabilities or authorization to start them.
+Finish the current voice-note work; wait for the user to announce completion,
+review once, and obtain the next implementation instruction before proceeding.
+
+1. **Voice notes:** complete and verify recording/upload, transcription, repeated
+   mention quantities, location matching and review-before-confirmation.
+2. **Receipt and document scanning:** inspect existing Documents/OCR capabilities
+   first; add capture, crop, perspective correction, rotation, contrast cleanup
+   and multi-page PDFs while preserving originals. Accept files from dedicated
+   scanning apps. Basic cleanup must not require an LLM.
+3. **Intelligent extraction and matching:** propose receipt fields and line items,
+   purchases, warranties and attachments. Use an available, consented LLM to
+   interpret abbreviations and rank relevant inventory candidates with evidence;
+   retain OCR/basic matching without it. Exact identifiers carry strong weight.
+   Handle duplicate documents, no matching item and per-line purchase values.
+   Review before creating, attaching or overwriting records. Before this work,
+   check that matching, jobs and AI context use explicit household scope.
+4. **Single-home polish, including unified search and assistant:** make manual,
+   photo, voice and document flows consistent, with duplicate/quantity handling.
+   Use one everyday input labelled “Search or ask about your inventory…”.
+   - Short queries such as “PS5” show matching items and boxes immediately,
+     without requiring an LLM. Show ordinary matches while typing; Enter submits
+     the full search/question rather than triggering paid AI on each keystroke.
+   - Questions such as “Which items have no purchase information?” produce a
+     structured, validated database query and linked/filterable item results,
+     explaining the missing-information criterion. The database supplies actual
+     results and counts; an LLM may interpret intent, never invent inventory.
+   - Open-ended questions produce an assistant answer grounded in accessible
+     records, with item links. Ambiguous intent offers matches and an explicit
+     “Ask assistant” action. Keep longer conversations on the assistant page,
+     allowing a question to continue there without losing its context.
+   - Preserve useful ordinary search without AI, show honest unavailable/error
+     states, enforce permissions and cloud consent, and treat queries as
+     untrusted data. Changes require a specific destination and confirmation.
+5. **Multiple properties in one household:** property → room → storage/box → item;
+   migrate existing inventory into an initial property without breaking IDs,
+   attachments or QR links. Add property context/filters and clear location paths.
+   Initially retain household-level permissions across all its properties.
+6. **Multiple households:** creation, switching, household-specific invitations,
+   membership roles, settings and verified isolation in jobs, AI and documents.
+   Search and assistant must support “All my places” across households/properties
+   the account can access, with explicit filters and labelled result locations;
+   remember a deliberately selected narrower scope. Revalidate permissions before
+   retrieval and exclude revoked access. Respect each household's cloud-provider
+   consent rather than sending its data through another household's provider.
+   Mutations identify a particular household/property and clarify ambiguity.
+   Cross-household item transfers are deferred beyond the initial release.
+
+For each milestone: OpenCode implements, verifies and deploys locally; we review
+after the user reports completion. Deploy to the server only on explicit request,
+using GitHub fetch/checkout of a verified commit for future deployments, with
+backups and migrations that preserve server secrets/data and existing nginx.
+Keep future household/property boundaries explicit during earlier milestones,
+without exposing unfinished multi-home UI. No additional work is queued merely
+by adding it to this roadmap.

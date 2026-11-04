@@ -98,7 +98,7 @@ def _request_json(
 ) -> dict[str, Any]:
     settings = _settings()
     request_headers = {"Content-Type": "application/json", **(headers or {})}
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    data = json.dumps(payload).encode() if payload is not None else None
     attempts = 2
     for attempt in range(attempts):
         request = urllib.request.Request(
@@ -142,6 +142,83 @@ def _request_json(
         raise AiUnavailable("Inference provider is unreachable.")
     try:
         parsed = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        raise AiInvalidOutput("Inference provider returned invalid JSON.") from None
+    if not isinstance(parsed, dict):
+        raise AiInvalidOutput("Inference provider returned an unexpected response.")
+    return parsed
+
+
+def request_multipart_json(
+    url: str,
+    *,
+    fields: dict[str, str],
+    file_field: str,
+    filename: str,
+    content_type: str,
+    data: bytes,
+    headers: dict[str, str] | None = None,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """POST multipart form data using the same no-redirect/TLS policy as JSON."""
+    settings = _settings()
+    boundary = f"----housetory-{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.append(
+            (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+            ).encode()
+        )
+    safe_filename = filename.replace('"', "").replace("\r", "").replace("\n", "")[:255]
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{file_field}"; filename="{safe_filename}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        ).encode()
+    )
+    chunks.append(data)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    body = b"".join(chunks)
+    request_headers = {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        **(headers or {}),
+    }
+    attempts = 2
+    for attempt in range(attempts):
+        request = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
+        try:
+            opener = urllib.request.build_opener(_NoRedirect)
+            with opener.open(  # nosec B310
+                request, timeout=timeout or settings.ai_timeout_seconds
+            ) as response:
+                response_body = response.read(3_000_000)
+            break
+        except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                raise AiUnavailable(
+                    "Inference provider returned a redirect. Redirects are not followed "
+                    "because the destination may be outside the consented endpoint."
+                ) from None
+            if exc.code in {429, 500, 502, 503, 504} and attempt + 1 < attempts:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                try:
+                    delay = min(float(retry_after), 5.0) if retry_after else 2.0
+                except ValueError:
+                    delay = 2.0
+                time.sleep(min(delay, 5.0))
+                continue
+            raise AiUnavailable(f"Inference provider returned HTTP {exc.code}.") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            if attempt + 1 < attempts:
+                time.sleep(1.0)
+                continue
+            raise AiUnavailable("Inference provider is unreachable.") from None
+    else:  # pragma: no cover
+        raise AiUnavailable("Inference provider is unreachable.")
+    try:
+        parsed = json.loads(response_body)
     except (ValueError, UnicodeDecodeError):
         raise AiInvalidOutput("Inference provider returned invalid JSON.") from None
     if not isinstance(parsed, dict):
@@ -247,8 +324,11 @@ def _metadata_capabilities(
         inputs = architecture.get("input_modalities")
         if isinstance(inputs, list):
             capabilities.discard("vision")
+            capabilities.discard("audio")
             if any(str(value).lower() in {"image", "img", "file"} for value in inputs):
                 capabilities.add("vision")
+            if any(str(value).lower() in {"audio", "speech"} for value in inputs):
+                capabilities.add("audio")
         outputs = architecture.get("output_modalities")
         if isinstance(outputs, list) and "text" not in {str(value).lower() for value in outputs}:
             capabilities.discard("text")
@@ -269,7 +349,9 @@ def _metadata_capabilities(
         source = "provider_metadata"
         if "generateContent" not in {str(value) for value in methods}:
             capabilities.discard("text")
-    order = ["text", "vision", "structured", "tools"]
+    if provider == AiProviderType.GEMINI.value:
+        capabilities.add("audio")
+    order = ["text", "vision", "audio", "structured", "tools"]
     return tuple(capability for capability in order if capability in capabilities), source
 
 

@@ -343,7 +343,19 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 configured=False,
                 error="The selected provider no longer exists.",
             )
-        return _provider_config(provider, task, setting.model or provider.default_model)
+        config = _provider_config(provider, task, setting.model or provider.default_model)
+        if task == AiTask.TRANSCRIPTION.value and not provider_supports_transcription(
+            provider.provider
+        ):
+            return replace(
+                config,
+                configured=False,
+                error=(
+                    "The configured transcription provider does not support audio "
+                    "transcription. Choose OpenAI or Google Gemini."
+                ),
+            )
+        return config
     if task == AiTask.VISION.value:
         # An assistant/default model is not proof that image recognition is configured.
         # Vision must be assigned explicitly so a text-only model is never called blindly.
@@ -363,6 +375,28 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             error=(
                 "No vision task is configured. Choose a vision-capable provider and "
                 "model under Settings → AI providers → Task defaults."
+            ),
+        )
+    if task == AiTask.TRANSCRIPTION.value:
+        # Audio transcription is opt-in and provider-specific. Never reuse a chat
+        # or vision default silently.
+        return AiRuntimeConfig(
+            provider="disabled",
+            base_url="",
+            api_key=None,
+            model=None,
+            task=task,
+            provider_id=None,
+            display_name=None,
+            mode="disabled",
+            source="database",
+            enabled=False,
+            cloud_consent=False,
+            configured=False,
+            error=(
+                "No transcription task is configured. Choose OpenAI (audio "
+                "transcriptions) or Google Gemini (audio input) under Settings → "
+                "AI providers → Task defaults."
             ),
         )
     # A single configured provider is a convenient default for text tasks.
@@ -387,6 +421,13 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
     )
 
 
+def provider_supports_transcription(provider: str) -> bool:
+    return provider in {
+        AiProviderType.OPENAI.value,
+        AiProviderType.GEMINI.value,
+    }
+
+
 def model_capabilities(provider: str, model: str | None) -> list[str]:
     if not model:
         return []
@@ -400,6 +441,10 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
             capabilities.append("tools")
     elif provider == AiProviderType.GEMINI.value:
         capabilities.extend(["structured", "tools"])
+    if provider == AiProviderType.GEMINI.value or any(
+        token in lowered for token in ("whisper", "transcribe", "-audio", "audio-")
+    ):
+        capabilities.append("audio")
     if any(
         token in lowered
         for token in (

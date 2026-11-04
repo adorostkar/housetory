@@ -35,6 +35,7 @@ from .inventory import (
     item_tags,
 )
 from .jobs import Job
+from .voice import VoiceNote
 
 __all__ = [
     "AuthSession",
@@ -65,6 +66,7 @@ __all__ = [
     "StorageLocation",
     "Tag",
     "User",
+    "VoiceNote",
     "Warranty",
     "item_documents",
     "item_tags",

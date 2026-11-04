@@ -35,6 +35,7 @@ from .ai_runtime import (
     config_for_provider,
     endpoint_scope,
     model_capabilities,
+    provider_supports_transcription,
     resolve_config,
 )
 
@@ -54,6 +55,7 @@ TASK_LABELS = {
     AiTask.SEARCH.value: "Natural-language search",
     AiTask.VISION.value: "Image recognition",
     AiTask.LABELS.value: "Label summary headlines",
+    AiTask.TRANSCRIPTION.value: "Voice transcription",
 }
 
 MODEL_CACHE_TTL_SECONDS = 300
@@ -102,6 +104,7 @@ TASK_CAPABILITY = {
     AiTask.SEARCH.value: "text",
     AiTask.VISION.value: "vision",
     AiTask.LABELS.value: "text",
+    AiTask.TRANSCRIPTION.value: "audio",
 }
 
 
@@ -212,6 +215,10 @@ def _assign_default_tasks(db: Session, household_id: uuid.UUID, provider: AiProv
         return
     capabilities = model_capabilities(provider.provider, provider.default_model)
     for task in TASK_LABELS:
+        # Audio transcription is deliberately opt-in: a chat model is not proof
+        # that the account can transcribe audio.
+        if task == AiTask.TRANSCRIPTION.value:
+            continue
         if TASK_CAPABILITY[task] not in capabilities:
             continue
         setting = db.scalar(
@@ -343,20 +350,35 @@ def update_task(
         provider = _provider_or_404(db, household_id, payload.provider_id)
     if payload.enabled and provider is not None:
         selected_model = payload.model or provider.default_model
-        cached_model = _cached_model(provider, selected_model)
-        capabilities = _capabilities_for(provider, selected_model)
-        if cached_model is not None and cached_model.kind != "chat":
+        if not selected_model:
             raise ApiError(
                 422,
-                "model_not_chat_capable",
-                "The selected catalog model is not a chat/completion model.",
+                "model_required",
+                "Choose a model for this task.",
             )
-        if TASK_CAPABILITY[task] not in capabilities:
-            raise ApiError(
-                422,
-                "model_capability_mismatch",
-                f"The selected model does not advertise the {TASK_CAPABILITY[task]} capability.",
-            )
+        if task == AiTask.TRANSCRIPTION.value:
+            if not provider_supports_transcription(provider.provider):
+                raise ApiError(
+                    422,
+                    "transcription_provider_unsupported",
+                    "Choose OpenAI or Google Gemini for audio transcription.",
+                )
+        else:
+            cached_model = _cached_model(provider, selected_model)
+            capabilities = _capabilities_for(provider, selected_model)
+            if cached_model is not None and cached_model.kind != "chat":
+                raise ApiError(
+                    422,
+                    "model_not_chat_capable",
+                    "The selected catalog model is not a chat/completion model.",
+                )
+            if TASK_CAPABILITY[task] not in capabilities:
+                raise ApiError(
+                    422,
+                    "model_capability_mismatch",
+                    "The selected model does not advertise the "
+                    f"{TASK_CAPABILITY[task]} capability.",
+                )
     setting = db.scalar(
         select(AiTaskSetting).where(
             AiTaskSetting.household_id == household_id, AiTaskSetting.task == task

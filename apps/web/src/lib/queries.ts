@@ -29,6 +29,8 @@ import type {
   SessionState,
   StorageLocationList,
   TagList,
+  VoiceConfig,
+  VoiceNote,
   WarrantyList,
   WarrantyStatus,
 } from "@/lib/types";
@@ -66,6 +68,8 @@ export const queryKeys = {
   container: (containerId: string) => ["containers", containerId] as const,
   labelTemplates: ["labels", "templates"] as const,
   qrConfig: ["containers", "qr-config"] as const,
+  voiceConfig: ["voice", "config"] as const,
+  voiceNote: (noteId: string) => ["voice", "note", noteId] as const,
 };
 
 export function useSession() {
@@ -263,6 +267,32 @@ export function useImportBatch(batchId: string | undefined) {
     refetchInterval: (query) => {
       const status = (query.state.data as ImportBatchDetail | undefined)?.status;
       return status === "queued" || status === "processing" ? 2000 : false;
+    },
+  });
+}
+
+export function useVoiceConfig() {
+  return useQuery({
+    queryKey: queryKeys.voiceConfig,
+    queryFn: () => api.get<VoiceConfig>("/voice/config"),
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useVoiceNote(noteId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.voiceNote(noteId ?? ""),
+    queryFn: () => api.get<VoiceNote>(`/voice/${noteId}`),
+    enabled: Boolean(noteId),
+    refetchInterval: (query) => {
+      const status = (query.state.data as VoiceNote | undefined)?.status;
+      return status === "queued" ||
+        status === "transcribing" ||
+        status === "interpreting" ||
+        status === "applying"
+        ? 1500
+        : false;
     },
   });
 }

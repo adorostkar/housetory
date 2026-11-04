@@ -73,6 +73,9 @@ const AssistantPage = React.lazy(() =>
 const ScanPage = React.lazy(() =>
   import("@/pages/scan-page").then((module) => ({ default: module.ScanPage })),
 );
+const VoicePage = React.lazy(() =>
+  import("@/pages/voice-page").then((module) => ({ default: module.VoicePage })),
+);
 const RecognitionPage = React.lazy(() =>
   import("@/pages/recognition-page").then((module) => ({
     default: module.RecognitionPage,
@@ -195,6 +198,7 @@ export default function App() {
             <Route path="assistant" element={<AssistantPage />} />
             <Route element={<RequireWriter />}>
               <Route path="scan" element={<ScanPage />} />
+              <Route path="voice" element={<VoicePage />} />
               <Route path="recognize" element={<RecognitionPage />} />
             </Route>
             <Route path="containers" element={<ContainersPage />} />

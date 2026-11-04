@@ -19,6 +19,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   vision: "Vision",
   structured: "Structured",
   tools: "Tools",
+  audio: "Audio",
 };
 
 export function ModelPicker({
@@ -57,14 +58,18 @@ export function ModelPicker({
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const deferredSearch = React.useDeferredValue(search);
   const selected = models.find((model) => model.id === value);
+  const allowedKinds = React.useMemo(
+    () => (requiredCapability === "audio" ? ["chat", "speech"] : ["chat"]),
+    [requiredCapability],
+  );
   const chatModels = React.useMemo(
     () =>
       models.filter(
         (model) =>
-          model.kind === "chat" &&
+          allowedKinds.includes(model.kind) &&
           (!requiredCapability || model.capabilities.includes(requiredCapability)),
       ),
-    [models, requiredCapability],
+    [models, requiredCapability, allowedKinds],
   );
   const filtered = React.useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
@@ -80,7 +85,7 @@ export function ModelPicker({
     models.length > 0 &&
     Boolean(value) &&
     (!selected ||
-      selected.kind !== "chat" ||
+      !allowedKinds.includes(selected.kind) ||
       (requiredCapability ? !selected.capabilities.includes(requiredCapability) : false));
   const inputValue = open ? search : selected?.display_name ?? selected?.id ?? value;
 

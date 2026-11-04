@@ -1,4 +1,4 @@
-import { ArrowRight, Camera, MapPin, PencilLine, Plus, Upload } from "lucide-react";
+import { ArrowRight, Camera, MapPin, Mic, PencilLine, Plus, Upload } from "lucide-react";
 import * as React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -162,6 +162,13 @@ const CHOICES = [
     description: "Photograph several objects, then review the suggestions.",
     icon: Camera,
     path: "/scan",
+  },
+  {
+    id: "voice",
+    title: "Record a voice note",
+    description: "Speak naturally, edit the transcript, then review grouped items.",
+    icon: Mic,
+    path: "/voice",
   },
   {
     id: "import",

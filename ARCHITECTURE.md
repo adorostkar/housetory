@@ -145,6 +145,7 @@ All application endpoints are versioned under `/api/v1`.
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results; `POST /search/natural` remains the explicit AI/deterministic full-search flow |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
+| Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}`, `POST /voice/{id}/interpret`, transcription retry, explicit confirm and cancel |
 | Documents/AI | `GET /documents/{id}/related-items` |
 | AI | `GET /ai/status?task=`, `POST /assistant/query`, `POST /search/natural`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
@@ -311,7 +312,9 @@ Key decisions:
 - **AI providers** are household-scoped rows containing provider type, base URL,
   default model, encrypted API key, key version, enabled state and separate
   remote-processing consent. `ai_task_settings` assigns a provider/model to
-  assistant, imports, documents, search, vision and label tasks. Model discovery
+  assistant, imports, documents, search, vision, transcription and label tasks.
+  Transcription is opt-in and capability-checked separately from chat/vision.
+  Model discovery
   fetches only the provider's catalog metadata, returns display names/kind and
   capability provenance, and is cached briefly per household/provider with
   credential/endpoint invalidation. Status responses expose only a catalog count
@@ -338,6 +341,13 @@ Key decisions:
   the resulting item. **Import source files** preserve extracted notes and
   attachments. Application is explicit and idempotent; no inventory is created by
   extraction.
+- **Voice-note records** store household scope, creator, status, private audio
+  metadata/storage key, room/container context, transcript and provider metadata,
+  validated structured suggestions with source spans, deterministic grouping and
+  location/duplicate metadata, warnings, applied-item links and lifecycle
+  timestamps. Audio is removed after successful transcription or cancellation;
+  failed audio is retained only for retry. Confirmation is separate and
+  idempotent, and reuses the existing item/location services.
 - **AI recognition records** store a private normalized/original photo, status,
   validated suggestions, model metadata, actual processing mode, optional
   destination room/container, applied-item provenance and errors.
@@ -363,7 +373,9 @@ append-only migration `4d8e1a6c2b90` for container fields, identifier uniqueness
 summary/label snapshots and the identifier-counter table. Phase 6 adds
 `c1a7e5d9f320` for AI providers/task settings, room/location photos, recognition
 mode/destination/apply provenance, hierarchical import fields and storage-location
-legacy identifiers/aliases. No earlier migration or record is rewritten.
+legacy identifiers/aliases. The voice milestone adds append-only migration
+`a4b6c8d0e2f1` for `voice_notes`, the transcription task check constraint and
+voice indexes. No earlier migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -440,7 +452,8 @@ deployment.
 - The worker writes a heartbeat file; its Docker health check fails if the
   heartbeat is stale.
 - Current handlers: prune expired sessions, prune old finished jobs,
-  `documents.ocr`, `imports.process` and `ai.recognize`. A maintenance job is enqueued every six hours. OCR jobs are
+  `documents.ocr`, `imports.process`, `ai.recognize`, `voice.transcribe` and
+  `voice.interpret`. A maintenance job is enqueued every six hours. OCR jobs are
   enqueued in the same transaction as an upload, claimable by the worker, and
   retried with backoff. The handler marks the document processing, extracts text
   with embedded PDF text or Tesseract/Poppler, stores proposals in JSONB, and
@@ -452,8 +465,11 @@ deployment.
   read text/Markdown/PDF/DOCX/XLSX/CSV/image sources and Obsidian ZIPs, store
   private extracted files, match locations/duplicates and produce review entries.
   Recognition jobs require an explicitly configured vision task; they never fall
-  back silently to the assistant/default model. Missing configuration, request
-  failure, OCR fallback, empty and failed paths are recorded and labelled. Fixed
+  back silently to the assistant/default model. Voice transcription requires the
+  explicit transcription task and supports only OpenAI `/audio/transcriptions` or
+  Gemini inline audio; interpretation reuses `imports`. Missing configuration,
+  cancellation, request failure, OCR fallback, empty and failed paths are
+  recorded and labelled. Fixed
   fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 

@@ -26,14 +26,29 @@ from housetory_api.jobs import (
     requeue_stale_jobs,
 )
 from housetory_api.models import AuthSession, Job
-from housetory_api.services.document_ocr import OCR_TASK, run_job as run_document_ocr
+from housetory_api.services.document_ocr import OCR_TASK
+from housetory_api.services.document_ocr import run_job as run_document_ocr
 from housetory_api.services.import_pipeline import (
     IMPORT_TASK,
     run_import_job,
 )
 from housetory_api.services.recognition import (
     RECOGNITION_TASK,
+)
+from housetory_api.services.recognition import (
     run_job as run_recognition_job,
+)
+from housetory_api.services.voice import (
+    INTERPRET_TASK as VOICE_INTERPRET_TASK,
+)
+from housetory_api.services.voice import (
+    TRANSCRIBE_TASK as VOICE_TRANSCRIBE_TASK,
+)
+from housetory_api.services.voice import (
+    process_interpretation as run_voice_interpretation,
+)
+from housetory_api.services.voice import (
+    process_transcription as run_voice_transcription,
 )
 
 logging.basicConfig(
@@ -44,9 +59,7 @@ logger = logging.getLogger("housetory.worker")
 
 PRUNE_TASK = "maintenance.prune_expired_sessions"
 PRUNE_FINISHED_TASK = "maintenance.prune_finished_jobs"
-HEARTBEAT_FILE = Path(
-    os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
-)
+HEARTBEAT_FILE = Path(os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat"))
 POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
 MAINTENANCE_INTERVAL_HOURS = 6
 
@@ -61,9 +74,7 @@ def _heartbeat() -> None:
 def prune_expired_sessions(payload: dict) -> dict:
     del payload
     with SessionLocal() as db:
-        result = db.execute(
-            delete(AuthSession).where(AuthSession.expires_at < func.now())
-        )
+        result = db.execute(delete(AuthSession).where(AuthSession.expires_at < func.now()))
         db.commit()
         return {"deleted": int(result.rowcount or 0)}
 
@@ -94,6 +105,8 @@ HANDLERS = {
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
+    VOICE_TRANSCRIBE_TASK: run_voice_transcription,
+    VOICE_INTERPRET_TASK: run_voice_interpretation,
 }
 
 
@@ -125,10 +138,7 @@ def schedule_maintenance() -> None:
         if has_active_job(db, PRUNE_TASK):
             return
         last = db.scalar(
-            select(Job)
-            .where(Job.task == PRUNE_TASK)
-            .order_by(Job.created_at.desc())
-            .limit(1)
+            select(Job).where(Job.task == PRUNE_TASK).order_by(Job.created_at.desc()).limit(1)
         )
         if last is not None:
             reference = last.finished_at or last.created_at
@@ -143,9 +153,7 @@ def schedule_maintenance() -> None:
             db.scalar(
                 select(func.count(Job.id)).where(
                     Job.task == PRUNE_FINISHED_TASK,
-                    Job.status.in_(
-                        [JobStatus.QUEUED.value, JobStatus.RUNNING.value]
-                    ),
+                    Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
                 )
             )
             == 0

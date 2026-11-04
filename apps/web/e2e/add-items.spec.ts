@@ -41,6 +41,9 @@ async function expectChooser(page: Page) {
   await expect(dialog.getByRole("button", { name: /Enter manually/ })).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Scan a photo/ })).toBeVisible();
   await expect(
+    dialog.getByRole("button", { name: /Record a voice note/ }),
+  ).toBeVisible();
+  await expect(
     dialog.getByRole("button", { name: /Import a list or file/ }),
   ).toBeVisible();
   return dialog;
