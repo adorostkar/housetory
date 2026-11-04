@@ -3,12 +3,12 @@ import {
   ArrowRight,
   FileText,
   Loader2,
-  Plus,
+  MapPin,
   Sparkles,
   Upload,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -26,7 +26,7 @@ import {
   IMPORT_STATUS_LABELS,
   IMPORT_STATUS_TONE,
 } from "@/lib/labels";
-import { useImports } from "@/lib/queries";
+import { useImports, useLocations, useRooms } from "@/lib/queries";
 import type { ImportBatch, ImportBatchDetail } from "@/lib/types";
 import { formatDate, formatFileSize, pluralize } from "@/lib/utils";
 
@@ -39,7 +39,22 @@ type Mode = (typeof MODES)[number]["id"];
 
 export function ImportsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const roomId = searchParams.get("room_id") ?? "";
+  const locationId = searchParams.get("location_id") ?? "";
   const importsQuery = useImports();
+  const roomsQuery = useRooms();
+  const locationsQuery = useLocations();
+  const contextRoom = roomsQuery.data?.items.find((room) => room.id === roomId);
+  const contextLocation = locationsQuery.data?.items.find(
+    (location) => location.id === locationId,
+  );
+  const contextLabel = [
+    contextRoom?.name,
+    contextLocation?.identifier ?? contextLocation?.name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const [mode, setMode] = React.useState<Mode>("paste");
   const [title, setTitle] = React.useState("");
   const [text, setText] = React.useState("");
@@ -49,6 +64,8 @@ export function ImportsPage() {
     mutationFn: () => {
       const formData = new FormData();
       if (title.trim()) formData.append("title", title.trim());
+      if (roomId) formData.append("room_id", roomId);
+      if (locationId) formData.append("location_id", locationId);
       if (mode === "paste") {
         if (!text.trim()) throw new Error("Paste some notes first.");
         formData.append("text", text);
@@ -73,22 +90,46 @@ export function ImportsPage() {
         title="Import"
         description="Turn notes, spreadsheets, documents, images or an Obsidian ZIP vault into proposed inventory entries for review."
         actions={
-          <>
-            <Button variant="outline" asChild>
-              <Link to="/items/new">
-                <Plus />
-                Add manually
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link to="/assistant">
-                <Sparkles />
-                Ask Housetory
-              </Link>
-            </Button>
-          </>
+          <Button variant="outline" asChild>
+            <Link to="/assistant">
+              <Sparkles />
+              Ask Housetory
+            </Link>
+          </Button>
         }
       />
+
+      {(roomId || locationId) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-sage/25 bg-sage-soft/40 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+          <MapPin className="size-4 shrink-0 text-sage" />
+          <span className="mr-auto">
+            New entries without their own location will default to{" "}
+            <strong className="font-medium text-foreground/90">
+              {contextLabel || "the selected context"}
+            </strong>
+            . Source hierarchy and explicit destinations are preserved; you can
+            change defaults during review.
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setSearchParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete("room_id");
+                  next.delete("location_id");
+                  return next;
+                },
+                { replace: true },
+              )
+            }
+          >
+            Clear context
+          </Button>
+        </div>
+      )}
 
       <section className="surface overflow-hidden">
         <div className="flex flex-wrap gap-1.5 border-b border-border/60 p-3 sm:p-4">

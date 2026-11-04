@@ -135,7 +135,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   );
 
   await page.goto("/");
-  const addItem = page.locator("aside").getByRole("link", { name: "Add an item" });
+  const addItem = page.locator("aside").getByRole("button", { name: "Add items" });
   const sidebarInput = page
     .locator("aside")
     .getByRole("combobox", { name: "Search your home" });

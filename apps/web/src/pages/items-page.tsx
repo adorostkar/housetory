@@ -1,9 +1,10 @@
-import { Camera, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
+import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
@@ -42,6 +43,7 @@ function isSortKey(value: string | null): value is SortKey {
 }
 
 export function ItemsPage() {
+  const { openAddItems } = useAddItems();
   const [searchParams, setSearchParams] = useSearchParams();
   const qParam = searchParams.get("q") ?? "";
   const roomFilter = searchParams.get("room_id") ?? "";
@@ -144,22 +146,7 @@ export function ItemsPage() {
             ? `${pluralize(total, "item")} recorded${hasFilters ? " matching your filters" : " across your home"}.`
             : "Everything in your home, in one considered place."
         }
-        actions={
-          <>
-            <Button variant="outline" asChild>
-              <Link to="/scan">
-                <Camera />
-                AI Scan Items
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link to="/items/new">
-                <Plus />
-                Add an item
-              </Link>
-            </Button>
-          </>
-        }
+        actions={<AddItemsButton />}
       />
 
       <div className="surface mb-8 p-3.5 sm:p-4">
@@ -325,8 +312,8 @@ export function ItemsPage() {
           <EmptyState
             title="A place for everything, starting here."
             description="Add your first item and record its room, its exact shelf, and as much or as little detail as you like."
-            actionLabel="Add your first item"
-            actionTo="/items/new"
+            actionLabel="Add items"
+            onAction={() => openAddItems()}
           />
         )
       ) : (

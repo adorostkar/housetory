@@ -218,9 +218,9 @@ export function ScanPage() {
   return (
     <div className="animate-fade-up">
       <PageHeader
-        eyebrow="Intelligence · Mobile camera"
-        title="AI Scan Items"
-        description="Photograph several objects at once, review every suggestion, choose destinations, then create only what you approve."
+        eyebrow="Add items · Camera"
+        title="Scan a photo"
+        description="Photograph several objects at once, review every suggestion, choose destinations, then create only what you approve. Processing follows your configured local or consented remote model."
         actions={
           <Button variant="outline" asChild>
             <Link to="/items">Inventory</Link>

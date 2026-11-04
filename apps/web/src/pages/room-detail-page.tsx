@@ -1,7 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   Boxes,
-  Camera,
   ChevronRight,
   MoreHorizontal,
   Pencil,
@@ -13,6 +12,11 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import {
+  AddItemsButton,
+  useAddItems,
+  useRegisterAddItemsContext,
+} from "@/components/add-items";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
@@ -84,6 +88,16 @@ export function RoomDetailPage() {
   const selectedLocation = locations.find((location) => location.id === requestedLocationId);
   const selectedLocationId = selectedLocation?.id ?? null;
   const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const { openAddItems } = useAddItems();
+  const addItemsContext = room
+    ? {
+        roomId: room.id,
+        locationId: selectedLocationId ?? undefined,
+        roomName: room.name,
+        locationName: selectedLocation?.name,
+      }
+    : undefined;
+  useRegisterAddItemsContext(addItemsContext ?? null);
 
   const selectLocation = (locationId: string | null) => {
     setSearchParams(
@@ -150,10 +164,6 @@ export function RoomDetailPage() {
     );
   }
 
-  const addItemHref = `/items/new?room_id=${room.id}${
-    selectedLocationId ? `&location_id=${selectedLocationId}` : ""
-  }`;
-
   const attemptRoomDelete = () => {
     if (room.item_count > 0 || room.location_count > 0 || childRooms.length > 0) {
       toast.error("Move or remove everything in this room first.");
@@ -187,12 +197,6 @@ export function RoomDetailPage() {
                 Containers
               </Link>
             </Button>
-            <Button variant="outline" asChild>
-              <Link to={`/scan?room_id=${room.id}`}>
-                <Camera />
-                Scan room
-              </Link>
-            </Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -204,12 +208,7 @@ export function RoomDetailPage() {
               <Plus />
               Add a place
             </Button>
-            <Button asChild>
-              <Link to={addItemHref}>
-                <Plus />
-                Add an item
-              </Link>
-            </Button>
+            <AddItemsButton context={addItemsContext} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" aria-label="Room options">
@@ -457,8 +456,8 @@ export function RoomDetailPage() {
                   ? `No items are stored in ${selectedLocation.name}. Add something, or choose another place.`
                   : "Add the first item to this room and give it a precise place to live."
               }
-              actionLabel="Add an item"
-              actionTo={addItemHref}
+              actionLabel="Add items"
+              onAction={() => openAddItems(addItemsContext)}
               className="py-14"
             />
           ) : (

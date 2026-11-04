@@ -254,8 +254,17 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
   const container = await createContainer(request, room.id, "Camera gear");
 
   await page.goto(`/containers/${container.id}`);
-  await page.getByRole("link", { name: "Scan contents" }).click();
-  await expect(page).toHaveURL(new RegExp(`/scan\\?location_id=${container.id}`));
+  await expect(
+    page.getByRole("heading", { name: container.identifier, level: 1, exact: true }),
+  ).toBeVisible();
+  await page.locator("main").getByRole("button", { name: "Add items" }).first().click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Scan a photo/ })
+    .click();
+  await expect(page).toHaveURL(
+    new RegExp(`/scan\\?room_id=${room.id}&location_id=${container.id}`),
+  );
   await expect(
     page.getByText(/A vision-capable model is selected/),
   ).toBeVisible();

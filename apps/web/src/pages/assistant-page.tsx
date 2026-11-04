@@ -13,6 +13,7 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
+import { AddItemsButton } from "@/components/add-items";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,12 +85,7 @@ export function AssistantPage() {
         description="Ask practical questions about your actual inventory, documents, purchases and warranties."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <Link to="/scan">
-                <Sparkles />
-                AI Scan Items
-              </Link>
-            </Button>
+            <AddItemsButton variant="outline" />
             <Button variant="outline" asChild>
               <Link to="/settings/ai">
                 <ShieldCheck />

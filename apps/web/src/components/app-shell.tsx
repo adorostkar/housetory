@@ -4,18 +4,16 @@ import {
   FileText,
   House,
   Package,
-  Plus,
   ReceiptText,
   Search,
   ShieldCheck,
   Sparkles,
-  Upload,
-  ScanLine,
 } from "lucide-react";
 import { Suspense, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { AccountMenu } from "@/components/account-menu";
+import { AddItemsButton, AddItemsProvider } from "@/components/add-items";
 import { BrandMark } from "@/components/brand-mark";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
@@ -30,9 +28,7 @@ const primaryNav = [
   { to: "/documents", label: "Documents", icon: FileText, end: false },
   { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
-  { to: "/imports", label: "Import", icon: Upload, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
-  { to: "/scan", label: "AI scan", icon: ScanLine, end: false },
   { to: "/containers", label: "Containers", icon: Boxes, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
@@ -42,12 +38,19 @@ const mobileNav = [
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
   { to: "/documents", label: "Docs", icon: FileText, end: false },
-  { to: "/imports", label: "Import", icon: Upload, end: false },
   { to: "/containers", label: "Boxes", icon: Boxes, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
 ] as const;
 
 export function AppShell() {
+  return (
+    <AddItemsProvider>
+      <AppShellLayout />
+    </AddItemsProvider>
+  );
+}
+
+function AppShellLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -76,12 +79,7 @@ export function AppShell() {
           <ThemeToggle className="-mr-2" />
         </div>
 
-        <Button asChild className="mt-8 w-full justify-start pl-4">
-          <Link to="/items/new">
-            <Plus />
-            Add an item
-          </Link>
-        </Button>
+        <AddItemsButton className="mt-8 w-full justify-start pl-4" />
 
         <QuickSearch className="mt-3" variant="sidebar" />
 
@@ -134,11 +132,14 @@ export function AppShell() {
                 </Link>
               </Button>
               <ThemeToggle />
-              <Button asChild variant="ghost" size="icon" aria-label="Add an item">
-                <Link to="/items/new">
-                  <Plus className="size-[1.15rem]" />
-                </Link>
-              </Button>
+              {location.pathname !== "/" && (
+                <AddItemsButton
+                  iconOnly
+                  variant="ghost"
+                  size="icon"
+                  label="Add items"
+                />
+              )}
               <AccountMenu compact />
             </div>
           </div>

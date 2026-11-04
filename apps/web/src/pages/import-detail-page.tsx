@@ -8,6 +8,7 @@ import {
   Folder,
   FolderTree,
   Link2Off,
+  MapPin,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -225,6 +226,22 @@ export function ImportDetailPage() {
     | undefined) ?? {};
   const reviewable = batch.status === "review" || batch.status === "completed";
   const hierarchyMode = batch.metadata.hierarchy === true;
+  const rawContext = batch.metadata.context as
+    | {
+        room_id?: string;
+        room_name?: string;
+        location_id?: string;
+        location_name?: string;
+        location_identifier?: string;
+      }
+    | undefined;
+  const importContext = rawContext?.room_id ? rawContext : undefined;
+  const importContextLabel = [
+    importContext?.room_name,
+    importContext?.location_identifier || importContext?.location_name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const hasOpenEntries = batch.entries.some((entry) => entry.status === "proposed");
   const selectedCount = Object.values(decisions).filter(
     (decision) => decision.include || decision.action === "reject",
@@ -350,6 +367,21 @@ export function ImportDetailPage() {
           <p className="mt-3 text-[0.75rem] text-destructive">{batch.error}</p>
         )}
       </section>
+
+      {importContext && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-sage/25 bg-sage-soft/35 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+          <MapPin className="mt-0.5 size-4 shrink-0 text-sage" />
+          <span>
+            Context destination:{" "}
+            <strong className="font-medium text-foreground/90">
+              {importContextLabel || "the originating room or place"}
+            </strong>
+            . It is used only for entries without their own destination. Source
+            hierarchy and explicit locations are preserved; you can change any
+            entry before approval.
+          </span>
+        </div>
+      )}
 
       {summary && (
         <section className="mt-4 rounded-2xl border border-sage/30 bg-sage-soft/50 p-5">

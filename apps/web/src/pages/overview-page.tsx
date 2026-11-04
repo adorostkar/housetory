@@ -12,6 +12,7 @@ import {
 import { Link } from "react-router-dom";
 import { useState } from "react";
 
+import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
@@ -50,6 +51,7 @@ export function OverviewPage() {
   const financialQuery = useFinancialOverview();
   const roomsQuery = useRooms();
   const [roomDialogOpen, setRoomDialogOpen] = useState(false);
+  const { openAddItems } = useAddItems();
 
   if (overview.isPending) return <OverviewSkeleton />;
   if (overview.isError) {
@@ -108,12 +110,7 @@ export function OverviewPage() {
             <DoorOpen />
             New room
           </Button>
-          <Button variant="outline" asChild>
-            <Link to="/items/new">
-              <Plus />
-              Add an item
-            </Link>
-          </Button>
+          <AddItemsButton />
         </div>
       </header>
 
@@ -226,8 +223,8 @@ export function OverviewPage() {
           <EmptyState
             title="Your home, ready for its first story."
             description="Add something you own — a camera, a favourite pan, the keys by the door. Then give it a room, an exact place, and a paper trail."
-            actionLabel="Add your first item"
-            actionTo="/items/new"
+            actionLabel="Add items"
+            onAction={() => openAddItems()}
             secondary={
               <Button variant="ghost" onClick={() => setRoomDialogOpen(true)}>
                 {rootRooms.length > 0 ? "Add another room" : "Add a room first"}

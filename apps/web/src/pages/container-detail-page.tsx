@@ -1,13 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Camera,
   Check,
   ChevronRight,
   FileText,
   MapPin,
   Pencil,
-  Plus,
   Printer,
   QrCode,
   Sparkles,
@@ -17,6 +15,11 @@ import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import {
+  AddItemsButton,
+  useAddItems,
+  useRegisterAddItemsContext,
+} from "@/components/add-items";
 import {
   ContainerMoveDialog,
   ContainerQrDialog,
@@ -80,6 +83,20 @@ export function ContainerDetailPage() {
   const container = containerQuery.data;
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
+  const { openAddItems } = useAddItems();
+  const addItemsContext = React.useMemo(
+    () =>
+      container
+        ? {
+            roomId: container.room_id,
+            locationId: container.id,
+            roomName: container.room.name,
+            locationName: container.identifier ?? container.name,
+          }
+        : undefined,
+    [container],
+  );
+  useRegisterAddItemsContext(addItemsContext ?? null);
 
   React.useEffect(() => {
     if (!container) return;
@@ -160,7 +177,6 @@ export function ContainerDetailPage() {
   }
   const detail = containerQuery.data;
   const identifier = detail.identifier ?? detail.name;
-  const itemHref = `/items/new?room_id=${detail.room_id}&location_id=${detail.id}`;
   const roomLabel = detail.room.name;
   const insideLabel = detail.path
     .slice(0, -1)
@@ -189,12 +205,6 @@ export function ContainerDetailPage() {
                 Print label
               </Link>
             </Button>
-            <Button variant="outline" asChild>
-              <Link to={`/scan?location_id=${detail.id}`}>
-                <Camera />
-                Scan contents
-              </Link>
-            </Button>
             <Button variant="outline" onClick={() => setQrOpen(true)}>
               <QrCode />
               QR
@@ -205,12 +215,7 @@ export function ContainerDetailPage() {
                 Move
               </Button>
             )}
-            <Button asChild>
-              <Link to={itemHref}>
-                <Plus />
-                Add item
-              </Link>
-            </Button>
+            <AddItemsButton context={addItemsContext} />
           </>
         }
       />
@@ -347,19 +352,18 @@ export function ContainerDetailPage() {
               Direct and nested items, including quantities and photos.
             </p>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={itemHref}>
-              <Plus />
-              Add item
-            </Link>
-          </Button>
+          <AddItemsButton
+            context={addItemsContext}
+            variant="outline"
+            size="sm"
+          />
         </div>
         {detail.items.length === 0 ? (
           <EmptyState
             title="This container is empty."
             description="Add an item and assign it here, or move an existing item into this container from its detail page."
-            actionLabel="Add an item"
-            actionTo={itemHref}
+            actionLabel="Add items"
+            onAction={() => openAddItems(addItemsContext)}
           />
         ) : (
           <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
