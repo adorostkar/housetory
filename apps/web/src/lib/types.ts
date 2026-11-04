@@ -1095,13 +1095,17 @@ export interface AiProviderTest {
 
 export interface AiProviderModel {
   id: string;
+  display_name: string | null;
+  kind: "chat" | "embedding" | "speech" | "image" | "other";
   capabilities: string[];
+  capability_source: "provider_metadata" | "heuristic";
 }
 
 export interface AiProviderModels {
   provider_id: UUID;
   models: AiProviderModel[];
   error: string | null;
+  cached: boolean;
 }
 
 export interface AiRecognitionDuplicateGroup {

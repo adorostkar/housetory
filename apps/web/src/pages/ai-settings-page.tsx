@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormError } from "@/components/form-field";
+import { ModelPicker } from "@/components/model-picker";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,7 +150,11 @@ export function AiSettingsPage() {
   const [deleteTarget, setDeleteTarget] = React.useState<AiProviderRecord | null>(null);
   const [testResults, setTestResults] = React.useState<Record<string, AiProviderTest>>({});
   const [models, setModels] = React.useState<Record<string, AiProviderModel[]>>({});
+  const [modelStatus, setModelStatus] = React.useState<
+    Record<string, { cached: boolean; error: string | null; loading: boolean }>
+  >({});
   const [tasks, setTasks] = React.useState<Record<string, AiTaskSetting>>({});
+  const [catalogStale, setCatalogStale] = React.useState(false);
 
   React.useEffect(() => {
     if (settings) {
@@ -167,6 +172,7 @@ export function AiSettingsPage() {
   const openCreate = () => {
     setEditing(null);
     setDraft(emptyDraft);
+    setCatalogStale(false);
     setDialogOpen(true);
   };
 
@@ -181,7 +187,9 @@ export function AiSettingsPage() {
       enabled: provider.enabled,
       cloud_consent: provider.cloud_consent,
     });
+    setCatalogStale(false);
     setDialogOpen(true);
+    discoverModels.mutate({ provider, refresh: false, quiet: true });
   };
 
   const saveProvider = useMutation({
@@ -199,10 +207,36 @@ export function AiSettingsPage() {
         ? api.patch<AiProviderRecord>(`/ai/providers/${editing.id}`, payload)
         : api.post<AiProviderRecord>("/ai/providers", payload);
     },
+    onSuccess: (provider) => {
+      refresh();
+      setEditing(provider);
+      setCatalogStale(false);
+      setDraft((current) => ({
+        ...current,
+        api_key: "",
+        default_model: provider.default_model ?? "",
+      }));
+      toast.success(
+        editing
+          ? "Provider saved. Refreshing models…"
+          : "Provider added. Discovering models…",
+      );
+      discoverModels.mutate({ provider, refresh: true, quiet: true });
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const finishProvider = useMutation({
+    mutationFn: () => {
+      if (!editing) throw new Error("Save the provider before choosing its model.");
+      return api.patch<AiProviderRecord>(`/ai/providers/${editing.id}`, {
+        default_model: draft.default_model.trim() || null,
+      });
+    },
     onSuccess: () => {
       refresh();
       setDialogOpen(false);
-      toast.success(editing ? "Provider updated" : "Provider added");
+      toast.success("Default model saved");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -222,23 +256,68 @@ export function AiSettingsPage() {
       api.post<AiProviderTest>(`/ai/providers/${provider.id}/test`),
     onSuccess: (result, provider) => {
       setTestResults((current) => ({ ...current, [provider.id]: result }));
-      if (result.ok) toast.success(result.message);
-      else toast.error(result.message);
+      if (result.ok) {
+        toast.success(result.message);
+        discoverModels.mutate({ provider, refresh: true, quiet: true });
+      } else {
+        toast.error(result.message);
+      }
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
   const discoverModels = useMutation({
-    mutationFn: (provider: AiProviderRecord) =>
-      api.get<{ provider_id: string; models: AiProviderModel[]; error: string | null }>(
-        `/ai/providers/${provider.id}/models`,
-      ),
-    onSuccess: (result) => {
-      setModels((current) => ({ ...current, [result.provider_id]: result.models }));
-      if (result.error) toast.error(result.error);
-      else toast.success(`${result.models.length} model(s) discovered`);
+    mutationFn: ({
+      provider,
+      refresh,
+    }: {
+      provider: AiProviderRecord;
+      refresh: boolean;
+      quiet: boolean;
+    }) =>
+      api.get<{
+        provider_id: string;
+        models: AiProviderModel[];
+        error: string | null;
+        cached: boolean;
+      }>(`/ai/providers/${provider.id}/models${refresh ? "?refresh=true" : ""}`),
+    onMutate: ({ provider }) => {
+      setModelStatus((current) => ({
+        ...current,
+        [provider.id]: {
+          cached: current[provider.id]?.cached ?? false,
+          error: null,
+          loading: true,
+        },
+      }));
     },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
+    onSuccess: (result, variables) => {
+      setModels((current) => ({ ...current, [result.provider_id]: result.models }));
+      setModelStatus((current) => ({
+        ...current,
+        [result.provider_id]: {
+          cached: result.cached,
+          error: result.error,
+          loading: false,
+        },
+      }));
+      if (result.error) {
+        if (!variables.quiet) toast.error(result.error);
+      } else if (!variables.quiet) {
+        toast.success(`${result.models.length} model(s) discovered`);
+      }
+    },
+    onError: (error, variables) => {
+      setModelStatus((current) => ({
+        ...current,
+        [variables.provider.id]: {
+          cached: current[variables.provider.id]?.cached ?? false,
+          error: getApiErrorMessage(error),
+          loading: false,
+        },
+      }));
+      if (!variables.quiet) toast.error(getApiErrorMessage(error));
+    },
   });
 
   const saveTask = useMutation({
@@ -293,6 +372,10 @@ export function AiSettingsPage() {
     return <FormError message={getApiErrorMessage(settingsQuery.error)} />;
   }
   if (!settings) return null;
+
+  const dialogProviderModels =
+    editing && !catalogStale ? models[editing.id] ?? [] : [];
+  const dialogModelStatus = editing ? modelStatus[editing.id] : undefined;
 
   return (
     <div className="animate-fade-up">
@@ -353,6 +436,7 @@ export function AiSettingsPage() {
             {settings.providers.map((provider) => {
               const result = testResults[provider.id];
               const providerModels = models[provider.id] ?? [];
+              const providerModelStatus = modelStatus[provider.id];
               return (
                 <article key={provider.id} className="rounded-xl border border-border/70 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -417,10 +501,17 @@ export function AiSettingsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={discoverModels.isPending}
-                      onClick={() => discoverModels.mutate(provider)}
+                      disabled={providerModelStatus?.loading}
+                      onClick={() =>
+                        discoverModels.mutate({
+                          provider,
+                          refresh: true,
+                          quiet: false,
+                        })
+                      }
                     >
-                      {discoverModels.isPending ? <Spinner /> : <Eye />} Discover models
+                      {providerModelStatus?.loading ? <Spinner /> : <Eye />}
+                      {providerModels.length > 0 ? "Refresh models" : "Discover models"}
                     </Button>
                   </div>
                   {result && (
@@ -433,11 +524,20 @@ export function AiSettingsPage() {
                       {result.message}
                     </p>
                   )}
-                  {providerModels.length > 0 && (
-                    <p className="mt-2 max-h-16 overflow-y-auto break-words text-[0.66rem] text-muted-foreground">
-                      {providerModels.map((model) => model.id).join(", ")}
+                  {providerModelStatus?.loading && providerModels.length === 0 ? (
+                    <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                      Discovering models from the provider…
                     </p>
-                  )}
+                  ) : providerModelStatus?.error ? (
+                    <p className="mt-2 text-[0.66rem] text-destructive">
+                      {providerModelStatus.error}
+                    </p>
+                  ) : providerModels.length > 0 ? (
+                    <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                      {providerModels.length} model(s) available
+                      {providerModelStatus?.cached ? " · cached" : ""}
+                    </p>
+                  ) : null}
                 </article>
               );
             })}
@@ -461,6 +561,8 @@ export function AiSettingsPage() {
             .map((task) => {
               const provider = settings.providers.find((entry) => entry.id === task.provider_id);
               const providerModels = provider ? models[provider.id] ?? [] : [];
+              const providerModelStatus = provider ? modelStatus[provider.id] : undefined;
+              const selectedModel = providerModels.find((model) => model.id === task.model);
               return (
                 <div
                   key={task.task}
@@ -469,24 +571,36 @@ export function AiSettingsPage() {
                   <div>
                     <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
                     <p className="text-[0.65rem] text-muted-foreground">
-                      {task.enabled ? task.capabilities.join(" · ") || "No capabilities" : "Disabled"}
+                      {task.enabled
+                        ? (selectedModel?.capabilities ?? task.capabilities).join(" · ") ||
+                          "Capabilities need verification"
+                        : "Disabled"}
                     </p>
                   </div>
                   <Select
                     aria-label={`${TASK_LABELS[task.task]} provider`}
                     value={task.provider_id ?? ""}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const nextProvider = settings.providers.find(
+                        (entry) => entry.id === event.target.value,
+                      );
                       setTasks((current) => ({
                         ...current,
                         [task.task]: {
                           ...task,
-                          provider_id: event.target.value || null,
-                          provider_label:
-                            settings.providers.find((entry) => entry.id === event.target.value)
-                              ?.display_name ?? null,
+                          provider_id: nextProvider?.id ?? null,
+                          provider_label: nextProvider?.display_name ?? null,
+                          model: null,
                         },
-                      }))
-                    }
+                      }));
+                      if (nextProvider && !models[nextProvider.id]) {
+                        discoverModels.mutate({
+                          provider: nextProvider,
+                          refresh: false,
+                          quiet: true,
+                        });
+                      }
+                    }}
                   >
                     <option value="">Not configured</option>
                     {settings.providers.map((entry) => (
@@ -496,25 +610,48 @@ export function AiSettingsPage() {
                     ))}
                   </Select>
                   <div>
-                    <Input
-                      aria-label={`${TASK_LABELS[task.task]} model`}
+                    <ModelPicker
+                      id={`task-${task.task}-model`}
+                      ariaLabel={`${TASK_LABELS[task.task]} model`}
                       value={task.model ?? ""}
-                      list={provider ? `models-${provider.id}` : undefined}
-                      onChange={(event) =>
+                      models={providerModels}
+                      disabled={!provider}
+                      requiredCapability={task.task === "vision" ? "vision" : undefined}
+                      loading={providerModelStatus?.loading}
+                      error={providerModelStatus?.error}
+                      cached={providerModelStatus?.cached}
+                      onDiscover={
+                        provider
+                          ? () =>
+                              discoverModels.mutate({
+                                provider,
+                                refresh: false,
+                                quiet: false,
+                              })
+                          : undefined
+                      }
+                      onRefresh={
+                        provider
+                          ? () =>
+                              discoverModels.mutate({
+                                provider,
+                                refresh: true,
+                                quiet: false,
+                              })
+                          : undefined
+                      }
+                      onChange={(value) =>
                         setTasks((current) => ({
                           ...current,
-                          [task.task]: { ...task, model: event.target.value || null },
+                          [task.task]: { ...task, model: value || null },
                         }))
                       }
-                      placeholder="Exact provider model name"
+                      placeholder={
+                        provider
+                          ? "Search models or type an exact ID"
+                          : "Choose a provider first"
+                      }
                     />
-                    {provider && (
-                      <datalist id={`models-${provider.id}`}>
-                        {providerModels.map((model) => (
-                          <option key={model.id} value={model.id} />
-                        ))}
-                      </datalist>
-                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <label className="flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
@@ -572,7 +709,8 @@ export function AiSettingsPage() {
           <DialogHeader>
             <DialogTitle>{editing ? "Edit provider" : "Add provider"}</DialogTitle>
             <DialogDescription>
-              Configure the provider endpoint and model. The API key is write-only.
+              Save the provider, discover its models, then choose a default. The API key
+              is write-only.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -592,9 +730,11 @@ export function AiSettingsPage() {
                   disabled={Boolean(editing)}
                   onChange={(event) => {
                     const provider = PROVIDERS.find((entry) => entry.value === event.target.value);
+                    setCatalogStale(true);
                     setDraft((current) => ({
                       ...current,
                       provider: event.target.value,
+                      default_model: "",
                       display_name: provider?.label ?? current.display_name,
                       base_url:
                         event.target.value === "ollama"
@@ -636,20 +776,66 @@ export function AiSettingsPage() {
                 id="provider-url"
                 className="mt-1.5"
                 value={draft.base_url}
-                onChange={(event) => setDraft((current) => ({ ...current, base_url: event.target.value }))}
+                onChange={(event) => {
+                  setCatalogStale(true);
+                  setDraft((current) => ({ ...current, base_url: event.target.value }));
+                }}
                 placeholder="https://api.openai.com/v1"
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label htmlFor="provider-model" className="text-[0.78rem] font-medium">Default model</label>
-                <Input
-                  id="provider-model"
-                  className="mt-1.5"
-                  value={draft.default_model}
-                  onChange={(event) => setDraft((current) => ({ ...current, default_model: event.target.value }))}
-                  placeholder="Exact model name"
-                />
+                <label htmlFor="provider-model" className="text-[0.78rem] font-medium">
+                  Default model
+                </label>
+                <div className="mt-1.5">
+                  <ModelPicker
+                    id="provider-model"
+                    ariaLabel="Default model"
+                    value={draft.default_model}
+                    models={dialogProviderModels}
+                    loading={dialogModelStatus?.loading}
+                    error={dialogModelStatus?.error}
+                    cached={dialogModelStatus?.cached}
+                    onDiscover={
+                      editing && !catalogStale
+                        ? () =>
+                            discoverModels.mutate({
+                              provider: editing,
+                              refresh: false,
+                              quiet: false,
+                            })
+                        : undefined
+                    }
+                    onRefresh={
+                      editing && !catalogStale
+                        ? () =>
+                            discoverModels.mutate({
+                              provider: editing,
+                              refresh: true,
+                              quiet: false,
+                            })
+                        : undefined
+                    }
+                    onChange={(value) =>
+                      setDraft((current) => ({ ...current, default_model: value }))
+                    }
+                    placeholder={
+                      editing
+                        ? "Search discovered models or type an exact ID"
+                        : "Save provider to discover models"
+                    }
+                  />
+                </div>
+                <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                  {!editing
+                    ? "Models are discovered after the provider is saved. You can also type an exact ID manually."
+                    : catalogStale
+                      ? "Endpoint or credential changes are not saved yet. Save the provider to refresh the catalog."
+                      : dialogProviderModels.length > 0 && !draft.default_model
+                        ? "Provider saved and models discovered. Choose a default model, then save the selection."
+                        : "Discovery lists provider catalog metadata only. It does not send inventory or require household-data consent."}
+                </p>
               </div>
               <div>
                 <label htmlFor="provider-key" className="text-[0.78rem] font-medium">
@@ -661,7 +847,10 @@ export function AiSettingsPage() {
                   autoComplete="new-password"
                   className="mt-1.5"
                   value={draft.api_key}
-                  onChange={(event) => setDraft((current) => ({ ...current, api_key: event.target.value }))}
+                  onChange={(event) => {
+                    setCatalogStale(true);
+                    setDraft((current) => ({ ...current, api_key: event.target.value }));
+                  }}
                   placeholder={editing?.has_api_key ? "Saved key — enter to replace" : "Provider API key"}
                 />
               </div>
@@ -702,12 +891,35 @@ export function AiSettingsPage() {
               </label>
             )}
             {saveProvider.error && <FormError message={getApiErrorMessage(saveProvider.error)} />}
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={saveProvider.isPending}>
-                {saveProvider.isPending ? <Spinner /> : <Check />}
-                {editing ? "Save provider" : "Add provider"}
+            <DialogFooter className="sm:items-center">
+              <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>
+                Cancel
               </Button>
+              {editing ? (
+                <>
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    disabled={saveProvider.isPending || discoverModels.isPending}
+                  >
+                    {saveProvider.isPending ? <Spinner /> : <RefreshCw />}
+                    Save endpoint/key & refresh
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={finishProvider.isPending}
+                    onClick={() => finishProvider.mutate()}
+                  >
+                    {finishProvider.isPending ? <Spinner /> : <Check />}
+                    Save selected model
+                  </Button>
+                </>
+              ) : (
+                <Button type="submit" disabled={saveProvider.isPending}>
+                  {saveProvider.isPending ? <Spinner /> : <Check />}
+                  Save provider & discover models
+                </Button>
+              )}
             </DialogFooter>
           </form>
         </DialogContent>

@@ -210,11 +210,23 @@ test("configures an Ollama provider through Settings with a mocked local service
   await dialog.getByLabel("Provider", { exact: true }).selectOption("ollama");
   await dialog.getByLabel("Display name").fill("Mock local vision");
   await dialog.getByLabel("Base URL").fill(mockProviderUrl());
-  await dialog.getByLabel("Default model").fill("llava:latest");
   await expect(
     dialog.getByText(/consent to sending household data/i),
   ).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Add provider" }).click();
+  await dialog
+    .getByRole("button", { name: /Save provider & discover models/ })
+    .click();
+  const modelPicker = dialog.getByRole("combobox", { name: "Default model" });
+  await expect(modelPicker).toBeVisible();
+  await modelPicker.click();
+  await expect(
+    dialog.getByRole("option", { name: /llava:latest/ }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(/Provider metadata|Heuristic — verify/).first(),
+  ).toBeVisible();
+  await dialog.getByRole("option", { name: /llava:latest/ }).click();
+  await dialog.getByRole("button", { name: /Save selected model/ }).click();
   await expect(dialog).toBeHidden();
 
   const card = page
@@ -223,11 +235,36 @@ test("configures an Ollama provider through Settings with a mocked local service
     .first();
   await expect(card).toContainText("Local");
   await expect(card).toContainText("llava:latest");
+  await expect(card).toContainText(/2 model\(s\) available/);
   await card.getByRole("button", { name: "Test connection" }).click();
   await expect(card).toContainText(/Connected/);
-  await card.getByRole("button", { name: "Discover models" }).click();
-  await expect(card).toContainText("llava:latest");
+  await card.getByRole("button", { name: "Refresh models" }).click();
+  await expect(card).toContainText(/2 model\(s\) available/);
   await expect(page.getByText(/Configuring a cloud API key/)).toBeVisible();
+
+  const taskModel = page.getByRole("combobox", {
+    name: "General assistant model",
+  });
+  await expect(taskModel).toHaveValue("llava:latest");
+  await taskModel.click();
+  await expect(
+    page.getByRole("option", { name: /llava:latest/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.getByRole("button", { name: "Edit provider" }).first().click();
+  const mobileDialog = page.getByRole("dialog");
+  const mobilePicker = mobileDialog.getByRole("combobox", {
+    name: "Default model",
+  });
+  await expect(mobilePicker).toBeVisible();
+  await mobilePicker.click();
+  await expect(
+    mobileDialog.getByRole("option", { name: /llava:latest/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
 
   const settings = await request.get("/api/v1/ai/settings");
   const body = (await settings.json()) as {

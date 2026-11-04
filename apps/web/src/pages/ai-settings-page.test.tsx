@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AiSettingsPage } from "@/pages/ai-settings-page";
 import { api } from "@/lib/api";
-import type { AiSettings, AiTaskSetting } from "@/lib/types";
+import type { AiProviderModel, AiProviderRecord, AiSettings, AiTaskSetting } from "@/lib/types";
 
 const settings: AiSettings = {
   credential_key_configured: true,
@@ -56,6 +56,21 @@ const settings: AiSettings = {
   ],
 };
 
+function providerModel(
+  id: string,
+  displayName: string,
+  kind: AiProviderModel["kind"] = "chat",
+  capabilities: string[] = ["text"],
+): AiProviderModel {
+  return {
+    id,
+    display_name: displayName,
+    kind,
+    capabilities,
+    capability_source: "heuristic",
+  };
+}
+
 function task(name: string, providerId: string, model: string): AiTaskSetting {
   return {
     task: name,
@@ -95,6 +110,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      get: vi.fn(),
       post: vi.fn(),
       patch: vi.fn(),
       put: vi.fn(),
@@ -117,8 +133,10 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  vi.mocked(api.get).mockReset();
   vi.mocked(api.put).mockReset();
   vi.mocked(api.post).mockReset();
+  vi.mocked(api.patch).mockReset();
 });
 
 describe("AiSettingsPage", () => {
@@ -178,8 +196,8 @@ describe("AiSettingsPage", () => {
     });
     renderPage();
     const input = screen.getByLabelText("General assistant model");
-    await userEvent.clear(input);
-    await userEvent.type(input, "gpt-4o-mini");
+    await userEvent.click(input);
+    await userEvent.type(input, "gpt-4o-mini{Enter}");
     const row = input.closest("div.grid") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Save" }));
     await waitFor(() =>
@@ -188,5 +206,137 @@ describe("AiSettingsPage", () => {
         expect.objectContaining({ model: "gpt-4o-mini", enabled: true }),
       ),
     );
+  });
+
+  it("saves a new provider, discovers models and chooses a default without a known ID", async () => {
+    const created: AiProviderRecord = {
+      ...settings.providers[0]!,
+      id: "provider-new",
+      display_name: "New OpenAI",
+      default_model: null,
+      api_key_version: 1,
+    };
+    vi.mocked(api.post).mockResolvedValue(created);
+    vi.mocked(api.get).mockResolvedValue({
+      provider_id: created.id,
+      models: [
+        providerModel("gpt-4o", "GPT-4o", "chat", [
+          "text",
+          "vision",
+          "structured",
+          "tools",
+        ]),
+        providerModel("text-embedding-3-small", "Embedding", "embedding", []),
+      ],
+      error: null,
+      cached: false,
+    });
+    vi.mocked(api.patch).mockResolvedValue({
+      ...created,
+      default_model: "gpt-4o",
+    });
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.clear(within(dialog).getByLabelText("Display name"));
+    await userEvent.type(within(dialog).getByLabelText("Display name"), "New OpenAI");
+    await userEvent.type(within(dialog).getByLabelText("API key"), "sk-new-secret");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Save provider & discover models/ }),
+    );
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/ai/providers",
+        expect.objectContaining({
+          provider: "openai",
+          default_model: null,
+          api_key: "sk-new-secret",
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        "/ai/providers/provider-new/models?refresh=true",
+      ),
+    );
+    const defaultModel = await within(dialog).findByRole("combobox", {
+      name: "Default model",
+    });
+    await userEvent.click(defaultModel);
+    await userEvent.click(
+      within(dialog).getByRole("option", { name: /GPT-4o/ }),
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Save selected model/ }),
+    );
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith("/ai/providers/provider-new", {
+        default_model: "gpt-4o",
+      }),
+    );
+  });
+
+  it("discovers models when editing with a saved key and keeps the key write-only", async () => {
+    const modelCatalog = {
+      provider_id: settings.providers[0]!.id,
+      models: [
+        providerModel("gpt-4o", "GPT-4o"),
+        providerModel("gpt-4o-mini", "GPT-4o mini"),
+      ],
+      error: null,
+      cached: false,
+    };
+    vi.mocked(api.get).mockResolvedValue(modelCatalog);
+    vi.mocked(api.patch).mockResolvedValue({
+      ...settings.providers[0]!,
+      default_model: "gpt-4o-mini",
+    });
+    renderPage();
+    const providerCards = screen.getAllByRole("article");
+    await userEvent.click(
+      within(providerCards[0]!).getByRole("button", { name: "Edit provider" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText(/API key/)).toHaveValue("");
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        "/ai/providers/provider-openai/models",
+      ),
+    );
+    const defaultModel = await within(dialog).findByRole("combobox", {
+      name: "Default model",
+    });
+    await userEvent.click(defaultModel);
+    await userEvent.click(
+      within(dialog).getByRole("option", { name: /GPT-4o mini/ }),
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Save selected model/ }),
+    );
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith("/ai/providers/provider-openai", {
+        default_model: "gpt-4o-mini",
+      }),
+    );
+    expect(vi.mocked(api.patch).mock.calls[0]?.[1]).not.toHaveProperty("api_key");
+  });
+
+  it("clears a task model and discovers the new provider catalog on provider switch", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      provider_id: "provider-ollama",
+      models: [providerModel("llava", "LLaVA", "chat", ["text", "vision"])],
+      error: null,
+      cached: false,
+    });
+    renderPage();
+    const providerSelect = screen.getByLabelText("General assistant provider");
+    await userEvent.selectOptions(providerSelect, "provider-ollama");
+    const modelInput = screen.getByLabelText("General assistant model");
+    expect(modelInput).toHaveValue("");
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("/ai/providers/provider-ollama/models"),
+    );
+    await userEvent.click(modelInput);
+    expect(screen.getByRole("option", { name: /LLaVA/ })).toBeVisible();
   });
 });
