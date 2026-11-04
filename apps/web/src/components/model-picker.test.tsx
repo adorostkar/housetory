@@ -128,6 +128,18 @@ describe("ModelPicker", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("keeps the selected value and reopens on click after Escape", async () => {
+    render(<Harness initial="gpt-4o" />);
+    const input = screen.getByRole("combobox", { name: "Test model" });
+    await userEvent.click(input);
+    expect(screen.getByRole("listbox")).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveValue("GPT-4o");
+    await userEvent.click(input);
+    expect(screen.getByRole("listbox")).toBeVisible();
+  });
+
   it("renders loading, empty, error and retry states", async () => {
     const retry = vi.fn();
     const discover = vi.fn();

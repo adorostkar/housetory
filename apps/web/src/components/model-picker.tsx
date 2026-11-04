@@ -98,6 +98,22 @@ export function ModelPicker({
     setActiveIndex(-1);
   }, [deferredSearch, open]);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Capture before Radix Dialog's document listener so the first Escape
+      // closes only this popup. The next Escape can dismiss the dialog.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setOpen(false);
+      setSearch("");
+    };
+    // Window capture runs before Radix Dialog's document capture handler.
+    window.addEventListener("keydown", onEscape, true);
+    return () => window.removeEventListener("keydown", onEscape, true);
+  }, [open]);
+
   const choose = (model: AiProviderModel) => {
     onChange(model.id);
     setOpen(false);
@@ -106,13 +122,6 @@ export function ModelPicker({
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setOpen(false);
-      setSearch("");
-      inputRef.current?.blur();
-      return;
-    }
     if (event.key === "ArrowDown" && visible.length > 0) {
       event.preventDefault();
       setOpen(true);
@@ -138,7 +147,7 @@ export function ModelPicker({
   };
 
   return (
-    <div ref={wrapperRef} className="relative">
+    <div ref={wrapperRef} className="relative min-w-0">
       <Search className="pointer-events-none absolute left-3 top-[1.15rem] size-3.5 -translate-y-1/2 text-muted-foreground" />
       <input
         ref={inputRef}
@@ -158,13 +167,16 @@ export function ModelPicker({
           setOpen(true);
           setSearch("");
         }}
+        onClick={() => {
+          setOpen(true);
+        }}
         onChange={(event) => {
           setOpen(true);
           setSearch(event.target.value);
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "h-10 w-full rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-[0.8rem] text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
+          "h-10 w-full min-w-0 rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-[0.8rem] text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
       <div className="absolute right-1.5 top-[1.15rem] flex -translate-y-1/2 items-center gap-0.5">
@@ -186,24 +198,25 @@ export function ModelPicker({
       </div>
 
       {selectedUnsupported && !open ? (
-        <p className="mt-1 flex items-center gap-1 text-[0.66rem] text-brass">
-          <AlertCircle className="size-3" />
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+          <AlertCircle className="mt-0.5 size-3 shrink-0" />
           Saved model is not listed{requiredCapability ? ` as ${requiredCapability}-capable` : ""} in
           the current catalog. You can keep it or choose a replacement.
         </p>
       ) : null}
 
       {open ? (
-        <div className="mt-1 overflow-hidden rounded-xl border border-border/80 bg-popover shadow-lift">
+        <div className="mt-1 min-w-0 overflow-hidden rounded-xl border border-border/80 bg-popover shadow-lift">
           {loading ? (
-            <div className="flex items-center gap-2 px-3 py-3 text-[0.72rem] text-muted-foreground" role="status">
-              <Loader2 className="size-3.5 animate-spin" />
-              Discovering models from the provider…
+            <div className="flex min-w-0 items-center gap-2 px-3 py-3 text-[0.72rem] text-muted-foreground" role="status">
+              <Loader2 className="size-3.5 shrink-0 animate-spin" />
+              <span className="min-w-0 break-words">Discovering models from the provider…</span>
             </div>
           ) : error ? (
-            <div className="px-3 py-3 text-[0.72rem]" role="alert">
-              <p className="flex items-center gap-1.5 text-destructive">
-                <AlertCircle className="size-3.5" /> {error}
+            <div className="min-w-0 px-3 py-3 text-[0.72rem]" role="alert">
+              <p className="flex min-w-0 items-start gap-1.5 text-destructive">
+                <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0 break-words">{error}</span>
               </p>
               {onRefresh ? (
                 <Button type="button" size="sm" variant="ghost" className="mt-1 h-7 px-2" onClick={onRefresh}>
@@ -212,8 +225,8 @@ export function ModelPicker({
               ) : null}
             </div>
           ) : models.length === 0 ? (
-            <div className="px-3 py-3 text-[0.72rem] text-muted-foreground">
-              <p>No models discovered yet.</p>
+            <div className="min-w-0 px-3 py-3 text-[0.72rem] text-muted-foreground">
+              <p className="break-words">No models discovered yet.</p>
               {onDiscover ? (
                 <Button
                   type="button"
@@ -227,9 +240,11 @@ export function ModelPicker({
               ) : null}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="px-3 py-3 text-[0.72rem] text-muted-foreground">
-              No compatible catalog model matches “{search}”. Press Enter to use that exact ID
-              manually.
+            <div className="min-w-0 px-3 py-3 text-[0.72rem] text-muted-foreground">
+              <p className="break-words">
+                No compatible catalog model matches “{search}”. Press Enter to use that exact
+                ID manually.
+              </p>
             </div>
           ) : (
             <>
@@ -237,7 +252,7 @@ export function ModelPicker({
                 id={`${id ?? ariaLabel}-model-list`}
                 role="listbox"
                 aria-label={`${ariaLabel} suggestions`}
-                className="max-h-64 overflow-y-auto p-1.5"
+                className="max-h-[min(16rem,40dvh)] min-w-0 overflow-x-hidden overflow-y-auto p-1.5"
               >
                 {visible.map((model, index) => (
                   <button
@@ -249,35 +264,45 @@ export function ModelPicker({
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => choose(model)}
                     className={cn(
-                      "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left",
+                      "flex w-full min-w-0 items-start gap-2 overflow-hidden rounded-lg px-2.5 py-2 text-left",
                       index === activeIndex ? "bg-secondary" : "hover:bg-secondary/65",
                     )}
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="truncate text-[0.76rem] font-medium">
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span
+                          className="min-w-0 max-w-full truncate text-[0.76rem] font-medium"
+                          title={model.display_name || model.id}
+                        >
                           {model.display_name || model.id}
                         </span>
                         {model.id !== (model.display_name || model.id) ? (
-                          <code className="truncate rounded bg-secondary px-1 py-0.5 text-[0.6rem] text-muted-foreground">
+                          <code
+                            className="min-w-0 max-w-full truncate rounded bg-secondary px-1 py-0.5 text-[0.6rem] text-muted-foreground"
+                            title={model.id}
+                          >
                             {model.id}
                           </code>
                         ) : null}
-                        <Badge variant="outline" className="text-[0.55rem]">
+                        <Badge variant="outline" className="shrink-0 text-[0.55rem]">
                           {KIND_LABELS[model.kind]}
                         </Badge>
                       </span>
-                      <span className="mt-1 flex flex-wrap items-center gap-1">
+                      <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                         {model.capabilities.length > 0 ? (
                           model.capabilities.map((capability) => (
-                            <Badge key={capability} variant="secondary" className="text-[0.55rem]">
+                            <Badge
+                              key={capability}
+                              variant="secondary"
+                              className="shrink-0 text-[0.55rem]"
+                            >
                               {CAPABILITY_LABELS[capability] ?? capability}
                             </Badge>
                           ))
                         ) : (
                           <span className="text-[0.62rem] text-muted-foreground">No task capabilities</span>
                         )}
-                        <span className="text-[0.6rem] text-muted-foreground">
+                        <span className="min-w-0 break-words text-[0.6rem] text-muted-foreground">
                           {model.capability_source === "provider_metadata"
                             ? "Provider metadata"
                             : "Heuristic — verify"}
@@ -288,15 +313,15 @@ export function ModelPicker({
                   </button>
                 ))}
               </div>
-              <div className="flex items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-[0.62rem] text-muted-foreground">
-                <span>
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-[0.62rem] text-muted-foreground">
+                <span className="min-w-0 break-words">
                   {filtered.length > visible.length
                     ? `Showing ${visible.length} of ${filtered.length}; type to narrow.`
                     : `${filtered.length} compatible model${filtered.length === 1 ? "" : "s"}`}
                   {cached ? " · cached" : ""}
                 </span>
                 {onRefresh ? (
-                  <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[0.62rem]" onClick={onRefresh}>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-[0.62rem]" onClick={onRefresh}>
                     <RefreshCw className="size-2.5" /> Refresh
                   </Button>
                 ) : null}

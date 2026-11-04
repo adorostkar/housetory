@@ -530,7 +530,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 61 Vitest tests + Testing Library, including compact Intelligence
+- Frontend: 62 Vitest tests + Testing Library, including compact Intelligence
   status, searchable model discovery pickers, task catalog switching, the
   unified Add items chooser,
   contextual destinations, quick-search grouping,
@@ -542,7 +542,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 10 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 11 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
   routing, quick search and the unified Add items chooser with contextual

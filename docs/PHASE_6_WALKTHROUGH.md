@@ -344,9 +344,9 @@ but it is no longer the acceptance fixture.
 
 - Backend: **182 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **61 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **62 Vitest tests** passed; strict TypeScript and production build
   passed.
-- Playwright: **10 workflows** passed on a fresh disposable stack at a separate
+- Playwright: **11 workflows** passed on a fresh disposable stack at a separate
   project, volume names and port. Coverage includes Phase 5 regressions, provider
   configuration with a mocked local Ollama service, camera upload, multi-object
   review/split/merge/approval, the actual Inventory.md hierarchy, duplicate
@@ -414,6 +414,14 @@ container and label views. Real Safari/iPhone hardware was unavailable.
   the model name exactly matches the provider's model list, and the API key is
   current. Loopback/container-host Ollama needs no remote consent; LAN, Tailscale
   and external endpoints do. The API/worker must be able to reach the endpoint.
+- **The provider dialog clips fields or actions:** the dialog is width-constrained
+  with wrapped fields and wrapping footer actions. Long model IDs, endpoints and
+  consent text wrap or truncate with the full value available in the input/title.
+  The model list scrolls independently; resizing or opening discovery does not
+  force the dialog wider than the viewport.
+- **Escape closes the provider dialog while the model list is open:** the first
+  Escape closes only the model list and preserves the dialog input; a second
+  Escape closes the provider dialog deliberately.
 - **No models appear after saving a provider:** confirm the key or local
   endpoint is valid, then use **Refresh models**. Discovery requests only catalog
   metadata and does not require household-data consent. If a private/custom model

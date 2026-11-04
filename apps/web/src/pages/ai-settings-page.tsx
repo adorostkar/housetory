@@ -438,11 +438,16 @@ export function AiSettingsPage() {
               const providerModels = models[provider.id] ?? [];
               const providerModelStatus = modelStatus[provider.id];
               return (
-                <article key={provider.id} className="rounded-xl border border-border/70 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-[0.92rem] font-medium">{provider.display_name}</h3>
+                <article
+                  key={provider.id}
+                  className="min-w-0 rounded-xl border border-border/70 p-4"
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <h3 className="min-w-0 break-words text-[0.92rem] font-medium">
+                          {provider.display_name}
+                        </h3>
                         <Badge variant={provider.endpoint_scope === "local" ? "sage" : "brass"}>
                           {provider.endpoint_scope === "local" ? (
                             <Laptop className="size-3" />
@@ -459,7 +464,7 @@ export function AiSettingsPage() {
                       <p className="mt-1 break-all text-[0.68rem] text-muted-foreground">
                         {providerLabel(provider.provider)} · {provider.base_url}
                       </p>
-                      <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                      <p className="mt-1 break-all text-[0.7rem] text-muted-foreground">
                         {provider.default_model ?? "No default model"} ·{" "}
                         {provider.has_api_key
                           ? "API key saved"
@@ -705,7 +710,7 @@ export function AiSettingsPage() {
       </section>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit provider" : "Add provider"}</DialogTitle>
             <DialogDescription>
@@ -714,14 +719,14 @@ export function AiSettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <form
-            className="space-y-4"
+            className="min-w-0 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               saveProvider.mutate();
             }}
           >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="min-w-0">
                 <label htmlFor="provider-type" className="text-[0.78rem] font-medium">Provider</label>
                 <Select
                   id="provider-type"
@@ -759,7 +764,7 @@ export function AiSettingsPage() {
                   ))}
                 </Select>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label htmlFor="provider-name" className="text-[0.78rem] font-medium">Display name</label>
                 <Input
                   id="provider-name"
@@ -770,11 +775,11 @@ export function AiSettingsPage() {
                 />
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <label htmlFor="provider-url" className="text-[0.78rem] font-medium">Base URL</label>
               <Input
                 id="provider-url"
-                className="mt-1.5"
+                className="mt-1.5 min-w-0"
                 value={draft.base_url}
                 onChange={(event) => {
                   setCatalogStale(true);
@@ -783,8 +788,8 @@ export function AiSettingsPage() {
                 placeholder="https://api.openai.com/v1"
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="min-w-0">
                 <label htmlFor="provider-model" className="text-[0.78rem] font-medium">
                   Default model
                 </label>
@@ -837,7 +842,7 @@ export function AiSettingsPage() {
                         : "Discovery lists provider catalog metadata only. It does not send inventory or require household-data consent."}
                 </p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label htmlFor="provider-key" className="text-[0.78rem] font-medium">
                   API key {editing && <span className="font-normal text-muted-foreground">(leave blank to keep)</span>}
                 </label>
@@ -870,17 +875,22 @@ export function AiSettingsPage() {
               </span>
             </label>
             {endpointScope(draft.provider, draft.base_url) !== "local" && (
-              <label className="flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 p-3 text-[0.75rem]">
+              <label className="flex min-w-0 items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 p-3 text-[0.75rem]">
                 <input
                   type="checkbox"
-                  className="mt-0.5 size-3.5 accent-primary"
+                  className="mt-0.5 size-3.5 shrink-0 accent-primary"
                   checked={draft.cloud_consent}
                   onChange={(event) => setDraft((current) => ({ ...current, cloud_consent: event.target.checked }))}
                 />
-                <span>
+                <span className="min-w-0 flex-1 break-words">
                   <span className="font-medium">
                     I consent to sending household data to {providerLabel(draft.provider)}
-                    {draft.base_url ? ` at ${draft.base_url}` : ""}
+                    {draft.base_url ? (
+                      <>
+                        {" at "}
+                        <span className="break-all">{draft.base_url}</span>
+                      </>
+                    ) : null}
                   </span>
                   <span className="block text-[0.68rem] leading-relaxed text-muted-foreground">
                     This endpoint is not on the Housetory host. Prompts, inventory excerpts,
@@ -891,8 +901,13 @@ export function AiSettingsPage() {
               </label>
             )}
             {saveProvider.error && <FormError message={getApiErrorMessage(saveProvider.error)} />}
-            <DialogFooter className="sm:items-center">
-              <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full whitespace-normal sm:w-auto"
+                onClick={() => setDialogOpen(false)}
+              >
                 Cancel
               </Button>
               {editing ? (
@@ -900,6 +915,7 @@ export function AiSettingsPage() {
                   <Button
                     type="submit"
                     variant="outline"
+                    className="w-full whitespace-normal sm:w-auto"
                     disabled={saveProvider.isPending || discoverModels.isPending}
                   >
                     {saveProvider.isPending ? <Spinner /> : <RefreshCw />}
@@ -907,6 +923,7 @@ export function AiSettingsPage() {
                   </Button>
                   <Button
                     type="button"
+                    className="w-full whitespace-normal sm:w-auto"
                     disabled={finishProvider.isPending}
                     onClick={() => finishProvider.mutate()}
                   >
@@ -915,7 +932,11 @@ export function AiSettingsPage() {
                   </Button>
                 </>
               ) : (
-                <Button type="submit" disabled={saveProvider.isPending}>
+                <Button
+                  type="submit"
+                  className="w-full whitespace-normal sm:w-auto"
+                  disabled={saveProvider.isPending}
+                >
                   {saveProvider.isPending ? <Spinner /> : <Check />}
                   Save provider & discover models
                 </Button>

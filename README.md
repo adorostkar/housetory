@@ -118,8 +118,8 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 61 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 10 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 62 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 11 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, the actual Inventory.md hierarchy, duplicate prevention,
@@ -380,7 +380,9 @@ household owner and open **Settings → AI providers**.
    available after endpoint or credential changes. Manual exact-ID entry remains
    available for private/custom models. General Settings shows only a compact
    provider/model/mode/consent summary and a catalog count; browse and select the
-   full catalog on the AI providers page.
+   full catalog on the AI providers page. The provider dialog stays within the
+  viewport with long catalog IDs, URLs and consent text; its model list scrolls
+  independently. Escape closes an open model list first and the dialog second.
 3. Enable remote-processing consent separately for each cloud or non-local
    endpoint. Saving an API key does **not** authorize sending household data.
    Ollama on loopback/`host.docker.internal`/a Compose service name is local; LAN,
