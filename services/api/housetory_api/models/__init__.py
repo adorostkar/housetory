@@ -1,4 +1,11 @@
-from .auth import AuthSession, Household, HouseholdMember, User
+from .auth import (
+    AuthSession,
+    Household,
+    HouseholdInvitation,
+    HouseholdMember,
+    PasswordResetToken,
+    User,
+)
 from .base import Base
 from .intelligence import (
     AiProvider,
@@ -36,7 +43,9 @@ __all__ = [
     "CustomFieldDefinition",
     "Document",
     "Household",
+    "HouseholdInvitation",
     "HouseholdMember",
+    "PasswordResetToken",
     "Item",
     "ItemCustomValue",
     "ItemPhoto",

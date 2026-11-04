@@ -72,7 +72,7 @@ def test_expired_session_is_not_accepted(owner_client, anon_client):
     assert response.status_code == 401
 
 
-def test_missing_membership_does_not_authenticate(owner_client, anon_client):
+def test_missing_membership_authenticates_account_but_not_household(owner_client, anon_client):
     with SessionLocal() as db:
         orphan = User(
             name="Orphan",
@@ -91,5 +91,9 @@ def test_missing_membership_does_not_authenticate(owner_client, anon_client):
         db.commit()
 
     headers = {"Cookie": f"housetory_session={token}"}
-    assert anon_client.get("/api/v1/auth/session", headers=headers).json()["authenticated"] is False
+    state = anon_client.get("/api/v1/auth/session", headers=headers).json()
+    assert state["authenticated"] is True
+    assert state["user"]["email"] == "orphan@example.com"
+    assert state["household"] is None
+    assert state["role"] is None
     assert anon_client.get("/api/v1/overview", headers=headers).status_code == 401

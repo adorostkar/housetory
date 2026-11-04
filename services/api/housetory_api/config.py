@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     import_max_total_mb: int = Field(default=50, ge=1, le=500)
     import_max_file_mb: int = Field(default=10, ge=1, le=100)
 
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_tls_mode: Literal["starttls", "ssl", "none"] = "starttls"
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_name: str = "Housetory"
+    smtp_from_address: str = ""
+    smtp_timeout_seconds: int = Field(default=10, ge=2, le=60)
+    invitation_ttl_hours: int = Field(default=168, ge=1, le=720)
+    password_reset_ttl_minutes: int = Field(default=60, ge=5, le=1440)
+
     ai_credential_key: str = ""
     ai_credential_key_previous: str = ""
     ai_provider: Literal["disabled", "ollama", "openai_compatible"] = "disabled"
@@ -77,6 +88,10 @@ class Settings(BaseSettings):
         return None
 
     @property
+    def email_configured(self) -> bool:
+        return bool(self.smtp_host.strip() and self.smtp_from_address.strip())
+
+    @property
     def ai_credential_key_configured(self) -> bool:
         return bool(self.ai_credential_key)
 
@@ -95,6 +110,22 @@ class Settings(BaseSettings):
     @property
     def ai_cloud_allowed(self) -> bool:
         return self.ai_cloud_enabled and self.ai_cloud_consent
+
+    @field_validator("smtp_from_address")
+    @classmethod
+    def _validate_from_address(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return value
+        local, separator, domain = value.partition("@")
+        if (
+            not separator
+            or not local
+            or "." not in domain
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("SMTP_FROM_ADDRESS must be a valid email address.")
+        return value
 
     @field_validator("app_base_url", "qr_base_url")
     @classmethod

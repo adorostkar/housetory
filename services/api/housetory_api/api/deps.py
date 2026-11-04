@@ -16,6 +16,12 @@ SESSION_COOKIE = "housetory_session"
 
 
 @dataclass(frozen=True)
+class AccountContext:
+    user: User
+    session: AuthSession
+
+
+@dataclass(frozen=True)
 class AuthContext:
     user: User
     household: Household
@@ -48,6 +54,24 @@ def _session_from_request(request: Request, db: Session) -> AuthSession | None:
     return auth_session
 
 
+def get_optional_account(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AccountContext | None:
+    auth_session = _session_from_request(request, db)
+    if auth_session is None:
+        return None
+    return AccountContext(user=auth_session.user, session=auth_session)
+
+
+def require_account(
+    account: AccountContext | None = Depends(get_optional_account),
+) -> AccountContext:
+    if account is None:
+        raise ApiError(401, "not_authenticated", "Sign in to continue.")
+    return account
+
+
 def get_optional_auth(
     request: Request,
     db: Session = Depends(get_db),
@@ -55,17 +79,29 @@ def get_optional_auth(
     auth_session = _session_from_request(request, db)
     if auth_session is None:
         return None
-    membership = db.scalar(
-        select(HouseholdMember)
-        .where(HouseholdMember.user_id == auth_session.user_id)
-        .order_by(HouseholdMember.created_at)
-        .limit(1)
-    )
+    if auth_session.household_id is not None:
+        membership = db.scalar(
+            select(HouseholdMember).where(
+                HouseholdMember.user_id == auth_session.user_id,
+                HouseholdMember.household_id == auth_session.household_id,
+            )
+        )
+    else:
+        # Compatibility for sessions created before selected-household sessions.
+        membership = db.scalar(
+            select(HouseholdMember)
+            .where(HouseholdMember.user_id == auth_session.user_id)
+            .order_by(HouseholdMember.created_at)
+            .limit(1)
+        )
     if membership is None:
         return None
     household = db.get(Household, membership.household_id)
     if household is None:
         return None
+    if auth_session.household_id is None:
+        auth_session.household_id = membership.household_id
+        db.commit()
     return AuthContext(
         user=auth_session.user,
         household=household,
@@ -80,6 +116,42 @@ def require_auth(
     if auth is None:
         raise ApiError(401, "not_authenticated", "Sign in to continue.")
     return auth
+
+
+def require_writer(auth: AuthContext = Depends(require_auth)) -> AuthContext:
+    if auth.role not in {"owner", "member"}:
+        raise ApiError(
+            403,
+            "read_only_role",
+            "Viewers have read-only access to this household.",
+        )
+    return auth
+
+
+READ_ONLY_POST_SUFFIXES = ("/assistant/query", "/search/natural")
+
+
+def enforce_household_write_access(
+    request: Request,
+    auth: AuthContext = Depends(require_auth),
+) -> AuthContext:
+    """Block all household mutations for viewers.
+
+    Applied at router level so new inventory mutations cannot forget the role
+    check. The two POST endpoints that only answer questions are explicitly
+    read-only.
+    """
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return auth
+    if auth.role in {"owner", "member"}:
+        return auth
+    if any(request.url.path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES):
+        return auth
+    raise ApiError(
+        403,
+        "read_only_role",
+        "Viewers have read-only access to this household.",
+    )
 
 
 def require_owner(auth: AuthContext = Depends(require_auth)) -> AuthContext:

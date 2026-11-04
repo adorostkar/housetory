@@ -83,7 +83,7 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class HouseholdMember(Base):
     __tablename__ = "household_members"
     __table_args__ = (
-        CheckConstraint("role in ('owner', 'member')", name="valid_role"),
+        CheckConstraint("role in ('owner', 'member', 'viewer')", name="valid_role"),
         Index("ix_household_members_user_id", "user_id"),
     )
 
@@ -113,10 +113,14 @@ class AuthSession(UUIDPrimaryKeyMixin, Base):
     __table_args__ = (
         Index("ix_auth_sessions_user_id", "user_id"),
         Index("ix_auth_sessions_expires_at", "expires_at"),
+        Index("ix_auth_sessions_household_id", "household_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    household_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="SET NULL")
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -130,11 +134,66 @@ class AuthSession(UUIDPrimaryKeyMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(String(64))
 
     user: Mapped[User] = relationship(back_populates="sessions")
+    household: Mapped[Household | None] = relationship()
+
+
+class HouseholdInvitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "household_invitations"
+    __table_args__ = (
+        CheckConstraint("role in ('owner', 'member', 'viewer')", name="valid_role"),
+        Index("ix_household_invitations_household_email", "household_id", "email"),
+        Index("ix_household_invitations_expires_at", "expires_at"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("households.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, server_default="member")
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    invited_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    accepted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    household: Mapped[Household] = relationship()
+    invited_by: Mapped[User | None] = relationship(foreign_keys=[invited_by_user_id])
+    accepted_by: Mapped[User | None] = relationship(foreign_keys=[accepted_by_user_id])
+
+
+class PasswordResetToken(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        Index("ix_password_reset_tokens_user_id", "user_id"),
+        Index("ix_password_reset_tokens_expires_at", "expires_at"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    user: Mapped[User] = relationship()
 
 
 __all__ = [
     "AuthSession",
     "Household",
+    "HouseholdInvitation",
     "HouseholdMember",
+    "PasswordResetToken",
     "User",
 ]

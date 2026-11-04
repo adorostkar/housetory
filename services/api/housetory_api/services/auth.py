@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select, text
@@ -45,6 +46,21 @@ def create_user_with_household(
     return user, household
 
 
+def get_membership(db: Session, user_id, household_id) -> tuple[Household, HouseholdMember] | None:
+    membership = db.scalar(
+        select(HouseholdMember).where(
+            HouseholdMember.user_id == user_id,
+            HouseholdMember.household_id == household_id,
+        )
+    )
+    if membership is None:
+        return None
+    household = db.get(Household, membership.household_id)
+    if household is None:
+        return None
+    return household, membership
+
+
 def get_primary_membership(db: Session, user: User) -> tuple[Household, str] | None:
     membership = db.scalar(
         select(HouseholdMember)
@@ -80,6 +96,7 @@ def create_session(
     settings: Settings,
     user_agent: str | None,
     ip_address: str | None,
+    household_id: uuid.UUID | None = None,
 ) -> str:
     now = datetime.now(UTC)
     db.execute(delete(AuthSession).where(AuthSession.expires_at < now))
@@ -87,6 +104,7 @@ def create_session(
     db.add(
         AuthSession(
             user_id=user.id,
+            household_id=household_id,
             token_hash=hash_session_token(token),
             expires_at=now + timedelta(days=settings.session_ttl_days),
             user_agent=(user_agent or "")[:512] or None,
@@ -100,3 +118,16 @@ def revoke_session(db: Session, token: str | None) -> None:
     if not token:
         return
     db.execute(delete(AuthSession).where(AuthSession.token_hash == hash_session_token(token)))
+
+
+def revoke_user_sessions(db: Session, user_id: uuid.UUID) -> None:
+    db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
+
+
+def revoke_household_sessions(db: Session, user_id: uuid.UUID, household_id: uuid.UUID) -> None:
+    db.execute(
+        delete(AuthSession).where(
+            AuthSession.user_id == user_id,
+            AuthSession.household_id == household_id,
+        )
+    )

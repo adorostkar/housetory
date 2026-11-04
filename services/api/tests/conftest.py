@@ -36,6 +36,7 @@ from sqlalchemy import text  # noqa: E402
 from housetory_api.api.abuse import login_limiter  # noqa: E402
 from housetory_api.db import engine  # noqa: E402
 from housetory_api.main import app  # noqa: E402
+from housetory_api.services.email import reset_captured_email  # noqa: E402
 
 
 def _admin_connection() -> psycopg.Connection:
@@ -90,6 +91,7 @@ def clean_state(database: None) -> Iterator[None]:
     shutil.rmtree(IMPORTS_ROOT, ignore_errors=True)
     IMPORTS_ROOT.mkdir(parents=True, exist_ok=True)
     login_limiter.reset_all()
+    reset_captured_email()
     yield
 
 
