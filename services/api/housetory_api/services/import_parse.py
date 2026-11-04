@@ -280,8 +280,22 @@ def parse_quantity(text: str) -> tuple[int, str]:
 def parse_price(text: str) -> tuple[int | None, str | None, str]:
     result = None
     currency = None
+    chosen_span: tuple[int, int] | None = None
     for match in MONEY_RE.finditer(text):
         raw = match.group("amount").replace(" ", "")
+        symbol = match.group("currency")
+        compact = raw.replace(",", "").replace(".", "")
+        if (
+            not symbol
+            and "." not in raw
+            and "," not in raw
+            and not re.search(
+                r"(?:price|paid|cost|amount|value|for)\s*[:$]?\s*$",
+                text[max(0, match.start() - 24) : match.start()],
+                re.IGNORECASE,
+            )
+        ):
+            continue
         if "," in raw and "." in raw:
             if raw.rfind(",") > raw.rfind("."):
                 raw = raw.replace(".", "").replace(",", ".")
@@ -297,15 +311,17 @@ def parse_price(text: str) -> tuple[int | None, str | None, str]:
             cents = round(float(raw) * 100)
         except ValueError:
             continue
-        if cents < 0:
+        if cents < 0 or not compact:
             continue
         result = cents
-        currency = CURRENCY_SYMBOLS.get(match.group("currency") or "")
+        currency = CURRENCY_SYMBOLS.get(symbol or "")
+        chosen_span = (match.start(), match.end())
         if currency:
             break
-    if result is None:
+    if chosen_span is None:
         return None, None, text
-    return result, currency, MONEY_RE.sub("", text).strip(" ,;|")
+    cleaned = (text[: chosen_span[0]] + text[chosen_span[1] :]).strip(" ,;|")
+    return result, currency, cleaned
 
 
 def parse_serial(text: str) -> tuple[str | None, str]:

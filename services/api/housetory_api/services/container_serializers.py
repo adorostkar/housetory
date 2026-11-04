@@ -142,6 +142,8 @@ def serialize_container(
     return ContainerOut(
         id=location.id,
         identifier=location.identifier,
+        legacy_identifier=location.legacy_identifier,
+        aliases=location.aliases or [],
         name=location.name,
         description=location.description,
         kind=location.kind,
@@ -187,6 +189,8 @@ def serialize_container_detail(
         ContainerBrief(
             id=child.id,
             identifier=child.identifier,
+            legacy_identifier=child.legacy_identifier,
+            aliases=child.aliases or [],
             name=child.name,
             kind=child.kind,
             container_type=child.container_type,

@@ -134,6 +134,11 @@ class ImportEntryOut(ORMModel):
     duplicate_resolution: str | None
     matched_item_id: uuid.UUID | None
     imported_item_id: uuid.UUID | None
+    entity_type: str = "item"
+    parent_entry_id: uuid.UUID | None = None
+    created_room_id: uuid.UUID | None = None
+    created_location_id: uuid.UUID | None = None
+    legacy_identifier: str | None = None
     error: str | None
     position: int
 
@@ -182,6 +187,10 @@ class ImportProposedInput(ProposedItem):
 class ImportApplyEntry(BaseModel):
     id: uuid.UUID
     action: Literal["import", "skip", "reject", "merge"]
+    entity_type: Literal["item", "room", "container", "location"] | None = None
+    parent_entry_id: uuid.UUID | None = None
+    legacy_identifier: str | None = None
+    allow_duplicate: bool = False
     proposed: ImportProposedInput | None = None
     merge_item_id: uuid.UUID | None = None
     merge_fields: list[

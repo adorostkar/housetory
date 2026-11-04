@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...config import get_settings
 from ...db import get_db
+from ...domain import AiTask
 from ...models import Item, StorageLocation
 from ...schemas.containers import (
     AiContainerSummary,
@@ -375,7 +376,7 @@ def ai_summary(
     location = _get(db, auth.household.id, location_id)
     items = load_container_items(db, auth.household.id, location_id)
     live = deterministic_summary(items)
-    status = ai.provider_status(probe=False)
+    status = ai.status_for(db, auth.household.id, AiTask.LABELS.value, probe=False)
     if not status.configured:
         refresh_summary(db, auth.household.id, location, source="deterministic")
         db.commit()
@@ -402,7 +403,11 @@ def ai_summary(
         "</container>"
     )
     try:
-        raw = ai.complete_json(AI_SUMMARY_SYSTEM, prompt)
+        raw = ai.complete_json(
+            AI_SUMMARY_SYSTEM,
+            prompt,
+            config=ai.config_for(db, auth.household.id, AiTask.LABELS.value),
+        )
         parsed = AiContainerSummary.model_validate(raw)
         headline = re.sub(r"\s+", " ", parsed.headline).strip()
         if re.search(r"\d", headline):

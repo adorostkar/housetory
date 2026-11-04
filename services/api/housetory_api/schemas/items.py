@@ -142,6 +142,10 @@ class ItemDetailResponse(BaseModel):
     item: ItemDetail
 
 
+class PhotoOrderRequest(BaseModel):
+    photo_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+
+
 class PhotoList(BaseModel):
     items: list[PhotoOut]
 

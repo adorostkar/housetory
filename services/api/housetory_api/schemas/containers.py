@@ -74,6 +74,8 @@ class ContainerSummaryUpdate(BaseModel):
 class ContainerBrief(ORMModel):
     id: uuid.UUID
     identifier: str | None
+    legacy_identifier: str | None = None
+    aliases: list[str] = Field(default_factory=list)
     name: str
     kind: str
     container_type: str | None
@@ -89,6 +91,8 @@ class ContainerBrief(ORMModel):
 class ContainerOut(ORMModel):
     id: uuid.UUID
     identifier: str | None
+    legacy_identifier: str | None = None
+    aliases: list[str] = Field(default_factory=list)
     name: str
     description: str | None
     kind: str

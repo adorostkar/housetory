@@ -119,6 +119,26 @@ def test_set_cover_photo_reorders_gallery(owner_client, anon_client):
     assert detail["primary_photo"]["id"] == uploaded[2]["id"]
     assert [photo["id"] for photo in detail["photos"]][0] == uploaded[2]["id"]
 
+    explicit = owner_client.put(
+        f"/api/v1/items/{item['id']}/photos/order",
+        json={
+            "photo_ids": [
+                uploaded[1]["id"],
+                uploaded[0]["id"],
+                uploaded[2]["id"],
+            ]
+        },
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert [photo["id"] for photo in explicit.json()["items"]] == [
+        uploaded[1]["id"],
+        uploaded[0]["id"],
+        uploaded[2]["id"],
+    ]
+    assert [photo["sort_order"] for photo in explicit.json()["items"]] == [0, 1, 2]
+    detail = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
+    assert detail["primary_photo"]["id"] == uploaded[1]["id"]
+
     assert (
         anon_client.post(
             f"/api/v1/items/{item['id']}/photos/{uploaded[0]['id']}/primary"

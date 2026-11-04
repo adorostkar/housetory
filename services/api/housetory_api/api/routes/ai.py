@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,8 @@ from ...db import get_db
 from ...domain import RecognitionStatus
 from ...models import AiRecognition
 from ...schemas.ai import (
+    AiRecognitionApplyRequest,
+    AiRecognitionApplyResult,
     AiRecognitionList,
     AiRecognitionOut,
     AiStatus,
@@ -26,7 +28,11 @@ from ...services import storage
 from ...services.ai_tools import document_relations
 from ...services.assistant import answer_question, natural_search
 from ...services.documents import get_document
-from ...services.recognition import enqueue_recognition, serialize_recognition
+from ...services.recognition import (
+    apply_recognition,
+    enqueue_recognition,
+    serialize_recognition,
+)
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -48,8 +54,20 @@ def _get_recognition(
 
 
 @router.get("/ai/status", response_model=AiStatus)
-def ai_status(auth: AuthContext = Depends(require_auth)) -> AiStatus:
-    return ai_service.provider_status(probe=True)
+def ai_status(
+    task: str = Query(
+        default="assistant",
+        pattern=r"^(assistant|imports|documents|search|vision|labels)$",
+    ),
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiStatus:
+    return ai_service.provider_status(
+        probe=True,
+        db=db,
+        household_id=auth.household.id,
+        task=task,
+    )
 
 
 @router.post("/assistant/query", response_model=AssistantResponse)
@@ -84,9 +102,30 @@ def natural_search_route(
 @router.post("/ai/recognitions", response_model=AiRecognitionOut, status_code=201)
 def create_recognition(
     file: Annotated[UploadFile, File()],
+    location_id: Annotated[uuid.UUID | None, Form()] = None,
+    room_id: Annotated[uuid.UUID | None, Form()] = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
+    if room_id is not None:
+        from ...models import Room
+
+        room = db.scalar(
+            select(Room).where(Room.id == room_id, Room.household_id == auth.household.id)
+        )
+        if room is None:
+            raise ApiError(404, "room_not_found", "Room not found.")
+    if location_id is not None:
+        from ...models import StorageLocation
+
+        location = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.id == location_id,
+                StorageLocation.household_id == auth.household.id,
+            )
+        )
+        if location is None:
+            raise ApiError(404, "location_not_found", "Storage location not found.")
     stored = storage.store_ai_image(auth.household.id, file)
     recognition = AiRecognition(
         household_id=auth.household.id,
@@ -99,6 +138,8 @@ def create_recognition(
         original_byte_size=stored.original_byte_size,
         width=stored.width,
         height=stored.height,
+        room_id=room_id,
+        location_id=location_id,
         status=RecognitionStatus.QUEUED.value,
         result={},
         field_sources={},
@@ -113,7 +154,7 @@ def create_recognition(
         storage.delete_key(stored.original_storage_key)
         raise
     db.refresh(recognition)
-    return serialize_recognition(recognition)
+    return serialize_recognition(recognition, db, auth.household.id)
 
 
 @router.get("/ai/recognitions", response_model=AiRecognitionList)
@@ -129,7 +170,10 @@ def list_recognitions(
         .limit(limit)
     ).all()
     return AiRecognitionList(
-        items=[serialize_recognition(recognition) for recognition in recognitions]
+        items=[
+            serialize_recognition(recognition, db, auth.household.id)
+            for recognition in recognitions
+        ]
     )
 
 
@@ -139,7 +183,9 @@ def read_recognition(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
-    return serialize_recognition(_get_recognition(db, auth.household.id, recognition_id))
+    return serialize_recognition(
+        _get_recognition(db, auth.household.id, recognition_id), db, auth.household.id
+    )
 
 
 @router.get("/ai/recognitions/{recognition_id}/image")
@@ -182,6 +228,24 @@ def recognition_original(
     )
 
 
+@router.post(
+    "/ai/recognitions/{recognition_id}/apply",
+    response_model=AiRecognitionApplyResult,
+)
+def apply_recognition_route(
+    recognition_id: uuid.UUID,
+    payload: AiRecognitionApplyRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiRecognitionApplyResult:
+    recognition = _get_recognition(db, auth.household.id, recognition_id)
+    try:
+        return apply_recognition(db, auth.household.id, recognition, payload)
+    except ValueError as exc:
+        db.rollback()
+        raise ApiError(422, "recognition_apply_failed", str(exc)) from None
+
+
 @router.post("/ai/recognitions/{recognition_id}/retry", response_model=AiRecognitionOut)
 def retry_recognition(
     recognition_id: uuid.UUID,
@@ -193,7 +257,7 @@ def retry_recognition(
         raise ApiError(409, "recognition_in_progress", "This photo is already queued.")
     enqueue_recognition(db, recognition)
     db.refresh(recognition)
-    return serialize_recognition(recognition)
+    return serialize_recognition(recognition, db, auth.household.id)
 
 
 @router.delete("/ai/recognitions/{recognition_id}", status_code=204)

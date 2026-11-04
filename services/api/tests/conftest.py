@@ -27,6 +27,9 @@ os.environ["APP_BASE_URL"] = "http://testserver"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["UPLOADS_DIR"] = str(UPLOAD_ROOT)
 os.environ["IMPORTS_DIR"] = str(IMPORTS_ROOT)
+# Deterministic Fernet key for credential tests. Production operators generate
+# their own key outside the database.
+os.environ["AI_CREDENTIAL_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 from sqlalchemy import text  # noqa: E402
 

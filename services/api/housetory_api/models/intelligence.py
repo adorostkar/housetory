@@ -18,8 +18,61 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ..domain import ImportEntryStatus, ImportSourceType, ImportStatus, RecognitionStatus
+from ..domain import (
+    ImportEntityType,
+    ImportEntryStatus,
+    ImportSourceType,
+    ImportStatus,
+    RecognitionStatus,
+)
 from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class AiProvider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ai_providers"
+    __table_args__ = (
+        CheckConstraint(
+            "provider in ('openai', 'anthropic', 'gemini', 'xai', 'openrouter', 'ollama')",
+            name="valid_provider",
+        ),
+        UniqueConstraint("household_id", "provider", name="uq_ai_providers_household_provider"),
+        Index("ix_ai_providers_household", "household_id"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(500))
+    default_model: Mapped[str | None] = mapped_column(String(160))
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text)
+    api_key_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    cloud_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+
+class AiTaskSetting(Base):
+    __tablename__ = "ai_task_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "task in ('assistant', 'imports', 'documents', 'search', 'vision', 'labels')",
+            name="valid_task",
+        ),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), primary_key=True
+    )
+    task: Mapped[str] = mapped_column(String(20), primary_key=True)
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="SET NULL")
+    )
+    model: Mapped[str | None] = mapped_column(String(160))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class ImportBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -115,11 +168,25 @@ class ImportEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_import_entries_batch_position", "batch_id", "position"),
         Index("ix_import_entries_status", "status"),
         Index("ix_import_entries_imported_item", "imported_item_id"),
+        Index("ix_import_entries_parent_entry", "parent_entry_id"),
     )
 
     batch_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False
     )
+    entity_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=ImportEntityType.ITEM.value
+    )
+    parent_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_entries.id", ondelete="SET NULL")
+    )
+    created_room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="SET NULL")
+    )
+    created_location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("storage_locations.id", ondelete="SET NULL")
+    )
+    legacy_identifier: Mapped[str | None] = mapped_column(String(120))
     source_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("import_source_files.id", ondelete="SET NULL")
     )
@@ -151,6 +218,26 @@ class ImportEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_file: Mapped[ImportSourceFile | None] = relationship(back_populates="entries")
 
 
+class RecognitionItemLink(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "recognition_item_links"
+    __table_args__ = (
+        UniqueConstraint("recognition_id", "item_id", name="uq_recognition_item"),
+        Index("ix_recognition_item_links_recognition", "recognition_id"),
+        Index("ix_recognition_item_links_item", "item_id"),
+    )
+
+    recognition_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_recognitions.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    suggestion_index: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class AiRecognition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "ai_recognitions"
     __table_args__ = (
@@ -159,6 +246,7 @@ class AiRecognition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="valid_status",
         ),
         Index("ix_ai_recognitions_household_created", "household_id", "created_at"),
+        Index("ix_ai_recognitions_location", "location_id"),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -183,5 +271,16 @@ class AiRecognition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     confidence: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)
     model_provider: Mapped[str | None] = mapped_column(String(40))
-    model_name: Mapped[str | None] = mapped_column(String(120))
+    model_name: Mapped[str | None] = mapped_column(String(160))
+    room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="SET NULL")
+    )
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("storage_locations.id", ondelete="SET NULL")
+    )
+    processing_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="unavailable"
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_items: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

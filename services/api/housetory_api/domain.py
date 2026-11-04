@@ -144,3 +144,28 @@ class RecognitionStatus(StrEnum):
     PROCESSING = "processing"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class AiProviderType(StrEnum):
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GEMINI = "gemini"
+    XAI = "xai"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
+
+
+class AiTask(StrEnum):
+    ASSISTANT = "assistant"
+    IMPORTS = "imports"
+    DOCUMENTS = "documents"
+    SEARCH = "search"
+    VISION = "vision"
+    LABELS = "labels"
+
+
+class ImportEntityType(StrEnum):
+    ITEM = "item"
+    ROOM = "room"
+    CONTAINER = "container"
+    LOCATION = "location"

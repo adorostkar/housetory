@@ -1,6 +1,14 @@
 from .auth import AuthSession, Household, HouseholdMember, User
 from .base import Base
-from .intelligence import AiRecognition, ImportBatch, ImportEntry, ImportSourceFile
+from .intelligence import (
+    AiProvider,
+    AiRecognition,
+    AiTaskSetting,
+    ImportBatch,
+    ImportEntry,
+    ImportSourceFile,
+    RecognitionItemLink,
+)
 from .inventory import (
     Category,
     CustomFieldDefinition,
@@ -9,8 +17,10 @@ from .inventory import (
     ItemCustomValue,
     ItemPhoto,
     LocationIdentifierCounter,
+    LocationPhoto,
     Purchase,
     Room,
+    RoomPhoto,
     StorageLocation,
     Tag,
     Warranty,
@@ -31,7 +41,12 @@ __all__ = [
     "ItemCustomValue",
     "ItemPhoto",
     "LocationIdentifierCounter",
+    "AiProvider",
     "AiRecognition",
+    "AiTaskSetting",
+    "LocationPhoto",
+    "RecognitionItemLink",
+    "RoomPhoto",
     "ImportBatch",
     "ImportEntry",
     "ImportSourceFile",

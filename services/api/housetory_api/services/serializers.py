@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -61,6 +62,22 @@ def photo_out(photo: ItemPhoto) -> PhotoOut:
         created_at=photo.created_at,
         url=photo_url(photo.id),
         thumbnail_url=photo_url(photo.id, thumbnail=True),
+    )
+
+
+def entity_photo_out(photo, kind: Literal["room", "location"]) -> PhotoOut:
+    path = f"{kind}-photos/{photo.id}"
+    return PhotoOut(
+        id=photo.id,
+        original_filename=photo.original_filename,
+        content_type=photo.content_type,
+        byte_size=photo.byte_size,
+        width=photo.width,
+        height=photo.height,
+        sort_order=photo.sort_order,
+        created_at=photo.created_at,
+        url=f"{_settings.api_prefix}/{path}/file",
+        thumbnail_url=f"{_settings.api_prefix}/{path}/thumbnail",
     )
 
 

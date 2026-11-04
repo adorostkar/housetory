@@ -6,6 +6,7 @@ import uuid
 import warnings
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from fastapi import UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -177,10 +178,18 @@ def _write_temp(upload: UploadFile, max_bytes: int) -> tuple[Path, int]:
 
 
 def store_photo(item_id: uuid.UUID, upload: UploadFile) -> StoredPhoto:
+    return store_entity_photo("items", item_id, upload)
+
+
+def store_entity_photo(
+    owner_type: Literal["items", "rooms", "locations"],
+    owner_id: uuid.UUID,
+    upload: UploadFile,
+) -> StoredPhoto:
     settings = get_settings()
     temp_path, size = _write_temp(upload, settings.max_upload_bytes)
     photo_id = uuid.uuid4()
-    base_dir = _root() / "items" / str(item_id) / "photos"
+    base_dir = _root() / owner_type / str(owner_id) / "photos"
     original_path: Path | None = None
     thumbnail_path: Path | None = None
     try:

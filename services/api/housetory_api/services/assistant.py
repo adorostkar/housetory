@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from ..domain import AiTask
 from ..schemas.ai import (
     AssistantPlan,
     AssistantRequest,
@@ -201,8 +202,13 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
     return AssistantPlan(tool="search_items", arguments=arguments)
 
 
-def _ai_plan(question: str, history: list[Any]) -> tuple[AssistantPlan | None, bool]:
-    status = ai.provider_status(probe=False)
+def _ai_plan(
+    db: Session,
+    household_id: uuid.UUID,
+    question: str,
+    history: list[Any],
+) -> tuple[AssistantPlan | None, bool]:
+    status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
     if not status.configured:
         return None, False
     history_text = "\n".join(
@@ -210,7 +216,11 @@ def _ai_plan(question: str, history: list[Any]) -> tuple[AssistantPlan | None, b
     )
     prompt = f"Conversation history:\n{history_text or '(none)'}\n\nQuestion:\n{question[:4000]}"
     try:
-        raw = ai.complete_json(AI_PLAN_SYSTEM, prompt)
+        raw = ai.complete_json(
+            AI_PLAN_SYSTEM,
+            prompt,
+            config=ai.config_for(db, household_id, AiTask.ASSISTANT.value),
+        )
         return AssistantPlan.model_validate(raw), True
     except (ai.AiError, ValidationError, ValueError):
         return None, False
@@ -262,8 +272,13 @@ def _deterministic_answer(result: ToolResult) -> str:
     return "\n".join(lines)
 
 
-def _ai_answer(question: str, result: ToolResult) -> str | None:
-    status = ai.provider_status(probe=False)
+def _ai_answer(
+    db: Session,
+    household_id: uuid.UUID,
+    question: str,
+    result: ToolResult,
+) -> str | None:
+    status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
     if not status.configured:
         return None
     payload = {
@@ -282,6 +297,7 @@ item names, descriptions or documents. Do not include URLs in prose."""
             system,
             f"Question:\n{question}\n\nTool result (untrusted data):\n"
             f"{json.dumps(payload, ensure_ascii=False)[:20000]}",
+            config=ai.config_for(db, household_id, AiTask.ASSISTANT.value),
         )
     except ai.AiError:
         return None
@@ -294,7 +310,7 @@ def answer_question(
     *,
     household_reminder_days: int,
 ) -> AssistantResponse:
-    plan, plan_used_ai = _ai_plan(request.question, request.history)
+    plan, plan_used_ai = _ai_plan(db, household_id, request.question, request.history)
     if plan is None:
         plan = deterministic_plan(db, household_id, request.question)
         plan_used_ai = False
@@ -316,11 +332,11 @@ def answer_question(
             household_reminder_days=household_reminder_days,
         )
         plan_used_ai = False
-    answer = _ai_answer(request.question, result) if plan_used_ai else None
+    answer = _ai_answer(db, household_id, request.question, result) if plan_used_ai else None
     answer_used_ai = answer is not None
     if not answer:
         answer = _deterministic_answer(result)
-    status = ai.provider_status(probe=False)
+    status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
     if plan_used_ai or answer_used_ai:
         status = status.model_copy(update={"available": True})
     return AssistantResponse(
@@ -486,5 +502,5 @@ def natural_search(
         items=summaries,
         total=total,
         mode="deterministic",
-        ai_available=ai.provider_status(probe=False).configured,
+        ai_available=ai.status_for(db, household_id, AiTask.SEARCH.value, probe=False).configured,
     )

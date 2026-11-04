@@ -24,6 +24,7 @@ from ...schemas.items import (
     ItemList,
     ItemUpdate,
     PhotoList,
+    PhotoOrderRequest,
 )
 from ...services import items as item_service
 from ...services import storage
@@ -383,6 +384,31 @@ def set_primary_photo(
         photo.sort_order = index
     db.commit()
     return PhotoList(items=[photo_out(photo) for photo in reordered])
+
+
+@router.put("/items/{item_id}/photos/order", response_model=PhotoList)
+def reorder_photos(
+    item_id: uuid.UUID,
+    payload: PhotoOrderRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> PhotoList:
+    item = _get_item(db, auth.household.id, item_id)
+    active_photos = sorted(item.photos, key=lambda photo: (photo.sort_order, photo.created_at))
+    if set(payload.photo_ids) != {photo.id for photo in active_photos} or len(
+        payload.photo_ids
+    ) != len(active_photos):
+        raise ApiError(
+            422,
+            "invalid_photo_order",
+            "Reorder every photograph on this item exactly once.",
+        )
+    by_id = {photo.id: photo for photo in active_photos}
+    ordered = [by_id[photo_id] for photo_id in payload.photo_ids]
+    for index, photo in enumerate(ordered):
+        photo.sort_order = index
+    db.commit()
+    return PhotoList(items=[photo_out(photo) for photo in ordered])
 
 
 @router.delete("/photos/{photo_id}", status_code=204)

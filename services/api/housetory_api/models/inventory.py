@@ -59,6 +59,9 @@ class Room(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="room", cascade="all, delete-orphan"
     )
     items: Mapped[list["Item"]] = relationship(back_populates="room")
+    photos: Mapped[list["RoomPhoto"]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
 
 
 class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -89,6 +92,11 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_storage_locations_household_room", "household_id", "room_id"),
         Index("ix_storage_locations_household_container", "household_id", "is_container"),
+        Index(
+            "ix_storage_locations_household_legacy",
+            "household_id",
+            "legacy_identifier",
+        ),
         Index("ix_storage_locations_parent_id", "parent_id"),
     )
 
@@ -109,6 +117,8 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_container: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     container_type: Mapped[str | None] = mapped_column(String(20))
     identifier: Mapped[str | None] = mapped_column(String(32))
+    legacy_identifier: Mapped[str | None] = mapped_column(String(120))
+    aliases: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
     summary_short: Mapped[str | None] = mapped_column(Text)
     summary_detailed: Mapped[str | None] = mapped_column(Text)
     summary_headline: Mapped[str | None] = mapped_column(Text)
@@ -127,6 +137,9 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="parent", cascade="all, delete-orphan"
     )
     items: Mapped[list["Item"]] = relationship(back_populates="storage_location")
+    photos: Mapped[list["LocationPhoto"]] = relationship(
+        back_populates="location", cascade="all, delete-orphan"
+    )
 
 
 class LocationIdentifierCounter(Base):
@@ -392,6 +405,56 @@ class ItemPhoto(UUIDPrimaryKeyMixin, Base):
     )
 
     item: Mapped[Item] = relationship(back_populates="photos")
+
+
+class RoomPhoto(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "room_photos"
+    __table_args__ = (
+        CheckConstraint("byte_size > 0", name="byte_size_positive"),
+        Index("ix_room_photos_room_id", "room_id"),
+    )
+
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    thumbnail_key: Mapped[str | None] = mapped_column(String(500), unique=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    room: Mapped[Room] = relationship(back_populates="photos")
+
+
+class LocationPhoto(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "location_photos"
+    __table_args__ = (
+        CheckConstraint("byte_size > 0", name="byte_size_positive"),
+        Index("ix_location_photos_location_id", "location_id"),
+    )
+
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("storage_locations.id", ondelete="CASCADE"), nullable=False
+    )
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    thumbnail_key: Mapped[str | None] = mapped_column(String(500), unique=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    location: Mapped[StorageLocation] = relationship(back_populates="photos")
 
 
 class Document(UUIDPrimaryKeyMixin, Base):

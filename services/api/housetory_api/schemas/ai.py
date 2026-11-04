@@ -24,6 +24,11 @@ AssistantTool = Literal[
 class AiStatus(BaseModel):
     provider: str
     mode: Literal["disabled", "local", "cloud"]
+    source: Literal["disabled", "environment", "database"] = "disabled"
+    task: str = "assistant"
+    provider_id: uuid.UUID | None = None
+    provider_label: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
     model: str | None
     configured: bool
     available: bool
@@ -72,6 +77,7 @@ class AiRecognitionSuggestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: trimmed(1, 200)
+    quantity: int = Field(default=1, ge=0, le=1_000_000)
     description: Description | None = None
     category: trimmed(1, 80) | None = None
     brand: trimmed(1, 120) | None = None
@@ -79,14 +85,20 @@ class AiRecognitionSuggestion(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
     notes: Description | None = None
     confidence: int | None = Field(default=None, ge=0, le=100)
+    source: Literal["vision", "ocr"] = "vision"
     field_sources: dict[str, str] = Field(default_factory=dict)
 
 
 class AiRecognitionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    suggestions: list[AiRecognitionSuggestion] = Field(max_length=5)
+    suggestions: list[AiRecognitionSuggestion] = Field(max_length=30)
     warnings: list[str] = Field(default_factory=list)
+
+
+class AiRecognitionDuplicateGroup(BaseModel):
+    suggestion_index: int
+    candidates: list[Any] = Field(default_factory=list)
 
 
 class AiRecognitionOut(ORMModel):
@@ -102,6 +114,13 @@ class AiRecognitionOut(ORMModel):
     error: str | None
     model_provider: str | None
     model_name: str | None
+    room_id: uuid.UUID | None = None
+    location_id: uuid.UUID | None = None
+    location_label: str | None = None
+    suggestion_duplicates: list[AiRecognitionDuplicateGroup] = Field(default_factory=list)
+    processing_mode: Literal["deterministic", "local", "cloud", "unavailable"] = "unavailable"
+    applied_at: datetime | None = None
+    applied_items: list[Any] = Field(default_factory=list)
     created_at: datetime
     completed_at: datetime | None
     image_url: str
@@ -195,3 +214,54 @@ class DocumentRelationSuggestion(BaseModel):
 class DocumentRelations(BaseModel):
     items: list[DocumentRelationSuggestion]
     suggested_item_ids: list[uuid.UUID]
+
+
+class AiRecognitionApplyEntry(BaseModel):
+    suggestion_index: int = Field(ge=0, le=29)
+    action: Literal["create", "update", "reject"] = "create"
+    proposal: AiRecognitionSuggestion | None = None
+    item_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
+    room_id: uuid.UUID | None = None
+    location_id: uuid.UUID | None = None
+    allow_duplicate: bool = False
+
+
+class AiRecognitionApplyRequest(BaseModel):
+    entries: list[AiRecognitionApplyEntry] = Field(min_length=1, max_length=30)
+
+
+class AiRecognitionApplyResult(BaseModel):
+    recognition: AiRecognitionOut
+    created: int
+    updated: int
+    rejected: int
+    skipped: int
+    failed: int
+    failures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AiHierarchyNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=200)
+    name: trimmed(1, 200)
+    entity_type: Literal["room", "container", "location"]
+    legacy_identifier: trimmed(1, 120) | None = None
+    container_type: trimmed(1, 20) | None = None
+
+
+class AiHierarchyItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=200)
+    name: trimmed(1, 200)
+    quantity: int = Field(default=1, ge=0, le=1_000_000)
+
+
+class AiHierarchyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[AiHierarchyNode] = Field(default_factory=list, max_length=200)
+    items: list[AiHierarchyItem] = Field(default_factory=list, max_length=2000)
+    warnings: list[str] = Field(default_factory=list)

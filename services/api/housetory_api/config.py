@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     import_max_total_mb: int = Field(default=50, ge=1, le=500)
     import_max_file_mb: int = Field(default=10, ge=1, le=100)
 
+    ai_credential_key: str = ""
+    ai_credential_key_previous: str = ""
     ai_provider: Literal["disabled", "ollama", "openai_compatible"] = "disabled"
     ai_model: str = ""
     ai_base_url: str = "http://host.docker.internal:11434"
@@ -73,6 +75,10 @@ class Settings(BaseSettings):
                 "trusted phone access outside your private network."
             )
         return None
+
+    @property
+    def ai_credential_key_configured(self) -> bool:
+        return bool(self.ai_credential_key)
 
     @property
     def ai_effective_model(self) -> str:
