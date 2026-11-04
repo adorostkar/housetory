@@ -1,13 +1,40 @@
 # Phase 6 — AI Intelligence, Mobile Camera & Smart Import
 
-**Status:** implemented and verified end-to-end on disposable Compose stacks over
-both HTTP and direct HTTPS. Real cloud credentials, a real local vision model, a
-physical iPhone camera and a physical printer were not available; those items are
-explicitly marked as unverified rather than implied.
+**Status:** Phase 6 corrections implemented and verified end-to-end on a fresh
+disposable Compose stack. The unchanged actual `Inventory.md` passes upload,
+paste, review, approved application and re-import. Real cloud credentials, a real
+local vision model, a physical iPhone camera and a physical printer were not
+available; those items are explicitly marked as unverified rather than implied.
 
-The live household on port 8080 was not reset. Verification used separate
-projects, volumes and ports, plus a loopback-only self-signed certificate for the
-TLS rehearsal.
+The live household on port 8080 was not reset or redeployed during this correction
+task. Verification used a separate project, separate volume names and port 8092.
+
+## Correction pass — root causes and fixes
+
+1. **Actual Inventory.md fell back to flat extraction.** The old parser skipped
+   the entire `## Box list (template)` section because it matched “template”, so
+   it discarded the real STO-01…STO-06 records. The rewritten test fixture also
+   used explicit room headings that the real note does not have. The parser now
+   reads the Index as reference metadata, distinguishes a box-list section
+   containing real records from empty example containers, derives
+   Storage → Storage room 2 from the index plus container headings, parses
+   parenthesized quantities, preserves evidence in names/notes, and prunes only
+   genuinely empty nodes.
+2. **AI normalization accepted fabricated facts.** Existing-key-only validation
+   was insufficient. Names, quantities, identifiers, entity types and container
+   types are now checked against the deterministic source excerpt; unsupported
+   edits are rejected, original values are retained, and reviewable warnings are
+   stored. Prompt instructions are not treated as validation.
+3. **Ollama was always classified as local.** Endpoint scope is now derived from
+   the host: loopback/container-host is local, LAN/Tailscale/private DNS is
+   private-network, and other hosts are remote. Private-network and remote
+   endpoints require consent; redirects are refused and TLS verification remains
+   enabled.
+4. **Remaining gaps closed.** Recognition suggestions have explicit merge/split
+   controls with idempotent entry keys. Natural-language search and document OCR
+   now use their selected task models with validated, deterministic fallback. The
+   iPhone settings guidance names trusted HTTPS, LAN and optional Tailscale
+   rather than presenting Tailscale as mandatory.
 
 ## 1. Implemented features
 
@@ -15,7 +42,8 @@ TLS rehearsal.
 
 - Owner-only **Settings → AI providers** page.
 - Add, edit, enable, disable and remove OpenAI, Anthropic Claude, Google Gemini,
-  xAI Grok, OpenRouter and local Ollama providers.
+  xAI Grok, OpenRouter and Ollama providers with local, private-network or remote
+  endpoints.
 - API key or local endpoint, default model, connection test and model discovery
   against the provider's official API.
 - Separate provider/model defaults for assistant, smart imports, document
@@ -23,8 +51,10 @@ TLS rehearsal.
   headlines.
 - Capability heuristics for text, vision, structured JSON and tool calling, with
   understandable errors when a model cannot perform the selected task.
-- Provider-level cloud consent controls that are separate from saving an API key.
-  Local Ollama remains local. AI can be disabled per task.
+- Provider-level remote-processing consent controls that are separate from saving
+  an API key. Loopback/container-host Ollama remains local; LAN, Tailscale and
+  external Ollama endpoints are private-network/remote and require consent. AI
+  can be disabled per task.
 - Task-aware status endpoint and processing-mode labels in the UI.
 - Environment-based AI remains a bootstrap/fallback path when no database
   provider exists, preserving Phase 4 behavior.
@@ -69,6 +99,8 @@ TLS rehearsal.
   field provenance.
 - Suggestions are editable; users can accept/reject, create new records, update
   an existing item, allow an intentional duplicate or choose another destination.
+- Suggestions can be merged with the next suggestion or split into separate
+  records. Split records use stable entry keys so retrying approval is idempotent.
 - Potential duplicates are shown with scores and reasons. Strong matches are
   blocked unless the user explicitly allows a new record or chooses update.
 - Apply is explicit and idempotent, uses savepoints, reports partial failures,
@@ -87,9 +119,16 @@ TLS rehearsal.
 - Recognizes rooms, fixed locations, movable and nested containers, items,
   quantities and legacy identifiers such as `STO-01`, `STO-CABLE-01`,
   `APT-KIDS-01` and `CAR-TOOLS-01`.
-- Skips index/contents pages, instructions, templates and empty example boxes.
-- Optional LLM normalization can edit only supplied keys; it cannot invent keys,
-  items, quantities, relationships, serials, prices or purchases.
+- Parses the actual note’s Index as metadata and imports the real records inside
+  a “Box list (template)” section, while skipping instructions, empty example
+  containers and index duplicates.
+- Extracts parenthesized quantities, preserves model numbers/dimensions/ages in
+  names or notes, combines “Ethernet cables (7) + long ethernet cable (1)” into
+  eight while retaining both source quantities, and keeps nested painting notes as
+  context for the five paintings rather than creating another possession.
+- Optional LLM normalization may edit only supplied keys, and every proposed name,
+  quantity, identifier, entity type and container type is validated against the
+  deterministic source evidence. Unsupported edits are rejected and reported.
 - Tree review supports expand/collapse, inline name/quantity/type/parent/legacy-ID
   editing, source excerpts, duplicate warnings, individual selection and branch
   approval.
@@ -127,7 +166,11 @@ TLS rehearsal.
   and require explicit user approval. AI has no SQL, shell, write or tool-call
   path into inventory.
 - Hierarchy parsing is deterministic-first and conservative; AI is an optional
-  normalizer over validated keys, not an extractor that can add records.
+  normalizer over validated keys, not an extractor that can add records. Every AI
+  edit is checked against source evidence before it can reach review.
+- Ollama endpoint scope is derived from the URL host rather than provider type.
+  Provider requests do not follow redirects, preventing a local endpoint from
+  silently forwarding content to an unconsented remote host.
 - TLS is an opt-in Compose overlay. The HTTP deployment remains valid for
   localhost, private networks and Tailscale Serve.
 
@@ -140,7 +183,7 @@ Append-only Alembic revision:
 Adds:
 
 - `ai_providers` with household/provider uniqueness, encrypted key, key version,
-  enabled state and cloud consent.
+  enabled state and remote-processing consent.
 - `ai_task_settings` keyed by household and task.
 - `room_photos` and `location_photos`.
 - `storage_locations.legacy_identifier` and `aliases`, with a lookup index.
@@ -187,6 +230,14 @@ assigning a non-vision model to the vision task. Capability detection is not
 presented as a substitute for a real provider test; connection and model
 availability are checked through the provider's API.
 
+The search task is connected to natural-language filter interpretation with
+allowed room/location/category/tag names and deterministic fallback. The document
+task is connected to OCR metadata normalization; merchant/product/brand/model/
+invoice/serial changes must appear in OCR text, while date/total/currency changes
+are rejected unless unchanged. Unsupported edits remain deterministic and are
+reported. The UI shows whether processing was deterministic, local, private or
+remote.
+
 ## 7. Camera capture behavior
 
 Verified in desktop Chromium with a file-input capture path: camera action,
@@ -200,45 +251,58 @@ Controlled local Ollama response returned two suggestions from one image:
 `Camera body` and `USB-C cables ×3`. The UI showed local processing, confidence,
 editable fields, destination defaulted to the container, and duplicate review.
 Approval created two records in the container with the correct quantity. A retry
-did not create duplicates. The item detail confirmed the scan image was not
-automatically attached as an item cover. The latest E2E run used unique names per
+did not create duplicates. Split and merge controls were exercised: two entries
+for the same source suggestion used stable keys and were idempotent, while merged
+suggestions produced one reviewed record. The item detail confirmed the scan image
+was not automatically attached as an item cover. The E2E run used unique names per
 run to avoid collisions with prior disposable data.
 
 This validates the adapter/schema/review/apply path, **not** real model accuracy.
 No real vision model was installed or benchmarked.
 
-## 9. Hierarchical import results
+## 9. Hierarchical import results for the actual Inventory.md
 
-The mandatory fixture produced:
+The unchanged source (`sha256 9443d010bc4ac62d2d03ef13ba0183c4872a4ee6f075852c1895db97144292d4`)
+produced:
 
-- 14 room/container nodes.
-- 33 item entries.
-- Storage → Storage room 2 → `STO-01`…`STO-06`.
-- `STO-03` contents including keyboards ×2, toner ×3, power cables ×2, PC power
-  cables ×4, three-way adapters ×3, display cables ×4, Ethernet cables ×7 with
-  the “plus one long cable” note, VGA ×1, adapter ×1, USB-C→HDMI ×2, HDMI ×1,
-  MagSafe 2 ×1 and case fans ×2.
-- `STO-06` flagged as an ambiguous loose-items group at confidence 45.
-- Index and template examples excluded; “Empty boxes” appears once, not as a
-  duplicate from the index.
-- `APT-KIDS-01`, `APT-TOOLS-01`, `CAR-TOOLS-01` and `CAR-EMERGENCY-01` preserved
-  as aliases/legacy identifiers.
-- Applying the tree created correct nested rooms and containers; item locations
-  and quantities matched the source.
-- Re-importing the same fixture showed duplicate warnings; default decisions
-  skipped the existing items, and the item total remained unchanged. Explicit
-  override is available but not automatic.
+- 8 nodes: Storage, Storage room 2 and STO-01…STO-06.
+- 52 item entries.
+- STO-01 ×2, STO-02 ×4, STO-03 ×16, STO-04 ×5, STO-05 ×6 and STO-06 ×19.
+- STO-06 flagged as an ambiguous loose-items group at confidence 45.
+- Keyboards (incl. Dell keyboard) ×2; toner ×3; MagSafe 2 cable; Compact 5V
+  adapter; PS5 empty box; Long wood pieces (~1m) ×10; Persian carpet (6 m²);
+  Child car seat (up to 4 years).
+- Ethernet cables (7) + long ethernet cable (1) → one reviewed item with quantity
+  8 and both source quantities retained in notes.
+- Wall-hanging paintings (5 total) (3 + 2) → quantity 5, with the nested
+  “Includes 2 wall-hanging paintings…” note attached as context rather than a new
+  item.
+- The populated `## Box list (template)` records were imported; empty
+  STO-KITCH-01, STO-CABLE-01, STO-TOOLS-01, APT-KIDS-01 and CAR-TOOLS-01 examples
+  were skipped.
+- No Apartment or Car rooms/containers were invented; no index/legend/instruction
+  content became an item; no purchases were created.
+- Legacy labels were preserved as aliases while containers received permanent
+  `BOX-###` identifiers.
 
-The optional AI normalization path was exercised with controlled outputs; a real
-model’s hierarchy accuracy was not benchmarked.
+Both upload and paste paths produced the same 8/52 hierarchy with AI disabled.
+Approved application persisted `Storage room 2` under `Storage`, all six
+containers under that room, and item quantities/locations correctly. Replaying
+the same batch skipped all 60 entries without new items. Re-importing the same
+source flagged duplicates; default decisions skipped the existing items, and an
+explicit duplicate attempt was blocked.
 
-## 10. Markdown regression fixture verification
+## 10. Markdown regression verification
 
-Backend test `tests/test_hierarchy_imports.py` asserts the exact node/item counts,
-parent links, legacy IDs, ambiguous confidence, quantity parsing, notes, source
-excerpts, index/template exclusion, apply order, idempotency and duplicate guard.
-Playwright repeats the import/review/apply flow through the real UI and API on a
-fresh disposable household.
+`tests/fixtures/home_inventory_actual.md` is a byte-for-byte copy of the real
+source. Backend tests assert the exact 8-node/52-item structure, quantities,
+preserved numbers, nested context, exclusions, parent relationships, approved
+apply, partial-approval dependency, duplicate guard, retry idempotency and
+unsupported-AI-edit rejection. Playwright performs upload, tree review, approval
+and re-import through the real UI/API on a fresh disposable household.
+
+The earlier rewritten fixture remains as a generic nested-room regression test,
+but it is no longer the acceptance fixture.
 
 ## 11. Phase 5 integration
 
@@ -265,14 +329,15 @@ fresh disposable household.
 
 ## 13. Test results
 
-- Backend: **156 pytest tests** passed against PostgreSQL with the full migration
+- Backend: **167 pytest tests** passed against PostgreSQL with the full migration
   chain and `alembic check` clean.
-- Frontend: **34 Vitest tests** passed; strict TypeScript and production build
+- Frontend: **36 Vitest tests** passed; strict TypeScript and production build
   passed.
-- Playwright: **8 workflows** passed over HTTP and again over direct HTTPS on a
-  fresh disposable stack. Coverage includes Phase 5 regressions, provider
+- Playwright: **8 workflows** passed on a fresh disposable stack at a separate
+  project, volume names and port. Coverage includes Phase 5 regressions, provider
   configuration with a mocked local Ollama service, camera upload, multi-object
-  review/approval, hierarchy import, duplicate prevention and PWA routing.
+  review/split/merge/approval, the actual Inventory.md hierarchy, duplicate
+  prevention and PWA routing.
 - Ruff checks passed for API and tests.
 
 ## 14. Security scans
@@ -292,7 +357,8 @@ Mocked/test-controlled:
 
 - Ollama model discovery and chat responses.
 - Multi-object suggestion content.
-- Optional hierarchy normalization output.
+- Optional hierarchy normalization output, including fabricated-edit rejection.
+- Search and document AI normalization responses.
 - AI provider connection test via a local Node HTTP service.
 
 Real:
@@ -307,6 +373,7 @@ Real:
 Not real:
 
 - Cloud provider account credentials, rate limits or model quality.
+- Real semantic quality of AI search/document/hierarchy normalization.
 - A real local vision model's recognition accuracy.
 - A physical iPhone camera, installed-home-screen PWA or printer.
 
@@ -330,9 +397,15 @@ container and label views. Real Safari/iPhone hardware was unavailable.
 ### Troubleshooting
 
 - **Provider test fails:** confirm the base URL is an absolute `http(s)` URL,
-  the model name exactly matches the provider's model list, the API key is
-  current, and cloud consent is enabled for cloud providers. Local Ollama must be
-  running and reachable from the API/worker container.
+  the model name exactly matches the provider's model list, and the API key is
+  current. Loopback/container-host Ollama needs no remote consent; LAN, Tailscale
+  and external endpoints do. The API/worker must be able to reach the endpoint.
+- **An AI-proposed item edit disappeared:** it did not match the source evidence.
+  The deterministic value is retained and the import warnings list the rejected
+  edit for review.
+- **Ollama is shown as private-network or remote:** that is intentional when the
+  host is not loopback/container-host. Enable consent or move the endpoint to the
+  server/Docker host.
 - **Saved credential cannot be decrypted:** restore the matching
   `AI_CREDENTIAL_KEY`, or set it as `AI_CREDENTIAL_KEY_PREVIOUS` together with a
   new key, restart API/worker, rotate, verify, then remove the previous key.
@@ -362,8 +435,6 @@ container and label views. Real Safari/iPhone hardware was unavailable.
 - No real iPhone camera/PWA test; secure-context and permission behavior must be
   confirmed on the device.
 - No physical printer or QR scan test.
-- Suggestion merge/split is not a separate control; users can reject, edit,
-  re-quantify and route suggestions individually.
 - Hierarchy AI normalization is intentionally conservative; ambiguous headings
   may need manual review.
 - An operator who loses `AI_CREDENTIAL_KEY` must replace saved provider keys.
@@ -378,6 +449,5 @@ container and label views. Real Safari/iPhone hardware was unavailable.
 ## 18. Recommended Phase 7 scope
 
 Tauri 2 macOS desktop, followed by real-model benchmarks, physical iPhone
-camera/PWA validation, optional suggestion merge/split, accessibility automation
-and visual regression testing. Advanced organisation (custom fields, taxonomy UI
+camera/PWA validation, accessibility automation and visual regression testing. Advanced organisation (custom fields, taxonomy UI
 and multi-user sharing) should follow.

@@ -237,23 +237,33 @@ the product-facing numbering below follows the delivery brief.
 ## Phase 6 — AI Intelligence, Mobile Camera & Smart Import ✅
 
 - [x] Owner-only AI provider settings for OpenAI, Anthropic Claude, Gemini,
-      xAI Grok, OpenRouter and local Ollama.
+      xAI Grok, OpenRouter and Ollama with local, private-network or remote
+      endpoint classification.
 - [x] Fernet-encrypted API credentials with environment-held key, rotation,
       fail-closed decryption and no secret serialization/logging.
 - [x] Separate task models for assistant, imports, documents, search, vision and
       label headlines, capability warnings and connection/model discovery.
-- [x] Explicit per-provider cloud consent, local/cloud distinction and
-      task-aware AI status/privacy notes.
+- [x] Explicit per-provider remote-processing consent, local/private/remote
+      endpoint scope, redirect refusal and task-aware AI status/privacy notes.
 - [x] Direct camera and library photo actions for items, rooms and storage
       locations, with preview, retake, cancel, progress and secure processing.
 - [x] Cover selection, explicit photo ordering, deletion and full-screen viewing.
 - [x] Multi-object AI Scan Items with editable suggestions, quantities,
       duplicate review, destinations, source provenance and approved bulk apply.
+- [x] Explicit merge/split controls for recognition suggestions, with stable
+      entry keys and idempotent split retry.
 - [x] Idempotent recognition application with existing-item updates, partial
       failure reporting and household isolation.
 - [x] Conservative hierarchical import parser and tree review: rooms, containers,
       nested locations, items, quantities, legacy identifiers, source references,
       branch approval, parent/entity editing and duplicate prevention.
+- [x] The unchanged actual `Inventory.md` is a checked-in acceptance fixture;
+      upload and paste both work without AI, including parenthesized quantities,
+      nested context notes, a populated “Box list (template)” and excluded empty
+      examples.
+- [x] AI hierarchy/document/search edits are validated against source evidence;
+      unsupported names, quantities, identifiers and entity changes are rejected
+      with reviewable warnings.
 - [x] Index, instruction and empty-template content excluded from inventory.
 - [x] Obsidian ZIP export support through the ordinary Upload file action; the
       dedicated vault tab was removed.
@@ -262,8 +272,8 @@ the product-facing numbering below follows the delivery brief.
 - [x] Tailscale remains optional; LAN and public trusted-certificate modes are
       documented.
 - [x] Backend, frontend and Playwright tests for providers, credentials,
-      capabilities, consent, camera, recognition, hierarchy, duplicates and
-      HTTPS/PWA routing.
+      capabilities, consent, endpoint scope, camera, recognition split/merge,
+      hierarchy, duplicates, actual Inventory.md and HTTPS/PWA routing.
 - [ ] Real cloud-provider credentials/model benchmark and real iPhone camera/PWA
       verification require the user's environment and hardware.
 
@@ -439,6 +449,5 @@ Do not start until explicitly approved. **Phase 7 — Tauri 2 macOS desktop** is
 strongest next milestone now that the web application, physical containers,
 imports, AI providers and camera workflows are stable. Further work should also
 include a real Ollama/cloud-model benchmark, real iPhone PWA/camera verification,
-optional suggestion merge/split, accessibility automation and visual-regression
-tests. Advanced organisation (custom fields, taxonomy management and multi-user
+accessibility automation and visual-regression tests. Advanced organisation (custom fields, taxonomy management and multi-user
 sharing) should follow afterwards.

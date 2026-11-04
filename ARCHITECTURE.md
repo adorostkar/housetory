@@ -284,10 +284,13 @@ Key decisions:
   derived WebP thumbnail. Up to 20 per item. Room and storage-location photos use
   the same validated storage pipeline and authenticated file routes.
 - **AI providers** are household-scoped rows containing provider type, base URL,
-  default model, encrypted API key, key version, enabled state and separate cloud
-  consent. `ai_task_settings` assigns a provider/model to assistant, imports,
-  documents, search, vision and label tasks. Credentials are Fernet-encrypted with
-  an environment key held outside PostgreSQL; no secret is serialized to clients.
+  default model, encrypted API key, key version, enabled state and separate
+  remote-processing consent. `ai_task_settings` assigns a provider/model to
+  assistant, imports, documents, search, vision and label tasks. Ollama endpoints
+  are scoped as local, private-network or remote from their host; only local
+  endpoints are described as staying on the server. Credentials are
+  Fernet-encrypted with an environment key held outside PostgreSQL; no secret is
+  serialized to clients.
 - **Documents** are household-owned files with type, merchant, document date,
   notes, extracted text, JSONB extraction metadata, OCR status/error/confidence/
   processed time, and original/normalized storage keys. They can be linked to
@@ -491,7 +494,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 156 pytest tests against a real PostgreSQL database. The test session
+- Backend: 167 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -506,7 +509,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   retry safety, source traceability, provider adapters, encrypted credentials and
   rotation, capability validation, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, hierarchical parsing/apply,
-  duplicate prevention, legacy identifiers, AI provider contracts, grounded
+  duplicate prevention, legacy identifiers, the unchanged actual Inventory.md
+  upload/paste/apply/re-import path, AI-edit validation against source evidence,
+  endpoint scope/consent/redirect safety, AI provider contracts, grounded
   tools, smart search, recognition fallback, document suggestions,
   prompt-injection resistance, upload content validation, malformed PDF/images,
   EXIF stripping, traversal filenames, upload size and permissions, archive
@@ -514,17 +519,17 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 34 Vitest tests + Testing Library, including provider settings,
-  camera preview/retake/cancel, multi-object review and bulk approval, hierarchy
-  branch approval/type-parent editing, processing-mode text, hierarchy utilities,
-  location paths, nested room cards, photo lightbox, document cards, warranty
-  labels/status text, container dialogs and nested-container resolution.
-  TypeScript is checked in strict mode; the production build is part of
-  verification.
+- Frontend: 36 Vitest tests + Testing Library, including provider settings and
+  remote-Ollama consent, camera preview/retake/cancel, multi-object review,
+  split/merge and bulk approval, hierarchy branch approval/type-parent editing,
+  processing-mode text, hierarchy utilities, location paths, nested room cards,
+  photo lightbox, document cards, warranty labels/status text, container dialogs
+  and nested-container resolution. TypeScript is checked in strict mode; the
+  production build is part of verification.
 - Browser: 8 checked-in Playwright workflows cover the Phase 5 container flows plus
-  mocked-Ollama provider configuration, camera upload, multi-object approval,
-  hierarchy import/duplicate prevention and PWA/deep-link routing over HTTP and
-  direct HTTPS.
+  mocked-Ollama provider configuration, camera upload, multi-object approval, the
+  actual Inventory.md hierarchy import/duplicate prevention and PWA/deep-link
+  routing over HTTP and direct HTTPS.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.

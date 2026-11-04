@@ -80,14 +80,16 @@ Tailscale is optional.
   containers, legacy identifiers such as `STO-01` and their contents. Index
   pages and empty templates are skipped, and the tree is reviewed before apply.
 - Provider management for OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
-  OpenRouter and local Ollama through **Settings → AI providers**. API keys are
-  encrypted at rest with a key held outside PostgreSQL.
+  OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
+  **Settings → AI providers**. API keys are encrypted at rest with a key held
+  outside PostgreSQL.
 - Separate task models for assistant, imports, documents, search, vision and
-  label headlines, with capability warnings and explicit cloud-data consent.
+  label headlines, with capability warnings and explicit remote-processing
+  consent. Local, private-network and remote endpoints are labelled separately.
 - Optional direct HTTPS with nginx, or Tailscale Serve as an optional private
   access layer. PWA and camera features work in secure contexts.
 - Document-to-item relationship suggestions that require explicit linking.
-- Optional local Ollama or consented cloud inference. AI is disabled by default
+- Optional local, private-network or consented remote AI inference. AI is disabled by default
   and ordinary Housetory functionality does not depend on it.
 - PostgreSQL-backed background worker for maintenance, OCR, import and AI jobs.
 - Docker Compose deployment with health checks, migrations, backups, optional
@@ -99,20 +101,22 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 156 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 167 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
   import/duplicate/location review, encrypted provider credentials and rotation,
   provider adapters, task capabilities, consent enforcement, entity photos,
-  multi-object recognition/apply/idempotency, hierarchical imports and exhaustive
+  multi-object recognition/apply/idempotency, split/merge idempotency, the
+  unchanged actual Inventory.md upload/paste path, AI-edit validation, endpoint
+  classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 34 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 36 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 8 checked-in Playwright workflows pass both over HTTP and direct HTTPS on
   disposable Compose stacks, covering the Phase 5 container/label/QR flows plus
   provider configuration against a mocked local Ollama service, camera upload,
-  multi-object review and approved creation, the hierarchy fixture, duplicate
-  prevention and PWA/service-worker/deep-link routing.
+  multi-object review/split/merge and approved creation, the actual Inventory.md
+  hierarchy, duplicate prevention and PWA/service-worker/deep-link routing.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -361,12 +365,16 @@ Ordinary provider setup happens in the application, not `.env`. Sign in as the
 household owner and open **Settings → AI providers**.
 
 1. Add a provider: OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
-   OpenRouter or local Ollama.
+   OpenRouter or Ollama (local, private-network or external).
 2. Enter the API key (cloud) or local endpoint (Ollama), choose a default model,
    and test the connection. Model discovery uses the provider's official models
    endpoint where supported.
-3. Enable cloud data consent separately for each cloud provider. Saving an API
-   key does **not** authorize sending household data.
+3. Enable remote-processing consent separately for each cloud or non-local
+   endpoint. Saving an API key does **not** authorize sending household data.
+   Ollama on loopback/`host.docker.internal`/a Compose service name is local; LAN,
+   Tailscale and external Ollama endpoints are private-network/remote and require
+   consent. TLS certificate verification is never disabled and redirects are not
+   followed.
 4. Assign a provider and model to assistant, smart imports, document
    interpretation, natural-language search, image recognition and optional label
    headlines. Vision tasks reject models that do not advertise vision capability.
@@ -426,9 +434,14 @@ a recognizable room/container structure, Housetory builds a review tree instead
 of flat items. Expand branches, edit names, quantities, entity types, parents and
 legacy identifiers, review duplicates and source text, then approve individual
 entries, branches or the whole tree. Rooms and containers are created before their
-contents. Index pages, instructions and empty templates are skipped. Legacy
+contents. Index pages, instructions and empty example containers are skipped;
+a “Box list (template)” section that contains real populated records is still
+imported. Parenthesized quantities, model numbers, dimensions and ages are
+preserved, while nested notes remain context for their parent item. Legacy
 identifiers such as `STO-01`, `APT-KIDS-01` and `CAR-TOOLS-01` are preserved as
-aliases, while Phase 5 permanent identifiers remain authoritative.
+aliases, while Phase 5 permanent identifiers remain authoritative. The checked-in
+acceptance fixture is a byte-for-byte copy of the real `Inventory.md`; tests
+verify both Upload file and Paste notes without AI.
 
 ## Data, backups and restore
 

@@ -613,9 +613,12 @@ direct nginx TLS.
   from the deployment environment. They are never returned to clients or logged.
   A missing/wrong key fails closed. `AI_CREDENTIAL_KEY_PREVIOUS` supports
   rotation; database backups do not include the key.
-- Cloud providers require consent separate from API-key configuration. Local
-  Ollama remains local. All provider calls originate in the API/worker; the
-  browser never calls a provider directly. Provider adapters use official APIs
+- Remote providers require consent separate from API-key configuration. Ollama
+  endpoint scope is derived from the host: loopback/container-host is local; LAN,
+  Tailscale and private DNS are private-network; external hosts are remote.
+  Private-network and remote endpoints require explicit consent. Redirects are
+  not followed, and TLS certificate verification is not weakened. All provider
+  calls originate in the API/worker; the browser never calls a provider directly. Provider adapters use official APIs
   only, with strict validated JSON and no SQL/shell/write tools.
 - `compose.tls.yaml` adds direct TLS 1.2/1.3 termination in nginx, HSTS, an HTTP
   redirect (except health), secure cookies and the existing security headers.
@@ -629,8 +632,9 @@ direct nginx TLS.
 - Fresh migration `c1a7e5d9f320` passes `alembic upgrade head` and `alembic check`.
 - Final dependency/image checks: production `pip-audit` clean, `npm audit` 0
   vulnerabilities, Trivy HIGH/CRITICAL 0 across API, worker, web and database
-  images (after `cryptography` 50.0.2). Backend tests: 156. Frontend: 34.
-  Playwright: 8 over HTTP and 8 over direct HTTPS.
+  images (after `cryptography` 50.0.2). Backend tests: 167. Frontend: 36.
+  Playwright: 8 over HTTP and 8 over direct HTTPS, including the unchanged actual
+  Inventory.md acceptance path.
 - Residual risk: real cloud/local-model behavior, rate-limit handling and model
   accuracy were not benchmarked; a real iPhone camera/PWA and physical printer
   were unavailable. The self-signed TLS rehearsal required a test-only browser
