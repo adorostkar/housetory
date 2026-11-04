@@ -515,7 +515,7 @@ household model or renumbering earlier phases.
       read-only states.
 - [x] Browser tests for account/member separation, recovery messaging, invitation
       forms and existing inventory flows.
-- [ ] Run all repository checks and deploy locally after backup/rollback
+- [x] Run all repository checks and deploy locally after backup/rollback
       recording; the remote server is explicitly out of scope.
 
 ## Recommended next phase
