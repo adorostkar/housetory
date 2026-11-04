@@ -87,12 +87,48 @@ the product-facing numbering below follows the delivery brief.
 - [x] Desktop and iPhone browser walkthrough with zero console/network errors.
 - [x] Walkthrough documentation and screenshots in `docs/PHASE_2_WALKTHROUGH.md`.
 
+## Phase 3 — Documents, Receipts & Ownership ✅
+
+- [x] Append-only migration for document metadata/OCR/originals, shared purchases,
+      warranty duration/reminders/documents, household reminder window and item
+      current values.
+- [x] Dedicated Documents library with search, type/merchant/date filters,
+      multiple-item association, metadata editing, authenticated downloads,
+      original-file downloads and confirmed deletion.
+- [x] Preserve exact original uploads alongside normalized safe downloads;
+      include both in backups and restore validation.
+- [x] CPU-only local OCR using Tesseract + Poppler in the worker, with embedded
+      PDF text read first and no API blocking.
+- [x] Durable `documents.ocr` jobs with queued/processing/succeeded/failed states,
+      persisted errors, confidence and retry.
+- [x] Review screen prefilled from OCR; inventory changes only after explicit
+      confirmation.
+- [x] Shared purchase records with date, price, currency, merchant, order number,
+      receipt document and notes; one purchase can cover multiple items.
+- [x] Purchase management page and item purchase editing without duplicated
+      purchase records.
+- [x] Warranty provider, start, duration, calculated expiry, certificate,
+      coverage notes, per-warranty reminder override and computed status.
+- [x] Configurable household warranty reminder window in Settings.
+- [x] Warranty dashboard sections for expiring soon, active and expired, plus a
+      dedicated warranty list.
+- [x] Ownership overview: purchase value, estimated current value, category/room
+      breakdowns, most valuable items and missing-purchase items.
+- [x] Strict multi-currency separation with no implicit conversion.
+- [x] CSV exports for documents, purchases, warranties and inventory.
+- [x] Backend tests for uploads, originals, OCR parsing/retries/application,
+      permissions, cross-household isolation, shared purchases, warranties,
+      currencies, exports and backup/restore paths.
+- [x] Desktop and iPhone walkthrough with real Compose OCR and zero console/
+      network errors, documented in `docs/PHASE_3_WALKTHROUGH.md`.
+
 ## Supporting platform — Background processing ✅
 
 - [x] PostgreSQL queue with `FOR UPDATE SKIP LOCKED`, retries/backoff, stale job
       recovery, heartbeat health check.
 - [x] Worker container, scheduled session cleanup and finished-job pruning.
-- [x] Queue mechanics tests.
+- [x] Document OCR handler, local Tesseract/Poppler runtime and retry behavior.
+- [x] Queue mechanics and OCR failure/retry tests.
 
 ## Supporting platform — Web application shell ✅
 
@@ -133,7 +169,7 @@ the product-facing numbering below follows the delivery brief.
       their tailnet; cannot be done from this repository).
 - [ ] Automated off-site backup scheduling (scripts are ready for cron/systemd).
 
-## Phase 3 — Desktop (next, not started)
+## Phase 4 — Desktop (next, not started)
 
 - [ ] Scaffold Tauri 2 in `apps/desktop` using the production web build.
 - [ ] macOS window chrome, menu bar, keyboard commands.
@@ -141,7 +177,7 @@ the product-facing numbering below follows the delivery brief.
 - [ ] Code signing/notarization and update strategy.
 - [ ] Desktop-specific tests.
 
-## Phase 4 — Product depth (next)
+## Phase 5 — Product depth (next)
 
 ### Custom fields
 - [ ] CRUD endpoints and validation for custom field definitions and values.
@@ -160,15 +196,19 @@ the product-facing numbering below follows the delivery brief.
 
 ### Media and documents
 - [ ] Photo reordering and captions.
-- [ ] Document rename and document library view.
+- [x] Document rename/edit and document library view.
+- [x] Original upload preservation and authenticated original downloads.
 - [ ] Move thumbnail/re-encoding to the job queue with progress reporting.
 - [ ] Optional AVIF/TIFF support.
 - [ ] Virus scanning hook for documents.
+- [ ] PDF/text inline viewer and richer document previews.
+- [ ] OCR line-item parsing and bulk multi-item application.
 
 ### Search and reporting
 - [ ] PostgreSQL `pg_trgm`/full-text indexes and ranked results.
-- [ ] Optional filters for warranty status and archived/active mixed views.
-- [ ] Export inventory to CSV/PDF.
+- [x] Warranty status views and filters.
+- [x] Export inventory, documents, purchases and warranties to CSV.
+- [ ] Add PDF report export and optional exchange-rate configuration.
 - [ ] Natural-language search with optional Ollama, disabled by default.
 
 ### Reliability
@@ -194,16 +234,25 @@ the product-facing numbering below follows the delivery brief.
 - The API and UI for custom fields are not implemented; the database schema is.
 - Category and tag deletion/editing are API-only.
 - Multi-user membership management is modelled but not exposed.
-- The worker currently handles maintenance only.
+- The worker handles maintenance and document OCR; other media jobs are still
+  synchronous.
 - Password change/reset is not implemented.
 - Login throttling is in-process only; setup can be claimed before first setup.
 - Search is `ILIKE` based; adequate for personal scale but not optimised.
-- No antivirus scanning for documents; PDFs download as attachments.
+- No antivirus scanning for documents; PDFs download as attachments. OCR parses
+  untrusted files locally and must be kept patched.
 - Backups are unencrypted unless the operator encrypts them.
-- No automated browser E2E suite is checked in; Phase 2 used a manual Playwright
-  walkthrough with zero console/network failures.
+- No automated browser E2E suite is checked in; Phases 2 and 3 used manual
+  Playwright walkthroughs with zero console/network failures.
 - Photo drag-reordering and captions are not implemented; users can choose a cover.
-- Tauri desktop is not started. Core Inventory is now stable enough to begin it.
+- OCR is heuristic and English-first. It proposes values only and does not parse
+  full line-item purchases; review is mandatory.
+- No exchange rates are configured. Currencies are never combined, and shared
+  purchases are allocated equally for category/room breakdowns.
+- Legacy documents created before Phase 3 retain only their already-sanitized
+  copy; exact originals are preserved for new uploads.
+- Tauri desktop is not started. Ownership is now stable enough to begin it.
+- The AI assistant is intentionally not started.
 - Offline mode is an app shell, not offline inventory data.
 
 ## Definition of done for Phase 2
@@ -215,8 +264,23 @@ the product-facing numbering below follows the delivery brief.
 5. Backend and frontend suites pass on the Compose-built application. ✅
 6. Walkthrough evidence and limitations are documented. ✅
 
-## Recommended Phase 3
+## Definition of done for Phase 3
+
+1. Documents upload, associate with multiple items, search, filter, download,
+   preserve originals and delete with confirmation. ✅
+2. OCR runs through the background worker on CPU-only Linux and proposes fields
+   for an explicit review. ✅
+3. Shared purchases link multiple items without duplicated purchase rows. ✅
+4. Warranties include duration/document/reminders and active/expiring/expired
+   views. ✅
+5. Ownership value distinguishes purchase and current value and never adds
+   currencies without conversion. ✅
+6. Exports, backup/restore, cross-household isolation and all earlier tests pass. ✅
+7. Desktop/iPhone walkthrough and honest limitations documented. ✅
+
+## Recommended next phase
 
 Do not start until explicitly approved. The strongest next candidates are the
-Tauri macOS shell, advanced organisation (custom fields and taxonomy management),
-and deeper media/document workflows. See the walkthrough for the trade-offs.
+Tauri 2 macOS shell, advanced organisation (custom fields and taxonomy
+management), and deeper document/OCR workflows. The AI assistant remains
+explicitly deferred.

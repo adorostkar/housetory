@@ -296,18 +296,19 @@ remained intact. Household rename requires owner role.
 | `pip-audit` production requirements | No known vulnerabilities |
 | `pip-audit` including dev requirements | No known vulnerabilities (pytest upgraded to 9.2.0) |
 | `npm audit` (prod and all) | 0 vulnerabilities |
-| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each |
+| Trivy HIGH/CRITICAL, final API/worker/web/db images | 0 findings each (Phase 3 rebuild) |
 | Bandit Python static analysis | No findings after assert cleanup |
 | Secret scan | No credentials in tracked files; `.env` ignored |
 | Compose port inspection | DB/API/worker unpublished; web loopback only |
 
-Trivy scan date: 2026-11-04. Image vulnerabilities are time-sensitive.
+Trivy scan date: 2026-11-04 (re-run after the Phase 3 worker OCR packages).
+Image vulnerabilities are time-sensitive.
 
 ## Verification performed
 
-- 67 backend pytest tests at audit sign-off; the Phase 2 follow-up raised this
-  to 72, including new security regressions.
-- 11 frontend Vitest tests at audit sign-off; now 16 after Phase 2; strict
+- 67 backend pytest tests at audit sign-off; Phase 2 raised this to 72 and
+  Phase 3 to 103, including new security regressions.
+- 11 frontend Vitest tests at audit sign-off; now 20 after Phases 2 and 3; strict
   TypeScript check and production build pass.
 - Headless Chromium walkthrough: setup, room/location, item create/edit,
   multipart photo upload, document upload, search, dark mode, settings and mobile
@@ -333,7 +334,10 @@ Trivy scan date: 2026-11-04. Image vulnerabilities are time-sensitive.
 3. **Unencrypted backups.** Files are `0600`/`0700` but not encrypted. Encrypt
    off-site copies and protect the host. Database/upload snapshots are not atomic.
 4. **No malware scanning.** Valid PDFs/images may contain malicious content;
-   documents download as attachments but users can open them externally.
+   documents download as attachments but users can open them externally. OCR
+   also parses untrusted documents with Tesseract/Poppler in the worker, so
+   parser vulnerabilities are a residual risk; rebuild and rescan the worker
+   image regularly.
 5. **Secrets in environment.** Docker host/root can inspect the database URL.
    Consider Docker/Compose secrets and a rootless or tightly controlled host.
 6. **No internal DB TLS.** PostgreSQL traffic stays on the private Compose
@@ -394,6 +398,60 @@ reviewed and covered:
 - Backend tests increased to 72 and frontend tests to 16; the Phase 2 walkthrough
   reported zero console errors and failed network requests.
 - No new critical/high security findings were introduced.
+
+## Phase 3 follow-up
+
+Phase 3 added document metadata/original storage, OCR, shared purchases,
+warranties, financial reporting and CSV exports. Security implications reviewed:
+
+- All document, purchase, warranty, ownership and export access is household
+  scoped. Tests extend cross-household checks to document detail/original/
+  mutation/OCR/apply, purchases, warranties, financial overview and every CSV
+  export.
+- New uploads preserve exact original bytes in a private `0600` file under a
+  `0700` directory. The original download is authenticated, `private, no-store`,
+  `nosniff`, CORP same-origin and an attachment. The default download remains the
+  normalized/sanitized copy. Legacy documents point both keys at their existing
+  sanitized file.
+- HEIC/HEIF document uploads are decoded through the same Pillow allowlist,
+  normalized to JPEG for the default download, and the original is served with
+  its actual source content type.
+- OCR runs only in the worker, which mounts uploads read-only. Read-only storage
+  resolution no longer attempts mkdir/chmod. The worker has a read-only root,
+  tmpfs `/tmp`, no added capabilities, `no-new-privileges`, no network access to
+  external OCR services, and only receives a document UUID in the job payload.
+- Tesseract and Poppler process content-validated documents. Scanned PDF pages
+  are bounded by `OCR_MAX_PDF_PAGES` and subprocess timeouts. OCR results are
+  proposals; a separate authenticated confirmation endpoint is required before
+  any item or purchase changes.
+- Shared purchase and warranty-document references validate household ownership.
+  Receipt/warranty document deletion uses `SET NULL` and does not delete the
+  related item or purchase.
+- No new Python or npm runtime dependencies were added for OCR; Tesseract,
+  English language data and Poppler are Alpine OS packages in the worker image.
+  The rebuilt API, worker, web and database images scan with zero HIGH/CRITICAL
+  findings. `npm audit` and production `pip-audit` report no known
+  vulnerabilities.
+- A destructive backup/restore drill was repeated with Phase 3 data. It exposed
+  and fixed a recovery defect: recreating the database removed the
+  least-privilege app role's grants. Restore now reapplies the role grants before
+  the API and worker start, with a regression test. Restored originals, OCR
+  metadata, documents and shared purchases were verified through authenticated
+  endpoints; the role remained non-superuser and could not create databases.
+- Backend tests increased to 103 and frontend tests to 20. The Phase 3 walkthrough
+  reported zero console errors and failed network requests and exercised real
+  Tesseract OCR in Compose.
+
+Residual Phase 3 risks:
+
+- OCR engine/parser vulnerabilities and malicious document content remain a
+  patching and image-refresh responsibility; no antivirus hook exists.
+- Preserved originals may contain sensitive EXIF/location metadata. They are
+  private and require authentication, but backups and downloads should be
+  handled as sensitive household data.
+- OCR heuristics can propose wrong amounts/dates/serials. The review gate
+  prevents silent inventory changes but does not guarantee extraction accuracy.
+- No exchange-rate conversion is configured; reports cannot combine currencies.
 
 ## Conclusion
 

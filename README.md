@@ -2,14 +2,16 @@
 
 > **Everything has a place.**
 
-Housetory is a private, self-hosted inventory for your home. Rooms hold nested
-storage places, items hold photographs, receipts, warranties and purchase
-details, and everything can be found again from one calm interface.
+Housetory is a private, self-hosted record of everything you own. Rooms hold
+nested storage places; items carry photographs, receipts, manuals, warranties,
+purchase history and current-value estimates. Local OCR reads receipts, a
+searchable document library keeps the paperwork, and ownership reports stay
+honest across multiple currencies.
 
 Designed for a CPU-only Linux server, reached securely through Tailscale, and
 installed on an iPhone as a PWA.
 
-![Status: foundation complete](https://img.shields.io/badge/status-foundation_complete-56614f)
+![Status: core inventory and ownership complete](https://img.shields.io/badge/status-core_inventory_%2B_ownership_complete-56614f)
 
 ## What is working
 
@@ -25,28 +27,47 @@ installed on an iPhone as a PWA.
 - Multiple item photographs with validation, thumbnail generation, EXIF
   stripping, HEIC conversion, cover selection and a full-screen viewer.
 - One-tap camera capture on iPhone alongside library uploads.
-- Receipts and manuals attached to items, stored on a persistent local volume.
-- Purchase prices grouped by currency, warranty dates and an overview dashboard.
-- PostgreSQL-backed background worker for maintenance jobs.
+- A dedicated document library for receipts, invoices, warranty certificates,
+  manuals, specifications and other files, associated with one or many items.
+- PDF, JPEG, PNG, WebP, HEIC and text uploads; original uploads are preserved,
+  safe downloads are normalized, and older documents remain readable.
+- CPU-only local OCR through Tesseract and Poppler in the worker: merchant,
+  purchase date, total, currency, invoice number, product names and serial
+  numbers are proposed for explicit review before inventory changes.
+- Shared purchase records: one purchase can cover several items without
+  duplicating the amount, receipt or merchant.
+- Warranties with provider, start date, duration, calculated expiration,
+  certificate document, coverage notes, status and configurable reminders.
+- Ownership overview with purchase value, estimated current value, category and
+  room breakdowns, most valuable items and items missing purchase information.
+- Multi-currency reporting that never adds currencies together; there is no
+  implicit exchange rate.
+- CSV exports for documents, purchases, warranties and inventory.
+- PostgreSQL-backed background worker for maintenance and OCR jobs.
 - Docker Compose deployment with health checks, migrations, backups and
   Tailscale HTTPS guidance.
 - Automated backend and frontend tests.
 
-### Foundation verification
+### Verification
 
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 72 pytest tests pass against PostgreSQL, including a fresh Alembic migration,
-  authentication/abuse controls, hierarchy semantics and exhaustive cross-
-  household access checks.
-- 16 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 103 pytest tests pass against PostgreSQL, including the full Alembic chain,
+  authentication/abuse controls, hierarchy semantics, document metadata/search/
+  originals, OCR parsing and retries, shared purchases, warranty calculations,
+  currency separation, exports and exhaustive cross-household access checks.
+- 20 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - `docker compose up --build` brings all services healthy; the worker processed
-  real queued maintenance jobs.
+  real queued maintenance and OCR jobs.
+- Real Tesseract OCR in the Compose worker extracted a photographed receipt
+  (merchant, date, total, currency, invoice and serial), and the confirmed review
+  created the purchase and attached the receipt.
 - Headless Chrome walkthroughs covered first-run setup, nested rooms/places,
   item creation and editing, multi-photo and document uploads, cover selection,
-  the photo viewer, hierarchy-aware filtering/search and mobile layouts with no
-  console errors or failed requests.
+  the photo viewer, hierarchy-aware filtering/search, document OCR review,
+  shared purchases, warranty dashboards, ownership reports and mobile layouts
+  with no console errors or failed requests.
 - Backup permissions, checksum verification, archive extraction safety, target
   checks and a full destructive restore were rehearsed locally, including
   authenticating and retrieving photos/documents after restore.
@@ -54,22 +75,27 @@ stack, not just unit mocks:
   Final application images scan with zero fixable HIGH/CRITICAL vulnerabilities.
 
 The Phase 2 desktop/iPhone walkthrough, screenshots and remaining limitations are
-in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md).
+in [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
+documents, OCR, purchase, warranty and ownership walkthrough is in
+[`docs/PHASE_3_WALKTHROUGH.md`](docs/PHASE_3_WALKTHROUGH.md).
 
 The pre-deployment security review, findings and remaining risks are in
 [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md). Passing tests do not constitute a
 guarantee of production security.
 
-The foundation is intentionally not the whole product. Custom fields, category/
-tag management UI, multi-user sharing, password changes, the Tauri macOS shell
-and browser E2E tests are not implemented yet. See
-[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
-from remaining work.
+The product is intentionally not finished. Custom fields, category/tag
+management UI, multi-user sharing, password changes, exchange-rate conversion,
+the Tauri macOS shell and a checked-in browser E2E suite are not implemented yet.
+See [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped
+work from remaining work and states the OCR and multi-currency limitations
+honestly.
 
 ## Quick start with Docker Compose
 
 Requirements: Docker Engine 24+ with Compose v2. For remote access, a Linux
-server joined to your Tailscale tailnet.
+server joined to your Tailscale tailnet. The worker image installs Tesseract,
+its English language data and Poppler at build time; no host OCR packages or GPU
+are needed.
 
 ```bash
 git clone <your-repository-url> housetory
@@ -146,6 +172,8 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `LOGIN_MAX_FAILURES` | `10` | Failed sign-ins per email/IP before throttling |
 | `LOGIN_WINDOW_SECONDS` | `900` | Sliding throttle window |
 | `EXTRA_ORIGINS` | empty | Comma-separated extra allowed origins (normally empty) |
+| `OCR_LANGUAGE` | `eng` | Tesseract language code installed in the worker image |
+| `OCR_MAX_PDF_PAGES` | `5` | Maximum scanned PDF pages rendered for OCR |
 
 `APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
 refuses to start with an insecure cookie configuration. Production also rejects
@@ -171,8 +199,9 @@ again if the cookie domain policy changes.
 
 Persistent named volumes:
 
-- `housetory_pgdata` — PostgreSQL
-- `housetory_uploads` — item photographs and documents
+- `housetory_pgdata` — PostgreSQL, including document metadata and OCR output
+- `housetory_uploads` — item photographs, normalized document downloads and
+  preserved original uploads under `households/*/documents/originals/`
 
 Create a verified backup (PostgreSQL custom dump + uploads tar + SHA-256 sums):
 
@@ -202,13 +231,15 @@ The restore script:
 - validates the uploads archive and rejects absolute paths, `..` traversal,
   links, devices and duplicate entries before stopping services;
 - requires typed confirmation unless `--yes` is supplied;
-- stops the API and worker, recreates the database, restores files, runs
-  migrations and restarts the stack.
+- stops the API and worker, recreates the database, restores files, reapplies
+  the least-privilege application role grants, runs migrations and restarts the
+  stack.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the non-atomic snapshot trade-off.
 
-Never delete a Docker volume unless you intend to lose data. To reset a
-development environment only:
+The uploads archive includes normalized files and preserved originals. Never
+delete a Docker volume unless you intend to lose data. To reset a development
+environment only:
 
 ```bash
 docker compose down -v   # destructive: deletes database and uploads
@@ -242,9 +273,13 @@ uv run alembic upgrade head
 uv run uvicorn housetory_api.main:app --reload --port 8000
 ```
 
-In a second terminal, run the worker from the repository root:
+In a second terminal, run the worker from the repository root. Real OCR needs
+the `tesseract` and `pdftoppm` binaries on the host; without them the worker still
+starts and records a clear OCR failure instead of crashing:
 
 ```bash
+# macOS: brew install tesseract poppler
+# Debian/Ubuntu: sudo apt install tesseract-ocr poppler-utils
 PYTHONPATH=services/api:services/worker \
   services/api/.venv/bin/python -m housetory_worker
 ```
@@ -320,10 +355,15 @@ docker compose down                   # stop, keep data
 - Base path: `/api/v1`
 - Health: `/api/v1/health/live`, `/api/v1/health/ready`
 - Authentication: opaque sessions in `HttpOnly`, `SameSite=Lax` cookies.
-- All inventory is scoped to the signed-in household; cross-household requests
-  return 404.
+- All inventory, documents, purchases and warranties are scoped to the signed-in
+  household; cross-household requests return 404 or a validation error.
 - Structured errors: `{"detail": {"code", "message", "fields"}}`.
-- Uploaded files are only served through authenticated endpoints.
+- Uploaded files and preserved originals are only served through authenticated,
+  no-store endpoints.
+- Documents support metadata/search/filtering, original downloads, OCR retry and
+  an explicit review/apply endpoint.
+- Purchases, warranties, ownership reports and CSV exports have dedicated
+  household-scoped endpoints.
 
 The endpoint inventory and data model are documented in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -361,11 +401,16 @@ compose.dev.yaml        Loopback Postgres exposure for development only
 - Login failures are throttled per email and proxy address with a documented
   in-process limiter. It resets on restart and is single-process only.
 - Cross-household access is denied for rooms, storage locations, categories,
-  tags, items, photos and documents (covered by tests).
+  tags, items, photos, documents, purchases, warranties and exports (covered by
+  tests).
 - Uploads are validated by content with an image-decoder allowlist and a PDF
-  parser, re-encoded to strip metadata, size-capped, and stored with `0600`
-  permissions under `0700` directories. PDFs and documents download as
-  attachments rather than rendering in the application origin.
+  parser, size-capped, and stored with `0600` permissions under `0700`
+  directories. Safe downloads are re-encoded to strip metadata; exact original
+  uploads are preserved and remain authenticated/no-store. PDFs and documents
+  download as attachments rather than rendering in the application origin.
+- OCR runs locally in the worker over validated files. Tesseract/Poppler parse
+  untrusted input in a CPU-only container with no network dependency; the
+  residual parser/malware risk is documented in the security audit.
 - Keep the host patched, rebuild images periodically, leave Tailscale Funnel
   off, use a private tailnet ACL, and encrypt backups before taking them
   off-server.

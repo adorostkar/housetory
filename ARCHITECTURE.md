@@ -131,8 +131,11 @@ All application endpoints are versioned under `/api/v1`.
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
 | Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, `GET /photos/{id}/file`, `GET /photos/{id}/thumbnail` |
-| Documents | `GET /documents`, `POST /items/{id}/documents`, `GET /documents/{id}/file`, `DELETE /documents/{id}` |
-| Overview | `GET /overview` |
+| Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
+| Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
+| Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
+| Ownership | `GET /overview`, `GET /financial-overview` |
+| Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 
 OpenAPI documentation is available in development at `/api/docs`. It is
 disabled when `ENVIRONMENT=production`.
@@ -194,15 +197,18 @@ users ──< household_members >── households
   │                                │      │
   │                                ├──< categories ──< categories (optional nesting)
   │                                ├──< tags ──< item_tags >── items
+  │                                ├──< purchases ──< items
   │                                └──< documents ──< item_documents >── items
   │                                                                      │
   │                                                       ┌──────────────┼─────────────┐
   │                                                       ▼              ▼             ▼
-  │                                                  purchases      warranties   item_photos
+  │                                                  warranties     item_photos   current values
   │
   └──< auth_sessions
 
 items ──< item_custom_values >── custom_field_definitions
+purchases ──> documents (receipt)      warranties ──> documents (certificate)
+documents (OCR metadata, original + normalized storage)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -218,14 +224,24 @@ Key decisions:
   items; foreign keys are `SET NULL`.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
-- **Purchases** and **warranties** are one-to-one extensions of items. Prices
-  are stored as integer minor units plus an ISO-4217 currency. Multiple
-  currencies are never silently summed.
+- **Purchases** are household-owned shared records. Items reference
+  `purchases.id`; one purchase can cover many items without duplicating the date,
+  amount, merchant, order number, notes or receipt document. Prices are stored
+  as integer minor units plus an ISO-4217 currency. Multiple currencies are never
+  silently summed.
+- **Warranties** remain one-to-one with an item. They store provider, start date,
+  optional duration in calendar months, resolved end date, optional per-warranty
+  reminder override, coverage notes and an optional certificate document.
+  Households carry the default reminder window.
+- **Current values** are optional item estimates stored separately from purchase
+  values, with their own currency.
 - **Photos** are item-owned files with dimensions, byte size, sort order and a
   derived WebP thumbnail. Up to 20 per item.
-- **Documents** are household-owned files and can be linked to multiple items
-  through `item_documents`. This supports e.g. one appliance manual attached to
-  several items.
+- **Documents** are household-owned files with type, merchant, document date,
+  notes, extracted text, JSONB extraction metadata, OCR status/error/confidence/
+  processed time, and original/normalized storage keys. They can be linked to
+  multiple items through `item_documents` and can be referenced by purchases and
+  warranties.
 - **Custom fields** are modelled as typed definitions
   (`text|number|date|boolean|select`) and per-item JSONB values. API and UI for
   custom fields are deferred; the schema is present in migration `0001`.
@@ -234,15 +250,25 @@ Key decisions:
 
 Delete behavior was chosen to avoid silent inventory loss. The API rejects
 deleting non-empty rooms and locations. Deleting an item cascades its photos,
-purchase, warranty and custom values. Documents are removed only when the item
-is their sole attachment; documents shared with other items remain available.
+warranty and custom values, detaches it from a shared purchase, and deletes the
+purchase only when no item remains attached. Documents are removed only when the
+item is their sole attachment; shared documents remain available. Deleting a
+purchase detaches its items without deleting them. A deleted receipt or warranty
+document clears the reference through `SET NULL`.
+
+The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
+ownership of existing purchases, moves one-to-one item purchase references to
+`items.purchase_id`, points existing document originals at their safe copies, and
+adds document/OCR, warranty duration/document/reminder and item current-value
+columns.
 
 ## 6. File storage
 
 - Root is `UPLOADS_DIR` (default `/data/uploads` in Docker).
 - Generated object keys, never user filenames, determine paths:
-  `items/<item_uuid>/photos/<photo_uuid>.<ext>` and
-  `households/<household_uuid>/documents/<document_uuid>.<ext>`.
+  `items/<item_uuid>/photos/<photo_uuid>.<ext>`,
+  `households/<household_uuid>/documents/<document_uuid>.<ext>` and preserved
+  originals under `households/<household_uuid>/documents/originals/`.
 - All access goes through authenticated API file routes. The uploads directory
   is not served by nginx as static files, so UUIDs alone are not access.
 - Uploads are size-capped (`MAX_UPLOAD_MB`, default 25 MB); nginx caps the whole
@@ -252,14 +278,21 @@ is their sole attachment; documents shared with other items remain available.
   extensions. HEIC is normalized to JPEG for browser compatibility. Images are
   re-encoded (stripping EXIF/GPS and other metadata), oriented correctly, and a
   1600px max WebP thumbnail is generated synchronously.
-- Documents are limited to PDF, JPEG, PNG, WebP and UTF-8 text. PDFs are parsed
-  with pypdf and must contain at least one page; encrypted/malformed PDFs are
-  rejected. Image documents are re-encoded to their actual format, normalizing
-  MIME/extension mismatches and stripping metadata. Executables, SVG and HTML
-  are rejected.
+- Documents are limited to PDF, JPEG, PNG, WebP, HEIC/HEIF and UTF-8 text. PDFs
+  are parsed with pypdf and must contain at least one page; encrypted/malformed
+  PDFs are rejected. Image documents are re-encoded to their actual format,
+  normalizing MIME/extension mismatches and stripping metadata. Executables, SVG
+  and HTML are rejected.
+- Each new document stores the exact uploaded bytes as a preserved original plus
+  a normalized safe download. Default downloads use the normalized file;
+  `/documents/{id}/original` returns the preserved bytes with their original
+  content type. Legacy documents point both keys at their already-sanitized copy.
 - All document responses are forced to `Content-Disposition: attachment` so
   active PDF content is not rendered in the application origin. Photo and
   document responses are `private, no-store`, `nosniff` and CORP same-origin.
+- The worker mounts uploads read-only. Storage resolution has a read-only path
+  that never attempts to create or chmod directories; only API write paths set
+  up `0700` storage.
 - Files and directories are stored with `0600` and `0700` permissions under the
   uploads volume; the volume root is also `0700`.
 - Deleted files are removed best-effort after the database commit. Deleting an
@@ -268,7 +301,9 @@ is their sole attachment; documents shared with other items remain available.
   are `0700` and files `0600`; restores verify checksums and refuse database or
   Compose-project mismatches. Uploads archives are validated for traversal,
   links, devices and duplicate entries and extracted with Python's safe tar
-  filter.
+  filter. Because recreating the database discards its CONNECT, table, sequence
+  and default-privilege grants, restore reapplies the least-privilege app role
+  before the API and worker start.
 
 ## 7. Background jobs
 
@@ -284,9 +319,17 @@ deployment.
 - Stale `running` jobs (worker crash) are requeued on startup and periodically.
 - The worker writes a heartbeat file; its Docker health check fails if the
   heartbeat is stale.
-- Current handlers: prune expired sessions and prune old finished jobs. A
-  maintenance job is enqueued every six hours. The queue is deliberately
-  general so future thumbnail/re-encoding/export jobs can reuse it.
+- Current handlers: prune expired sessions, prune old finished jobs and
+  `documents.ocr`. A maintenance job is enqueued every six hours. OCR jobs are
+  enqueued in the same transaction as an upload, claimable by the worker, and
+  retried with backoff. The handler marks the document processing, extracts text
+  with embedded PDF text or Tesseract/Poppler, stores proposals in JSONB, and
+  records failure/error without touching inventory records. Confirmation is a
+  separate authenticated endpoint that changes purchases/items explicitly.
+- The worker image installs Alpine Tesseract with English language data and
+  Poppler utilities. No GPU, external OCR API or network service is required.
+  OCR language and scanned-PDF page count are configurable. The queue is
+  deliberately general so future export/media jobs can reuse it.
 
 ## 8. Frontend
 
@@ -294,14 +337,19 @@ deployment.
   (Radix primitives + CVA + local UI components).
 - TanStack Query owns server state; there is no global state store.
 - React Router 7 with route-level lazy loading and a protected shell.
-- Routes: overview, rooms, room detail, items, item create/edit/detail, search,
-  settings, setup, login, 404.
+- Routes: overview, rooms, room detail, items, item create/edit/detail,
+  documents, document detail/OCR review, purchases, warranties, search, settings,
+  setup, login, 404.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
 - Item photography supports multiple uploads, cover selection, an accessible
   full-screen viewer with keyboard/thumbnail navigation, and an iPhone camera
   capture action.
+- Document library, OCR review, purchase management with multi-item selection,
+  warranty dashboards and an ownership/financial overview use the same typed API
+  client and React Query invalidation model. OCR status polls while queued or
+  processing and stops after a terminal state.
 - Design system: warm ivory/stone light mode, deep charcoal dark mode, system
   SF typography with New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.
@@ -322,10 +370,11 @@ development and nginx proxies in production. No CORS allowlist is needed.
   permissions headers. API JSON and authenticated media are `no-store`.
 - The application port binds only to loopback. Tailscale Serve is the only
   intended entry point. Tailscale Funnel is explicitly not used.
-- Only PostgreSQL (`db`) and uploads (`api`) own persistent data. The PostgreSQL
-  image is rebuilt with a current Go-built `gosu`; API and worker images use
-  Alpine Python to keep the runtime high/critical package count at zero in the
-  audit performed. Backups use `pg_dump` plus a tar of the uploads because
+- Only PostgreSQL (`db`) and uploads (`api`) own persistent data. The worker
+  image adds Tesseract, English language data and Poppler for CPU-only OCR. The
+  PostgreSQL image is rebuilt with a current Go-built `gosu`; API and worker
+  images use Alpine Python to keep the runtime high/critical package count at
+  zero in the audit performed. Backups use `pg_dump` plus a tar of the uploads because
   snapshots cannot be atomic across both; restore stops the API and worker first.
 - The database admin role is used only for migrations, backup and restore. API
   and worker connect with a separate non-superuser role that has DML privileges
@@ -335,19 +384,23 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 72 pytest tests against a real PostgreSQL database. The test session
-  creates a dedicated database, runs the real Alembic migration, and truncates
-  tables between tests. Coverage includes health, auth/session lifecycle,
-  concurrent first-run setup, cookie attributes, token hashing, rate limiting,
-  origin/Referer protection, exhaustive cross-household isolation, rooms/
-  locations/taxonomy, nested-room/place counts, descendant-aware filters,
-  ancestor-aware search, cover-photo ordering, item-move responses, multi-currency
-  overview, upload content validation, malformed PDF/images, EXIF stripping,
+- Backend: 103 pytest tests against a real PostgreSQL database. The test session
+  creates a dedicated database, runs the full Alembic chain, and truncates tables
+  between tests. Coverage includes health, auth/session lifecycle, concurrent
+  first-run setup, cookie attributes, token hashing, rate limiting, origin/
+  Referer protection, exhaustive cross-household isolation, rooms/locations/
+  taxonomy, nested-room/place counts, descendant-aware filters, ancestor-aware
+  search, cover-photo ordering, item-move responses, multi-currency overview,
+  document metadata/search/types/originals, HEIC normalization, OCR parsing,
+  job completion and failure/retry, confirmed OCR application, shared purchase
+  associations, warranty duration/status/reminders, currency separation, CSV
+  exports, upload content validation, malformed PDF/images, EXIF stripping,
   traversal filenames, upload size and permissions, archive extraction safety,
   queue mechanics and migration freshness.
-- Frontend: 16 Vitest tests + Testing Library, including hierarchy utilities,
-  location paths, nested room cards and the photo lightbox. TypeScript is checked
-  in strict mode; the production build is part of verification.
+- Frontend: 20 Vitest tests + Testing Library, including hierarchy utilities,
+  location paths, nested room cards, the photo lightbox, document cards,
+  warranty labels/status text and calendar-month expiration. TypeScript is
+  checked in strict mode; the production build is part of verification.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
@@ -366,7 +419,17 @@ development and nginx proxies in production. No CORS allowlist is needed.
   before the first owner exists.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
   attachments but may still contain malicious content when opened in a PDF
-  reader.
+  reader. OCR parses untrusted documents locally in the worker; keep the worker
+  image rebuilt and patched.
+- OCR extraction is heuristic and English-first, limited to configured PDF page
+  counts and installed language packs. It proposes values only; review is
+  mandatory.
+- No exchange-rate provider or conversion configuration. Multi-currency values
+  are reported separately, and category/room shared-purchase allocation is
+  equal across active linked items rather than manually assignable.
+- Original files are preserved for new uploads; documents created before Phase 3
+  only have their already-sanitized copy because the original bytes were removed
+  by the earlier security hardening.
 - Secrets (database password) are supplied to containers as environment
   variables and are visible to the Docker host/root. Protect host access.
 - PostgreSQL connections inside the private Compose bridge are not TLS-encrypted.
