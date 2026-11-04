@@ -250,3 +250,10 @@
     animation-delay: 225ms;
   }
 }
+
+
+.quick-search-input::-webkit-search-cancel-button,
+.quick-search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

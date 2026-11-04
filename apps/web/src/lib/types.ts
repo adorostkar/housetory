@@ -877,6 +877,22 @@ export interface NaturalSearchResponse {
   ai_available: boolean;
 }
 
+export type QuickSearchKind = "item" | "container" | "location";
+
+export interface QuickSearchResult {
+  id: UUID;
+  kind: QuickSearchKind;
+  title: string;
+  subtitle: string | null;
+  context: string | null;
+  url: string;
+}
+
+export interface QuickSearchResponse {
+  query: string;
+  results: QuickSearchResult[];
+}
+
 export interface DocumentRelationSuggestion {
   item: ItemSummary;
   score: number;

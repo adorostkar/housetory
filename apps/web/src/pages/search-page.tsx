@@ -1,11 +1,18 @@
 import { useMutation } from "@tanstack/react-query";
-import { ListFilter, Package, Search as SearchIcon, Sparkles } from "lucide-react";
+import {
+  Boxes,
+  ListFilter,
+  MapPin,
+  Package,
+  Search as SearchIcon,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { api, getApiErrorMessage } from "@/lib/api";
-import type { NaturalSearchResponse } from "@/lib/types";
+import type { NaturalSearchResponse, QuickSearchResult } from "@/lib/types";
 
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
@@ -14,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useItems } from "@/lib/queries";
+import { useItems, useQuickSearch } from "@/lib/queries";
 import { pluralize } from "@/lib/utils";
 
 export function SearchPage() {
@@ -26,6 +33,12 @@ export function SearchPage() {
   );
   const debounced = useDebouncedValue(query, 350);
   const trimmed = debounced.trim();
+  const hasQuery = qParam.trim().length > 0;
+  const placesQuery = useQuickSearch(
+    qParam,
+    8,
+    hasQuery && mode === "keyword",
+  );
   const searchQuery = useItems(
     { q: qParam || undefined },
     30,
@@ -84,7 +97,11 @@ export function SearchPage() {
     );
   };
 
-  const hasQuery = qParam.trim().length > 0;
+  const placeResults =
+    mode === "keyword"
+      ? (placesQuery.data?.results ?? []).filter((result) => result.kind !== "item")
+      : [];
+  const placesPending = mode === "keyword" && hasQuery && placesQuery.isPending;
   const pending =
     mode === "smart" ? naturalSearch.isPending : searchQuery.isPending;
   const isError =
@@ -171,7 +188,7 @@ export function SearchPage() {
               </Button>
             </div>
           </div>
-        ) : pending ? (
+        ) : pending || (results.length === 0 && placesPending) ? (
           <SearchSkeleton />
         ) : isError ? (
           <ErrorState
@@ -184,7 +201,7 @@ export function SearchPage() {
               else void searchQuery.refetch();
             }}
           />
-        ) : results.length === 0 ? (
+        ) : results.length === 0 && placeResults.length === 0 ? (
           <div className="surface flex flex-col items-center px-6 py-16 text-center">
             <span className="flex size-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
               <SearchIcon className="size-5" strokeWidth={1.6} />
@@ -218,7 +235,10 @@ export function SearchPage() {
           <>
             <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
               <p className="text-[0.8rem] text-muted-foreground">
-                {pluralize(total, "result")} for “{qParam}”
+                {results.length > 0
+                  ? pluralize(total, "result")
+                  : pluralize(placeResults.length, "matching place")}{" "}
+                for “{qParam}”
               </p>
               {mode === "smart" && naturalSearch.data && (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -236,11 +256,28 @@ export function SearchPage() {
                 </div>
               )}
             </div>
-            <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
-              {results.map((item) => (
-                <ItemCard key={item.id} item={item} />
-              ))}
-            </div>
+            {results.length > 0 && (
+              <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
+                {results.map((item) => (
+                  <ItemCard key={item.id} item={item} />
+                ))}
+              </div>
+            )}
+            {placeResults.length > 0 && (
+              <section className="mt-8" aria-label="Matching containers and locations">
+                <div className="mb-3 flex items-center gap-2">
+                  <Boxes className="size-4 text-brass" />
+                  <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+                    Places and containers
+                  </h2>
+                </div>
+                <div className="surface divide-y divide-border/60 overflow-hidden">
+                  {placeResults.map((result) => (
+                    <PlaceResult key={`${result.kind}-${result.id}`} result={result} />
+                  ))}
+                </div>
+              </section>
+            )}
             {mode === "keyword" && searchQuery.hasNextPage && (
               <div className="mt-8 flex justify-center">
                 <Button
@@ -256,6 +293,32 @@ export function SearchPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function PlaceResult({ result }: { result: QuickSearchResult }) {
+  const Icon = result.kind === "container" ? Boxes : MapPin;
+  const label = result.kind === "container" ? "Container" : "Location";
+  return (
+    <Link
+      to={result.url}
+      className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-secondary/40"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-[0.84rem] font-medium">{result.title}</span>
+          <Badge variant={result.kind === "container" ? "brass" : "outline"} className="text-[0.6rem]">
+            {label}
+          </Badge>
+        </span>
+        <span className="mt-0.5 block truncate text-[0.7rem] text-muted-foreground">
+          {[result.subtitle, result.context].filter(Boolean).join(" · ") || "Housetory"}
+        </span>
+      </span>
+    </Link>
   );
 }
 

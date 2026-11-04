@@ -18,6 +18,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { AccountMenu } from "@/components/account-menu";
 import { BrandMark } from "@/components/brand-mark";
 import { PageFallback } from "@/components/page-fallback";
+import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -67,7 +68,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
+      <aside className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
         <div className="flex items-center justify-between px-2">
           <Link to="/" aria-label="Housetory home">
             <BrandMark />
@@ -81,6 +82,8 @@ export function AppShell() {
             Add an item
           </Link>
         </Button>
+
+        <QuickSearch className="mt-3" variant="sidebar" />
 
         <nav className="mt-8 space-y-1" aria-label="Primary">
           <p className="eyebrow mb-3 px-3">Everything has a place</p>
@@ -120,7 +123,12 @@ export function AppShell() {
               </span>
             </Link>
             <div className="flex items-center gap-0.5">
-              <Button asChild variant="ghost" size="icon" aria-label="Search">
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                aria-label="Search your home"
+              >
                 <Link to="/search">
                   <Search className="size-[1.1rem]" />
                 </Link>

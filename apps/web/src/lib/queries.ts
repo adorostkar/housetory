@@ -21,6 +21,7 @@ import type {
   Overview,
   PhotoList,
   PurchaseList,
+  QuickSearchResponse,
   RoomList,
   SessionState,
   StorageLocationList,
@@ -54,6 +55,7 @@ export const queryKeys = {
   aiProviderModels: (providerId: string) => ["ai", "provider", providerId, "models"] as const,
   roomPhotos: (roomId: string) => ["photos", "room", roomId] as const,
   locationPhotos: (locationId: string) => ["photos", "location", locationId] as const,
+  quickSearch: ["search", "quick"] as const,
   containers: ["containers"] as const,
   container: (containerId: string) => ["containers", containerId] as const,
   labelTemplates: ["labels", "templates"] as const,
@@ -135,6 +137,20 @@ export function useItems(filters: ItemFilters, limit = 24, enabled = true) {
       return nextOffset < lastPage.total ? nextOffset : undefined;
     },
     enabled,
+  });
+}
+
+export function useQuickSearch(q: string, limit = 4, enabled = true) {
+  const term = q.trim();
+  return useQuery({
+    queryKey: [...queryKeys.quickSearch, term, limit],
+    queryFn: ({ signal }) =>
+      api.get<QuickSearchResponse>(
+        `/search/quick${buildQuery({ q: term, limit })}`,
+        { signal },
+      ),
+    enabled: enabled && term.length >= 2,
+    staleTime: 10_000,
   });
 }
 

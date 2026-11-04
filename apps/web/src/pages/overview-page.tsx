@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
 import { RoomCard } from "@/components/room-card";
+import { QuickSearch } from "@/components/quick-search";
 import { RoomDialog } from "@/components/room-dialog";
 import { SectionHeading } from "@/components/section-heading";
 import { StatCard } from "@/components/stat-card";
@@ -115,6 +116,10 @@ export function OverviewPage() {
           </Button>
         </div>
       </header>
+
+      <div className="mb-6 lg:hidden">
+        <QuickSearch variant="mobile" />
+      </div>
 
       <div className="grid grid-cols-2 gap-3.5 sm:gap-4 xl:grid-cols-5">
         <StatCard
