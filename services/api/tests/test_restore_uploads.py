@@ -125,3 +125,34 @@ def test_restore_reapplies_least_privilege_role_grants():
     text = restore_script.read_text()
     assert "create-app-role.sql" in text
     assert "Restoring application role privileges" in text
+
+
+def test_backup_archives_private_import_sources():
+    backup = SCRIPT.parent / "backup.sh"
+    restore = SCRIPT.parent / "restore.sh"
+    backup_text = backup.read_text()
+    restore_text = restore.read_text()
+    assert "imports.tar.gz" in backup_text
+    assert "/data/imports" in backup_text
+    assert "imports.tar.gz" in restore_text
+    assert "--root /data/imports" in restore_text
+
+
+def test_import_archive_extracts_with_safe_permissions(tmp_path):
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    archive = tar_stream(
+        [
+            {"name": "./", "type": "dir"},
+            {
+                "name": "./households/a/imports/b/Vault/Note.md",
+                "data": b"# Note",
+            },
+        ]
+    )
+    result = run(["--extract", "--root", str(imports)], archive)
+    assert result.returncode == 0, result.stderr.decode()
+    note = imports / "households/a/imports/b/Vault/Note.md"
+    assert note.read_bytes() == b"# Note"
+    assert stat.S_IMODE(os.stat(note).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(imports).st_mode) == 0o700

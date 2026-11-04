@@ -1,0 +1,286 @@
+import re
+import uuid
+from pathlib import PurePosixPath
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ...config import get_settings
+from ...db import get_db
+from ...domain import ImportSourceType, ImportStatus
+from ...models import ImportBatch, ImportEntry, ImportSourceFile
+from ...schemas.imports import (
+    ImportApplyRequest,
+    ImportApplyResult,
+    ImportBatchDetail,
+    ImportBatchList,
+    ImportBatchOut,
+)
+from ...services import storage
+from ...services.import_pipeline import (
+    apply_import,
+    enqueue_import,
+    serialize_batch,
+)
+from ...services.import_readers import SUPPORTED_EXTENSIONS
+from ..deps import AuthContext, require_auth
+from ..errors import ApiError
+
+router = APIRouter(prefix="/imports", tags=["imports"])
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
+
+def _batch_out(db: Session, batch: ImportBatch) -> ImportBatchOut:
+    return ImportBatchOut(
+        id=batch.id,
+        title=batch.title,
+        source_type=batch.source_type,
+        status=batch.status,
+        original_filename=batch.original_filename,
+        content_type=batch.content_type,
+        byte_size=batch.byte_size,
+        error=batch.error,
+        warnings=batch.warnings or [],
+        total_entries=batch.total_entries,
+        imported_entries=batch.imported_entries,
+        skipped_entries=batch.skipped_entries,
+        failed_entries=batch.failed_entries,
+        created_at=batch.created_at,
+        updated_at=batch.updated_at,
+        completed_at=batch.completed_at,
+        source_url=(
+            f"{get_settings().api_prefix}/imports/{batch.id}/source" if batch.storage_key else None
+        ),
+        entry_count=int(
+            db.scalar(select(func.count(ImportEntry.id)).where(ImportEntry.batch_id == batch.id))
+            or 0
+        ),
+    )
+
+
+def _get_batch(db: Session, household_id: uuid.UUID, batch_id: uuid.UUID) -> ImportBatch:
+    batch = db.scalar(
+        select(ImportBatch).where(
+            ImportBatch.id == batch_id, ImportBatch.household_id == household_id
+        )
+    )
+    if batch is None:
+        raise ApiError(404, "import_not_found", "Import not found.")
+    return batch
+
+
+@router.get("", response_model=ImportBatchList)
+def list_imports(
+    status: Annotated[str | None, Query(pattern=r"^[a-z_]+$")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchList:
+    conditions = [ImportBatch.household_id == auth.household.id]
+    if status:
+        conditions.append(ImportBatch.status == status)
+    total = int(db.scalar(select(func.count(ImportBatch.id)).where(*conditions)) or 0)
+    batches = db.scalars(
+        select(ImportBatch)
+        .where(*conditions)
+        .order_by(ImportBatch.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return ImportBatchList(
+        items=[_batch_out(db, batch) for batch in batches],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post("", response_model=ImportBatchDetail, status_code=201)
+def create_import(
+    file: Annotated[UploadFile | None, File()] = None,
+    text: Annotated[str | None, Form()] = None,
+    title: Annotated[str | None, Form(max_length=200)] = None,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    has_file = file is not None and bool(file.filename)
+    has_text = bool(text and text.strip())
+    if has_file == has_text:
+        raise ApiError(
+            422,
+            "import_source_required",
+            "Choose exactly one source: a file, a ZIP vault, or pasted text.",
+        )
+    if has_text and len(text) > 2_000_000:
+        raise ApiError(413, "text_too_large", "Pasted imports are limited to 2 MB of text.")
+
+    filename = None
+    content_type = None
+    source_type = ImportSourceType.TEXT
+    if has_file:
+        filename = file.filename or "import"
+        suffix = PurePosixPath(filename).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            raise ApiError(
+                422,
+                "unsupported_import_type",
+                "Supported imports are txt, md, markdown, csv, xlsx, docx, pdf, "
+                "images and ZIP vaults.",
+            )
+        content_type = (file.content_type or "application/octet-stream").split(";", 1)[0]
+        source_type = (
+            ImportSourceType.VAULT
+            if suffix == ".zip"
+            else ImportSourceType.IMAGE
+            if suffix in IMAGE_EXTENSIONS
+            else ImportSourceType.FILE
+        )
+    clean_title = (title or "").strip()
+    if has_text and not clean_title:
+        clean_title = "Pasted notes"
+    if has_file and not clean_title:
+        clean_title = (filename or "Import").rsplit(".", 1)[0][:200] or "Import"
+
+    batch = ImportBatch(
+        household_id=auth.household.id,
+        title=clean_title[:200],
+        source_type=source_type.value,
+        status=ImportStatus.QUEUED.value,
+        original_filename=filename,
+        content_type=content_type,
+        warnings=[],
+        metadata_json={},
+    )
+    db.add(batch)
+    try:
+        db.flush()
+        if has_text:
+            stored = storage.store_import_text(auth.household.id, batch.id, text or "")
+        else:
+            assert file is not None
+            stored = storage.store_import_source(auth.household.id, batch.id, file)
+        batch.storage_key = stored.storage_key
+        batch.byte_size = stored.byte_size
+        if has_text:
+            batch.original_filename = "pasted-notes.txt"
+            batch.content_type = "text/plain"
+        enqueue_import(db, batch)
+    except Exception:
+        db.rollback()
+        raise
+    return serialize_batch(db, batch)
+
+
+@router.get("/{batch_id}", response_model=ImportBatchDetail)
+def read_import(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    return serialize_batch(db, _get_batch(db, auth.household.id, batch_id))
+
+
+@router.get("/{batch_id}/source")
+def download_import_source(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    batch = _get_batch(db, auth.household.id, batch_id)
+    if not batch.storage_key:
+        raise ApiError(404, "source_not_found", "Import source not found.")
+    path = storage.resolve_import_key(batch.storage_key)
+    filename = batch.original_filename or "import-source"
+    filename = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename)[:255] or "import-source"
+    return FileResponse(
+        path,
+        media_type=batch.content_type or "application/octet-stream",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/{batch_id}/files/{file_id}/download")
+def download_import_file(
+    batch_id: uuid.UUID,
+    file_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    _get_batch(db, auth.household.id, batch_id)
+    source = db.scalar(
+        select(ImportSourceFile).where(
+            ImportSourceFile.id == file_id, ImportSourceFile.batch_id == batch_id
+        )
+    )
+    if source is None:
+        raise ApiError(404, "source_file_not_found", "Import source file not found.")
+    path = storage.resolve_import_key(source.storage_key)
+    filename = (
+        re.sub(r"[^A-Za-z0-9._ -]+", "_", PurePosixPath(source.relative_path).name)[:255]
+        or "import-file"
+    )
+    return FileResponse(
+        path,
+        media_type=source.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.post("/{batch_id}/retry", response_model=ImportBatchDetail)
+def retry_import(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    batch = _get_batch(db, auth.household.id, batch_id)
+    if batch.status != ImportStatus.FAILED.value:
+        raise ApiError(409, "import_not_failed", "Only failed imports can be retried.")
+    enqueue_import(db, batch)
+    batch = _get_batch(db, auth.household.id, batch.id)
+    return serialize_batch(db, batch)
+
+
+@router.post("/{batch_id}/apply", response_model=ImportApplyResult)
+def apply_import_route(
+    batch_id: uuid.UUID,
+    payload: ImportApplyRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportApplyResult:
+    batch = _get_batch(db, auth.household.id, batch_id)
+    try:
+        return apply_import(db, batch, payload.entries)
+    except ValueError as exc:
+        raise ApiError(422, "import_apply_failed", str(exc)) from None
+
+
+@router.delete("/{batch_id}", status_code=204)
+def delete_import(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> Response:
+    batch = _get_batch(db, auth.household.id, batch_id)
+    keys = [batch.storage_key] if batch.storage_key else []
+    files = db.scalars(select(ImportSourceFile).where(ImportSourceFile.batch_id == batch.id)).all()
+    keys.extend(source.storage_key for source in files)
+    db.delete(batch)
+    db.commit()
+    for key in keys:
+        storage.delete_import_key(key)
+    return Response(status_code=204)

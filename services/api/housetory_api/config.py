@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://housetory:housetory@localhost:5432/housetory"
     data_dir: Path = Path("./data")
     uploads_dir: Path | None = None
+    imports_dir: Path | None = None
 
     app_base_url: str = "http://localhost:8080"
     extra_origins: str = ""
@@ -34,6 +35,38 @@ class Settings(BaseSettings):
     login_window_seconds: int = Field(default=900, ge=10, le=86_400)
     ocr_language: str = "eng"
     ocr_max_pdf_pages: int = Field(default=5, ge=1, le=20)
+    import_max_files: int = Field(default=2000, ge=1, le=10000)
+    import_max_total_mb: int = Field(default=50, ge=1, le=500)
+    import_max_file_mb: int = Field(default=10, ge=1, le=100)
+
+    ai_provider: Literal["disabled", "ollama", "openai_compatible"] = "disabled"
+    ai_model: str = ""
+    ai_base_url: str = "http://host.docker.internal:11434"
+    ai_timeout_seconds: int = Field(default=90, ge=5, le=600)
+    ai_max_concurrency: int = Field(default=1, ge=1, le=8)
+    ai_cloud_enabled: bool = False
+    ai_cloud_consent: bool = False
+    ai_cloud_base_url: str = ""
+    ai_cloud_model: str = ""
+    ai_cloud_api_key: str = ""
+    ai_max_context_chars: int = Field(default=12000, ge=1000, le=100000)
+    ai_import_max_chunks: int = Field(default=8, ge=1, le=50)
+
+    @property
+    def ai_effective_model(self) -> str:
+        if self.ai_provider == "openai_compatible":
+            return self.ai_cloud_model
+        return self.ai_model
+
+    @property
+    def ai_effective_base_url(self) -> str:
+        if self.ai_provider == "openai_compatible":
+            return self.ai_cloud_base_url.rstrip("/")
+        return self.ai_base_url.rstrip("/")
+
+    @property
+    def ai_cloud_allowed(self) -> bool:
+        return self.ai_cloud_enabled and self.ai_cloud_consent
 
     @field_validator("app_base_url")
     @classmethod
@@ -64,6 +97,10 @@ class Settings(BaseSettings):
     @property
     def resolved_uploads_dir(self) -> Path:
         return self.uploads_dir or (self.data_dir / "uploads")
+
+    @property
+    def resolved_imports_dir(self) -> Path:
+        return self.imports_dir or (self.data_dir / "imports")
 
     @property
     def max_upload_bytes(self) -> int:

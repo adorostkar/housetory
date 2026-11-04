@@ -1,5 +1,6 @@
 from .auth import AuthSession, Household, HouseholdMember, User
 from .base import Base
+from .intelligence import AiRecognition, ImportBatch, ImportEntry, ImportSourceFile
 from .inventory import (
     Category,
     CustomFieldDefinition,
@@ -28,6 +29,10 @@ __all__ = [
     "Item",
     "ItemCustomValue",
     "ItemPhoto",
+    "AiRecognition",
+    "ImportBatch",
+    "ImportEntry",
+    "ImportSourceFile",
     "Job",
     "Purchase",
     "Room",

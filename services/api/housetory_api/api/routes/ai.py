@@ -1,0 +1,238 @@
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ...db import get_db
+from ...domain import RecognitionStatus
+from ...models import AiRecognition
+from ...schemas.ai import (
+    AiRecognitionList,
+    AiRecognitionOut,
+    AiStatus,
+    AssistantRequest,
+    AssistantResponse,
+    DocumentRelations,
+    DocumentRelationSuggestion,
+    NaturalSearchRequest,
+    NaturalSearchResponse,
+)
+from ...schemas.items import ItemSummary
+from ...services import ai as ai_service
+from ...services import storage
+from ...services.ai_tools import document_relations
+from ...services.assistant import answer_question, natural_search
+from ...services.documents import get_document
+from ...services.recognition import enqueue_recognition, serialize_recognition
+from ..deps import AuthContext, require_auth
+from ..errors import ApiError
+
+router = APIRouter(tags=["ai"])
+
+
+def _get_recognition(
+    db: Session, household_id: uuid.UUID, recognition_id: uuid.UUID
+) -> AiRecognition:
+    recognition = db.scalar(
+        select(AiRecognition).where(
+            AiRecognition.id == recognition_id,
+            AiRecognition.household_id == household_id,
+        )
+    )
+    if recognition is None:
+        raise ApiError(404, "recognition_not_found", "Recognition not found.")
+    return recognition
+
+
+@router.get("/ai/status", response_model=AiStatus)
+def ai_status(auth: AuthContext = Depends(require_auth)) -> AiStatus:
+    return ai_service.provider_status(probe=True)
+
+
+@router.post("/assistant/query", response_model=AssistantResponse)
+def assistant_query(
+    payload: AssistantRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AssistantResponse:
+    return answer_question(
+        db,
+        auth.household.id,
+        payload,
+        household_reminder_days=auth.household.warranty_reminder_days,
+    )
+
+
+@router.post("/search/natural", response_model=NaturalSearchResponse)
+def natural_search_route(
+    payload: NaturalSearchRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> NaturalSearchResponse:
+    return natural_search(
+        db,
+        auth.household.id,
+        payload.question,
+        household_reminder_days=auth.household.warranty_reminder_days,
+        limit=payload.limit,
+    )
+
+
+@router.post("/ai/recognitions", response_model=AiRecognitionOut, status_code=201)
+def create_recognition(
+    file: Annotated[UploadFile, File()],
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiRecognitionOut:
+    stored = storage.store_ai_image(auth.household.id, file)
+    recognition = AiRecognition(
+        household_id=auth.household.id,
+        storage_key=stored.storage_key,
+        original_storage_key=stored.original_storage_key,
+        original_filename=stored.original_filename,
+        content_type=stored.content_type,
+        original_content_type=stored.original_content_type,
+        byte_size=stored.byte_size,
+        original_byte_size=stored.original_byte_size,
+        width=stored.width,
+        height=stored.height,
+        status=RecognitionStatus.QUEUED.value,
+        result={},
+        field_sources={},
+    )
+    db.add(recognition)
+    try:
+        db.flush()
+        enqueue_recognition(db, recognition)
+    except Exception:
+        db.rollback()
+        storage.delete_key(stored.storage_key)
+        storage.delete_key(stored.original_storage_key)
+        raise
+    db.refresh(recognition)
+    return serialize_recognition(recognition)
+
+
+@router.get("/ai/recognitions", response_model=AiRecognitionList)
+def list_recognitions(
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiRecognitionList:
+    recognitions = db.scalars(
+        select(AiRecognition)
+        .where(AiRecognition.household_id == auth.household.id)
+        .order_by(AiRecognition.created_at.desc())
+        .limit(limit)
+    ).all()
+    return AiRecognitionList(
+        items=[serialize_recognition(recognition) for recognition in recognitions]
+    )
+
+
+@router.get("/ai/recognitions/{recognition_id}", response_model=AiRecognitionOut)
+def read_recognition(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiRecognitionOut:
+    return serialize_recognition(_get_recognition(db, auth.household.id, recognition_id))
+
+
+@router.get("/ai/recognitions/{recognition_id}/image")
+def recognition_image(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    recognition = _get_recognition(db, auth.household.id, recognition_id)
+    path = storage.resolve_key(recognition.storage_key)
+    return FileResponse(
+        path,
+        media_type=recognition.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+        },
+    )
+
+
+@router.get("/ai/recognitions/{recognition_id}/original")
+def recognition_original(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    recognition = _get_recognition(db, auth.household.id, recognition_id)
+    path = storage.resolve_key(recognition.original_storage_key)
+    filename = recognition.original_filename.replace('"', "")
+    return FileResponse(
+        path,
+        media_type=recognition.original_content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.post("/ai/recognitions/{recognition_id}/retry", response_model=AiRecognitionOut)
+def retry_recognition(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AiRecognitionOut:
+    recognition = _get_recognition(db, auth.household.id, recognition_id)
+    if recognition.status == RecognitionStatus.QUEUED.value:
+        raise ApiError(409, "recognition_in_progress", "This photo is already queued.")
+    enqueue_recognition(db, recognition)
+    db.refresh(recognition)
+    return serialize_recognition(recognition)
+
+
+@router.delete("/ai/recognitions/{recognition_id}", status_code=204)
+def delete_recognition(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> Response:
+    recognition = _get_recognition(db, auth.household.id, recognition_id)
+    keys = [recognition.storage_key, recognition.original_storage_key]
+    db.delete(recognition)
+    db.commit()
+    for key in keys:
+        storage.delete_key(key)
+    return Response(status_code=204)
+
+
+@router.get("/documents/{document_id}/related-items", response_model=DocumentRelations)
+def document_related_items(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentRelations:
+    document = get_document(db, auth.household.id, document_id)
+    suggestions = document_relations(
+        db,
+        auth.household.id,
+        document,
+        household_reminder_days=auth.household.warranty_reminder_days,
+    )
+    items = [
+        DocumentRelationSuggestion(
+            item=ItemSummary.model_validate(suggestion["item"]),
+            score=suggestion["score"],
+            reasons=suggestion["reasons"],
+        )
+        for suggestion in suggestions
+    ]
+    return DocumentRelations(
+        items=items,
+        suggested_item_ids=[entry.item.id for entry in items],
+    )

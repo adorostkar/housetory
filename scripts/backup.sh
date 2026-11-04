@@ -41,10 +41,14 @@ docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 echo "Backing up uploaded files..."
 docker compose exec -T api sh -c 'tar -C /data/uploads -czf - .' > "$target/uploads.tar.gz"
 
-chmod 600 "$target/database.dump" "$target/uploads.tar.gz"
+echo "Backing up import sources and vault files..."
+docker compose exec -T api sh -c 'tar -C /data/imports -czf - .' > "$target/imports.tar.gz"
+
+chmod 600 "$target/database.dump" "$target/uploads.tar.gz" "$target/imports.tar.gz"
 
 size_db="$(wc -c < "$target/database.dump" | tr -d ' ')"
 size_uploads="$(wc -c < "$target/uploads.tar.gz" | tr -d ' ')"
+size_imports="$(wc -c < "$target/imports.tar.gz" | tr -d ' ')"
 
 cat > "$target/manifest.txt" <<EOF
 Housetory backup
@@ -55,13 +59,14 @@ compose_project=$compose_project
 backup_host=$(hostname 2>/dev/null || printf 'unknown')
 database_bytes=$size_db
 uploads_bytes=$size_uploads
+imports_bytes=$size_imports
 EOF
 chmod 600 "$target/manifest.txt"
 
 if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$target" && sha256sum database.dump uploads.tar.gz > SHA256SUMS)
+  (cd "$target" && sha256sum database.dump uploads.tar.gz imports.tar.gz > SHA256SUMS)
 else
-  (cd "$target" && shasum -a 256 database.dump uploads.tar.gz > SHA256SUMS)
+  (cd "$target" && shasum -a 256 database.dump uploads.tar.gz imports.tar.gz > SHA256SUMS)
 fi
 chmod 600 "$target/SHA256SUMS"
 

@@ -27,6 +27,14 @@ from housetory_api.jobs import (
 )
 from housetory_api.models import AuthSession, Job
 from housetory_api.services.document_ocr import OCR_TASK, run_job as run_document_ocr
+from housetory_api.services.import_pipeline import (
+    IMPORT_TASK,
+    run_import_job,
+)
+from housetory_api.services.recognition import (
+    RECOGNITION_TASK,
+    run_job as run_recognition_job,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +92,8 @@ HANDLERS = {
     PRUNE_FINISHED_TASK: prune_finished_jobs,
     "maintenance.ping": ping,
     OCR_TASK: run_document_ocr,
+    IMPORT_TASK: run_import_job,
+    RECOGNITION_TASK: run_recognition_job,
 }
 
 

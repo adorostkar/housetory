@@ -1,0 +1,877 @@
+"""Read-only, household-scoped tools used by the assistant and smart search."""
+
+import re
+import uuid
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from typing import Any
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session
+
+from ..domain import WarrantyStatus
+from ..models import (
+    Category,
+    Document,
+    Item,
+    Purchase,
+    Room,
+    StorageLocation,
+    Tag,
+    Warranty,
+)
+from ..schemas.ai import AssistantReference, NaturalSearchFilters
+from ..schemas.items import ItemSummary
+from ..services.hierarchy import descendant_ids
+from ..services.ownership import financial_overview
+from ..services.serializers import (
+    item_detail,
+    item_load_options,
+    item_summary,
+)
+from ..services.warranties import warranty_status
+from ..services.warranty_dashboard import build_dashboard, load_warranties
+from .items import get_item
+
+
+@dataclass
+class ToolResult:
+    tool: str
+    summary: str
+    filters: dict[str, Any] = field(default_factory=dict)
+    items: list[ItemSummary] = field(default_factory=list)
+    documents: list[dict[str, Any]] = field(default_factory=list)
+    locations: list[dict[str, Any]] = field(default_factory=list)
+    references: list[AssistantReference] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
+    facts: dict[str, Any] = field(default_factory=dict)
+
+
+def _item_reference(item: ItemSummary | Item) -> AssistantReference:
+    return AssistantReference(
+        type="item",
+        id=item.id,
+        title=item.name,
+        subtitle=(
+            getattr(item.room, "name", None)
+            if isinstance(item, Item)
+            else item.room.name
+            if item.room
+            else None
+        ),
+        url=f"/items/{item.id}",
+    )
+
+
+def _resolve_room(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    room_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> Room | None:
+    if room_id:
+        return db.scalar(select(Room).where(Room.id == room_id, Room.household_id == household_id))
+    if not name:
+        return None
+    normalized = name.strip().lower()
+    return db.scalar(
+        select(Room)
+        .where(
+            Room.household_id == household_id,
+            func.lower(Room.name) == normalized,
+        )
+        .limit(1)
+    ) or db.scalar(
+        select(Room)
+        .where(Room.household_id == household_id, Room.name.ilike(f"%{normalized}%"))
+        .order_by(func.length(Room.name))
+        .limit(1)
+    )
+
+
+def _resolve_location(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    location_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> StorageLocation | None:
+    if location_id:
+        return db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.id == location_id,
+                StorageLocation.household_id == household_id,
+            )
+        )
+    if not name:
+        return None
+    normalized = name.strip().lower()
+    return db.scalar(
+        select(StorageLocation)
+        .where(
+            StorageLocation.household_id == household_id,
+            func.lower(StorageLocation.name) == normalized,
+        )
+        .limit(1)
+    ) or db.scalar(
+        select(StorageLocation)
+        .where(
+            StorageLocation.household_id == household_id,
+            StorageLocation.name.ilike(f"%{normalized}%"),
+        )
+        .order_by(func.length(StorageLocation.name))
+        .limit(1)
+    )
+
+
+def _resolve_category(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID | None = None,
+    name: str | None = None,
+) -> Category | None:
+    if category_id:
+        return db.scalar(
+            select(Category).where(
+                Category.id == category_id, Category.household_id == household_id
+            )
+        )
+    if not name:
+        return None
+    normalized = name.strip().lower()
+    return db.scalar(
+        select(Category)
+        .where(
+            Category.household_id == household_id,
+            or_(
+                func.lower(Category.name) == normalized,
+                Category.name.ilike(f"%{normalized}%"),
+            ),
+        )
+        .order_by(func.length(Category.name))
+        .limit(1)
+    )
+
+
+def search_inventory(
+    db: Session,
+    household_id: uuid.UUID,
+    filters: NaturalSearchFilters,
+    *,
+    household_reminder_days: int,
+    limit: int = 30,
+) -> tuple[list[Item], int]:
+    conditions: list[Any] = [
+        Item.household_id == household_id,
+        Item.is_archived.is_(False),
+    ]
+    room = _resolve_room(db, household_id, room_id=filters.room_id, name=filters.room_name)
+    if filters.room_id and room is None:
+        return [], 0
+    room_rows = db.execute(
+        select(Room.id, Room.parent_id).where(Room.household_id == household_id)
+    ).all()
+    if room is not None:
+        conditions.append(Item.room_id.in_(descendant_ids(room_rows, room.id)))
+    if filters.exclude_room_id:
+        excluded = _resolve_room(db, household_id, room_id=filters.exclude_room_id)
+        if excluded is not None:
+            conditions.append(
+                or_(
+                    Item.room_id.is_(None),
+                    Item.room_id.not_in(descendant_ids(room_rows, excluded.id)),
+                )
+            )
+    location = _resolve_location(
+        db, household_id, location_id=filters.location_id, name=filters.location_name
+    )
+    if filters.location_id and location is None:
+        return [], 0
+    if location is not None:
+        location_rows = db.execute(
+            select(StorageLocation.id, StorageLocation.parent_id).where(
+                StorageLocation.household_id == household_id
+            )
+        ).all()
+        conditions.append(Item.storage_location_id.in_(descendant_ids(location_rows, location.id)))
+    category = _resolve_category(
+        db, household_id, category_id=filters.category_id, name=filters.category_name
+    )
+    if filters.category_id and category is None:
+        return [], 0
+    if category is not None:
+        conditions.append(Item.category_id == category.id)
+    if filters.tag:
+        conditions.append(Item.tags.any(Tag.name.ilike(f"%{filters.tag}%")))
+    if filters.q:
+        search = f"%{filters.q.strip()}%"
+        conditions.append(
+            or_(
+                Item.name.ilike(search),
+                Item.description.ilike(search),
+                Item.brand.ilike(search),
+                Item.model.ilike(search),
+                Item.serial_number.ilike(search),
+                Item.category.has(Category.name.ilike(search)),
+                Item.room.has(Room.name.ilike(search)),
+                Item.storage_location.has(StorageLocation.name.ilike(search)),
+                Item.tags.any(Tag.name.ilike(search)),
+                Item.documents.any(
+                    or_(
+                        Document.title.ilike(search),
+                        Document.extracted_text.ilike(search),
+                    )
+                ),
+            )
+        )
+    if filters.missing_purchase:
+        conditions.append(
+            or_(
+                Item.purchase_id.is_(None),
+                Item.purchase.has(
+                    and_(
+                        Purchase.purchase_date.is_(None),
+                        Purchase.price_cents.is_(None),
+                    )
+                ),
+            )
+        )
+    if filters.missing_serial:
+        conditions.append(or_(Item.serial_number.is_(None), Item.serial_number == ""))
+    if filters.purchased_after or filters.purchased_before:
+        purchase_conditions = []
+        if filters.purchased_after:
+            purchase_conditions.append(Purchase.purchase_date >= filters.purchased_after)
+        if filters.purchased_before:
+            purchase_conditions.append(Purchase.purchase_date <= filters.purchased_before)
+        conditions.append(Item.purchase.has(and_(*purchase_conditions)))
+    if filters.min_purchase_cents is not None or filters.max_purchase_cents is not None:
+        price_conditions = []
+        if filters.min_purchase_cents is not None:
+            price_conditions.append(Purchase.price_cents >= filters.min_purchase_cents)
+        if filters.max_purchase_cents is not None:
+            price_conditions.append(Purchase.price_cents <= filters.max_purchase_cents)
+        conditions.append(Item.purchase.has(and_(*price_conditions)))
+    today = date.today()
+    if filters.warranty_status:
+        if filters.warranty_status == "expired":
+            conditions.append(
+                Item.warranty.has(and_(Warranty.end_date.is_not(None), Warranty.end_date < today))
+            )
+        elif filters.warranty_status == "expiring":
+            conditions.append(
+                Item.warranty.has(
+                    and_(
+                        Warranty.end_date.is_not(None),
+                        Warranty.end_date >= today,
+                        Warranty.end_date <= today + timedelta(days=household_reminder_days),
+                    )
+                )
+            )
+        else:
+            conditions.append(
+                Item.warranty.has(and_(Warranty.end_date.is_not(None), Warranty.end_date >= today))
+            )
+
+    total = int(db.scalar(select(func.count(Item.id)).where(*conditions)) or 0)
+    query = (
+        select(Item)
+        .options(*item_load_options())
+        .outerjoin(Purchase, Purchase.id == Item.purchase_id)
+        .where(*conditions)
+    )
+    ordering = {
+        "purchase_desc": [Purchase.price_cents.desc().nullslast(), Item.name.asc()],
+        "purchase_asc": [Purchase.price_cents.asc().nullslast(), Item.name.asc()],
+        "name_asc": [func.lower(Item.name).asc()],
+        "relevance": [Item.updated_at.desc()],
+    }[filters.sort]
+    return list(db.scalars(query.order_by(*ordering).limit(limit)).all()), total
+
+
+def _add_item(items: list[ItemSummary], seen: set[uuid.UUID], item: Item, reminder: int) -> None:
+    if item.id in seen:
+        return
+    seen.add(item.id)
+    items.append(item_summary(item, household_reminder_days=reminder))
+
+
+def tool_search_items(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    filters = NaturalSearchFilters(
+        q=str(args.get("q") or "").strip() or None,
+        room_name=str(args.get("room_name") or "").strip() or None,
+        location_name=str(args.get("location_name") or "").strip() or None,
+        exclude_room_id=args.get("exclude_room_id"),
+        category_name=str(args.get("category_name") or "").strip() or None,
+        tag=str(args.get("tag") or "").strip() or None,
+        missing_purchase=bool(args.get("missing_purchase")),
+        missing_serial=bool(args.get("missing_serial")),
+        warranty_status=args.get("warranty_status"),
+        purchased_after=args.get("purchased_after"),
+        purchased_before=args.get("purchased_before"),
+        min_purchase_cents=args.get("min_purchase_cents"),
+        max_purchase_cents=args.get("max_purchase_cents"),
+        sort=args.get("sort") or "relevance",
+    )
+    items, total = search_inventory(
+        db, household_id, filters, household_reminder_days=household_reminder_days
+    )
+    summaries = [
+        item_summary(item, household_reminder_days=household_reminder_days) for item in items
+    ]
+    if not summaries:
+        summary = "No matching inventory items were found."
+    elif len(summaries) == 1:
+        item = summaries[0]
+        summary = (
+            f"Found 1 item: {item.name}. "
+            f"Location: {item.room.name if item.room else 'unassigned'}"
+            f"{', ' + item.location.name if item.location else ''}. "
+            f"Purchase price: {item.purchase.price_cents if item.purchase else 'not recorded'}."
+        )
+    else:
+        summary = (
+            f"Found {total} matching items. The first {min(total, len(summaries))} are listed."
+        )
+    references = [_item_reference(item) for item in summaries]
+    return ToolResult(
+        tool="search_items",
+        summary=summary,
+        filters=filters.model_dump(mode="json", exclude_none=True),
+        items=summaries,
+        references=references,
+        facts={"total": total},
+    )
+
+
+def tool_get_item_details(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    item_id = args.get("item_id")
+    if not item_id:
+        raise ValueError("item_id is required")
+    item = get_item(db, household_id, uuid.UUID(str(item_id)))
+    detail = item_detail(item, household_reminder_days=household_reminder_days)
+    summary = f"{detail.name}: "
+    parts = []
+    if detail.room:
+        parts.append(f"in {detail.room.name}")
+    if detail.location:
+        parts.append(f"at {detail.location.name}")
+    if detail.brand or detail.model:
+        parts.append(f"{detail.brand or ''} {detail.model or ''}".strip())
+    summary += ", ".join(parts) if parts else "no location recorded"
+    return ToolResult(
+        tool="get_item_details",
+        summary=summary,
+        items=[detail],
+        references=[_item_reference(detail)],
+        facts=detail.model_dump(mode="json"),
+    )
+
+
+def tool_search_locations(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    query = str(args.get("q") or "").strip()
+    rooms = db.scalars(select(Room).where(Room.household_id == household_id)).all()
+    locations = db.scalars(
+        select(StorageLocation).where(StorageLocation.household_id == household_id)
+    ).all()
+    room_map = {room.id: room for room in rooms}
+    if query:
+        lowered = query.lower()
+        rooms = [room for room in rooms if lowered in room.name.lower()]
+        locations = [loc for loc in locations if lowered in loc.name.lower()]
+    results = [
+        {
+            "id": str(room.id),
+            "type": "room",
+            "name": room.name,
+            "url": f"/rooms/{room.id}",
+            "item_count": sum(
+                1
+                for item in db.scalars(
+                    select(Item).where(
+                        Item.household_id == household_id,
+                        Item.room_id == room.id,
+                        Item.is_archived.is_(False),
+                    )
+                ).all()
+            ),
+        }
+        for room in rooms[:20]
+    ] + [
+        {
+            "id": str(location.id),
+            "type": "storage_location",
+            "name": location.name,
+            "room": room_map.get(location.room_id).name if room_map.get(location.room_id) else None,
+            "url": f"/rooms/{location.room_id}?location_id={location.id}",
+        }
+        for location in locations[:20]
+    ]
+    return ToolResult(
+        tool="search_locations",
+        summary=f"Found {len(results)} matching rooms or storage places.",
+        locations=results,
+        filters={"q": query},
+    )
+
+
+def tool_list_room_contents(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    room = _resolve_room(
+        db,
+        household_id,
+        room_id=args.get("room_id"),
+        name=args.get("room_name"),
+    )
+    if room is None:
+        raise ValueError("Room not found")
+    rooms = db.scalars(select(Room).where(Room.household_id == household_id)).all()
+    children = {room.id}
+    changed = True
+    while changed:
+        changed = False
+        for child in rooms:
+            if child.parent_id in children and child.id not in children:
+                children.add(child.id)
+                changed = True
+    items = db.scalars(
+        select(Item)
+        .options(*item_load_options())
+        .where(
+            Item.household_id == household_id,
+            Item.is_archived.is_(False),
+            Item.room_id.in_(children),
+        )
+        .order_by(func.lower(Item.name))
+    ).all()
+    summaries = [
+        item_summary(item, household_reminder_days=household_reminder_days) for item in items
+    ]
+    locations = db.scalars(
+        select(StorageLocation)
+        .where(
+            StorageLocation.household_id == household_id,
+            StorageLocation.room_id.in_(children),
+        )
+        .order_by(StorageLocation.sort_order, StorageLocation.name)
+    ).all()
+    location_results = [
+        {
+            "id": str(location.id),
+            "type": "storage_location",
+            "name": location.name,
+            "room": room.name,
+            "url": f"/rooms/{room.id}?location_id={location.id}",
+        }
+        for location in locations
+    ]
+    item_word = "item" if len(summaries) == 1 else "items"
+    room_word = "room" if len(children) == 1 else "rooms"
+    return ToolResult(
+        tool="list_room_contents",
+        summary=(
+            f"{room.name} contains {len(summaries)} {item_word} in {len(children)} {room_word}."
+        ),
+        items=summaries,
+        locations=location_results,
+        references=[_item_reference(item) for item in summaries]
+        + [AssistantReference(type="room", id=room.id, title=room.name, url=f"/rooms/{room.id}")],
+        facts={"room_id": str(room.id), "room_name": room.name, "total": len(summaries)},
+    )
+
+
+def tool_search_documents(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    query = str(args.get("q") or "").strip()
+    item_id = args.get("item_id")
+    conditions = [Document.household_id == household_id]
+    if item_id:
+        conditions.append(Document.items.any(Item.id == uuid.UUID(str(item_id))))
+    if query:
+        search = f"%{query}%"
+        conditions.append(
+            or_(
+                Document.title.ilike(search),
+                Document.merchant.ilike(search),
+                Document.extracted_text.ilike(search),
+                Document.original_filename.ilike(search),
+                Document.items.any(Item.name.ilike(search)),
+            )
+        )
+    documents = db.scalars(
+        select(Document).where(*conditions).order_by(Document.created_at.desc()).limit(20)
+    ).all()
+    output = [
+        {
+            "id": str(document.id),
+            "title": document.title,
+            "type": document.document_type,
+            "merchant": document.merchant,
+            "document_date": document.document_date.isoformat() if document.document_date else None,
+            "items": [item.name for item in document.items],
+            "url": f"/documents/{document.id}",
+        }
+        for document in documents
+    ]
+    return ToolResult(
+        tool="search_documents",
+        summary=f"Found {len(output)} matching documents.",
+        documents=output,
+        filters={"q": query, "item_id": str(item_id) if item_id else None},
+        references=[
+            AssistantReference(
+                type="document",
+                id=document.id,
+                title=document.title,
+                subtitle=document.merchant,
+                url=f"/documents/{document.id}",
+            )
+            for document in documents
+        ],
+    )
+
+
+def tool_get_purchase_history(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    conditions = [Purchase.household_id == household_id]
+    if args.get("merchant"):
+        conditions.append(Purchase.vendor.ilike(f"%{args['merchant']}%"))
+    if args.get("item_id"):
+        conditions.append(Purchase.items.any(Item.id == uuid.UUID(str(args["item_id"]))))
+    if args.get("date_from"):
+        conditions.append(Purchase.purchase_date >= date.fromisoformat(str(args["date_from"])))
+    if args.get("date_to"):
+        conditions.append(Purchase.purchase_date <= date.fromisoformat(str(args["date_to"])))
+    purchases = db.scalars(
+        select(Purchase)
+        .where(*conditions)
+        .order_by(Purchase.purchase_date.desc().nullslast(), Purchase.created_at.desc())
+        .limit(20)
+    ).all()
+    output = []
+    for purchase in purchases:
+        output.append(
+            {
+                "id": str(purchase.id),
+                "merchant": purchase.vendor,
+                "purchase_date": purchase.purchase_date.isoformat()
+                if purchase.purchase_date
+                else None,
+                "price_cents": purchase.price_cents,
+                "currency": purchase.currency,
+                "items": [item.name for item in purchase.items],
+                "receipt": purchase.receipt_document.title if purchase.receipt_document else None,
+            }
+        )
+    return ToolResult(
+        tool="get_purchase_history",
+        summary=f"Found {len(output)} purchase records.",
+        filters=args,
+        facts={"purchases": output},
+        references=[
+            AssistantReference(
+                type="purchase",
+                id=purchase.id,
+                title=purchase.vendor or "Purchase",
+                subtitle=purchase.purchase_date.isoformat() if purchase.purchase_date else None,
+                url="/purchases",
+            )
+            for purchase in purchases
+        ],
+    )
+
+
+def tool_get_warranty_status(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    warranties = load_warranties(db, household_id)
+    category_name = str(args.get("category") or "").strip().lower()
+    status_filter = args.get("status")
+    today = date.today()
+    rows = []
+    for warranty in warranties:
+        effective = warranty.reminder_days or household_reminder_days
+        status, days = warranty_status(warranty.end_date, reminder_days=effective)
+        if status_filter == "active" and status == WarrantyStatus.EXPIRED:
+            continue
+        if status_filter == "expiring" and status != WarrantyStatus.EXPIRING:
+            continue
+        if status_filter == "expired" and status != WarrantyStatus.EXPIRED:
+            continue
+        if category_name and (
+            not warranty.item.category or category_name not in warranty.item.category.name.lower()
+        ):
+            continue
+        if not warranty.item:
+            continue
+        rows.append(
+            {
+                "warranty_id": str(warranty.id),
+                "item_id": str(warranty.item.id),
+                "item": warranty.item.name,
+                "provider": warranty.provider,
+                "end_date": warranty.end_date.isoformat() if warranty.end_date else None,
+                "status": status.value,
+                "days_remaining": days,
+                "url": f"/items/{warranty.item.id}",
+            }
+        )
+    return ToolResult(
+        tool="get_warranty_status",
+        summary=f"Found {len(rows)} warranties matching that request.",
+        filters=args,
+        facts={"warranties": rows, "today": today.isoformat()},
+        references=[
+            AssistantReference(
+                type="warranty",
+                id=uuid.UUID(row["warranty_id"]),
+                title=row["item"],
+                subtitle=row["end_date"],
+                url=row["url"],
+            )
+            for row in rows
+        ][:20],
+    )
+
+
+def tool_get_inventory_summary(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    financial = financial_overview(
+        db,
+        household_id,
+        household_reminder_days=household_reminder_days,
+        valuable_limit=5,
+        missing_limit=5,
+    )
+    warranties = build_dashboard(
+        load_warranties(db, household_id), household_reminder_days, limit=5
+    )
+    facts = {
+        "item_count": financial.item_count,
+        "currency_totals": [entry.model_dump(mode="json") for entry in financial.currency_totals],
+        "items_missing_purchase_count": financial.items_missing_purchase_count,
+        "warranties": {
+            "active": warranties.active_count,
+            "expiring": warranties.expiring_count,
+            "expired": warranties.expired_count,
+        },
+    }
+    summary = (
+        f"There are {financial.item_count} active items. "
+        f"{financial.items_missing_purchase_count} items are missing purchase information. "
+        f"Warranties: {warranties.active_count} active, {warranties.expiring_count} expiring soon, "
+        f"{warranties.expired_count} expired."
+    )
+    return ToolResult(
+        tool="get_inventory_summary",
+        summary=summary,
+        facts=facts,
+        items=[entry.item for entry in financial.most_valuable_items[:5]],
+    )
+
+
+def tool_find_missing_information(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    field = str(args.get("field") or "purchase")
+    conditions = [Item.household_id == household_id, Item.is_archived.is_(False)]
+    if field in {"purchase", "purchase_info"}:
+        conditions.append(
+            or_(
+                Item.purchase_id.is_(None),
+                Item.purchase.has(
+                    and_(
+                        Purchase.purchase_date.is_(None),
+                        Purchase.price_cents.is_(None),
+                    )
+                ),
+            )
+        )
+        label = "missing purchase information"
+    elif field in {"serial", "serial_number"}:
+        conditions.append(or_(Item.serial_number.is_(None), Item.serial_number == ""))
+        label = "missing serial numbers"
+    elif field in {"room", "location"}:
+        if field == "room":
+            conditions.append(Item.room_id.is_(None))
+        else:
+            conditions.append(Item.storage_location_id.is_(None))
+        label = f"missing {field} assignments"
+    elif field in {"warranty", "warranty_info"}:
+        conditions.append(~Item.warranty.has())
+        label = "without warranty information"
+    else:
+        raise ValueError("Unsupported missing-information field")
+    items = db.scalars(
+        select(Item)
+        .options(*item_load_options())
+        .where(*conditions)
+        .order_by(func.lower(Item.name))
+        .limit(50)
+    ).all()
+    summaries = [
+        item_summary(item, household_reminder_days=household_reminder_days) for item in items
+    ]
+    return ToolResult(
+        tool="find_missing_information",
+        summary=f"Found {len(summaries)} items {label}.",
+        items=summaries,
+        filters={"field": field},
+        references=[_item_reference(item) for item in summaries],
+        facts={"total": len(summaries), "field": field},
+    )
+
+
+def execute_tool(
+    db: Session,
+    household_id: uuid.UUID,
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    handlers = {
+        "search_items": lambda: tool_search_items(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_item_details": lambda: tool_get_item_details(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "search_locations": lambda: tool_search_locations(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "list_room_contents": lambda: tool_list_room_contents(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "search_documents": lambda: tool_search_documents(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_purchase_history": lambda: tool_get_purchase_history(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_warranty_status": lambda: tool_get_warranty_status(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_inventory_summary": lambda: tool_get_inventory_summary(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "find_missing_information": lambda: tool_find_missing_information(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+    }
+    handler = handlers.get(tool)
+    if handler is None:
+        raise ValueError("Unknown tool")
+    return handler()
+
+
+def document_relations(
+    db: Session,
+    household_id: uuid.UUID,
+    document: Document,
+    *,
+    household_reminder_days: int,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    metadata = document.extracted_metadata or {}
+    text = " ".join(
+        [
+            str(metadata.get("merchant") or ""),
+            " ".join(str(name) for name in metadata.get("product_names") or []),
+            " ".join(str(serial) for serial in metadata.get("serial_numbers") or []),
+            document.merchant or "",
+        ]
+    )
+    if not text.strip():
+        return []
+    items = db.scalars(
+        select(Item)
+        .options(*item_load_options())
+        .where(Item.household_id == household_id, Item.is_archived.is_(False))
+    ).all()
+    serials = {str(value).lower() for value in metadata.get("serial_numbers") or []}
+    results = []
+    for item in items:
+        score = 0
+        reasons = []
+        if item.serial_number and item.serial_number.lower() in serials:
+            score += 80
+            reasons.append("serial number matches the document")
+        haystack = " ".join(
+            filter(
+                None,
+                [item.name, item.brand, item.model, item.serial_number, item.description],
+            )
+        ).lower()
+        tokens = [
+            token.lower()
+            for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9-]{2,}", text)
+            if len(token) >= 4
+            and token.lower()
+            not in {"with", "from", "that", "this", "your", "their", "receipt", "invoice"}
+        ]
+        matched = [token for token in tokens if token in haystack]
+        if matched:
+            score += min(35, len(set(matched)) * 8)
+            reasons.append("text matches " + ", ".join(sorted(set(matched))[:3]))
+        if score >= 20:
+            results.append((score, reasons, item))
+    results.sort(key=lambda entry: entry[0], reverse=True)
+    return [
+        {
+            "item": item_summary(item, household_reminder_days=household_reminder_days).model_dump(
+                mode="json"
+            ),
+            "score": score,
+            "reasons": reasons,
+        }
+        for score, reasons, item in results[:limit]
+    ]

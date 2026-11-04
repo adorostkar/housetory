@@ -490,10 +490,55 @@ def _parse_product_names(lines: list[str], merchant: str | None) -> list[str]:
     return names
 
 
+def _parse_brand_model(text: str) -> tuple[str | None, str | None]:
+    brand = re.search(r"\b(?:brand|make|manufacturer)\s*[:#-]\s*([^\n,;|]{2,120})", text, re.I)
+    model = re.search(r"\bmodel\s*(?:number|no\.?)?\s*[:#-]\s*([^\n,;|]{1,120})", text, re.I)
+    return (
+        brand.group(1).strip() if brand else None,
+        model.group(1).strip() if model else None,
+    )
+
+
+def _parse_warranty_fields(text: str) -> dict:
+    lowered = text.lower()
+    if "warranty" not in lowered and "coverage" not in lowered:
+        return {}
+    result: dict = {}
+    duration = re.search(
+        r"(\d+)\s*(year|years|month|months)\s*(?:warranty|coverage|parts|labour|parts and labour)?",
+        text,
+        re.IGNORECASE,
+    )
+    if duration:
+        amount = int(duration.group(1))
+        result["warranty_months"] = amount * 12 if "year" in duration.group(2).lower() else amount
+    provider = re.search(
+        r"\b(?:warranty|coverage)\s+(?:by|from|with)\s+([A-Za-z0-9&.' -]{2,80})",
+        text,
+        re.IGNORECASE,
+    )
+    if provider:
+        result["warranty_provider"] = provider.group(1).strip(" .,;")
+    dates = []
+    for token in re.findall(
+        r"\b(?:20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b",
+        text,
+    ):
+        parsed = _parse_date(token)
+        if parsed:
+            dates.append(parsed)
+    if dates:
+        result["warranty_start"] = min(dates)
+        if len(dates) > 1:
+            result["warranty_end"] = max(dates)
+    return result
+
+
 def parse_receipt(text: str) -> dict:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     merchant = _parse_merchant(lines)
     total_cents, total_currency = _parse_total(lines)
+    brand, model = _parse_brand_model(text)
     return {
         "merchant": merchant,
         "purchase_date": _parse_date(text),
@@ -502,4 +547,7 @@ def parse_receipt(text: str) -> dict:
         "product_names": _parse_product_names(lines, merchant),
         "invoice_number": _parse_invoice_number(text),
         "serial_numbers": _parse_serials(text),
+        "brand": brand,
+        "model": model,
+        **_parse_warranty_fields(text),
     }

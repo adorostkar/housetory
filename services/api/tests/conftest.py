@@ -19,12 +19,14 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+psycopg://housetory:housetory@127.0.0.1:5432/housetory_test",
 )
 UPLOAD_ROOT = Path(tempfile.mkdtemp(prefix="housetory-test-uploads-"))
+IMPORTS_ROOT = Path(tempfile.mkdtemp(prefix="housetory-test-imports-"))
 
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "test"
 os.environ["APP_BASE_URL"] = "http://testserver"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["UPLOADS_DIR"] = str(UPLOAD_ROOT)
+os.environ["IMPORTS_DIR"] = str(IMPORTS_ROOT)
 
 from sqlalchemy import text  # noqa: E402
 
@@ -65,6 +67,7 @@ def database() -> Iterator[None]:
     with _admin_connection() as connection:
         connection.execute(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
     shutil.rmtree(UPLOAD_ROOT, ignore_errors=True)
+    shutil.rmtree(IMPORTS_ROOT, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -81,6 +84,8 @@ def clean_state(database: None) -> Iterator[None]:
             connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
     shutil.rmtree(UPLOAD_ROOT, ignore_errors=True)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(IMPORTS_ROOT, ignore_errors=True)
+    IMPORTS_ROOT.mkdir(parents=True, exist_ok=True)
     login_limiter.reset_all()
     yield
 
@@ -100,6 +105,11 @@ def anon_client() -> Iterator[TestClient]:
 @pytest.fixture
 def upload_root() -> Path:
     return UPLOAD_ROOT
+
+
+@pytest.fixture
+def imports_root() -> Path:
+    return IMPORTS_ROOT
 
 
 @pytest.fixture

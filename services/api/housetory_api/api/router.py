@@ -1,11 +1,13 @@
 from fastapi import APIRouter
 
 from .routes import (
+    ai,
     auth,
     documents,
     exports,
     health,
     household,
+    imports,
     items,
     locations,
     overview,
@@ -30,5 +32,7 @@ api_router.include_router(documents.router)
 api_router.include_router(purchases.router)
 api_router.include_router(warranties.router)
 api_router.include_router(exports.router)
+api_router.include_router(imports.router)
+api_router.include_router(ai.router)
 
 __all__ = ["api_router"]

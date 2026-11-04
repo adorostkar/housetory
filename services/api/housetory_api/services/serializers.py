@@ -7,6 +7,7 @@ from ..domain import WarrantyStatus
 from ..models import Document, Item, ItemPhoto, Purchase, Warranty
 from ..schemas.common import ItemReference
 from ..schemas.documents import DocumentBrief, DocumentOut
+from ..schemas.imports import ImportSourceBrief
 from ..schemas.items import (
     CategoryBrief,
     ItemDetail,
@@ -212,11 +213,17 @@ def item_summary(item: Item, *, household_reminder_days: int | None = None) -> I
     )
 
 
-def item_detail(item: Item, *, household_reminder_days: int | None = None) -> ItemDetail:
+def item_detail(
+    item: Item,
+    *,
+    household_reminder_days: int | None = None,
+    import_source: ImportSourceBrief | None = None,
+) -> ItemDetail:
     summary = item_summary(item, household_reminder_days=household_reminder_days)
     return ItemDetail(
         **summary.model_dump(),
         serial_number=item.serial_number,
+        import_source=import_source,
         photos=[
             photo_out(photo)
             for photo in sorted(item.photos, key=lambda p: (p.sort_order, p.created_at))

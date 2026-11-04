@@ -24,7 +24,10 @@ RUN apk add --no-cache \
         tesseract-ocr-data-eng \
         poppler-utils \
     && addgroup -S housetory \
-    && adduser -S -G housetory -h /home/housetory housetory
+    && adduser -S -G housetory -h /home/housetory housetory \
+    && mkdir -p /data/uploads /data/imports \
+    && chown -R housetory:housetory /data \
+    && chmod 700 /data /data/uploads /data/imports
 
 WORKDIR /app
 COPY --from=builder /app/api /app/api

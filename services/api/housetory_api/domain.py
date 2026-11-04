@@ -64,3 +64,42 @@ class WarrantyStatus(StrEnum):
     EXPIRING = "expiring"
     EXPIRED = "expired"
     UNKNOWN = "unknown"
+
+
+class ImportSourceType(StrEnum):
+    TEXT = "text"
+    FILE = "file"
+    VAULT = "vault"
+    IMAGE = "image"
+
+
+class ImportStatus(StrEnum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    REVIEW = "review"
+    APPLYING = "applying"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ImportEntryStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    IMPORTED = "imported"
+    SKIPPED = "skipped"
+    MERGED = "merged"
+    FAILED = "failed"
+
+
+class DuplicateResolution(StrEnum):
+    NEW = "new"
+    SKIP = "skip"
+    MERGE = "merge"
+
+
+class RecognitionStatus(StrEnum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

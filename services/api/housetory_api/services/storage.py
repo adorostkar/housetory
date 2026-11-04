@@ -71,6 +71,27 @@ class StoredDocument:
     original_byte_size: int
 
 
+@dataclass(frozen=True)
+class StoredImportFile:
+    storage_key: str
+    original_filename: str
+    content_type: str
+    byte_size: int
+
+
+@dataclass(frozen=True)
+class StoredAiImage:
+    storage_key: str
+    original_storage_key: str
+    original_filename: str
+    content_type: str
+    original_content_type: str
+    byte_size: int
+    original_byte_size: int
+    width: int
+    height: int
+
+
 def _root_path() -> Path:
     return get_settings().resolved_uploads_dir
 
@@ -83,8 +104,20 @@ def _root() -> Path:
     return root
 
 
+def _import_root_path() -> Path:
+    return get_settings().resolved_imports_dir
+
+
+def _import_root() -> Path:
+    root = _import_root_path()
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    return root
+
+
 def ensure_storage() -> None:
     _root()
+    _import_root()
 
 
 def _mkdir_private(path: Path) -> None:
@@ -392,6 +425,32 @@ def resolve_key(storage_key: str) -> Path:
     return path
 
 
+def resolve_import_key(storage_key: str) -> Path:
+    root = _import_root_path().resolve()
+    path = (root / storage_key).resolve()
+    if root not in path.parents and path != root:
+        raise ApiError(404, "file_not_found", "File not found.")
+    if not path.is_file():
+        raise ApiError(404, "file_not_found", "File not found.")
+    return path
+
+
+def delete_import_key(storage_key: str | None) -> None:
+    if not storage_key:
+        return
+    try:
+        path = resolve_import_key(storage_key)
+    except ApiError:
+        return
+    path.unlink(missing_ok=True)
+    for parent in (path.parent, path.parent.parent):
+        try:
+            if parent != _import_root() and parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+        except OSError:
+            break
+
+
 def delete_key(storage_key: str | None) -> None:
     if not storage_key:
         return
@@ -407,3 +466,117 @@ def delete_key(storage_key: str | None) -> None:
                 parent.rmdir()
         except OSError:
             break
+
+
+def store_import_source(
+    household_id: uuid.UUID, batch_id: uuid.UUID, upload: UploadFile
+) -> StoredImportFile:
+    settings = get_settings()
+    temp_path, size = _write_temp(upload, settings.max_upload_bytes)
+    base_dir = (
+        _import_root() / "households" / str(household_id) / "imports" / str(batch_id) / "source"
+    )
+    destination = base_dir / f"{uuid.uuid4().hex}-{_safe_filename(upload.filename)}"
+    try:
+        _mkdir_private(base_dir)
+        # Uploads staging and import storage are separate Docker volumes, so a
+        # rename can cross devices. Copy the preserved bytes instead.
+        shutil.copyfile(temp_path, destination)
+        _chmod_file(destination)
+        return StoredImportFile(
+            storage_key=destination.relative_to(_import_root()).as_posix(),
+            original_filename=_safe_filename(upload.filename),
+            content_type=(upload.content_type or "application/octet-stream").split(";", 1)[0],
+            byte_size=size,
+        )
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def store_import_text(household_id: uuid.UUID, batch_id: uuid.UUID, text: str) -> StoredImportFile:
+    data = text.encode("utf-8")
+    if not data:
+        raise ApiError(422, "empty_import", "Paste some text before importing.")
+    return store_import_file(
+        household_id,
+        batch_id,
+        "pasted-notes.txt",
+        data,
+        "text/plain",
+        kind_dir="source",
+    )
+
+
+def store_import_file(
+    household_id: uuid.UUID,
+    batch_id: uuid.UUID,
+    relative_path: str,
+    data: bytes,
+    content_type: str,
+    *,
+    kind_dir: str = "files",
+) -> StoredImportFile:
+    if not data:
+        raise ApiError(422, "empty_import", "The import contains an empty file.")
+    safe_name = _safe_filename(relative_path)
+    base_dir = (
+        _import_root() / "households" / str(household_id) / "imports" / str(batch_id) / kind_dir
+    )
+    destination = base_dir / f"{uuid.uuid4().hex}-{safe_name}"
+    _mkdir_private(base_dir)
+    try:
+        with destination.open("wb") as handle:
+            handle.write(data)
+        _chmod_file(destination)
+        return StoredImportFile(
+            storage_key=destination.relative_to(_import_root()).as_posix(),
+            original_filename=safe_name,
+            content_type=content_type,
+            byte_size=len(data),
+        )
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def store_ai_image(household_id: uuid.UUID, upload: UploadFile) -> StoredAiImage:
+    settings = get_settings()
+    temp_path, size = _write_temp(upload, settings.max_upload_bytes)
+    image_id = uuid.uuid4()
+    base_dir = _root() / "households" / str(household_id) / "ai" / "images"
+    original_destination = (
+        base_dir
+        / "originals"
+        / f"{image_id}{PurePosixPath(_safe_filename(upload.filename)).suffix or '.img'}"
+    )
+    normalized_path: Path | None = None
+    try:
+        _mkdir_private(original_destination.parent)
+        shutil.copyfile(temp_path, original_destination)
+        _chmod_file(original_destination)
+        normalized_path, content_type, original_content_type, normalized_name = (
+            _normalize_document_image(temp_path, base_dir, image_id, upload.filename)
+        )
+        with _open_image(normalized_path) as image:
+            width, height = image.size
+        return StoredAiImage(
+            storage_key=normalized_path.relative_to(_root()).as_posix(),
+            original_storage_key=original_destination.relative_to(_root()).as_posix(),
+            original_filename=normalized_name,
+            content_type=content_type,
+            original_content_type=original_content_type,
+            byte_size=normalized_path.stat().st_size,
+            original_byte_size=size,
+            width=width,
+            height=height,
+        )
+    except Exception:
+        if normalized_path is not None:
+            normalized_path.unlink(missing_ok=True)
+        original_destination.unlink(missing_ok=True)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)

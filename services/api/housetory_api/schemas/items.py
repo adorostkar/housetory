@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 from ..domain import ItemCondition
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.documents import DocumentList, DocumentOut
+from ..schemas.imports import ImportSourceBrief
 from ..schemas.purchases import PurchaseIn, PurchaseOut
 from ..schemas.warranties import WarrantyIn, WarrantyOut
 
@@ -123,6 +124,7 @@ class ItemDetail(ItemSummary):
     serial_number: str | None
     photos: list[PhotoOut]
     documents: list[DocumentOut]
+    import_source: ImportSourceBrief | None = None
 
 
 class ItemList(BaseModel):

@@ -25,6 +25,22 @@ x-api-environment: &api-environment
   LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-900}
   DATA_DIR: /data
   UPLOADS_DIR: /data/uploads
+  IMPORTS_DIR: /data/imports
+  AI_PROVIDER: ${AI_PROVIDER:-disabled}
+  AI_MODEL: ${AI_MODEL:-}
+  AI_BASE_URL: ${AI_BASE_URL:-http://host.docker.internal:11434}
+  AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-90}
+  AI_MAX_CONCURRENCY: ${AI_MAX_CONCURRENCY:-1}
+  AI_CLOUD_ENABLED: ${AI_CLOUD_ENABLED:-false}
+  AI_CLOUD_CONSENT: ${AI_CLOUD_CONSENT:-false}
+  AI_CLOUD_BASE_URL: ${AI_CLOUD_BASE_URL:-}
+  AI_CLOUD_MODEL: ${AI_CLOUD_MODEL:-}
+  AI_CLOUD_API_KEY: ${AI_CLOUD_API_KEY:-}
+  AI_MAX_CONTEXT_CHARS: ${AI_MAX_CONTEXT_CHARS:-12000}
+  AI_IMPORT_MAX_CHUNKS: ${AI_IMPORT_MAX_CHUNKS:-8}
+  IMPORT_MAX_FILES: ${IMPORT_MAX_FILES:-2000}
+  IMPORT_MAX_TOTAL_MB: ${IMPORT_MAX_TOTAL_MB:-50}
+  IMPORT_MAX_FILE_MB: ${IMPORT_MAX_FILE_MB:-10}
 
 services:
   db:
@@ -86,6 +102,9 @@ services:
         condition: service_completed_successfully
     volumes:
       - housetory_uploads:/data/uploads
+      - housetory_imports:/data/imports
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8000"
     read_only: true
@@ -119,10 +138,29 @@ services:
       ENVIRONMENT: production
       DATA_DIR: /data
       UPLOADS_DIR: /data/uploads
+      IMPORTS_DIR: /data/imports
       OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
       OCR_MAX_PDF_PAGES: ${OCR_MAX_PDF_PAGES:-5}
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-http://host.docker.internal:11434}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-90}
+      AI_MAX_CONCURRENCY: ${AI_MAX_CONCURRENCY:-1}
+      AI_CLOUD_ENABLED: ${AI_CLOUD_ENABLED:-false}
+      AI_CLOUD_CONSENT: ${AI_CLOUD_CONSENT:-false}
+      AI_CLOUD_BASE_URL: ${AI_CLOUD_BASE_URL:-}
+      AI_CLOUD_MODEL: ${AI_CLOUD_MODEL:-}
+      AI_CLOUD_API_KEY: ${AI_CLOUD_API_KEY:-}
+      AI_MAX_CONTEXT_CHARS: ${AI_MAX_CONTEXT_CHARS:-12000}
+      AI_IMPORT_MAX_CHUNKS: ${AI_IMPORT_MAX_CHUNKS:-8}
+      IMPORT_MAX_FILES: ${IMPORT_MAX_FILES:-2000}
+      IMPORT_MAX_TOTAL_MB: ${IMPORT_MAX_TOTAL_MB:-50}
+      IMPORT_MAX_FILE_MB: ${IMPORT_MAX_FILE_MB:-10}
     volumes:
       - housetory_uploads:/data/uploads:ro
+      - housetory_imports:/data/imports
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -175,3 +213,5 @@ volumes:
     name: housetory_pgdata
   housetory_uploads:
     name: housetory_uploads
+  housetory_imports:
+    name: housetory_imports

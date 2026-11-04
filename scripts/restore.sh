@@ -32,6 +32,13 @@ for file in database.dump uploads.tar.gz SHA256SUMS manifest.txt; do
   fi
 done
 
+# Imports were added after the original backup format. Older backups remain
+# restorable; new backups include the private import-source volume.
+has_imports=false
+if [ -f "$source_dir/imports.tar.gz" ]; then
+  has_imports=true
+fi
+
 echo "Verifying backup checksums..."
 (cd "$source_dir" && \
   if command -v sha256sum >/dev/null 2>&1; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
@@ -71,6 +78,14 @@ docker compose run --rm --no-deps -T \
   -v "$ROOT/scripts:/scripts:ro" \
   --entrypoint python api /scripts/restore_uploads.py --check \
   < "$source_dir/uploads.tar.gz"
+
+if [ "$has_imports" = true ]; then
+  echo "Validating imports archive..."
+  docker compose run --rm --no-deps -T \
+    -v "$ROOT/scripts:/scripts:ro" \
+    --entrypoint python api /scripts/restore_uploads.py --check \
+    < "$source_dir/imports.tar.gz"
+fi
 
 if [ "$assume_yes" != true ]; then
   echo
@@ -112,6 +127,14 @@ docker compose run --rm --no-deps -T \
   -v "$ROOT/scripts:/scripts:ro" \
   --entrypoint python api /scripts/restore_uploads.py --extract \
   < "$source_dir/uploads.tar.gz"
+
+if [ "$has_imports" = true ]; then
+  echo "Restoring import sources..."
+  docker compose run --rm --no-deps -T \
+    -v "$ROOT/scripts:/scripts:ro" \
+    --entrypoint python api /scripts/restore_uploads.py --extract --root /data/imports \
+    < "$source_dir/imports.tar.gz"
+fi
 
 echo "Applying any newer migrations..."
 docker compose run --rm migrate

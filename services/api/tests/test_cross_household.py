@@ -70,6 +70,22 @@ def _owner_dataset(owner_client, pdf_bytes):
         f"/api/v1/items/{item['id']}/documents",
         files={"file": ("private.pdf", pdf_bytes, "application/pdf")},
     ).json()
+    import_batch = owner_client.post(
+        "/api/v1/imports",
+        data={"text": "- Private Item in Private Room", "title": "Private import"},
+    )
+    assert import_batch.status_code == 201, import_batch.text
+    import_batch = import_batch.json()
+    from housetory_api.services.import_pipeline import process_import_batch
+
+    process_import_batch(import_batch["id"])
+    import_batch = owner_client.get(f"/api/v1/imports/{import_batch['id']}").json()
+    recognition_response = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("private-recognition.png", buffer.getvalue(), "image/png")},
+    )
+    assert recognition_response.status_code == 201, recognition_response.text
+    recognition = recognition_response.json()
     purchase = owner_client.post(
         "/api/v1/purchases",
         json={
@@ -95,6 +111,8 @@ def _owner_dataset(owner_client, pdf_bytes):
         "document": document,
         "purchase": purchase,
         "warranty": warranty,
+        "import": import_batch,
+        "recognition": recognition,
     }
 
 
@@ -127,6 +145,8 @@ def test_every_household_endpoint_rejects_cross_household_access(
     assert anon_client.get("/api/v1/documents", headers=headers).json()["items"] == []
     assert anon_client.get("/api/v1/purchases", headers=headers).json()["items"] == []
     assert anon_client.get("/api/v1/warranties", headers=headers).json()["items"] == []
+    assert anon_client.get("/api/v1/imports", headers=headers).json()["items"] == []
+    assert anon_client.get("/api/v1/ai/recognitions", headers=headers).json()["items"] == []
     financial = anon_client.get("/api/v1/financial-overview", headers=headers).json()
     assert financial["item_count"] == 0
     assert financial["currency_totals"] == []
@@ -148,6 +168,12 @@ def test_every_household_endpoint_rejects_cross_household_access(
         ("GET", f"/api/v1/documents/{data['document']['id']}/original"),
         ("GET", f"/api/v1/documents/{data['document']['id']}"),
         ("GET", f"/api/v1/purchases/{data['purchase']['id']}"),
+        ("GET", f"/api/v1/imports/{data['import']['id']}"),
+        ("GET", f"/api/v1/imports/{data['import']['id']}/source"),
+        ("GET", f"/api/v1/ai/recognitions/{data['recognition']['id']}"),
+        ("GET", f"/api/v1/ai/recognitions/{data['recognition']['id']}/image"),
+        ("GET", f"/api/v1/ai/recognitions/{data['recognition']['id']}/original"),
+        ("GET", f"/api/v1/documents/{data['document']['id']}/related-items"),
     ]
     for method, path in object_paths:
         response = anon_client.request(method, path, headers=headers)
@@ -188,6 +214,19 @@ def test_every_household_endpoint_rejects_cross_household_access(
             {"price_cents": 1},
         ),
         ("DELETE", f"/api/v1/purchases/{data['purchase']['id']}", None),
+        ("POST", f"/api/v1/imports/{data['import']['id']}/retry", None),
+        (
+            "POST",
+            f"/api/v1/imports/{data['import']['id']}/apply",
+            {"entries": []},
+        ),
+        ("DELETE", f"/api/v1/imports/{data['import']['id']}", None),
+        ("DELETE", f"/api/v1/ai/recognitions/{data['recognition']['id']}", None),
+        (
+            "POST",
+            f"/api/v1/ai/recognitions/{data['recognition']['id']}/retry",
+            None,
+        ),
         (
             "POST",
             f"/api/v1/items/{data['item']['id']}/photos",
@@ -398,10 +437,18 @@ def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
         f"/api/v1/documents/{random_id}/file",
         f"/api/v1/documents/{random_id}/original",
         f"/api/v1/documents/{random_id}",
+        f"/api/v1/documents/{random_id}/related-items",
+        f"/api/v1/imports/{random_id}",
+        f"/api/v1/imports/{random_id}/source",
+        f"/api/v1/ai/recognitions/{random_id}",
+        f"/api/v1/ai/recognitions/{random_id}/image",
         f"/api/v1/purchases/{random_id}",
         "/api/v1/purchases",
         "/api/v1/warranties",
         "/api/v1/financial-overview",
+        "/api/v1/imports",
+        "/api/v1/ai/status",
+        "/api/v1/ai/recognitions",
         "/api/v1/exports/documents.csv",
         "/api/v1/exports/purchases.csv",
         "/api/v1/exports/warranties.csv",
@@ -425,6 +472,19 @@ def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
     assert anon_client.post("/api/v1/purchases", json={"price_cents": 1}).status_code == 401
     assert anon_client.get("/api/v1/financial-overview").status_code == 401
     assert anon_client.get("/api/v1/exports/inventory.csv").status_code == 401
+    assert (
+        anon_client.post(
+            "/api/v1/assistant/query", json={"question": "Where is my camera?"}
+        ).status_code
+        == 401
+    )
+    assert (
+        anon_client.post("/api/v1/search/natural", json={"question": "Find cameras"}).status_code
+        == 401
+    )
+    assert (
+        anon_client.post("/api/v1/imports", data={"text": "Camera in the attic"}).status_code == 401
+    )
 
 
 def test_member_cannot_change_household_settings(owner_client, anon_client):
