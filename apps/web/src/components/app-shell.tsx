@@ -1,6 +1,5 @@
 import {
   Boxes,
-  Camera,
   DoorOpen,
   FileText,
   House,
@@ -11,6 +10,7 @@ import {
   ShieldCheck,
   Sparkles,
   Upload,
+  ScanLine,
 } from "lucide-react";
 import { Suspense, useEffect } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -31,7 +31,7 @@ const primaryNav = [
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
   { to: "/imports", label: "Import", icon: Upload, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
-  { to: "/recognize", label: "Recognise", icon: Camera, end: false },
+  { to: "/scan", label: "AI scan", icon: ScanLine, end: false },
   { to: "/containers", label: "Containers", icon: Boxes, end: false },
   { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;

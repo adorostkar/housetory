@@ -83,12 +83,20 @@ export function AssistantPage() {
         title="Assistant"
         description="Ask practical questions about your actual inventory, documents, purchases and warranties."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/settings">
-              <ShieldCheck />
-              AI status
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/scan">
+                <Sparkles />
+                AI Scan Items
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/settings/ai">
+                <ShieldCheck />
+                AI settings
+              </Link>
+            </Button>
+          </>
         }
       />
 

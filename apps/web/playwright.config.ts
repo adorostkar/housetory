@@ -13,6 +13,11 @@ export default defineConfig({
     baseURL,
     storageState: "./e2e/.auth/state.json",
     channel: process.env.E2E_CHANNEL ?? "chrome",
+    ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS === "true",
+    launchOptions:
+      process.env.E2E_IGNORE_HTTPS === "true"
+        ? { args: ["--ignore-certificate-errors"] }
+        : {},
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",

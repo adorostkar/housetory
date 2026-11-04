@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   Boxes,
+  Camera,
   ChevronRight,
   MoreHorizontal,
   Pencil,
@@ -13,6 +14,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
@@ -185,6 +187,12 @@ export function RoomDetailPage() {
                 Containers
               </Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/scan?room_id=${room.id}`}>
+                <Camera />
+                Scan room
+              </Link>
+            </Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -228,6 +236,10 @@ export function RoomDetailPage() {
           </>
         }
       />
+
+      <section className="surface mb-5 p-4 sm:p-5">
+        <EntityPhotoManager kind="room" entityId={room.id} name={room.name} />
+      </section>
 
       <div className="grid items-start gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="space-y-5">

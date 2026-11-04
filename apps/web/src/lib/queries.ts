@@ -4,6 +4,7 @@ import { api, buildQuery } from "@/lib/api";
 import type {
   AiRecognition,
   AiRecognitionList,
+  AiSettings,
   AiStatus,
   CategoryList,
   ContainerDetail,
@@ -18,6 +19,7 @@ import type {
   ItemList,
   LabelTemplateList,
   Overview,
+  PhotoList,
   PurchaseList,
   RoomList,
   SessionState,
@@ -46,8 +48,12 @@ export const queryKeys = {
   imports: ["imports"] as const,
   importBatch: (batchId: string) => ["imports", batchId] as const,
   aiStatus: ["ai", "status"] as const,
+  aiSettings: ["ai", "settings"] as const,
   recognitions: ["ai", "recognitions"] as const,
   recognition: (recognitionId: string) => ["ai", "recognition", recognitionId] as const,
+  aiProviderModels: (providerId: string) => ["ai", "provider", providerId, "models"] as const,
+  roomPhotos: (roomId: string) => ["photos", "room", roomId] as const,
+  locationPhotos: (locationId: string) => ["photos", "location", locationId] as const,
   containers: ["containers"] as const,
   container: (containerId: string) => ["containers", containerId] as const,
   labelTemplates: ["labels", "templates"] as const,
@@ -239,10 +245,10 @@ export function useImportBatch(batchId: string | undefined) {
   });
 }
 
-export function useAiStatus() {
+export function useAiStatus(task = "assistant") {
   return useQuery({
-    queryKey: queryKeys.aiStatus,
-    queryFn: () => api.get<AiStatus>("/ai/status"),
+    queryKey: [...queryKeys.aiStatus, task],
+    queryFn: () => api.get<AiStatus>(`/ai/status?task=${encodeURIComponent(task)}`),
     staleTime: 30_000,
     retry: false,
   });
@@ -341,5 +347,31 @@ export function useQrConfig() {
     queryKey: queryKeys.qrConfig,
     queryFn: () => api.get<{ base_url: string; warning: string | null; local_only: boolean }>("/containers/qr-config"),
     staleTime: 60_000,
+  });
+}
+
+
+export function useAiSettings(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.aiSettings,
+    queryFn: () => api.get<AiSettings>("/ai/settings"),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useRoomPhotos(roomId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.roomPhotos(roomId ?? ""),
+    queryFn: () => api.get<PhotoList>(`/rooms/${roomId}/photos`),
+    enabled: Boolean(roomId),
+  });
+}
+
+export function useLocationPhotos(locationId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.locationPhotos(locationId ?? ""),
+    queryFn: () => api.get<PhotoList>(`/locations/${locationId}/photos`),
+    enabled: Boolean(locationId),
   });
 }

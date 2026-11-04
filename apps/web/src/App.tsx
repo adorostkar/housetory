@@ -66,6 +66,9 @@ const ImportDetailPage = React.lazy(() =>
 const AssistantPage = React.lazy(() =>
   import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
 );
+const ScanPage = React.lazy(() =>
+  import("@/pages/scan-page").then((module) => ({ default: module.ScanPage })),
+);
 const RecognitionPage = React.lazy(() =>
   import("@/pages/recognition-page").then((module) => ({
     default: module.RecognitionPage,
@@ -86,6 +89,9 @@ const LabelsPage = React.lazy(() =>
 );
 const SettingsPage = React.lazy(() =>
   import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })),
+);
+const AiSettingsPage = React.lazy(() =>
+  import("@/pages/ai-settings-page").then((module) => ({ default: module.AiSettingsPage })),
 );
 const NotFoundPage = React.lazy(() =>
   import("@/pages/not-found-page").then((module) => ({ default: module.NotFoundPage })),
@@ -166,12 +172,14 @@ export default function App() {
             <Route path="imports" element={<ImportsPage />} />
             <Route path="imports/:batchId" element={<ImportDetailPage />} />
             <Route path="assistant" element={<AssistantPage />} />
+            <Route path="scan" element={<ScanPage />} />
             <Route path="recognize" element={<RecognitionPage />} />
             <Route path="containers" element={<ContainersPage />} />
             <Route path="containers/:containerId" element={<ContainerDetailPage />} />
             <Route path="labels" element={<LabelsPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings/ai" element={<AiSettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>

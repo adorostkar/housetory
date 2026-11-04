@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Camera, ImageOff, Plus, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageOff, Plus, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { CameraUpload } from "@/components/camera-upload";
 import { PhotoLightbox } from "@/components/photo-lightbox";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -77,6 +78,20 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
     },
   });
 
+  const reorder = useMutation({
+    mutationFn: (photoIds: string[]) =>
+      api.put<PhotoList>(`/items/${item.id}/photos/order`, { photo_ids: photoIds }),
+    onSuccess: (response) => {
+      queryClient.setQueryData<ItemDetailResponse>(queryKeys.item(item.id), (current) => {
+        if (!current) return current;
+        return { ...current, item: { ...current.item, photos: response.items } };
+      });
+      invalidate();
+      toast.success("Photograph order updated");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
   const makeCover = useMutation({
     mutationFn: (photoId: string) =>
       api.post<PhotoList>(`/items/${item.id}/photos/${photoId}/primary`),
@@ -92,6 +107,19 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
   });
 
   const active = item.photos.find((photo) => photo.id === activeId) ?? item.photos[0] ?? null;
+  const activeIndex = active ? item.photos.findIndex((photo) => photo.id === active.id) : -1;
+  const moveActive = (direction: -1 | 1) => {
+    if (activeIndex < 0) return;
+    const target = activeIndex + direction;
+    if (target < 0 || target >= item.photos.length) return;
+    const ordered = [...item.photos];
+    const current = ordered[activeIndex];
+    const replacement = ordered[target];
+    if (!current || !replacement) return;
+    ordered[activeIndex] = replacement;
+    ordered[target] = current;
+    reorder.mutate(ordered.map((photo) => photo.id));
+  };
   const cover = item.photos[0] ?? null;
   const activeIsCover = Boolean(active && cover && active.id === cover.id);
   const atLimit = item.photos.length >= 20;
@@ -137,30 +165,21 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
                 <Plus />
                 Add photographs
               </label>
-              <label
-                htmlFor="photo-camera-empty"
-                className={cn(
-                  buttonVariants({ variant: "outline", size: "sm" }),
-                  "cursor-pointer sm:hidden",
-                )}
-              >
-                <Camera />
-                Take photo
-              </label>
+              <CameraUpload
+                compact
+                showLibrary={false}
+                label="Add item photograph"
+                busy={upload.isPending}
+                onUpload={async (file) => {
+                  await upload.mutateAsync([file]);
+                }}
+              />
             </div>
             <input
               id="photo-upload-empty"
               type="file"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
               multiple
-              className="sr-only"
-              onChange={onFilesSelected}
-            />
-            <input
-              id="photo-camera-empty"
-              type="file"
-              accept="image/*"
-              capture="environment"
               className="sr-only"
               onChange={onFilesSelected}
             />
@@ -179,6 +198,24 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
               </Badge>
             )}
             <div className="absolute right-3 top-3 z-10 flex gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+              <button
+                type="button"
+                onClick={() => moveActive(-1)}
+                disabled={activeIndex <= 0 || reorder.isPending}
+                className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-foreground disabled:opacity-30"
+                aria-label="Move photograph earlier"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveActive(1)}
+                disabled={activeIndex < 0 || activeIndex >= item.photos.length - 1 || reorder.isPending}
+                className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-foreground disabled:opacity-30"
+                aria-label="Move photograph later"
+              >
+                <ChevronRight className="size-4" />
+              </button>
               {!activeIsCover && (
                 <button
                   type="button"
@@ -257,16 +294,15 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
             >
               {upload.isPending ? <Spinner /> : <Plus />}
             </label>
-            <label
-              htmlFor="photo-camera"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "icon" }),
-                "shrink-0 cursor-pointer border-dashed text-muted-foreground hover:text-foreground sm:hidden",
-              )}
-              aria-label="Take a photo"
-            >
-              <Camera />
-            </label>
+            <CameraUpload
+              compact
+              showLibrary={false}
+              label="Add item photograph"
+              busy={upload.isPending}
+              onUpload={async (file) => {
+                await upload.mutateAsync([file]);
+              }}
+            />
           </>
         )}
         <input
@@ -274,15 +310,6 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
           type="file"
           accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
           multiple
-          className="sr-only"
-          disabled={upload.isPending || atLimit}
-          onChange={onFilesSelected}
-        />
-        <input
-          id="photo-camera"
-          type="file"
-          accept="image/*"
-          capture="environment"
           className="sr-only"
           disabled={upload.isPending || atLimit}
           onChange={onFilesSelected}

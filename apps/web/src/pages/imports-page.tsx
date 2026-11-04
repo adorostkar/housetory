@@ -1,7 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   ArrowRight,
-  FileArchive,
   FileText,
   Loader2,
   Plus,
@@ -34,7 +33,6 @@ import { formatDate, formatFileSize, pluralize } from "@/lib/utils";
 const MODES = [
   { id: "paste", label: "Paste notes", icon: FileText },
   { id: "file", label: "Upload file", icon: Upload },
-  { id: "vault", label: "Obsidian vault", icon: FileArchive },
 ] as const;
 
 type Mode = (typeof MODES)[number]["id"];
@@ -73,7 +71,7 @@ export function ImportsPage() {
       <PageHeader
         eyebrow="Intelligence"
         title="Import"
-        description="Turn notes, spreadsheets, documents, images or an Obsidian vault into proposed inventory entries for review."
+        description="Turn notes, spreadsheets, documents, images or an Obsidian ZIP vault into proposed inventory entries for review."
         actions={
           <>
             <Button variant="outline" asChild>
@@ -145,24 +143,16 @@ export function ImportsPage() {
                 </Field>
               ) : (
                 <Field
-                  label={mode === "vault" ? "Obsidian vault ZIP" : "Source file"}
+                  label="Source file"
                   htmlFor="import-file"
-                  hint={
-                    mode === "vault"
-                      ? "ZIP containing Markdown notes and attachments. Path traversal, symlinks, file-count and size limits are enforced."
-                      : "TXT, Markdown, CSV, XLSX, DOCX, PDF or an image of a list."
-                  }
+                  hint="TXT, Markdown, CSV, XLSX, DOCX, PDF, an image of a list, or an Obsidian ZIP vault. Path traversal, symlinks, file-count and size limits are enforced for archives."
                 >
                   <label
                     htmlFor="import-file"
                     className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 transition-colors hover:bg-secondary/40"
                   >
                     <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-                      {mode === "vault" ? (
-                        <FileArchive className="size-5" />
-                      ) : (
-                        <Upload className="size-5" />
-                      )}
+                      <Upload className="size-5" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[0.85rem] font-medium">
@@ -171,9 +161,7 @@ export function ImportsPage() {
                       <span className="mt-1 block text-[0.7rem] text-muted-foreground">
                         {file
                           ? formatFileSize(file.size)
-                          : mode === "vault"
-                            ? "Select the .zip vault archive"
-                            : "Tap to browse or take a photo"}
+                          : "Tap to browse or take a photo"}
                       </span>
                     </span>
                   </label>
@@ -181,11 +169,7 @@ export function ImportsPage() {
                     id="import-file"
                     type="file"
                     className="sr-only"
-                    accept={
-                      mode === "vault"
-                        ? ".zip,application/zip"
-                        : ".txt,.md,.markdown,.csv,.xlsx,.docx,.pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"
-                    }
+                    accept=".txt,.md,.markdown,.csv,.xlsx,.docx,.pdf,.zip,application/zip,image/jpeg,image/png,image/webp,image/heic,image/heif"
                     onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                   />
                 </Field>
@@ -198,7 +182,7 @@ export function ImportsPage() {
                   value={title}
                   maxLength={200}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder={mode === "vault" ? "Obsidian vault" : "Household notes"}
+                  placeholder="Household notes"
                 />
               </Field>
               <div className="rounded-xl border border-border/70 bg-secondary/25 p-4 text-[0.72rem] leading-relaxed text-muted-foreground">
@@ -210,6 +194,10 @@ export function ImportsPage() {
                   Processing runs in the background. You will review every proposed
                   entry, resolve duplicates and missing locations, then approve what
                   gets created.
+                </p>
+                <p className="mt-2">
+                  Rooms, boxes and their contents are detected from headings and
+                  identifiers such as STO-01. Index pages and templates are skipped.
                 </p>
                 <p className="mt-2">
                   AI is optional. Deterministic extraction works without a model; local

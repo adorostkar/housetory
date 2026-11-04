@@ -44,7 +44,7 @@ import { formatDate } from "@/lib/utils";
 export function RecognitionPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const aiStatus = useAiStatus();
+  const aiStatus = useAiStatus("vision");
   const recognitionsQuery = useRecognitions();
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Camera,
   Check,
   ChevronRight,
   FileText,
@@ -21,6 +22,7 @@ import {
   ContainerQrDialog,
 } from "@/components/container-dialogs";
 import { EmptyState } from "@/components/empty-state";
+import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
@@ -187,6 +189,12 @@ export function ContainerDetailPage() {
                 Print label
               </Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/scan?location_id=${detail.id}`}>
+                <Camera />
+                Scan contents
+              </Link>
+            </Button>
             <Button variant="outline" onClick={() => setQrOpen(true)}>
               <QrCode />
               QR
@@ -206,6 +214,10 @@ export function ContainerDetailPage() {
           </>
         }
       />
+
+      <section className="surface mb-4 p-4 sm:p-5">
+        <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />
+      </section>
 
       <section className="surface p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">

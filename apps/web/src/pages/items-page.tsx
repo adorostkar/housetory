@@ -147,9 +147,9 @@ export function ItemsPage() {
         actions={
           <>
             <Button variant="outline" asChild>
-              <Link to="/recognize">
+              <Link to="/scan">
                 <Camera />
-                Recognise photo
+                AI Scan Items
               </Link>
             </Button>
             <Button asChild>

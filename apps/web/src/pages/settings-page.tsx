@@ -10,7 +10,7 @@ import {
   Sun,
 } from "lucide-react";
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
@@ -337,12 +337,15 @@ export function SettingsPage() {
                 </p>
               )}
               <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
-                Configure <code className="rounded bg-secondary px-1.5 py-0.5">AI_PROVIDER</code>,{" "}
-                <code className="rounded bg-secondary px-1.5 py-0.5">AI_MODEL</code>,{" "}
-                <code className="rounded bg-secondary px-1.5 py-0.5">AI_BASE_URL</code> and the
-                cloud consent flags in <code className="rounded bg-secondary px-1.5 py-0.5">.env</code>.
-                Housetory never downloads models automatically and does not require a GPU.
+                Configure providers, encrypted API keys, per-task models and cloud consent
+                in the dedicated AI settings page. Housetory never downloads models
+                automatically and does not require a GPU.
               </p>
+              {isOwner && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/settings/ai">Manage AI providers</Link>
+                </Button>
+              )}
             </div>
           ) : null}
         </section>

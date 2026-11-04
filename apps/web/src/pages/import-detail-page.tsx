@@ -6,6 +6,7 @@ import {
   FileArchive,
   FileText,
   Folder,
+  FolderTree,
   Link2Off,
   Loader2,
   RefreshCw,
@@ -16,6 +17,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
+import { HierarchyReview } from "@/components/hierarchy-review";
 import { ErrorState } from "@/components/error-state";
 import { ImportEntryCard } from "@/components/import-entry-card";
 import { PageHeader } from "@/components/page-header";
@@ -81,9 +83,10 @@ export function ImportDetailPage() {
     });
     setDecisions((current) => {
       const next = { ...current };
+      const duplicateThreshold = batch.metadata.hierarchy === true ? 55 : 70;
       for (const entry of batch.entries) {
         const highDuplicate = entry.duplicate_candidates.find(
-          (candidate) => candidate.score >= 70,
+          (candidate) => candidate.score >= duplicateThreshold,
         );
         const final = [
           "imported",
@@ -125,9 +128,11 @@ export function ImportDetailPage() {
 
   const apply = useMutation({
     mutationFn: () => {
+      const hierarchy = batch?.metadata.hierarchy === true;
       const entries = Object.entries(decisions)
         .filter(([, decision]) => decision.include || decision.action === "reject")
         .map(([id, decision]) => {
+          const entry = batch?.entries.find((candidate) => candidate.id === id);
           if (decision.action === "merge") {
             if (!decision.mergeItemId || decision.mergeFields.length === 0) {
               throw new Error("Choose an existing item and at least one merge field.");
@@ -144,6 +149,23 @@ export function ImportDetailPage() {
             id,
             action: decision.action,
             proposed: edits[id],
+            ...(hierarchy
+              ? {
+                  entity_type:
+                    decision.entityType ??
+                    (entry?.entity_type as typeof decision.entityType) ??
+                    "item",
+                  parent_entry_id:
+                    decision.parentEntryId !== undefined
+                      ? decision.parentEntryId
+                      : (entry?.parent_entry_id ?? null),
+                  legacy_identifier:
+                    decision.legacyIdentifier !== undefined
+                      ? decision.legacyIdentifier
+                      : (entry?.legacy_identifier ?? null),
+                  allow_duplicate: Boolean(decision.allowDuplicate),
+                }
+              : {}),
           };
         });
       if (entries.length === 0) throw new Error("Select at least one entry to apply.");
@@ -202,6 +224,7 @@ export function ImportDetailPage() {
     | { stage?: string; message?: string }
     | undefined) ?? {};
   const reviewable = batch.status === "review" || batch.status === "completed";
+  const hierarchyMode = batch.metadata.hierarchy === true;
   const hasOpenEntries = batch.entries.some((entry) => entry.status === "proposed");
   const selectedCount = Object.values(decisions).filter(
     (decision) => decision.include || decision.action === "reject",
@@ -283,6 +306,20 @@ export function ImportDetailPage() {
               <FileArchive className="size-3" /> Vault
             </Badge>
           )}
+          {hierarchyMode && (
+            <Badge variant="sage">
+              <FolderTree className="size-3" /> Structured hierarchy
+            </Badge>
+          )}
+          <Badge variant={batch.metadata.ai_used ? "brass" : "outline"}>
+            {batch.metadata.ai_used ? (
+              <>
+                <Sparkles className="size-3" /> AI-assisted
+              </>
+            ) : (
+              "Deterministic extraction"
+            )}
+          </Badge>
           <span className="text-[0.75rem] text-muted-foreground">
             {pluralize(batch.total_entries, "proposal")} · {batch.imported_entries} imported ·{" "}
             {batch.skipped_entries} skipped · {batch.failed_entries} failed
@@ -304,8 +341,9 @@ export function ImportDetailPage() {
           </div>
         ) : (
           <p className="mt-3 text-[0.8rem] leading-relaxed text-muted-foreground">
-            Review the proposed entries. Nothing is written until you approve the
-            selected entries. Missing rooms and places can be created inline.
+            {hierarchyMode
+              ? "Housetory detected a room and container hierarchy. Expand branches, edit names, quantities, types and parents, then approve the tree. Parents are created before their contents."
+              : "Review the proposed entries. Nothing is written until you approve the selected entries. Missing rooms and places can be created inline."}
           </p>
         )}
         {batch.error && batch.status !== "failed" && (
@@ -464,35 +502,52 @@ export function ImportDetailPage() {
           </div>
           )}
 
-          <div className="mt-3 space-y-3">
-            {batch.entries.map((entry: ImportEntry) => (
-              <ImportEntryCard
-                key={entry.id}
-                entry={entry}
-                proposed={edits[entry.id] ?? entry.proposed}
-                decision={
-                  decisions[entry.id] ?? {
-                    include: false,
-                    action: "import",
-                    mergeItemId: "",
-                    mergeFields: [],
-                  }
-                }
-                rooms={rooms}
-                locations={locations}
-                categories={categories}
+          {hierarchyMode ? (
+            <div className="mt-3">
+              <HierarchyReview
+                entries={batch.entries}
+                edits={edits}
+                decisions={decisions}
                 disabled={apply.isPending}
-                onProposedChange={(proposed) =>
-                  setEdits((current) => ({ ...current, [entry.id]: proposed }))
+                onEdit={(entryId, proposed) =>
+                  setEdits((current) => ({ ...current, [entryId]: proposed }))
                 }
-                onDecisionChange={(decision) =>
-                  setDecisions((current) => ({ ...current, [entry.id]: decision }))
+                onDecision={(entryId, decision) =>
+                  setDecisions((current) => ({ ...current, [entryId]: decision }))
                 }
-                onCreateRoom={createRoom}
-                onCreateLocation={createLocation}
               />
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {batch.entries.map((entry: ImportEntry) => (
+                <ImportEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  proposed={edits[entry.id] ?? entry.proposed}
+                  decision={
+                    decisions[entry.id] ?? {
+                      include: false,
+                      action: "import",
+                      mergeItemId: "",
+                      mergeFields: [],
+                    }
+                  }
+                  rooms={rooms}
+                  locations={locations}
+                  categories={categories}
+                  disabled={apply.isPending}
+                  onProposedChange={(proposed) =>
+                    setEdits((current) => ({ ...current, [entry.id]: proposed }))
+                  }
+                  onDecisionChange={(decision) =>
+                    setDecisions((current) => ({ ...current, [entry.id]: decision }))
+                  }
+                  onCreateRoom={createRoom}
+                  onCreateLocation={createLocation}
+                />
+              ))}
+            </div>
+          )}
 
           {hasOpenEntries && (
             <div className="sticky bottom-24 z-20 mt-4 flex justify-end lg:bottom-4">

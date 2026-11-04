@@ -7,7 +7,10 @@ export default async function globalSetup(config: FullConfig) {
   const baseURL = config.projects[0]?.use?.baseURL ?? process.env.E2E_BASE_URL;
   const email = process.env.E2E_EMAIL ?? "phase5@example.com";
   const password = process.env.E2E_PASSWORD ?? "phase-five-password-2026";
-  const context = await request.newContext({ baseURL });
+  const context = await request.newContext({
+    baseURL,
+    ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS === "true",
+  });
   const sessionResponse = await context.get("/api/v1/auth/session");
   const session = await sessionResponse.json();
   let response;

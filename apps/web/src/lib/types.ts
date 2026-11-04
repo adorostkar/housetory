@@ -641,6 +641,11 @@ export interface ImportEntry {
   duplicate_resolution: DuplicateResolution | null;
   matched_item_id: UUID | null;
   imported_item_id: UUID | null;
+  entity_type?: "item" | "room" | "container" | "location";
+  parent_entry_id?: UUID | null;
+  created_room_id?: UUID | null;
+  created_location_id?: UUID | null;
+  legacy_identifier?: string | null;
   error: string | null;
   position: number;
 }
@@ -721,6 +726,10 @@ export type ImportMergeField =
 export interface ImportApplyEntry {
   id: UUID;
   action: ImportEntryAction;
+  entity_type?: ImportEntityType;
+  parent_entry_id?: UUID | null;
+  legacy_identifier?: string | null;
+  allow_duplicate?: boolean;
   proposed?: ProposedItem;
   merge_item_id?: UUID | null;
   merge_fields?: ImportMergeField[];
@@ -737,8 +746,13 @@ export interface ImportApplyResult {
 }
 
 export interface AiStatus {
-  provider: "disabled" | "ollama" | "openai_compatible";
+  provider: string;
   mode: "disabled" | "local" | "cloud";
+  source?: "disabled" | "environment" | "database";
+  task?: string;
+  provider_id?: UUID | null;
+  provider_label?: string | null;
+  capabilities?: string[];
   model: string | null;
   configured: boolean;
   available: boolean;
@@ -752,6 +766,7 @@ export interface AiStatus {
 
 export interface AiRecognitionSuggestion {
   name: string;
+  quantity: number;
   description: string | null;
   category: string | null;
   brand: string | null;
@@ -759,6 +774,7 @@ export interface AiRecognitionSuggestion {
   tags: string[];
   notes: string | null;
   confidence: number | null;
+  source?: "vision" | "ocr";
   field_sources: Record<string, string>;
 }
 
@@ -778,6 +794,13 @@ export interface AiRecognition {
   error: string | null;
   model_provider: string | null;
   model_name: string | null;
+  room_id?: UUID | null;
+  location_id?: UUID | null;
+  location_label?: string | null;
+  suggestion_duplicates?: AiRecognitionDuplicateGroup[];
+  processing_mode?: "deterministic" | "local" | "cloud" | "unavailable";
+  applied_at?: string | null;
+  applied_items?: Array<Record<string, unknown>>;
   created_at: string;
   completed_at: string | null;
   image_url: string;
@@ -865,11 +888,17 @@ export interface DocumentRelations {
   suggested_item_ids: UUID[];
 }
 
+export type ImportEntityType = "item" | "room" | "container" | "location";
+
 export interface ImportDecision {
   include: boolean;
   action: ImportEntryAction;
   mergeItemId: string;
   mergeFields: ImportMergeField[];
+  entityType?: ImportEntityType;
+  parentEntryId?: UUID | null;
+  legacyIdentifier?: string | null;
+  allowDuplicate?: boolean;
 }
 
 
@@ -896,6 +925,8 @@ export interface ContainerSummary {
 export interface Container {
   id: UUID;
   identifier: string | null;
+  legacy_identifier?: string | null;
+  aliases?: string[];
   name: string;
   description: string | null;
   kind: LocationKind;
@@ -923,6 +954,8 @@ export interface Container {
 export interface ContainerChild {
   id: UUID;
   identifier: string | null;
+  legacy_identifier?: string | null;
+  aliases?: string[];
   name: string;
   kind: LocationKind;
   container_type: ContainerType | null;
@@ -999,4 +1032,85 @@ export interface LabelPrintInput {
   offset_y_mm: number;
   record: boolean;
   custom?: LabelGeometry | null;
+}
+
+
+export interface AiProviderRecord {
+  id: UUID;
+  provider: string;
+  display_name: string;
+  base_url: string | null;
+  default_model: string | null;
+  has_api_key: boolean;
+  api_key_version: number;
+  enabled: boolean;
+  cloud_consent: boolean;
+  is_local: boolean;
+  capabilities: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiTaskSetting {
+  task: string;
+  provider_id: UUID | null;
+  provider_label: string | null;
+  model: string | null;
+  enabled: boolean;
+  capabilities: string[];
+  updated_at: string | null;
+}
+
+export interface AiSettings {
+  providers: AiProviderRecord[];
+  tasks: AiTaskSetting[];
+  credential_key_configured: boolean;
+  environment_provider: string;
+  warning: string | null;
+}
+
+export interface AiProviderTest {
+  ok: boolean;
+  message: string;
+  models: string[];
+  selected_model_available: boolean | null;
+}
+
+export interface AiProviderModel {
+  id: string;
+  capabilities: string[];
+}
+
+export interface AiProviderModels {
+  provider_id: UUID;
+  models: AiProviderModel[];
+  error: string | null;
+}
+
+export interface AiRecognitionDuplicateGroup {
+  suggestion_index: number;
+  candidates: DuplicateCandidate[];
+}
+
+export interface AiRecognitionApplyInput {
+  entries: Array<{
+    suggestion_index: number;
+    action: "create" | "update" | "reject";
+    proposal?: AiRecognitionSuggestion | null;
+    item_id?: UUID | null;
+    category_id?: UUID | null;
+    room_id?: UUID | null;
+    location_id?: UUID | null;
+    allow_duplicate?: boolean;
+  }>;
+}
+
+export interface AiRecognitionApplyResult {
+  recognition: AiRecognition;
+  created: number;
+  updated: number;
+  rejected: number;
+  skipped: number;
+  failed: number;
+  failures: Array<{ suggestion_index: number; message: string }>;
 }
