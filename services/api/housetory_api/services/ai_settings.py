@@ -35,6 +35,7 @@ from .ai_runtime import (
     config_for_provider,
     endpoint_scope,
     model_capabilities,
+    model_supports_transcription,
     provider_supports_transcription,
     resolve_config,
 )
@@ -362,6 +363,12 @@ def update_task(
                     422,
                     "transcription_provider_unsupported",
                     "Choose OpenAI or Google Gemini for audio transcription.",
+                )
+            if not model_supports_transcription(provider.provider, selected_model):
+                raise ApiError(
+                    422,
+                    "transcription_model_unsupported",
+                    "Choose an OpenAI whisper/transcription model or a Gemini audio model.",
                 )
         else:
             cached_model = _cached_model(provider, selected_model)

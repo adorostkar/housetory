@@ -33,8 +33,10 @@ imports, photos, search and labels continue to work without voice configuration.
 
 A self-hosted OpenAI-compatible endpoint can be used for transcription by adding
 an **OpenAI** provider with its own base URL, if it genuinely implements
-`POST /audio/transcriptions`. Housetory does not bundle or download a speech
-model, and local transcription is not claimed as universally available.
+`POST /audio/transcriptions` and exposes a model ID that identifies a Whisper or
+transcription model (for example `whisper-1` or `faster-whisper`). Housetory does
+not bundle or download a speech model, and local transcription is not claimed as
+universally available.
 
 ### Configuration steps
 

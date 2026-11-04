@@ -793,3 +793,14 @@ def test_transcription_task_status_is_explicit_and_accepts_audio_capability(owne
     assert saved.status_code == 200, saved.text
     assert saved.json()["task"] == "transcription"
     assert saved.json()["model"] == "whisper-1"
+
+    rejected = owner_client.put(
+        "/api/v1/ai/tasks/transcription",
+        json={
+            "provider_id": provider["id"],
+            "model": "gpt-4o",
+            "enabled": True,
+        },
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "transcription_model_unsupported"

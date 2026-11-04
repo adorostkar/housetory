@@ -310,7 +310,20 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
         ).all()
     )
     if not providers:
-        return _env_config(task)
+        config = _env_config(task)
+        if task == AiTask.TRANSCRIPTION.value and not model_supports_transcription(
+            config.provider, config.model
+        ):
+            return replace(
+                config,
+                configured=False,
+                error=(
+                    "No transcription task is configured. Choose OpenAI (audio "
+                    "transcriptions) or Google Gemini (audio input) under Settings → "
+                    "AI providers → Task defaults."
+                ),
+            )
+        return config
     by_id = {provider.id: provider for provider in providers}
     setting = db.scalar(
         select(AiTaskSetting).where(
@@ -344,15 +357,16 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 error="The selected provider no longer exists.",
             )
         config = _provider_config(provider, task, setting.model or provider.default_model)
-        if task == AiTask.TRANSCRIPTION.value and not provider_supports_transcription(
-            provider.provider
+        if task == AiTask.TRANSCRIPTION.value and not model_supports_transcription(
+            provider.provider, config.model
         ):
             return replace(
                 config,
                 configured=False,
                 error=(
-                    "The configured transcription provider does not support audio "
-                    "transcription. Choose OpenAI or Google Gemini."
+                    "The configured transcription provider or model does not support "
+                    "audio transcription. Choose OpenAI with a whisper/transcription "
+                    "model or Google Gemini with an audio-capable model."
                 ),
             )
         return config
@@ -428,6 +442,15 @@ def provider_supports_transcription(provider: str) -> bool:
     }
 
 
+def model_supports_transcription(provider: str, model: str | None) -> bool:
+    if not provider_supports_transcription(provider) or not model:
+        return False
+    if provider == AiProviderType.GEMINI.value:
+        return True
+    lowered = model.lower()
+    return "whisper" in lowered or "transcribe" in lowered
+
+
 def model_capabilities(provider: str, model: str | None) -> list[str]:
     if not model:
         return []
@@ -442,7 +465,7 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
     elif provider == AiProviderType.GEMINI.value:
         capabilities.extend(["structured", "tools"])
     if provider == AiProviderType.GEMINI.value or any(
-        token in lowered for token in ("whisper", "transcribe", "-audio", "audio-")
+        token in lowered for token in ("whisper", "transcribe")
     ):
         capabilities.append("audio")
     if any(
