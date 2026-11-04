@@ -206,6 +206,9 @@ the product-facing numbering below follows the delivery brief.
 - [x] Item create/edit, photographs, documents, purchase/warranty details.
 - [x] Global search page and deterministic quick search for items, containers and
       locations in the desktop sidebar and mobile overview.
+- [x] Unified Add items chooser for manual entry, photo scanning and file/note
+      import, with contextual room/container destinations and preserved existing
+      workflow deep links.
 - [x] Settings: household rename, account details, appearance, storage use,
       sign out, iPhone install guidance.
 - [x] Light/dark/system themes, reduced-motion support.

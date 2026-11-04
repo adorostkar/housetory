@@ -73,7 +73,10 @@ Tailscale is optional.
   attachment resolution, broken-link reporting and vault structure.
 - A read-only grounded assistant using real household tools, with deterministic
   answers when no model is available, plus natural-language smart search.
-- A persistent quick search beneath **Add an item** on desktop and near the top
+- One clear **Add items** chooser for manual entry, **Scan a photo** and
+  importing a list or file. This replaces separate primary Import/AI Scan
+  navigation while keeping every focused workflow and import history.
+- A persistent quick search beneath **Add items** on desktop and near the top
   of the mobile overview, with grouped items, containers and locations, keyboard
   navigation and a link to full results.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
@@ -104,7 +107,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 171 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 175 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -115,12 +118,13 @@ stack, not just unit mocks:
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 42 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 9 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 48 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 10 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, the actual Inventory.md hierarchy, duplicate prevention,
-  PWA/service-worker/deep-link routing and desktop/mobile quick search.
+  PWA/service-worker/deep-link routing, quick search and the unified Add items
+  chooser with contextual destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -432,10 +436,12 @@ offer limited text-based suggestions and the UI labels that fallback honestly.
 
 ### Hierarchical imports
 
-**Import → Upload file** accepts TXT, Markdown, CSV, XLSX, DOCX, PDF, images and
-Obsidian ZIP exports. There is no separate Obsidian tab. When the source contains
-a recognizable room/container structure, Housetory builds a review tree instead
-of flat items. Expand branches, edit names, quantities, entity types, parents and
+**Add items → Import a list or file** opens the import workflow. It accepts TXT,
+Markdown, CSV, XLSX, DOCX, PDF, images and Obsidian ZIP exports. There is no
+separate Obsidian tab. When the source contains a recognizable room/container
+structure, Housetory builds a review tree instead of flat items. Starting from a
+room or container carries a review default; flat entries without their own
+location inherit it, while source hierarchy and explicit destinations always win. Expand branches, edit names, quantities, entity types, parents and
 legacy identifiers, review duplicates and source text, then approve individual
 entries, branches or the whole tree. Rooms and containers are created before their
 contents. Index pages, instructions and empty example containers are skipped;

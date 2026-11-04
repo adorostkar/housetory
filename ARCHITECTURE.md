@@ -141,7 +141,7 @@ All application endpoints are versioned under `/api/v1`.
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results; `POST /search/natural` remains the explicit AI/deterministic full-search flow |
-| Imports | `GET/POST /imports`, `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
+| Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
 | Documents/AI | `GET /documents/{id}/related-items` |
 | AI | `GET /ai/status?task=`, `POST /assistant/query`, `POST /search/natural`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
@@ -495,7 +495,7 @@ development and nginx proxies in production. No CORS allowlist is needed.
 
 ## 10. Testing
 
-- Backend: 171 pytest tests against a real PostgreSQL database. The test session
+- Backend: 175 pytest tests against a real PostgreSQL database. The test session
   creates a dedicated database, runs the full Alembic chain, and truncates tables
   between tests. Coverage includes health, auth/session lifecycle, concurrent
   first-run setup, cookie attributes, token hashing, rate limiting, origin/
@@ -522,7 +522,8 @@ development and nginx proxies in production. No CORS allowlist is needed.
   cross-room movement, rollback/cycle prevention, concurrent moves, summary
   accuracy/staleness, deterministic fallback, label presets/geometry/start slots/
   offsets/calibration, QR authorization and migration freshness.
-- Frontend: 42 Vitest tests + Testing Library, including quick-search grouping,
+- Frontend: 48 Vitest tests + Testing Library, including the unified Add items
+  chooser, contextual destinations, quick-search grouping,
   keyboard selection, Escape/outside dismissal, loading/empty/error/stale
   responses and query preservation, provider settings and remote-Ollama consent,
   camera preview/retake/cancel, multi-object review, split/merge and bulk
@@ -531,10 +532,11 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 9 checked-in Playwright workflows cover the Phase 5 container flows plus
-  mocked-Ollama provider configuration, camera upload, multi-object approval, the
-  actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
-  routing and desktop/mobile quick-search placement and navigation.
+- Browser: 10 checked-in Playwright workflows cover the Phase 5 container flows
+  plus mocked-Ollama provider configuration, camera upload, multi-object approval,
+  the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
+  routing, quick search and the unified Add items chooser with contextual
+  destinations and import-history access.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
