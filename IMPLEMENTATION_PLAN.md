@@ -898,13 +898,13 @@ start unified search/stocktake/property work or make automatic inventory changes
 - [x] Documented extraction/matching limits, provider/fallback configuration,
       money/quantity rules, review/idempotency/duplicate semantics and privacy in
       `docs/INTELLIGENT_EXTRACTION.md`.
-- [ ] Local deployment after backup; remote server remains untouched.
+- [x] Local deployment after backup; remote server remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3 and 4 are
+Voice notes are complete and locally verified. Milestones 2, 3, 4 and 5 are
 implemented and locally verified; later milestones still require a separate
 instruction.
 
@@ -931,13 +931,14 @@ instruction.
    rotation, contrast cleanup and multi-page PDFs while preserving originals.
    Accept files from dedicated scanning apps. Basic cleanup must not require an
    LLM.
-5. **Intelligent extraction and matching:** propose receipt fields and line items,
-   purchases, warranties and attachments. Use an available, consented LLM to
-   interpret abbreviations and rank relevant inventory candidates with evidence;
-   retain OCR/basic matching without it. Exact identifiers carry strong weight.
-   Handle duplicate documents, no matching item and per-line purchase values.
-   Review before creating, attaching or overwriting records. Before this work,
-   check that matching, jobs and AI context use explicit household scope.
+5. **Intelligent extraction and matching (implemented locally):** propose receipt
+   fields and line items, purchases, warranties and attachments. Use an available,
+   consented LLM to interpret abbreviations and rank relevant inventory candidates
+   with evidence; retain OCR/basic matching without it. Exact identifiers carry
+   strong weight. Handle duplicate documents, no matching item and per-line
+   purchase values. Review before creating, attaching or overwriting records.
+   Before this work, check that matching, jobs and AI context use explicit
+   household scope.
 6. **Single-home polish, including unified search and assistant:** make manual,
    photo, voice and document flows consistent, with duplicate/quantity handling.
    Use one everyday input labelled “Search or ask about your inventory…”.
