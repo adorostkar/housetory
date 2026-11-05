@@ -101,6 +101,14 @@ Tailscale is optional.
   container moves, loans, returns, corrections and cancellation are recorded with
   actor and preserved name snapshots. Supported moves and lending actions offer a
   state-checked compensating undo; legacy items are not given fabricated history.
+- **Bulk organisation and compact list view**: select only the loaded item records
+  and move, add/remove tags or explicitly set/clear a category in bounded atomic
+  batches. The previews show destination, selected records/units and active-loan
+  impact; changing search, filters, sort or archived state clears selection with
+  feedback. A remembered compact list view shows quantity, room/container path and
+  on-loan/at-home status. Batch moves record per-item and batch history; individual
+  moves can be undone, while tag/category batches cannot. See
+  [`docs/BULK_ORGANISATION.md`](docs/BULK_ORGANISATION.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
   then review structured item groups. Repeated mentions such as “ethernet cable,
@@ -136,7 +144,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 235 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 242 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -146,20 +154,22 @@ stack, not just unit mocks:
   duplicate resolution/split/idempotent confirmation, OpenAI/Gemini transcription
   adapters, audio validation and cleanup, lending quantities/concurrency/returns/
   retries, item and container history snapshots, safe undo and quantity/archive/
-  delete guards, the unchanged actual Inventory.md upload/paste path, semantic
-  AI-edit validation
+  delete guards, atomic bulk move/tag/category batches, batch replay/idempotency,
+  per-item bulk-move undo, the unchanged actual Inventory.md upload/paste path,
+  semantic AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 82 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 19 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 86 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 20 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
   lending/partial return/outstanding list/timeline undo and item/container move
-  history, the actual Inventory.md hierarchy, duplicate prevention,
-  PWA/service-worker/deep-link routing, quick search and the unified Add items
-  chooser with contextual destinations.
+  history, loaded-only bulk selection with move/tag/category dialogs and
+  compact-list persistence, the actual Inventory.md hierarchy, duplicate
+  prevention, PWA/service-worker/deep-link routing, quick search and the unified
+  Add items chooser with contextual destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -180,8 +190,10 @@ stack, not just unit mocks:
   Final application images scan with zero fixable HIGH/CRITICAL vulnerabilities.
 
 The voice-note provider/format/retention configuration and walkthrough are in
-[`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md), and lending quantities, history and
-undo rules are in [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md). The Phase 2 desktop/iPhone
+[`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md), lending quantities, history and
+undo rules are in [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md),
+and bulk selection boundaries, batch semantics and compact-list behavior are in
+[`docs/BULK_ORGANISATION.md`](docs/BULK_ORGANISATION.md). The Phase 2 desktop/iPhone
 walkthrough, screenshots and remaining limitations are in
 [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in

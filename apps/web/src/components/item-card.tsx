@@ -5,18 +5,33 @@ import { Badge } from "@/components/ui/badge";
 import type { ItemSummary } from "@/lib/types";
 import { cn, CONDITION_LABELS, formatCurrency, formatDate, itemContainer } from "@/lib/utils";
 
-export function ItemCard({ item, className }: { item: ItemSummary; className?: string }) {
+interface ItemSelection {
+  selected: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+}
+
+export function ItemCard({
+  item,
+  className,
+  selection,
+}: {
+  item: ItemSummary;
+  className?: string;
+  selection?: ItemSelection;
+}) {
   const photo = item.primary_photo;
   const container = itemContainer(item);
   const price = item.purchase?.price_cents;
   const warrantyActive =
     item.warranty?.status === "active" || item.warranty?.status === "expiring";
 
-  return (
+  const card = (
     <Link
       to={`/items/${item.id}`}
       className={cn(
         "group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/85 shadow-soft transition-[transform,border-color,box-shadow] duration-300 ease-smooth hover:-translate-y-0.5 hover:border-border hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        selection?.selected && "border-sage/60 shadow-lift ring-2 ring-sage/45",
         className,
       )}
     >
@@ -36,7 +51,12 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
           </div>
         )}
 
-        <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2">
+        <div
+          className={cn(
+            "absolute inset-x-3 top-3 flex items-start justify-between gap-2",
+            selection && "pl-8",
+          )}
+        >
           <div className="flex flex-wrap gap-1.5">
             {item.is_archived && (
               <Badge variant="secondary" className="bg-background/80 backdrop-blur-md">
@@ -146,14 +166,47 @@ export function ItemCard({ item, className }: { item: ItemSummary; className?: s
       </div>
     </Link>
   );
+
+  if (!selection) return card;
+  return (
+    <div className="relative min-w-0">
+      <label className="absolute left-3 top-3 z-20 flex size-6 cursor-pointer items-center justify-center rounded-md border border-border/80 bg-background/90 shadow-sm backdrop-blur-md">
+        <input
+          type="checkbox"
+          className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
+          checked={selection.selected}
+          disabled={selection.disabled}
+          onChange={selection.onToggle}
+          aria-label={`Select ${item.name}`}
+        />
+      </label>
+      {card}
+    </div>
+  );
 }
 
-export function ItemRow({ item }: { item: ItemSummary }) {
+export function ItemRow({
+  item,
+  selection,
+}: {
+  item: ItemSummary;
+  selection?: ItemSelection;
+}) {
   const photo = item.primary_photo;
-  return (
+  const onLoan = item.on_loan_quantity ?? 0;
+  const path =
+    item.location_path.length > 0
+      ? [item.room?.name, ...item.location_path.map((entry) => entry.identifier ?? entry.name)]
+          .filter(Boolean)
+          .join(" / ")
+      : [item.room?.name, item.location?.name].filter(Boolean).join(" / ");
+  const row = (
     <Link
       to={`/items/${item.id}`}
-      className="group flex items-center gap-4 rounded-xl px-2 py-2.5 transition-colors hover:bg-secondary/60"
+      className={cn(
+        "group flex min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-secondary/60",
+        selection?.selected && "bg-sage-soft/45 ring-1 ring-sage/35",
+      )}
     >
       <div className="relative size-14 shrink-0 overflow-hidden rounded-xl bg-secondary/70">
         {photo ? (
@@ -170,11 +223,21 @@ export function ItemRow({ item }: { item: ItemSummary }) {
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[0.88rem] font-medium">{item.name}</p>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <p className="truncate text-[0.88rem] font-medium">{item.name}</p>
+          <Badge variant="outline" className="shrink-0 tabular-nums">
+            ×{item.quantity}
+          </Badge>
+          {onLoan > 0 && (
+            <Badge variant="brass" className="shrink-0">
+              {onLoan} on loan · {Math.max(0, item.quantity - onLoan)} at home
+            </Badge>
+          )}
+          {item.is_archived && <Badge variant="secondary">Archived</Badge>}
+        </div>
         <p className="mt-0.5 truncate text-[0.72rem] text-muted-foreground">
-          {[item.room?.name, item.location?.name].filter(Boolean).join(" · ") ||
-            "No location"}
-          {item.on_loan_quantity ? ` · ${item.on_loan_quantity} on loan` : ""}{" "}
+          {path || "No location"}
+          {item.category ? ` · ${item.category.name}` : ""}{" "}
           {item.purchase?.price_cents != null && (
             <span className="text-muted-foreground/70">
               · {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
@@ -189,5 +252,21 @@ export function ItemRow({ item }: { item: ItemSummary }) {
         </span>
       )}
     </Link>
+  );
+  if (!selection) return row;
+  return (
+    <div className="relative flex min-w-0 items-center">
+      <label className="ml-2 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-card/70">
+        <input
+          type="checkbox"
+          className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
+          checked={selection.selected}
+          disabled={selection.disabled}
+          onChange={selection.onToggle}
+          aria-label={`Select ${item.name}`}
+        />
+      </label>
+      <div className="min-w-0 flex-1">{row}</div>
+    </div>
   );
 }

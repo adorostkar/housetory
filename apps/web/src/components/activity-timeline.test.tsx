@@ -72,4 +72,30 @@ describe("ActivityTimeline", () => {
     expect(path).toBe("/history/event-1/undo");
     expect(payload.request_id).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it("shows the batch context on a bulk-moved item event", () => {
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    const batched: ActivityEvent = {
+      ...event,
+      details: {
+        ...event.details,
+        batch: {
+          batch_id: "batch-1",
+          batch_action: "items.bulk_moved",
+          batch_item_count: 2,
+          batch_unit_count: 5,
+        },
+      },
+    };
+    render(
+      <QueryClientProvider client={client}>
+        <ActivityTimeline events={[batched]} />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByText(/Part of a bulk move · 2 item\(s\), 5 unit\(s\) selected/),
+    ).toBeVisible();
+  });
 });

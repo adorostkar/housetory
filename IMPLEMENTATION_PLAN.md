@@ -658,6 +658,89 @@ or start later roadmap milestones.
       `docs/LENDING_HISTORY_UNDO.md`.
 - [x] Local deployment after backup; remote server remains untouched.
 
+## Staged milestone — bulk organisation and compact list view
+
+This milestone extends the existing Items page, item movement, taxonomy, lending,
+history and role model. It does not add batch undo, quantity splitting, tag
+replacement, a household-wide activity page, email or later roadmap work.
+
+### Stage A — loaded selection and view continuity
+
+- [x] Native per-item checkboxes on cards and compact rows, placed outside item
+      links so selection never navigates.
+- [x] Explicit **Select all loaded** scope, accurate selected record/unit/on-loan
+      counts and honest `Showing X of Y; only loaded items can be selected`
+      wording when more records match.
+- [x] Selection clears on search, room/place/category/tag/archived/sort changes
+      with visible feedback; card/list toggling preserves it, and navigation or
+      refresh drops component state.
+- [x] Archived checkboxes disabled; viewers see no selection controls or bulk bar.
+- [x] Remembered compact list view alongside cards, showing name, quantity,
+      room/container path and on-loan/at-home status without borrower notes.
+- [x] Existing typography, palette, spacing, rounded controls, cards and shell
+      preserved; desktop and mobile screenshots reviewed.
+
+### Stage B — bounded atomic API contract
+
+- [x] `POST /items/bulk/move`, `/items/bulk/tags` and `/items/bulk/category` with
+      household-scoped validation and the existing viewer write guard.
+- [x] 1–100 unique item IDs and 1–20 tag IDs; duplicate item IDs and oversized
+      requests rejected, duplicate tag IDs deduplicated.
+- [x] Required client request ID plus canonical payload fingerprint; identical
+      replay returns the stored result, while different action/payload reuse is
+      rejected with `409 request_id_reused`.
+- [x] Validation before writes in one transaction; no partial success or
+      retry-only failures. No-op and archived batches return clear 409 errors.
+- [x] Household hierarchy advisory lock first, then item rows in sorted UUID
+      order, matching container moves and serializing with item edits/lending.
+- [x] Cross-household item/destination/tag/category references return 404 without
+      per-item disclosure.
+
+### Stage C — move, tag and category behavior
+
+- [x] Bulk move changes each selected record's home room and optional place only;
+      quantities, loans, tags, categories and other relationships are unchanged.
+- [x] Destination room/place consistency validated; no rooms or containers created;
+      partial-quantity moves and cloning explicitly out of scope.
+- [x] Active-loan warning and result counts make clear that moving the home place
+      does not return or physically move loaned units.
+- [x] Tag workflow supports add/remove, preserves other tags, rejects empty input
+      and no-ops, and deliberately omits replace-all.
+- [x] Category workflow requires explicit `set` or `clear`; empty input never
+      clears, and clear is separately reviewed.
+- [x] Mixed same-destination batches report moved and unchanged counts while
+      remaining atomic.
+
+### Stage D — history, undo and review
+
+- [x] Per-item `item.moved` events with actor, from/to snapshots and
+      `details.batch`; one batch event records counts, destination and replay
+      result.
+- [x] Tag/category changes record one batch event each and are not labelled
+      undoable; no per-item fabrications or batch undo.
+- [x] Individual bulk moves reuse the existing safe per-item undo; intervening
+      changes are rechecked and sibling items are not silently reverted.
+- [x] Move/tag/category dialogs preview records, units, destination/tags/category
+      and active-loan impact before confirmation.
+- [x] Append-only migration `d4f6b8c0e2a1` permits `entity_type="batch"`; no
+      earlier migration or row is rewritten.
+
+### Stage E — verification and local delivery
+
+- [x] PostgreSQL tests for atomicity, mixed/no-op/archived/missing batches,
+      household isolation and viewer rejection, active loans and preserved
+      quantities, tag/category semantics, bounds, replay mismatch, concurrency,
+      per-item undo and non-undoable batch events.
+- [x] Frontend tests for loaded-only selection, select-all-loaded, view
+      persistence, filter clearing and all three reviewed workflows.
+- [x] Disposable-stack browser workflow for checkbox keyboard use,
+      loaded-versus-total wording, move/tag/category, loan warning, compact-list
+      persistence and mobile layout.
+- [x] Document selection boundaries, batch limits, atomic/replay semantics,
+      active-loan interaction, history/undo scope and limitations in
+      `docs/BULK_ORGANISATION.md`.
+- [ ] Local deployment after backup; remote server remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are

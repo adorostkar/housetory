@@ -1,5 +1,14 @@
-import { Search, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  FolderTree,
+  LayoutGrid,
+  List,
+  MoveRight,
+  Search,
+  SlidersHorizontal,
+  Tags,
+  X,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -7,7 +16,12 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { ItemCard } from "@/components/item-card";
+import {
+  BulkCategoryDialog,
+  BulkMoveDialog,
+  BulkTagDialog,
+} from "@/components/bulk-organise-dialogs";
+import { ItemCard, ItemRow } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +37,7 @@ import {
   useTags,
 } from "@/lib/queries";
 import {
+  cn,
   flattenLocations,
   flattenRoomTree,
   locationPath,
@@ -58,10 +73,33 @@ export function ItemsPage() {
 
   const [search, setSearch] = useState(qParam);
   const debouncedSearch = useDebouncedValue(search, 300);
+  const [view, setView] = useState<"grid" | "list">(() => {
+    try {
+      return localStorage.getItem("housetory.items.view") === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<"move" | "tags" | "category" | null>(
+    null,
+  );
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const roomsQuery = useRooms();
   const locationsQuery = useLocations(roomFilter || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("housetory.items.view", view);
+    } catch {
+      // Browsing-private storage failures should not break the list.
+    }
+  }, [view]);
 
   useEffect(() => {
     const trimmed = debouncedSearch.trim();
@@ -90,9 +128,82 @@ export function ItemsPage() {
   const itemsQuery = useItems(filters, 24);
   const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const total = itemsQuery.data?.pages[0]?.total ?? 0;
+  const filterSignature = JSON.stringify([
+    qParam,
+    roomFilter,
+    locationFilter,
+    categoryFilter,
+    tagFilter,
+    archived,
+    sort,
+  ]);
+  const previousFilterSignature = useRef(filterSignature);
+  const loadedIdsKey = items.map((item) => item.id).join("|");
+  const selectableItems = items.filter((item) => !item.is_archived);
+  const selectedItems = items.filter((item) => selected.has(item.id));
+  const allLoadedSelected =
+    selectableItems.length > 0 && selectableItems.every((item) => selected.has(item.id));
+  const someLoadedSelected = selectableItems.some((item) => selected.has(item.id));
+  const selectedUnits = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const selectedOnLoan = selectedItems.reduce(
+    (sum, item) => sum + (item.on_loan_quantity ?? 0),
+    0,
+  );
+  const hasArchivedSelection = selectedItems.some((item) => item.is_archived);
   const hasFilters = Boolean(
     qParam || roomFilter || locationFilter || categoryFilter || tagFilter || archived,
   );
+
+  useEffect(() => {
+    if (previousFilterSignature.current === filterSignature) return;
+    previousFilterSignature.current = filterSignature;
+    setSelected(new Set());
+    if (selectedRef.current.size > 0) {
+      setSelectionNotice("Selection cleared because the view changed.");
+    }
+  }, [filterSignature]);
+
+  useEffect(() => {
+    setSelected((current) => {
+      if (current.size === 0) return current;
+      const loaded = new Set(loadedIdsKey.split("|").filter(Boolean));
+      const next = new Set([...current].filter((id) => loaded.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [loadedIdsKey]);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someLoadedSelected && !allLoadedSelected;
+    }
+  }, [someLoadedSelected, allLoadedSelected]);
+
+  const clearSelection = (message?: string) => {
+    setSelected(new Set());
+    if (message && selectedRef.current.size > 0) setSelectionNotice(message);
+  };
+
+  const toggleItem = (itemId: string) => {
+    if (!canWrite) return;
+    setSelectionNotice(null);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const toggleAllLoaded = () => {
+    if (!canWrite) return;
+    setSelectionNotice(null);
+    setSelected((current) => {
+      if (selectableItems.every((item) => current.has(item.id))) {
+        return new Set();
+      }
+      return new Set(selectableItems.map((item) => item.id));
+    });
+  };
   const roomOptions = flattenRoomTree(roomsQuery.data?.items ?? []);
   const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
 
@@ -115,6 +226,7 @@ export function ItemsPage() {
   }, [locationFilter, roomFilter, locationsQuery.isSuccess, locationsQuery.data, setSearchParams]);
 
   const updateParam = (key: string, value: string) => {
+    clearSelection("Selection cleared because the view changed.");
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
       if (value) next.set(key, value);
@@ -124,6 +236,7 @@ export function ItemsPage() {
   };
 
   const updateRoomFilter = (roomId: string) => {
+    clearSelection("Selection cleared because the view changed.");
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
       if (roomId) next.set("room_id", roomId);
@@ -135,6 +248,7 @@ export function ItemsPage() {
 
   const clearFilters = () => {
     setSearch("");
+    clearSelection("Selection cleared because the view changed.");
     setSearchParams({}, { replace: true });
   };
 
@@ -157,7 +271,10 @@ export function ItemsPage() {
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                clearSelection("Selection cleared because the search changed.");
+              }}
               placeholder="Search items"
               aria-label="Search items"
               className="pl-10"
@@ -288,6 +405,135 @@ export function ItemsPage() {
         </div>
       </div>
 
+      {selectionNotice && (
+        <div
+          className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-secondary/25 px-3.5 py-2.5 text-[0.74rem] leading-relaxed text-muted-foreground"
+          role="status"
+        >
+          <span>{selectionNotice}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded-full p-1 hover:bg-secondary hover:text-foreground"
+            onClick={() => setSelectionNotice(null)}
+            aria-label="Dismiss selection notice"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
+      {items.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-[0.74rem] text-muted-foreground">
+            {canWrite && (
+              <label className="flex min-w-0 items-center gap-2">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={allLoadedSelected}
+                  disabled={selectableItems.length === 0}
+                  onChange={toggleAllLoaded}
+                  aria-label="Select all loaded items"
+                />
+                <span>
+                  Select all loaded ({selectableItems.length})
+                </span>
+              </label>
+            )}
+            <span aria-hidden>·</span>
+            <span>
+              Showing {items.length} of {total}
+              {items.length < total
+                ? "; only loaded items can be selected"
+                : ""}
+            </span>
+          </div>
+          <div
+            className="flex items-center gap-1 rounded-lg border border-border/70 bg-card/55 p-1"
+            role="group"
+            aria-label="Item view"
+          >
+            <button
+              type="button"
+              className={cn(
+                "flex size-7 items-center justify-center rounded-md transition-colors",
+                view === "grid"
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-label="Card view"
+              aria-pressed={view === "grid"}
+              onClick={() => setView("grid")}
+            >
+              <LayoutGrid className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex size-7 items-center justify-center rounded-md transition-colors",
+                view === "list"
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-label="Compact list view"
+              aria-pressed={view === "list"}
+              onClick={() => setView("list")}
+            >
+              <List className="size-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canWrite && selectedItems.length > 0 && (
+        <div className="surface mb-4 flex flex-col gap-3 border-brass/25 bg-brass-soft/25 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 text-[0.78rem]">
+            <p className="font-medium">
+              {pluralize(selectedItems.length, "item")} selected ·{" "}
+              {pluralize(selectedUnits, "unit")}
+            </p>
+            <p className="mt-0.5 text-[0.68rem] text-muted-foreground">
+              {selectedOnLoan > 0
+                ? `${selectedOnLoan} unit(s) on loan; their home place can move without changing loans.`
+                : "Bulk actions apply to the selected loaded records only."}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={hasArchivedSelection}
+              onClick={() => setBulkDialog("move")}
+            >
+              <MoveRight />
+              Move
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={hasArchivedSelection}
+              onClick={() => setBulkDialog("tags")}
+            >
+              <Tags />
+              Tags
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={hasArchivedSelection}
+              onClick={() => setBulkDialog("category")}
+            >
+              <FolderTree />
+              Category
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => clearSelection()}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {itemsQuery.isPending ? (
         <ItemGridSkeleton />
       ) : itemsQuery.isError ? (
@@ -324,11 +570,43 @@ export function ItemsPage() {
         )
       ) : (
         <>
-          <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {items.map((item) => (
-              <ItemCard key={item.id} item={item} />
-            ))}
-          </div>
+          {view === "grid" ? (
+            <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+              {items.map((item) => (
+                <ItemCard
+                  key={item.id}
+                  item={item}
+                  selection={
+                    canWrite
+                      ? {
+                          selected: selected.has(item.id),
+                          onToggle: () => toggleItem(item.id),
+                          disabled: item.is_archived,
+                        }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="surface divide-y divide-border/60 overflow-hidden p-1.5">
+              {items.map((item) => (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  selection={
+                    canWrite
+                      ? {
+                          selected: selected.has(item.id),
+                          onToggle: () => toggleItem(item.id),
+                          disabled: item.is_archived,
+                        }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
           <div className="mt-8 flex flex-col items-center gap-3">
             <p className="text-[0.72rem] text-muted-foreground">
               Showing {items.length} of {total}
@@ -345,6 +623,45 @@ export function ItemsPage() {
           </div>
         </>
       )}
+
+      <BulkMoveDialog
+        open={bulkDialog === "move"}
+        onOpenChange={(open) => setBulkDialog(open ? "move" : null)}
+        items={selectedItems}
+        onCompleted={(result) => {
+          setSelected(new Set());
+          setSelectionNotice(
+            `Moved ${pluralize(result.moved_count, "item")}. Each moved item has its own history entry and can be undone individually.`,
+          );
+        }}
+      />
+      <BulkTagDialog
+        open={bulkDialog === "tags"}
+        onOpenChange={(open) => setBulkDialog(open ? "tags" : null)}
+        items={selectedItems}
+        onCompleted={(result) => {
+          setSelected(new Set());
+          setSelectionNotice(
+            `${result.mode === "add" ? "Added" : "Removed"} tags on ${pluralize(
+              result.updated_count,
+              "item",
+            )}.`,
+          );
+        }}
+      />
+      <BulkCategoryDialog
+        open={bulkDialog === "category"}
+        onOpenChange={(open) => setBulkDialog(open ? "category" : null)}
+        items={selectedItems}
+        onCompleted={(result) => {
+          setSelected(new Set());
+          setSelectionNotice(
+            result.mode === "set"
+              ? `Set category on ${pluralize(result.updated_count, "item")}.`
+              : `Cleared category on ${pluralize(result.updated_count, "item")}.`,
+          );
+        }}
+      />
     </div>
   );
 }

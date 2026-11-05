@@ -36,6 +36,9 @@ const ACTION_TONE: Record<
 
 const ACTION_LABELS: Record<string, string> = {
   "item.moved": "Item moved",
+  "items.bulk_moved": "Bulk move",
+  "items.bulk_tagged": "Bulk tag update",
+  "items.bulk_categorised": "Bulk category update",
   "container.moved": "Container moved",
   "loan.created": "Lent",
   "loan.returned": "Returned",
@@ -63,6 +66,13 @@ function placeLabel(place: unknown): string | null {
   const room = typeof record.room_name === "string" ? record.room_name : null;
   if (location && room) return `${room} / ${location}`;
   return location ?? room;
+}
+
+function batchContext(event: ActivityEvent): Record<string, unknown> | null {
+  const batch = (event.details as Record<string, unknown> | undefined)?.batch;
+  if (!batch || typeof batch !== "object") return null;
+  const record = batch as Record<string, unknown>;
+  return typeof record.batch_id === "string" ? record : null;
 }
 
 export function ActivityTimeline({
@@ -116,6 +126,7 @@ export function ActivityTimeline({
             (event.details as Record<string, unknown>)?.from,
           );
           const to = placeLabel((event.details as Record<string, unknown>)?.to);
+          const batch = batchContext(event);
           const reasons = event.can_undo
             ? null
             : event.undo_blocked_reason &&
@@ -138,6 +149,19 @@ export function ActivityTimeline({
                   <p className="mt-1 flex flex-wrap items-center gap-1 text-[0.7rem] text-muted-foreground">
                     <MapPin className="size-3" />
                     {from ?? "No place"} <span aria-hidden>→</span> {to ?? "No place"}
+                  </p>
+                )}
+                {batch && (
+                  <p className="mt-1 text-[0.66rem] text-muted-foreground">
+                    Part of a bulk move ·{" "}
+                    {typeof batch.batch_item_count === "number"
+                      ? batch.batch_item_count
+                      : "?"}{" "}
+                    item(s),{" "}
+                    {typeof batch.batch_unit_count === "number"
+                      ? batch.batch_unit_count
+                      : "?"}{" "}
+                    unit(s) selected
                   </p>
                 )}
                 <p className="mt-1 text-[0.66rem] text-muted-foreground">

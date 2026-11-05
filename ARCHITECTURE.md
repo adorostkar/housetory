@@ -137,6 +137,7 @@ All application endpoints are versioned under `/api/v1`.
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
 | Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
+| Bulk organisation | `POST /items/bulk/move`, `POST /items/bulk/tags`, `POST /items/bulk/category`; bounded atomic batches with required request-id replay safety |
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
@@ -294,6 +295,17 @@ Key decisions:
 - **Items** optionally reference a room and a storage location. A location
   implicitly determines its room. Deleting a room/location does not delete
   items; foreign keys are `SET NULL`.
+- **Bulk organisation** is an explicit loaded-record workflow in the Items page.
+  Move, add/remove tags and explicit set/clear category accept 1–100 unique item
+  IDs (and up to 20 tags), validate every household-scoped reference before
+  writing and commit all changes or none. The per-household hierarchy advisory
+  lock is taken first, then item rows are locked in sorted UUID order, matching
+  container moves and serializing with item edits and lending. Each move writes a
+  per-item `item.moved` event with from/to snapshots plus `details.batch`, and one
+  `entity_type="batch"` event stores affected IDs, counts, destination and the
+  replay result. Tag/category batches store one batch event and are not undoable.
+  Required request ids are fingerprinted so identical retries return the stored
+  result while different payloads are rejected.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
 - **Purchases** are household-owned shared records. Items reference
@@ -388,8 +400,9 @@ mode/destination/apply provenance, hierarchical import fields and storage-locati
 legacy identifiers/aliases. The voice milestone adds append-only migration
 `a4b6c8d0e2f1` for `voice_notes`, the transcription task check constraint and
 voice indexes. The lending milestone adds append-only migration `c9e1f3a5b7d2`
-for loans, partial returns and activity events. No earlier migration or record is
-rewritten.
+for loans, partial returns and activity events. The bulk-organisation milestone
+adds append-only migration `d4f6b8c0e2a1`, allowing `entity_type="batch"` on
+activity events. No earlier migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -485,7 +498,8 @@ deployment.
   cancellation, request failure, OCR fallback, empty and failed paths are
   recorded and labelled. Lending and undo are synchronous authenticated API
   operations using row locks, request-id idempotency and compensating events;
-  no borrower email or reminder jobs exist. Fixed
+  bulk move/tag/category batches are likewise synchronous, bounded transactions
+  with no background job and no borrower email or reminder job. Fixed
   fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 
@@ -522,6 +536,12 @@ deployment.
 - Item cards resolve the nearest container from `location_path`; item detail
   links to container pages; room place menus link to container pages and show
   identifiers.
+- The Items page supports explicit loaded-record selection and a remembered
+  card/compact-list toggle. Checkboxes sit outside item links; archived rows are
+  disabled; viewers have no selection controls. Search/filter/sort changes clear
+  selection with visible feedback, and the UI never claims unloaded matches are
+  selected. The compact rows show quantity, full place path and on-loan/at-home
+  status without exposing borrower notes.
 - Design system: warm ivory/stone light mode, deep charcoal dark mode, system
   SF typography with New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.

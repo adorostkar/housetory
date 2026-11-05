@@ -30,6 +30,9 @@ UNDOABLE_ACTIONS = {
 
 ACTION_LABELS = {
     ActivityAction.ITEM_MOVED.value: "Item moved",
+    ActivityAction.ITEMS_BULK_MOVED.value: "Bulk move",
+    ActivityAction.ITEMS_BULK_TAGGED.value: "Bulk tag update",
+    ActivityAction.ITEMS_BULK_CATEGORISED.value: "Bulk category update",
     ActivityAction.CONTAINER_MOVED.value: "Container moved",
     ActivityAction.LOAN_CREATED.value: "Loan created",
     ActivityAction.LOAN_RETURNED.value: "Items returned",

@@ -6,6 +6,7 @@ from .routes import (
     ai,
     ai_settings,
     auth,
+    bulk,
     containers,
     documents,
     entity_photos,
@@ -42,6 +43,7 @@ api_router.include_router(containers.router, dependencies=write_guard)
 api_router.include_router(labels.router, dependencies=write_guard)
 api_router.include_router(taxonomy.router, dependencies=write_guard)
 api_router.include_router(items.router, dependencies=write_guard)
+api_router.include_router(bulk.router, dependencies=write_guard)
 api_router.include_router(loans.router, dependencies=write_guard)
 api_router.include_router(documents.router, dependencies=write_guard)
 api_router.include_router(purchases.router, dependencies=write_guard)

@@ -5,7 +5,7 @@ so validation, purchase/warranty handling and relationship rules cannot drift.
 """
 
 import uuid
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -199,6 +199,7 @@ def update_item_record(
     actor_user_id: uuid.UUID | None = None,
     actor_name: str | None = None,
     record_history: bool = True,
+    history_context: dict[str, Any] | None = None,
 ) -> Item:
     fields = payload.model_fields_set
 
@@ -308,6 +309,16 @@ def update_item_record(
         )
         from_label = moved_from.get("location_name") or moved_from.get("room_name") or "no place"
         to_label = moved_to.get("location_name") or moved_to.get("room_name") or "no place"
+        details = {
+            "from": moved_from,
+            "to": moved_to,
+            "from_room_id": moved_from.get("room_id"),
+            "from_location_id": moved_from.get("location_id"),
+            "to_room_id": moved_to.get("room_id"),
+            "to_location_id": moved_to.get("location_id"),
+        }
+        if history_context:
+            details["batch"] = history_context
         history.record_event(
             db,
             household_id,
@@ -318,13 +329,6 @@ def update_item_record(
             entity_id=item.id,
             item_id=item.id,
             summary=f"Moved {item.name} from {from_label} to {to_label}",
-            details={
-                "from": moved_from,
-                "to": moved_to,
-                "from_room_id": moved_from.get("room_id"),
-                "from_location_id": moved_from.get("location_id"),
-                "to_room_id": moved_to.get("room_id"),
-                "to_location_id": moved_to.get("location_id"),
-            },
+            details=details,
         )
     return item
