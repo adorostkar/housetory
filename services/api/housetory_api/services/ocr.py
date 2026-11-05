@@ -31,10 +31,17 @@ class OcrUnavailableError(OcrError):
 
 
 @dataclass(frozen=True)
+class OcrPage:
+    page_number: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ExtractedText:
     text: str
     confidence: int | None
     source: str
+    pages: tuple[OcrPage, ...] = ()
 
 
 CURRENCY_SYMBOLS = {
@@ -218,15 +225,23 @@ def _tesseract_tsv(path: Path) -> ExtractedText:
     confidence = (
         round(sum(confidence_values) / len(confidence_values)) if confidence_values else None
     )
-    return ExtractedText(text="\n".join(ordered), confidence=confidence, source="ocr")
+    text = "\n".join(ordered)
+    return ExtractedText(
+        text=text,
+        confidence=confidence,
+        source="ocr",
+        pages=(OcrPage(page_number=1, text=text),),
+    )
 
 
-def _pdf_embedded_text(path: Path) -> str:
+def _pdf_embedded_pages(path: Path) -> list[OcrPage]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path), strict=False)
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(pages).strip()
+    return [
+        OcrPage(page_number=index, text=page.extract_text() or "")
+        for index, page in enumerate(reader.pages, start=1)
+    ]
 
 
 def _ocr_pdf(path: Path) -> ExtractedText:
@@ -258,29 +273,42 @@ def _ocr_pdf(path: Path) -> ExtractedText:
         if not pages:
             raise OcrError("The PDF did not render any pages for OCR.")
         extracted = [_tesseract_tsv(page) for page in pages]
-    text = "\n\n".join(page.text for page in extracted if page.text).strip()
+    page_records: list[OcrPage] = []
+    for index, page in enumerate(extracted, start=1):
+        page_text = page.pages[0].text if page.pages else page.text
+        page_records.append(OcrPage(page_number=index, text=page_text))
+    text = "\n\n".join(page.text for page in page_records if page.text).strip()
     confidences = [page.confidence for page in extracted if page.confidence is not None]
     return ExtractedText(
         text=text,
         confidence=round(sum(confidences) / len(confidences)) if confidences else None,
         source="ocr",
+        pages=tuple(page_records),
     )
 
 
 def extract_text(path: Path, content_type: str) -> ExtractedText:
     lowered = content_type.lower()
     if lowered == "application/pdf":
-        embedded = _pdf_embedded_text(path)
+        embedded_pages = _pdf_embedded_pages(path)
+        embedded = "\n".join(page.text for page in embedded_pages).strip()
         if len(re.sub(r"\s+", "", embedded)) >= 30:
-            return ExtractedText(text=embedded, confidence=None, source="pdf_text")
+            return ExtractedText(
+                text=embedded,
+                confidence=None,
+                source="pdf_text",
+                pages=tuple(embedded_pages),
+            )
         return _ocr_pdf(path)
     if lowered.startswith("image/"):
         return _tesseract_tsv(path)
     if lowered.startswith("text/"):
+        text = path.read_text(encoding="utf-8", errors="replace")
         return ExtractedText(
-            text=path.read_text(encoding="utf-8", errors="replace"),
+            text=text,
             confidence=None,
             source="text",
+            pages=(OcrPage(page_number=1, text=text),),
         )
     raise OcrError(f"OCR does not support {content_type!r}.")
 

@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import UploadFile
 from sqlalchemy import select
@@ -57,6 +58,7 @@ def create_document(
     merchant: str | None,
     document_date,
     notes: str | None,
+    metadata: dict[str, Any] | None = None,
 ) -> Document:  # noqa: ANN001
     clean_title = (title or "").strip()
     if len(clean_title) > 200:
@@ -66,11 +68,28 @@ def create_document(
 
     items = resolve_document_items(db, household_id, item_ids)
     stored = storage.store_document(household_id, upload)
+    content_sha256 = storage.file_sha256(stored.original_storage_key)
+    extracted_metadata = dict(metadata or {})
+    duplicates = list(
+        db.scalars(
+            select(Document)
+            .where(
+                Document.household_id == household_id,
+                Document.content_sha256 == content_sha256,
+            )
+            .order_by(Document.created_at.desc())
+            .limit(10)
+        ).all()
+    )
+    if duplicates:
+        extracted_metadata["duplicate_documents"] = [
+            {"id": str(duplicate.id), "title": duplicate.title} for duplicate in duplicates
+        ]
     document = Document(
         household_id=household_id,
         storage_key=stored.storage_key,
         original_storage_key=stored.original_storage_key,
-        content_sha256=storage.file_sha256(stored.original_storage_key),
+        content_sha256=content_sha256,
         original_filename=stored.original_filename,
         content_type=stored.content_type,
         original_content_type=stored.original_content_type,
@@ -81,7 +100,7 @@ def create_document(
         document_date=document_date,
         merchant=merchant,
         notes=notes,
-        extracted_metadata={},
+        extracted_metadata=extracted_metadata,
         ocr_status=OcrStatus.NOT_REQUESTED.value,
     )
     document.items = items

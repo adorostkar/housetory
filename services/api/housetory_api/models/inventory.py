@@ -407,6 +407,83 @@ class PurchaseAllocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     document: Mapped["Document | None"] = relationship()
 
 
+class ItemManualProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "item_manual_profiles"
+    __table_args__ = (
+        CheckConstraint("length(manufacturer) between 2 and 120", name="manufacturer_length"),
+        CheckConstraint("length(model_identifier) between 3 and 120", name="model_length"),
+        CheckConstraint(
+            "variant is null or length(variant) between 1 and 120", name="variant_length"
+        ),
+        Index("ix_item_manual_profiles_household", "household_id"),
+        UniqueConstraint("item_id", name="uq_item_manual_profiles_item"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    manufacturer: Mapped[str] = mapped_column(String(120), nullable=False)
+    model_identifier: Mapped[str] = mapped_column(String(120), nullable=False)
+    variant: Mapped[str | None] = mapped_column(String(120))
+    confirmed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    item: Mapped[Item] = relationship()
+
+
+class ManualSearchCandidate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "manual_search_candidates"
+    __table_args__ = (
+        CheckConstraint("length(title) between 1 and 300", name="title_length"),
+        CheckConstraint("length(source_url) between 1 and 2000", name="source_url_length"),
+        CheckConstraint("length(file_url) between 1 and 2000", name="file_url_length"),
+        CheckConstraint("publisher is null or length(publisher) <= 200", name="publisher_length"),
+        CheckConstraint("language is null or length(language) <= 40", name="language_length"),
+        CheckConstraint(
+            "source_type in ('manufacturer', 'official', 'other')",
+            name="valid_source_type",
+        ),
+        UniqueConstraint(
+            "household_id",
+            "download_request_id",
+            name="uq_manual_candidates_household_request",
+        ),
+        Index("ix_manual_candidates_household_item", "household_id", "item_id"),
+        Index("ix_manual_candidates_document", "document_id"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    file_url: Mapped[str] = mapped_column(Text, nullable=False)
+    publisher: Mapped[str | None] = mapped_column(String(200))
+    language: Mapped[str | None] = mapped_column(String(40))
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="other")
+    model_coverage: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    snippet: Mapped[str | None] = mapped_column(Text)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    download_request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )
+
+    item: Mapped[Item] = relationship()
+    document: Mapped["Document | None"] = relationship()
+
+
 class Warranty(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "warranties"
     __table_args__ = (

@@ -19,6 +19,7 @@ from .routes import (
     labels,
     loans,
     locations,
+    manuals,
     overview,
     ownership,
     purchases,
@@ -47,6 +48,7 @@ api_router.include_router(taxonomy.router, dependencies=write_guard)
 api_router.include_router(items.router, dependencies=write_guard)
 api_router.include_router(bulk.router, dependencies=write_guard)
 api_router.include_router(loans.router, dependencies=write_guard)
+api_router.include_router(manuals.router, dependencies=write_guard)
 api_router.include_router(scans.router, dependencies=write_guard)
 api_router.include_router(extraction.router, dependencies=write_guard)
 api_router.include_router(documents.router, dependencies=write_guard)

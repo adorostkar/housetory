@@ -109,6 +109,10 @@ class DocumentScanCommit(BaseModel):
     notes: Description | None = None
 
 
+class DocumentItemLink(BaseModel):
+    item_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
 class DocumentUpdate(BaseModel):
     title: trimmed(1, 200) | None = None
     document_type: DocumentType | None = None

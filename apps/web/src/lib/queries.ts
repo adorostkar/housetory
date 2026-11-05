@@ -17,6 +17,8 @@ import type {
   DocumentRecord,
   DocumentRelations,
   FinancialOverview,
+  ItemManuals,
+  ManualCandidateList,
   ImportBatchDetail,
   ImportBatchList,
   ItemDetailResponse,
@@ -81,6 +83,9 @@ export const queryKeys = {
   loan: (loanId: string) => ["loans", loanId] as const,
   itemLoans: (itemId: string) => ["items", itemId, "loans"] as const,
   itemHistory: (itemId: string) => ["items", itemId, "history"] as const,
+  itemManuals: (itemId: string) => ["items", itemId, "manuals"] as const,
+  itemManualCandidates: (itemId: string) =>
+    ["items", itemId, "manual-search"] as const,
   containerHistory: (containerId: string) =>
     ["containers", containerId, "history"] as const,
 };
@@ -127,6 +132,22 @@ export function useItemLoans(itemId: string | undefined) {
         `/items/${itemId}/loans${buildQuery({ on_date: localDateISO() })}`,
       ),
     enabled: Boolean(itemId),
+  });
+}
+
+export function useItemManuals(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.itemManuals(itemId ?? ""),
+    queryFn: () => api.get<ItemManuals>(`/items/${itemId}/manuals`),
+    enabled: Boolean(itemId),
+  });
+}
+
+export function useManualCandidates(itemId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.itemManualCandidates(itemId ?? ""),
+    queryFn: () => api.get<ManualCandidateList>(`/items/${itemId}/manual-search`),
+    enabled: Boolean(itemId) && enabled,
   });
 }
 
@@ -272,11 +293,12 @@ export interface DocumentFilters {
   sort?: "created_desc" | "created_asc" | "document_date_desc" | "title_asc";
 }
 
-export function useDocuments(filters: DocumentFilters = {}, limit = 100) {
+export function useDocuments(filters: DocumentFilters = {}, limit = 100, enabled = true) {
   return useQuery({
     queryKey: [...queryKeys.documents, filters, limit],
     queryFn: () =>
       api.get<DocumentList>(`/documents${buildQuery({ ...filters, limit })}`),
+    enabled,
   });
 }
 

@@ -25,6 +25,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
 import { ItemDocuments } from "@/components/item-documents";
 import { ItemLoanStatus } from "@/components/item-loan-status";
+import { ItemManuals } from "@/components/item-manuals";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { PhotoGallery } from "@/components/photo-gallery";
@@ -233,6 +234,8 @@ export function ItemDetailPage() {
               </p>
             )}
           </section>
+
+          <ItemManuals item={item} />
         </div>
 
         <aside className="space-y-4">

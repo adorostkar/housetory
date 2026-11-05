@@ -128,7 +128,12 @@ def require_writer(auth: AuthContext = Depends(require_auth)) -> AuthContext:
     return auth
 
 
-READ_ONLY_POST_SUFFIXES = ("/assistant/query", "/search/natural")
+READ_ONLY_POST_SUFFIXES = (
+    "/assistant/query",
+    "/search/natural",
+    "/manual-questions",
+    "/manual-questions/online",
+)
 
 
 def enforce_household_write_access(

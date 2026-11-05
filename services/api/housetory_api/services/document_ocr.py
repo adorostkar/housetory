@@ -232,6 +232,18 @@ def run_document_ocr(
             metadata["source"] = extracted.source
             metadata["confidence"] = extracted.confidence
             metadata["ocr_artifact"] = artifact
+            if extracted.pages:
+                page_records: list[dict[str, Any]] = []
+                remaining = 180_000
+                for page in extracted.pages[:40]:
+                    page_text = page.text[:20_000]
+                    if remaining <= 0:
+                        break
+                    page_text = page_text[:remaining]
+                    remaining -= len(page_text)
+                    page_records.append({"page": page.page_number, "text": page_text})
+                metadata["ocr_pages"] = page_records
+                metadata["ocr_page_count"] = len(extracted.pages)
             metadata = _apply_ai_document_metadata(db, document, extracted.text, metadata)
             try:
                 metadata["extraction"] = build_extraction(

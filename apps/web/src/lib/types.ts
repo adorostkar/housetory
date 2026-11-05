@@ -276,6 +276,111 @@ export interface DocumentRecord {
 
 export type ItemDocument = DocumentRecord;
 
+export interface ManualProfile {
+  id: UUID;
+  item_id: UUID;
+  manufacturer: string;
+  model_identifier: string;
+  variant: string | null;
+  confirmed_at: string;
+  updated_at: string;
+}
+
+export interface ManualSearchStatus {
+  configured: boolean;
+  provider_label: string | null;
+  reason: string | null;
+  profile: ManualProfile | null;
+  can_search: boolean;
+}
+
+export interface ItemManuals {
+  item_id: UUID;
+  manuals: DocumentRecord[];
+  search: ManualSearchStatus;
+}
+
+export interface ManualReference {
+  id: UUID;
+  title: string;
+  url: string;
+  ocr_status: OcrStatus;
+}
+
+export interface ManualCitation {
+  document_id: UUID;
+  document_title: string;
+  page: number | null;
+  section: string | null;
+  excerpt: string;
+  url: string;
+}
+
+export type ManualAnswerMode = "ai" | "extractive" | "no_evidence";
+
+export interface ManualAnswer {
+  item_id: UUID;
+  item_name: string;
+  answer: string;
+  mode: ManualAnswerMode;
+  citations: ManualCitation[];
+  manuals: ManualReference[];
+  notices: string[];
+  ai_status: AiStatus;
+  source_kind: "attached_manual";
+}
+
+export interface WebCitation {
+  title: string;
+  url: string;
+  publisher: string | null;
+  language: string | null;
+  source_type: string;
+  excerpt: string;
+}
+
+export interface ManualOnlineAnswer {
+  item_id: UUID;
+  answer: string;
+  mode: ManualAnswerMode;
+  citations: WebCitation[];
+  notices: string[];
+  ai_status: AiStatus;
+  source_kind: "online";
+}
+
+export interface ManualSearchCandidate {
+  id: UUID;
+  item_id: UUID;
+  title: string;
+  source_url: string;
+  file_url: string;
+  publisher: string | null;
+  language: string | null;
+  source_type: "manufacturer" | "official" | "other";
+  model_coverage: string[];
+  snippet: string | null;
+  retrieved_at: string;
+  document_id: UUID | null;
+  created_at: string;
+}
+
+export interface ManualCandidateList {
+  item_id: UUID;
+  candidates: ManualSearchCandidate[];
+  notices: string[];
+}
+
+export interface ManualDownloadResult {
+  document: DocumentRecord;
+  candidate: ManualSearchCandidate;
+  duplicate_documents: Array<{
+    id: UUID;
+    title: string;
+    reused?: boolean;
+  }>;
+}
+
 export type ExtractionLineKind =
   | "product"
   | "discount"

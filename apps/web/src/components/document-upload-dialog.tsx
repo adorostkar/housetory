@@ -28,12 +28,14 @@ export function DocumentUploadDialog({
   onOpenChange,
   defaultItemIds = [],
   defaultType = "receipt",
+  manualMode = false,
   onUploaded,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultItemIds?: string[];
   defaultType?: DocumentType;
+  manualMode?: boolean;
   onUploaded?: (document: DocumentRecord) => void;
 }) {
   const invalidate = useInvalidateInventory();
@@ -48,13 +50,13 @@ export function DocumentUploadDialog({
 
   React.useEffect(() => {
     if (open) {
-      setDocumentType(defaultType);
+      setDocumentType(manualMode ? "manual" : defaultType);
       setItemIds(defaultItemIds);
     }
     // The key intentionally captures the selection without re-running on every
     // parent render where the array has a new identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultItemKey, defaultType, open]);
+  }, [defaultItemKey, defaultType, manualMode, open]);
 
   const upload = useMutation({
     mutationFn: () => {
@@ -62,7 +64,7 @@ export function DocumentUploadDialog({
       const formData = new FormData();
       formData.append("file", file);
       if (title.trim()) formData.append("title", title.trim());
-      formData.append("document_type", documentType);
+      formData.append("document_type", manualMode ? "manual" : documentType);
       if (merchant.trim()) formData.append("merchant", merchant.trim());
       if (documentDate) formData.append("document_date", documentDate);
       if (notes.trim()) formData.append("notes", notes.trim());
@@ -71,7 +73,16 @@ export function DocumentUploadDialog({
     },
     onSuccess: (document) => {
       invalidate();
-      toast.success("Document added to the library");
+      const duplicates = document.extracted_metadata.duplicate_documents as
+        | Array<{ title: string }>
+        | undefined;
+      if (duplicates && duplicates.length > 0) {
+        toast.warning("Manual added with a duplicate warning", {
+          description: `The same file is already stored as “${duplicates[0]?.title ?? "an existing document"}”. Use the existing library copy if possible.`,
+        });
+      } else {
+        toast.success(manualMode ? "Manual added to the library" : "Document added to the library");
+      }
       setFile(null);
       setTitle("");
       setMerchant("");
@@ -104,10 +115,11 @@ export function DocumentUploadDialog({
     >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add a document</DialogTitle>
+          <DialogTitle>{manualMode ? "Add a manual" : "Add a document"}</DialogTitle>
           <DialogDescription>
-            Receipts, invoices, warranty certificates, manuals and specifications.
-            The original upload is preserved alongside a safe download copy.
+            {manualMode
+              ? "Upload a manual or a clear photo/scan of one. No make or model is required, and the exact original is preserved in the Manual library."
+              : "Receipts, invoices, warranty certificates, manuals and specifications. The original upload is preserved alongside a safe download copy."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -120,9 +132,13 @@ export function DocumentUploadDialog({
           {upload.error && <FormError message={getApiErrorMessage(upload.error)} />}
 
           <Field
-            label="File"
+            label={manualMode ? "Manual file" : "File"}
             htmlFor="document-file"
-            hint="PDF, JPEG, PNG, WebP or plain text · up to 25 MB. Multi-page PDFs are attached unchanged."
+            hint={
+              manualMode
+                ? "PDF or image · up to 25 MB. Multi-page PDFs are attached unchanged."
+                : "PDF, JPEG, PNG, WebP or plain text · up to 25 MB. Multi-page PDFs are attached unchanged."
+            }
           >
             <label
               htmlFor="document-file"
@@ -159,52 +175,66 @@ export function DocumentUploadDialog({
           </Field>
 
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Title" htmlFor="document-title" optional>
+            <Field
+              label="Title"
+              htmlFor="document-title"
+              optional
+            >
               <Input
                 id="document-title"
                 maxLength={200}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Purchase receipt"
+                placeholder={manualMode ? "Cordless drill manual" : "Purchase receipt"}
               />
             </Field>
-            <Field label="Type" htmlFor="document-type">
-              <Select
-                id="document-type"
-                value={documentType}
-                onChange={(event) => setDocumentType(event.target.value as DocumentType)}
-              >
-                {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Merchant" htmlFor="document-merchant" optional>
-              <Input
-                id="document-merchant"
-                maxLength={160}
-                value={merchant}
-                onChange={(event) => setMerchant(event.target.value)}
-                placeholder="Where it came from"
-              />
-            </Field>
-            <Field label="Document date" htmlFor="document-date" optional>
-              <Input
-                id="document-date"
-                type="date"
-                value={documentDate}
-                onChange={(event) => setDocumentDate(event.target.value)}
-              />
-            </Field>
+            {!manualMode && (
+              <Field label="Type" htmlFor="document-type">
+                <Select
+                  id="document-type"
+                  value={documentType}
+                  onChange={(event) => setDocumentType(event.target.value as DocumentType)}
+                >
+                  {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {!manualMode && (
+              <Field label="Merchant" htmlFor="document-merchant" optional>
+                <Input
+                  id="document-merchant"
+                  maxLength={160}
+                  value={merchant}
+                  onChange={(event) => setMerchant(event.target.value)}
+                  placeholder="Where it came from"
+                />
+              </Field>
+            )}
+            {!manualMode && (
+              <Field label="Document date" htmlFor="document-date" optional>
+                <Input
+                  id="document-date"
+                  type="date"
+                  value={documentDate}
+                  onChange={(event) => setDocumentDate(event.target.value)}
+                />
+              </Field>
+            )}
           </div>
 
           <ItemMultiSelect
             selected={itemIds}
             onChange={setItemIds}
-            label="Linked items"
-            hint="A document can belong to one item, several items, or the household library."
+            label={manualMode ? "Compatible items" : "Linked items"}
+            hint={
+              manualMode
+                ? "A manual can cover one item, several compatible items, or stay in the library. Only link items this manual actually covers."
+                : "A document can belong to one item, several items, or the household library."
+            }
             disabled={upload.isPending}
           />
 
@@ -229,7 +259,7 @@ export function DocumentUploadDialog({
             </Button>
             <Button type="submit" disabled={!file || upload.isPending}>
               {upload.isPending && <Spinner />}
-              Add document
+              {manualMode ? "Add manual" : "Add document"}
             </Button>
           </DialogFooter>
         </form>

@@ -11,6 +11,7 @@ from ...db import get_db
 from ...domain import DocumentType, OcrStatus
 from ...models import Document, Item, Purchase
 from ...schemas.documents import (
+    DocumentItemLink,
     DocumentList,
     DocumentOut,
     DocumentUpdate,
@@ -194,6 +195,21 @@ def upload_item_document(
         notes=notes,
     )
     return document_out(document)
+
+
+@router.post("/documents/{document_id}/items", response_model=DocumentOut)
+def link_document_items(
+    document_id: uuid.UUID,
+    payload: DocumentItemLink,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentOut:
+    document = get_document(db, auth.household.id, document_id)
+    selected = resolve_document_items(db, auth.household.id, payload.item_ids)
+    existing_ids = {item.id for item in document.items}
+    document.items = [*document.items, *[item for item in selected if item.id not in existing_ids]]
+    db.commit()
+    return document_out(get_document(db, auth.household.id, document.id))
 
 
 @router.get("/documents/{document_id}", response_model=DocumentOut)
