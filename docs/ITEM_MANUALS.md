@@ -296,7 +296,7 @@ in the main column.
 
 ## Verification
 
-- **279 PostgreSQL-backed backend tests** pass, including the new manual
+- **280 PostgreSQL-backed backend tests** pass, including the new manual
   attachment, identity-gate, citation, idempotency, duplicate, provider-output
   and SSRF tests.
 - **123 Vitest frontend tests** pass, including manual card/actions, Ask dialogs,

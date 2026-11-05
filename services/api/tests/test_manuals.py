@@ -790,12 +790,15 @@ def test_pinned_connection_rejects_oversize_and_timeout(monkeypatch, pdf_bytes):
             self.status = status
             self._headers = headers
             self._body = body
+            self._offset = 0
 
         def getheaders(self):
             return list(self._headers.items())
 
         def read(self, amount):
-            return self._body[:amount]
+            chunk = self._body[self._offset : self._offset + amount]
+            self._offset += len(chunk)
+            return chunk
 
     class FakeConnection:
         instances = []
@@ -839,7 +842,7 @@ def test_pinned_connection_rejects_oversize_and_timeout(monkeypatch, pdf_bytes):
         "_PinnedHTTPConnection",
         _fake_connection_class(FakeResponse(200, {"content-length": str(10 * 1024 * 1024)}, b"x")),
     )
-    with pytest.raises(manual_web.ManualFetchError, match="larger"):
+    with pytest.raises(manual_web.ManualFetchError, match="large"):
         manual_web._request_once("http://manual.example/big.pdf", timeout=10, max_bytes=1024 * 1024)
 
     monkeypatch.setattr(
@@ -847,7 +850,7 @@ def test_pinned_connection_rejects_oversize_and_timeout(monkeypatch, pdf_bytes):
         "_PinnedHTTPConnection",
         _fake_connection_class(FakeResponse(200, {}, b"x" * (1024 * 1024 + 1))),
     )
-    with pytest.raises(manual_web.ManualFetchError, match="larger"):
+    with pytest.raises(manual_web.ManualFetchError, match="large"):
         manual_web._request_once("http://manual.example/big.pdf", timeout=10, max_bytes=1024 * 1024)
 
     class TimeoutConnection(FakeConnection):
@@ -874,6 +877,22 @@ def _fake_connection_class(response):
             return None
 
     return _Connection
+
+
+def test_bounded_read_enforces_total_deadline_not_only_per_read(monkeypatch):
+    class DripResponse:
+        def read(self, amount):
+            return b"x"
+
+    times = iter([0.0, 0.5, 1.5])
+    monkeypatch.setattr(manual_web.time, "monotonic", lambda: next(times))
+    with pytest.raises(manual_web.ManualFetchError, match="timed out"):
+        manual_web._read_bounded(
+            DripResponse(),
+            max_bytes=1024,
+            timeout=1,
+            error_type=manual_web.ManualFetchError,
+        )
 
 
 def test_search_gateway_rejects_redirect_and_invalid_json(monkeypatch):
@@ -906,8 +925,14 @@ def test_search_gateway_rejects_redirect_and_invalid_json(monkeypatch):
     class InvalidResponse:
         status = 200
 
+        def __init__(self):
+            self._body = b"not-json"
+            self._offset = 0
+
         def read(self, amount):
-            return b"not-json"
+            chunk = self._body[self._offset : self._offset + amount]
+            self._offset += len(chunk)
+            return chunk
 
     class InvalidConnection(RedirectConnection):
         def getresponse(self):

@@ -17,6 +17,7 @@ import json
 import re
 import socket
 import ssl
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -39,6 +40,35 @@ class ManualSearchUnavailable(ManualWebError):
 
 class ManualFetchError(ManualWebError):
     pass
+
+
+def _read_bounded(
+    response: Any,
+    *,
+    max_bytes: int,
+    timeout: int,
+    error_type: type[ManualWebError],
+) -> bytes:
+    """Read a response with both a byte cap and a total wall-clock deadline.
+
+    A plain socket timeout only bounds an individual read, so a server could
+    otherwise trickle bytes forever while staying below the per-read timeout.
+    """
+    deadline = time.monotonic() + timeout
+    chunks: list[bytes] = []
+    total = 0
+    while total <= max_bytes:
+        if time.monotonic() > deadline:
+            raise error_type("The response timed out.")
+        chunk = response.read(min(65_536, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    body = b"".join(chunks)
+    if len(body) > max_bytes:
+        raise error_type("The response was too large.")
+    return body
 
 
 @dataclass(frozen=True)
@@ -230,9 +260,17 @@ def _post_search(payload: dict[str, Any]) -> dict[str, Any]:
             raise ManualSearchUnavailable(
                 f"The manual search service returned HTTP {response.status}."
             )
-        data = response.read(MAX_SEARCH_RESPONSE_BYTES + 1)
-        if len(data) > MAX_SEARCH_RESPONSE_BYTES:
-            raise ManualSearchUnavailable("The manual search response was too large.")
+        try:
+            data = _read_bounded(
+                response,
+                max_bytes=MAX_SEARCH_RESPONSE_BYTES,
+                timeout=settings.manual_search_timeout_seconds,
+                error_type=ManualSearchUnavailable,
+            )
+        except ManualSearchUnavailable as exc:
+            raise ManualSearchUnavailable(
+                "The manual search response was too large or timed out."
+            ) from exc
     except (OSError, TimeoutError, ValueError, http.client.HTTPException) as exc:
         raise ManualSearchUnavailable("The manual search service is unavailable.") from exc
     finally:
@@ -464,9 +502,12 @@ def _request_once(url: str, *, timeout: int, max_bytes: int) -> tuple[int, dict[
         length = response_headers.get("content-length")
         if length and length.isdigit() and int(length) > max_bytes:
             raise ManualFetchError("The manual file is larger than the configured upload limit.")
-        body = response.read(max_bytes + 1)
-        if len(body) > max_bytes:
-            raise ManualFetchError("The manual file is larger than the configured upload limit.")
+        body = _read_bounded(
+            response,
+            max_bytes=max_bytes,
+            timeout=timeout,
+            error_type=ManualFetchError,
+        )
         return response.status, response_headers, body
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
         raise ManualFetchError("The manual source could not be downloaded safely.") from exc

@@ -1253,7 +1253,7 @@ limitations are in `docs/ITEM_MANUALS.md`.
 
 ### Verification and local delivery
 
-- [x] 279 PostgreSQL tests, 123 Vitest tests and 33 disposable-stack Playwright
+- [x] 280 PostgreSQL tests, 123 Vitest tests and 33 disposable-stack Playwright
   workflows pass; Ruff, strict TypeScript typecheck, production build and Alembic
   drift checks pass. The new workflow uploads a synthetic text manual without
   make/model, asks a grounded question with a real page citation and attaches the
