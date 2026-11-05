@@ -1040,16 +1040,21 @@ the user's live Heavy drill loan as a fixture.
 
 ### Stage F — backup and local deployment
 
-- [ ] Back up the real local database/uploads/imports, apply the append-only
-      migration, deploy locally, remove test-only PostgreSQL port exposure, and
-      verify healthy services, served assets and preserved real-data counts.
-      Remote deployment remains untouched.
+- [x] Backed up the real local database/uploads/imports to
+      `backups/housetory-20261105T100830Z` (checksums valid) before deployment.
+- [x] Applied append-only migration `e2f4a6c8b0d2` through the standard local
+      Compose deployment and removed the test-only PostgreSQL host port.
+- [x] Verified healthy api/db/worker/web services, served the new search/assistant/
+      purchase-status assets, and preserved real-data counts (51 items, 1 user,
+      1 member, 1 AI provider, 6 task settings, 5 import batches, 328 entries,
+      1 loan, 0 purchases/documents/allocations; uploads 2 files/1,177,655 bytes;
+      imports 5 files/75,620 bytes). Remote deployment remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4 and 5 are
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5 and 6 are
 implemented and locally verified; later milestones still require a separate
 instruction.
 
