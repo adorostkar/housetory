@@ -27,6 +27,7 @@ import { ItemCard } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
 import { PageHeader } from "@/components/page-header";
 import { RoomDialog } from "@/components/room-dialog";
+import { StocktakeEntry } from "@/components/stocktake-entry";
 import { LocationIcon, roomIcon } from "@/components/room-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -246,6 +247,8 @@ export function RoomDetailPage() {
           </>
         }
       />
+
+      <StocktakeEntry roomId={room.id} />
 
       <section className="surface mb-5 p-4 sm:p-5">
         <EntityPhotoManager kind="room" entityId={room.id} name={room.name} />

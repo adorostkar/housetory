@@ -615,3 +615,72 @@ def test_multicurrency_legacy_purchase_and_shared_document_dedup(owner_client, p
     with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
         manifest = json.loads(archive.read("manifest.json"))
     assert len([doc for doc in manifest["documents"] if doc["id"] == receipt["id"]]) == 1
+
+
+def test_evidence_package_includes_exact_last_checked_state_and_marks_it_stale(
+    owner_client,
+):
+    room = create_room(owner_client, "Checked evidence room")
+    item = create_item(owner_client, "Checked radio", room_id=room["id"])
+    started = owner_client.post(
+        "/api/v1/stocktake/sessions",
+        json={
+            "room_ids": [room["id"]],
+            "container_ids": [],
+            "include_descendants": True,
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert started.status_code == 201, started.text
+    session_id = started.json()["id"]
+    session = owner_client.get(f"/api/v1/stocktake/sessions/{session_id}").json()
+    row = session["items"][0]
+    observation = owner_client.post(
+        f"/api/v1/stocktake/sessions/{session_id}/observations",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "status": "present",
+            "snapshot_item_id": row["snapshot_item_id"],
+            "counted_quantity": 1,
+            "expected_item_updated_at": row["current"]["updated_at"],
+            "expected_on_loan_quantity": 0,
+        },
+    )
+    assert observation.status_code == 201, observation.text
+    completed = owner_client.post(
+        f"/api/v1/stocktake/sessions/{session_id}/complete",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "acknowledge_partial": True,
+        },
+    )
+    assert completed.status_code == 200, completed.text
+
+    preview_data = preview(owner_client, {"item_ids": [item["id"]]}).json()
+    created = create_package(owner_client, preview_data)
+    assert created.status_code == 202, created.text
+    run_package(created.json()["id"])
+    csv_response = owner_client.get(f"/api/v1/evidence-exports/{created.json()['id']}/csv")
+    rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
+    record = dict(zip(rows[0], rows[1], strict=True))
+    assert record["last_checked_status"] == "present"
+    assert record["last_checked_quantity"] == "1"
+    assert record["last_checked_stale"] == "no"
+    pdf = owner_client.get(f"/api/v1/evidence-exports/{created.json()['id']}/pdf")
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf.content)).pages)
+    assert "Last checked" in text
+
+    owner_client.patch(f"/api/v1/items/{item['id']}", json={"name": "Checked radio edited"})
+    stale_preview = preview(owner_client, {"item_ids": [item["id"]]}).json()
+    stale_created = create_package(owner_client, stale_preview)
+    assert stale_created.status_code == 202
+    run_package(stale_created.json()["id"])
+    stale_csv = owner_client.get(f"/api/v1/evidence-exports/{stale_created.json()['id']}/csv")
+    stale_rows = list(csv.reader(io.StringIO(stale_csv.content.decode("utf-8-sig"))))
+    stale_record = dict(zip(stale_rows[0], stale_rows[1], strict=True))
+    assert stale_record["last_checked_stale"] == "yes"
+    stale_pdf = owner_client.get(f"/api/v1/evidence-exports/{stale_created.json()['id']}/pdf")
+    stale_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(stale_pdf.content)).pages
+    )
+    assert "changed after that check" in stale_text

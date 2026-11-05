@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     evidence_export_max_pdf_photos: int = Field(default=60, ge=0, le=500)
     evidence_export_retention_hours: int = Field(default=168, ge=1, le=720)
     evidence_export_timeout_seconds: int = Field(default=180, ge=10, le=900)
+    stocktake_max_items: int = Field(default=500, ge=1, le=5000)
+    stocktake_max_apply_batch: int = Field(default=200, ge=1, le=1000)
+    stocktake_max_active_sessions: int = Field(default=25, ge=1, le=200)
+    stocktake_max_notes_chars: int = Field(default=2000, ge=100, le=10000)
+    stocktake_max_observations_per_session: int = Field(default=2000, ge=10, le=10000)
 
     @property
     def qr_effective_base_url(self) -> str:

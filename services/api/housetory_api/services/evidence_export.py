@@ -74,7 +74,7 @@ from ..schemas.evidence_exports import (
 from . import lending, storage
 from .labels import FONT_BOLD, FONT_REGULAR, _register_fonts
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
-from .serializers import item_load_options
+from .serializers import item_load_options, last_verified_out
 from .warranties import effective_reminder_days, warranty_status
 
 EVIDENCE_EXPORT_TASK = "exports.evidence"
@@ -133,6 +133,13 @@ CSV_COLUMNS = [
     "warranty_provider",
     "warranty_end_date",
     "warranty_status",
+    "last_checked_at",
+    "last_checked_status",
+    "last_checked_quantity",
+    "last_checked_owned_quantity",
+    "last_checked_on_loan_quantity",
+    "last_checked_location_path",
+    "last_checked_stale",
     "photo_count",
     "evidence_count",
     "evidence_references",
@@ -692,6 +699,21 @@ def build_snapshot(
                     "document_ref": doc_refs.get(warranty.document_id),
                 }
                 if warranty is not None
+                else None
+            ),
+            "last_checked": (
+                {
+                    "at": checked.at.isoformat(),
+                    "session_id": str(checked.session_id) if checked.session_id else None,
+                    "status": checked.status,
+                    "quantity": checked.quantity,
+                    "owned_quantity": checked.owned_quantity,
+                    "on_loan_quantity": checked.on_loan_quantity,
+                    "location_path": checked.location_path,
+                    "stale": checked.stale,
+                    "stale_reason": checked.stale_reason,
+                }
+                if (checked := last_verified_out(item, on_loan)) is not None
                 else None
             ),
             "photo_ids": [str(photo.id) for photo in item.photos],
@@ -1317,6 +1339,24 @@ def _pdf_item_flowables(
                 styles["small"],
             )
         )
+    last_checked = item.get("last_checked")
+    if last_checked:
+        status = str(last_checked.get("status") or "checked").replace("_", " ")
+        if last_checked.get("stale"):
+            checked_text = (
+                f"Last checked {str(last_checked.get('at'))[:10]} as {status}; "
+                "the recorded item, quantity or location changed after that check."
+            )
+        else:
+            checked_text = (
+                f"Last checked {str(last_checked.get('at'))[:10]} · {status} · "
+                f"{last_checked.get('quantity')} at home"
+            )
+            if last_checked.get("on_loan_quantity"):
+                checked_text += f" · {last_checked['on_loan_quantity']} on loan (still owned)"
+            if last_checked.get("location_path"):
+                checked_text += f" · {last_checked['location_path']}"
+        lines.append(_paragraph(checked_text, styles["small"]))
     if item.get("description"):
         lines.append(_paragraph(item["description"], styles["body"]))
     if item.get("document_refs"):
@@ -1610,6 +1650,9 @@ def build_pdf(
         "Original supporting document bytes are only claimed when the attachment bundle "
         "includes the original role. Normalized or cleaned scan PDFs are labelled as "
         "such in the bundle manifest.",
+        "Per-item last-checked information comes from completed stocktakes and is shown "
+        "only for exact recorded observations. A changed item is labelled rather than "
+        "treated as still verified.",
         "This is supporting documentation, not an insurance policy, valuation, claim or "
         "guarantee of coverage.",
     ]
@@ -1689,6 +1732,19 @@ def build_csv(snapshot: dict[str, Any], *, deadline: float | None = None) -> byt
             (item.get("warranty") or {}).get("provider") or "",
             (item.get("warranty") or {}).get("end_date") or "",
             (item.get("warranty") or {}).get("status") or "",
+            (item.get("last_checked") or {}).get("at") or "",
+            (item.get("last_checked") or {}).get("status") or "",
+            (item.get("last_checked") or {}).get("quantity")
+            if (item.get("last_checked") or {}).get("quantity") is not None
+            else "",
+            (item.get("last_checked") or {}).get("owned_quantity")
+            if (item.get("last_checked") or {}).get("owned_quantity") is not None
+            else "",
+            (item.get("last_checked") or {}).get("on_loan_quantity")
+            if (item.get("last_checked") or {}).get("on_loan_quantity") is not None
+            else "",
+            (item.get("last_checked") or {}).get("location_path") or "",
+            "yes" if (item.get("last_checked") or {}).get("stale") else "no",
             item.get("photo_count") or 0,
             item.get("document_count") or 0,
             "; ".join(item.get("document_refs") or []),
@@ -1998,6 +2054,7 @@ def write_bundle(
                         "at_home_quantity": item["at_home_quantity"],
                         "full_location_path": item["full_location_path"],
                         "evidence_references": item["document_refs"],
+                        "last_checked": item.get("last_checked"),
                     }
                     for item in snapshot["items"]
                 ],

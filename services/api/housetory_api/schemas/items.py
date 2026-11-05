@@ -104,6 +104,20 @@ class ItemUpdate(BaseModel):
         return self
 
 
+class LastVerifiedOut(BaseModel):
+    at: datetime
+    session_id: uuid.UUID | None = None
+    status: str
+    quantity: int
+    owned_quantity: int
+    on_loan_quantity: int
+    location_path: str = ""
+    room_id: uuid.UUID | None = None
+    location_id: uuid.UUID | None = None
+    stale: bool = False
+    stale_reason: str | None = None
+
+
 class ItemSummary(ORMModel):
     id: uuid.UUID
     name: str
@@ -130,6 +144,7 @@ class ItemSummary(ORMModel):
     current_value_currency: str
     created_at: datetime
     updated_at: datetime
+    last_verified: LastVerifiedOut | None = None
 
 
 class ItemDetail(ItemSummary):
@@ -172,6 +187,7 @@ __all__ = [
     "ItemSummary",
     "ItemTagsUpdate",
     "ItemUpdate",
+    "LastVerifiedOut",
     "PhotoList",
     "PhotoOut",
     "PurchaseIn",

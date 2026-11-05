@@ -1,4 +1,4 @@
-import { HandCoins, ImageOff, ShieldCheck } from "lucide-react";
+import { ClipboardCheck, HandCoins, ImageOff, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -126,6 +126,22 @@ export function ItemCard({
         </div>
 
         <div className="mt-auto pt-4">
+          {item.last_verified && (
+            <p
+              className={cn(
+                "mb-1.5 inline-flex items-center gap-1 text-[0.66rem]",
+                item.last_verified.stale ? "text-brass" : "text-muted-foreground",
+              )}
+              title={item.last_verified.stale_reason ?? "Last stocktake check"}
+            >
+              <ClipboardCheck className="size-3" />
+              Checked {formatDate(item.last_verified.at)}
+              {item.last_verified.status === "present"
+                ? ""
+                : ` · ${item.last_verified.status.replace("_", " ")}`}
+              {item.last_verified.stale ? " · changed" : ""}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.72rem] text-muted-foreground">
             {item.room && <span className="truncate">{item.room.name}</span>}
             {item.room && (container || item.location) && (

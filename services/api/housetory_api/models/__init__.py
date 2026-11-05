@@ -43,6 +43,14 @@ from .inventory import (
     item_tags,
 )
 from .jobs import Job
+from .stocktake import (
+    StocktakeApplication,
+    StocktakeCorrection,
+    StocktakeItemState,
+    StocktakeObservation,
+    StocktakeSession,
+    StocktakeSnapshotItem,
+)
 from .voice import VoiceNote
 
 __all__ = [
@@ -81,6 +89,12 @@ __all__ = [
     "Purchase",
     "PurchaseAllocation",
     "Room",
+    "StocktakeApplication",
+    "StocktakeCorrection",
+    "StocktakeItemState",
+    "StocktakeObservation",
+    "StocktakeSession",
+    "StocktakeSnapshotItem",
     "StorageLocation",
     "Tag",
     "User",

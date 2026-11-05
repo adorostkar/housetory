@@ -10,6 +10,7 @@ export function ItemNewPage() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get("room_id") ?? undefined;
   const locationId = searchParams.get("location_id") ?? undefined;
+  const defaultName = searchParams.get("name") ?? undefined;
 
   return (
     <div className="animate-fade-up">
@@ -20,7 +21,11 @@ export function ItemNewPage() {
         backTo={roomId ? `/rooms/${roomId}` : "/items"}
         backLabel={roomId ? "Back to room" : "All items"}
       />
-      <ItemForm defaultRoomId={roomId} defaultLocationId={locationId} />
+      <ItemForm
+        defaultRoomId={roomId}
+        defaultLocationId={locationId}
+        defaultName={defaultName}
+      />
     </div>
   );
 }

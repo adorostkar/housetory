@@ -99,6 +99,9 @@ const ContainerDetailPage = React.lazy(() =>
     default: module.ContainerDetailPage,
   })),
 );
+const StocktakePage = React.lazy(() =>
+  import("@/pages/stocktake-page").then((module) => ({ default: module.StocktakePage })),
+);
 const LabelsPage = React.lazy(() =>
   import("@/pages/labels-page").then((module) => ({ default: module.LabelsPage })),
 );
@@ -213,6 +216,7 @@ export default function App() {
             </Route>
             <Route path="containers" element={<ContainersPage />} />
             <Route path="containers/:containerId" element={<ContainerDetailPage />} />
+            <Route path="stocktake/:sessionId" element={<StocktakePage />} />
             <Route element={<RequireWriter />}>
               <Route path="labels" element={<LabelsPage />} />
             </Route>

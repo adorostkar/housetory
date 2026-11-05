@@ -59,6 +59,21 @@ def prefix_for_location_kind(kind: str) -> str:
     return FIXED_LOCATION_PREFIXES.get(kind, "LOC")
 
 
+class StocktakeStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
+class StocktakeObservationStatus(StrEnum):
+    PRESENT = "present"
+    MISSING = "missing"
+    MOVED = "moved"
+    QUANTITY_DISCREPANCY = "quantity_discrepancy"
+    UNKNOWN = "unknown"
+    UNEXPECTED = "unexpected"
+
+
 class ItemCondition(StrEnum):
     NEW = "new"
     EXCELLENT = "excellent"
@@ -215,6 +230,7 @@ class ActivityAction(StrEnum):
     CONTAINER_MOVE_UNDONE = "container.move_undone"
     LOAN_CREATION_UNDONE = "loan.creation_undone"
     LOAN_RETURN_UNDONE = "loan.return_undone"
+    STOCKTAKE_QUANTITY_CORRECTED = "stocktake.quantity_corrected"
 
 
 class ImportEntityType(StrEnum):

@@ -75,10 +75,12 @@ export function ItemForm({
   item,
   defaultRoomId,
   defaultLocationId,
+  defaultName,
 }: {
   item?: ItemDetail;
   defaultRoomId?: string;
   defaultLocationId?: string;
+  defaultName?: string;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -88,7 +90,7 @@ export function ItemForm({
   const tagsQuery = useTags();
   const documentsQuery = useDocuments({}, 100);
 
-  const [name, setName] = React.useState(item?.name ?? "");
+  const [name, setName] = React.useState(item?.name ?? defaultName ?? "");
   const [description, setDescription] = React.useState(item?.description ?? "");
   const [brand, setBrand] = React.useState(item?.brand ?? "");
   const [model, setModel] = React.useState(item?.model ?? "");

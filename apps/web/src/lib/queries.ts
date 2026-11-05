@@ -35,6 +35,10 @@ import type {
   QuickSearchResponse,
   RoomList,
   SessionState,
+  StocktakeScopeSummary,
+  StocktakeReview,
+  StocktakeSessionDetail,
+  StocktakeSessionList,
   StorageLocationList,
   TagList,
   VoiceConfig,
@@ -93,6 +97,9 @@ export const queryKeys = {
     ["items", itemId, "manual-search"] as const,
   evidenceExports: ["evidence-exports"] as const,
   evidenceExport: (exportId: string) => ["evidence-exports", exportId] as const,
+  stocktakeSessions: ["stocktake", "sessions"] as const,
+  stocktakeSession: (sessionId: string) => ["stocktake", sessionId] as const,
+  stocktakeSummary: (scopeKey: string) => ["stocktake", "summary", scopeKey] as const,
   containerHistory: (containerId: string) =>
     ["containers", containerId, "history"] as const,
 };
@@ -504,6 +511,7 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: ["ai", "recognitions"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
     void queryClient.invalidateQueries({ queryKey: ["containers"] });
+    void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
   };
 }
 
@@ -534,6 +542,62 @@ export function useContainers(filters: ContainerFilters = {}, limit = 200) {
     queryKey: [...queryKeys.containers, filters, limit],
     queryFn: () =>
       api.get<ContainerList>(`/containers${buildQuery({ ...filters, limit })}`),
+  });
+}
+
+export function useStocktakeSessions(
+  filters: { roomId?: string; containerId?: string; status?: string } = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...queryKeys.stocktakeSessions, filters],
+    queryFn: () =>
+      api.get<StocktakeSessionList>(
+        `/stocktake/sessions${buildQuery({
+          room_id: filters.roomId,
+          container_id: filters.containerId,
+          status: filters.status,
+          limit: 20,
+        })}`,
+      ),
+    enabled,
+  });
+}
+
+export function useStocktakeSession(sessionId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.stocktakeSession(sessionId ?? ""),
+    queryFn: () => api.get<StocktakeSessionDetail>(`/stocktake/sessions/${sessionId}`),
+    enabled: Boolean(sessionId) && enabled,
+    staleTime: 0,
+  });
+}
+
+export function useStocktakeScopeSummary(
+  scope: { roomId?: string; containerId?: string },
+  enabled = true,
+) {
+  const scopeKey = scope.roomId ? `room:${scope.roomId}` : `container:${scope.containerId}`;
+  return useQuery({
+    queryKey: queryKeys.stocktakeSummary(scopeKey),
+    queryFn: () =>
+      api.get<StocktakeScopeSummary>(
+        `/stocktake/summary${buildQuery({
+          room_id: scope.roomId,
+          container_id: scope.containerId,
+        })}`,
+      ),
+    enabled: enabled && Boolean(scope.roomId || scope.containerId),
+    staleTime: 0,
+  });
+}
+
+export function useStocktakeReview(sessionId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: [...queryKeys.stocktakeSession(sessionId ?? ""), "review"],
+    queryFn: () => api.get<StocktakeReview>(`/stocktake/sessions/${sessionId}/review`),
+    enabled: Boolean(sessionId) && enabled,
+    staleTime: 0,
   });
 }
 

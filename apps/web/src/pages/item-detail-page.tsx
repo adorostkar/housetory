@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   CalendarDays,
   ChevronRight,
+  ClipboardCheck,
   FileText,
   HandCoins,
   Hash,
@@ -350,6 +351,37 @@ export function ItemDetailPage() {
                   </span>
                 )}
               </InfoRow>
+
+              {item.last_verified && (
+                <InfoRow icon={ClipboardCheck} label="Last checked">
+                  <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    {item.last_verified.session_id ? (
+                      <Link
+                        to={`/stocktake/${item.last_verified.session_id}`}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {formatDate(item.last_verified.at)}
+                      </Link>
+                    ) : (
+                      <span>{formatDate(item.last_verified.at)}</span>
+                    )}
+                    <span className="text-muted-foreground">
+                      {item.last_verified.status === "quantity_discrepancy"
+                        ? "quantity differs"
+                        : item.last_verified.status}
+                    </span>
+                    {item.last_verified.stale ? (
+                      <span className="text-brass" title={item.last_verified.stale_reason ?? undefined}>
+                        · changed since
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        · {item.last_verified.quantity} at home
+                      </span>
+                    )}
+                  </span>
+                </InfoRow>
+              )}
 
               <InfoRow icon={Wallet} label="Current value">
                 {item.current_value_cents != null ? (

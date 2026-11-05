@@ -31,6 +31,7 @@ import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
+import { StocktakeEntry } from "@/components/stocktake-entry";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -233,6 +234,8 @@ export function ContainerDetailPage() {
           </>
         }
       />
+
+      <StocktakeEntry containerId={detail.id} />
 
       <section className="surface mb-4 p-4 sm:p-5">
         <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />

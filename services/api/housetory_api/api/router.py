@@ -27,6 +27,7 @@ from .routes import (
     rooms,
     scans,
     search,
+    stocktake,
     taxonomy,
     voice,
     warranties,
@@ -57,6 +58,7 @@ api_router.include_router(purchases.router, dependencies=write_guard)
 api_router.include_router(warranties.router, dependencies=write_guard)
 api_router.include_router(exports.router, dependencies=write_guard)
 api_router.include_router(evidence_exports.router, dependencies=write_guard)
+api_router.include_router(stocktake.router, dependencies=write_guard)
 api_router.include_router(imports.router, dependencies=write_guard)
 api_router.include_router(voice.router, dependencies=write_guard)
 api_router.include_router(ai.router, dependencies=write_guard)

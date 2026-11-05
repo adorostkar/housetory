@@ -32,6 +32,7 @@ from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from .auth import Household
+    from .stocktake import StocktakeItemState
 
 
 class Room(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -319,6 +320,9 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     custom_values: Mapped[list["ItemCustomValue"]] = relationship(
         back_populates="item", cascade="all, delete-orphan"
+    )
+    last_verification: Mapped["StocktakeItemState | None"] = relationship(
+        back_populates="item", cascade="all, delete-orphan", uselist=False
     )
 
 

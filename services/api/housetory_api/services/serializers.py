@@ -22,6 +22,7 @@ from ..schemas.items import (
     CategoryBrief,
     ItemDetail,
     ItemSummary,
+    LastVerifiedOut,
     LocationBrief,
     PhotoOut,
     RoomBrief,
@@ -47,6 +48,7 @@ def item_load_options() -> list:
         .selectinload(Purchase.allocations)
         .joinedload(PurchaseAllocation.item),
         joinedload(Item.warranty).joinedload(Warranty.document),
+        joinedload(Item.last_verification),
         selectinload(Item.tags),
         selectinload(Item.photos),
         selectinload(Item.documents).selectinload(Document.items),
@@ -265,6 +267,34 @@ def warranty_out(
     )
 
 
+def last_verified_out(item: Item, on_loan_quantity: int = 0) -> LastVerifiedOut | None:
+    state = item.last_verification
+    if state is None:
+        return None
+    reasons: list[str] = []
+    if item.updated_at != state.item_updated_at:
+        reasons.append("Item changed since this check.")
+    if item.quantity != state.owned_quantity:
+        reasons.append("Recorded quantity changed since this check.")
+    if on_loan_quantity != state.on_loan_quantity:
+        reasons.append("Loan quantities changed since this check.")
+    if item.room_id != state.room_id or item.storage_location_id != state.location_id:
+        reasons.append("Location changed since this check.")
+    return LastVerifiedOut(
+        at=state.verified_at,
+        session_id=state.session_id,
+        status=state.status,
+        quantity=state.counted_quantity,
+        owned_quantity=state.owned_quantity,
+        on_loan_quantity=state.on_loan_quantity,
+        location_path=state.location_path,
+        room_id=state.room_id,
+        location_id=state.location_id,
+        stale=bool(reasons),
+        stale_reason=" ".join(reasons) or None,
+    )
+
+
 def _primary_photo(item: Item) -> PhotoOut | None:
     photos = sorted(item.photos, key=lambda photo: (photo.sort_order, photo.created_at))
     return photo_out(photos[0]) if photos else None
@@ -325,6 +355,7 @@ def item_summary(
         current_value_currency=item.current_value_currency,
         created_at=item.created_at,
         updated_at=item.updated_at,
+        last_verified=last_verified_out(item, on_loan_quantity),
     )
 
 
@@ -365,6 +396,7 @@ __all__ = [
     "item_detail",
     "item_load_options",
     "item_summary",
+    "last_verified_out",
     "photo_out",
     "photo_url",
     "purchase_out",
