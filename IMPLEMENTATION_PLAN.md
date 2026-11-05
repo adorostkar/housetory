@@ -954,7 +954,12 @@ not start single-home polish or add another AI provider/task framework.
       versioned apply and allocation display.
 - [x] Disposable-stack browser workflows for mocked AI refinement, accept/edit/apply,
       persisted allocations and refresh/already-applied state.
-- [ ] Local deployment after backup; remote server remains untouched.
+- [x] Local deployment after backup; remote server remains untouched. Verified
+      backup `backups/housetory-20261105T091625Z` (checksums valid), migration
+      `a7c9e1f3b5d4` applied, healthy api/db/worker/web services, served new
+      refinement/allocation assets, and unchanged local counts (51 items, 1 user,
+      1 member, 1 AI provider, 6 task settings, 5 import batches, 328 entries,
+      1 loan, 0 purchases/documents). Host PostgreSQL port exposure was removed.
 
 ## Agreed product roadmap — updated 2026-11-05
 
