@@ -28,6 +28,12 @@ from housetory_api.jobs import (
 from housetory_api.models import AuthSession, Job
 from housetory_api.services.document_ocr import OCR_TASK
 from housetory_api.services.document_ocr import run_job as run_document_ocr
+from housetory_api.services.evidence_export import (
+    EVIDENCE_EXPORT_TASK,
+    EVIDENCE_PRUNE_TASK,
+    prune_expired_exports,
+    run_evidence_export,
+)
 from housetory_api.services.import_pipeline import (
     IMPORT_TASK,
     run_import_job,
@@ -101,6 +107,8 @@ def ping(payload: dict) -> dict:
 HANDLERS = {
     PRUNE_TASK: prune_expired_sessions,
     PRUNE_FINISHED_TASK: prune_finished_jobs,
+    EVIDENCE_PRUNE_TASK: lambda payload: {"expired": prune_expired_exports()},
+    EVIDENCE_EXPORT_TASK: run_evidence_export,
     "maintenance.ping": ping,
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,
@@ -159,6 +167,9 @@ def schedule_maintenance() -> None:
             == 0
         ):
             enqueue(db, PRUNE_FINISHED_TASK)
+
+        if not has_active_job(db, EVIDENCE_PRUNE_TASK):
+            enqueue(db, EVIDENCE_PRUNE_TASK)
 
 
 def run() -> None:
