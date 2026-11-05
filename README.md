@@ -66,6 +66,16 @@ Tailscale is optional.
   durable worker, can be cancelled/retried, expire automatically and use
   authenticated no-store downloads. No AI or external fetch is required. See
   [`docs/INVENTORY_EVIDENCE.md`](docs/INVENTORY_EVIDENCE.md).
+- **Multiple properties in one household**: organise inventory as
+  property → room → fixed place/container → item, with a compact “All properties”
+  selector on rooms, items and containers. Existing data is backfilled into an
+  initial `Home` property per household without changing any IDs, permanent box
+  identifiers, photos, documents, loans or QR links. Property filters are
+  server-enforced and remembered; same-named rooms in different properties stay
+  distinct. Top-level room subtrees, containers and bulk item moves can cross
+  properties with an explicit scope preview, preserved identities and loan-safe
+  last-checked staleness. Populated properties cannot be archived or deleted.
+  See [`docs/PROPERTIES.md`](docs/PROPERTIES.md).
 - **Stocktake / last verified here**: start a bounded check from a room or
   container, including descendants. The expected snapshot keeps owned, at-home
   and on-loan quantities separate; loaned units are never marked missing.
@@ -208,7 +218,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 300 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 307 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -248,9 +258,11 @@ stack, not just unit mocks:
   corrections, stale item/loan/review conflicts, idempotent observation/apply/
   complete requests, partial coverage, last-checked staleness, viewer isolation,
   exact evidence last-checked fields, hierarchical imports and exhaustive
-  cross-household access checks.
-- 129 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 37 checked-in Playwright workflows pass on disposable Compose stacks, covering
+  cross-household access checks, property backfill/IDs, property CRUD guards,
+  room/container/bulk moves across properties, property filters, import/voice
+  property scoping, QR/loan preservation and last-checked staleness.
+- 132 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 39 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -767,7 +779,7 @@ Persistent named volumes:
 - `housetory_imports` — private original import sources, extracted Obsidian notes
   and attachments
 
-Create a verified backup (PostgreSQL custom dump + uploads/imports tars + SHA-256 sums):
+Create a verified backup (PostgreSQL custom dump + uploads/imports/exports tars + SHA-256 sums):
 
 ```bash
 ./scripts/backup.sh
@@ -988,6 +1000,10 @@ docker compose down                   # stop, keep data
   refresh, review/apply, complete/abandon and compact scope-summary routes. The
   checklist, review and finish UI lives at `/stocktake/{sessionId}` and is
   reachable from room/container detail without new primary navigation.
+- Properties add household-scoped CRUD/list routes, property filters on rooms/
+  items/containers, a top-level room subtree move preview/apply route and
+  property management in Settings. Property IDs are never treated as a
+  permission boundary; household membership still controls every request.
 - Purchases, warranties, ownership reports and CSV exports have dedicated
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit

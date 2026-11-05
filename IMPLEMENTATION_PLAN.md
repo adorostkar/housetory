@@ -1544,13 +1544,92 @@ privacy, limits and last-checked semantics are in `docs/STOCKTAKE.md`.
   stocktake observation, upload deletion or arbitrary Docker cleanup was performed.
   Properties and multiple households were not started.
 
+## Staged milestone — multiple properties within one household
+
+This milestone adds a property layer between the household and its existing room
+tree without changing household permissions, existing IDs/attachments/QR links,
+or any purchase/loan ownership. Full rules are in `docs/PROPERTIES.md`.
+
+### Stage A — schema, migration and consistency
+
+- [x] Added `properties` with household scope, name, optional description,
+  ordering and empty-only archive, plus `rooms.property_id` and property indexes.
+  Room-name uniqueness is property/parent-scoped; parent/property consistency is
+  enforced by application validation and a composite database constraint.
+- [x] Added an append-only migration that creates one `Home` property per
+  existing household, backfills every room without changing room/item/container
+  UUIDs, permanent identifiers, loan quantities, photos/documents, imports,
+  stocktake history or QR payloads. Historical activity snapshots are left as
+  historical facts.
+- [x] Backfill leaves item and last-checked `updated_at` values untouched; later
+  real moves update item timestamps so last-checked state becomes stale.
+- [x] New households receive an initial `Home` property. Room creation defaults
+  only when there is one active property; nested rooms inherit their parent.
+  Unlocated items remain explicitly unlocated.
+- [x] Added household-scoped property CRUD/list, empty-only archive/delete guards
+  and hierarchy locks. Viewers remain read-only; property IDs never bypass
+  household membership checks.
+
+### Stage B — hierarchy moves, filters and scope propagation
+
+- [x] Added explicit top-level room-subtree preview and atomic move with request
+  ID/review fingerprint, deterministic locks, affected room/place/item/unit and
+  on-loan counts, ID/QR preservation, history event and stale last-checked
+  behavior. Nested-only room moves are clearly rejected; populated properties
+  cannot be archived/deleted.
+- [x] Existing container moves and bulk item moves work across properties with
+  source/destination property history, preserved identity and loan quantities.
+- [x] Added remembered “All properties” filters to rooms, items and containers,
+  server-side property filters, room grouping, active filter chips and selection
+  clearing on property changes. Search/assistant/evidence remain all-property by
+  default with property-labelled paths.
+- [x] Added property paths to item cards/details, containers, search, assistant,
+  evidence PDF/CSV/manifest, stocktake snapshots and label/QR destination context.
+  Old QR/deep links remain stable.
+- [x] Property context is stored for imports and voice notes; matching is scoped
+  to the property, same-name rooms across properties are ambiguous rather than
+  silently chosen, and hierarchy-created rooms use the selected property.
+  Document/photo flows validate the same room/container/property relationship.
+
+### Stage C — UI, tests and local delivery
+
+- [x] Added compact property management under Settings, property selectors on
+  rooms/items/containers and a room-subtree move dialog with explicit preview.
+  Existing fonts, palette, cards, rounded controls and shell were retained.
+- [x] Added PostgreSQL tests for multi-household backfill/IDs, unlocated records,
+  CRUD/archive/delete guards, duplicate room names, parent constraints, room/
+  container/bulk moves, loans/QR/last checked, filters/search/assistant/evidence/
+  stocktake paths, import/voice property ambiguity, viewer and cross-household
+  isolation.
+- [x] Added Vitest property-management and room-property-move coverage, and
+  disposable Playwright workflows for two-property filtering/remembering,
+  add-item/container context, same-name rooms, cross-property move with preserved
+  IDs/QR/loans and populated-property guards.
+- [x] 307 PostgreSQL backend tests, 132 Vitest tests and 39 disposable-stack
+  Playwright workflows pass; Ruff, strict TypeScript typecheck, production build
+  and Alembic drift checks pass. Added light/dark desktop and mobile property
+  screenshots plus the move/management walkthrough.
+- [x] Backed up all local persistent volumes (database, uploads, imports and the
+  separate evidence exports volume) to `backups/housetory-20261105T223653Z`
+  with valid checksums, then applied append-only migration `f1a3c5e7b9d2` and
+  redeployed the local Compose stack.
+- [x] Verified one `Home` property for the existing household, every room assigned
+  to it, and unchanged room/storage-location ID hashes, item ID/`updated_at`
+  hashes, item/user/member/loan counts, uploads/imports files and bytes. The new
+  properties table remains household-scoped and the app role has DML rights;
+  property routes return 401 unauthenticated and the test-only DB port remains
+  unpublished.
+- [x] No remote deployment, email, paid AI, credentials, real-household property
+  creation beyond the required additive backfill, volume cleanup or arbitrary
+  Docker rollback was performed. Multiple-household switching was not started.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8 and 9
-are implemented and locally verified; later milestones still require a separate
-instruction.
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8, 9
+and 10 are implemented and locally verified; multiple-household switching remains
+for a separate instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
@@ -1698,7 +1777,7 @@ instruction.
    discrepancies. Record who verified what and when; distinguish a verification
    from an edit. Do not mark unchecked contents as present or overwrite quantities
    automatically. Preserve an interrupted stocktake for later completion.
-10. **Multiple properties in one household:** property → room → storage/box → item;
+10. **Multiple properties in one household (implemented locally):** property → room → storage/box → item;
    migrate existing inventory into an initial property without breaking IDs,
    attachments or QR links. Add property context/filters and clear location paths.
    Initially retain household-level permissions across all its properties.
@@ -1711,6 +1790,59 @@ instruction.
    consent rather than sending its data through another household's provider.
    Mutations identify a particular household/property and clarify ambiguity.
    Cross-household item transfers are deferred beyond the initial release.
+
+12. **Item images — reference pictures and illustrations:** deliver after the
+   property/household milestones, preserving the existing visual feel. Distinguish
+   actual user photos, downloaded product references, representative images,
+   custom AI illustrations and built-in illustrations in storage and presentation.
+   - Display priority: user photo, suitable product/reference image, accepted
+     custom AI illustration, built-in type illustration, category icon. User can
+     change/remove/reset the choice; actual photos always take precedence.
+   - Small curated built-in illustration library for common types (Ethernet cable,
+     TV, drill, suitcase etc.), consistently styled, locally matched conservatively
+     and usable offline without LLM calls. Vague types use broad fallback icons.
+   - Find product image uses real configured search and bounded safe downloads,
+     manufacturer sources preferred. Exact confirmed make/model yields an exact
+     reference only when evidence supports compatibility. An LLM may rank real
+     candidates, never invent URLs, source permissions or model compatibility.
+   - IMPORTANT image-specific relaxation approved by user: full model is NOT
+     required for representative images. “LG TV” + “OLED, 77-inch” is sufficient
+     to search, automatically choose a suitable clean single-product image and
+     show it without a candidate approval dialog. Match known attributes, reject
+     obvious brand/type conflicts and use a generic fallback if no suitable image.
+     Exact model certainty is not required for a representative browsing thumbnail.
+   - Label downloaded images “Reference image”; source and whether exact model is
+     confirmed are available in details. Representative images must not silently
+     populate make/model/colour/specification/condition fields from depicted details.
+     Provide Change image, Remove and Use generic illustration; user need not
+     choose a candidate in the normal automatic flow.
+   - Automatic lookup for newly saved items is a household opt-in setting, off by
+     default, operating only after inventory review/save with sufficient description
+     and no real photo. No per-keystroke searches. Separate batch action for old
+     items with explicit scope, limits/progress/cancel and no surprise full-library
+     processing. Deduplicate jobs/downloads and discard stale results after item
+     changes or a real photo upload. Preserve source URL, retrieval date and image
+     provenance. Respect source image-use permissions; do not assume discovery
+     grants reuse rights, bypass restrictions or remove watermarks.
+   - Optional Item illustrations task uses a compatible image-generation model,
+     reusing existing credentials where supported. Manual generate/preview/accept
+     first; optional default-off automatic generation for new saved items and later
+     batch generation. Spending/job/concurrency limits, explicit provider consent,
+     honest estimates only when reliable and no repeated paid retries. Text LLM
+     prompt assistance optional, never required for simple descriptions.
+   - Send only required product text to search/generation providers, not borrowers,
+     room contents, receipts or household notes. Household-scoped permissions and
+     consent; safe SSRF/DNS/redirect/file/type/size/time protections as manual
+     downloads, private storage and cleanup. Generated/reference artwork must be
+     visibly distinguished and excluded from insurance/evidence/condition claims
+     and physical photo-based recognition/stocktake evidence. Never overwrite photos.
+   - Stages: provenance/display + built-in library; real search with automatic
+     representative selection; manual AI generation; automation/batch. Test known
+     attributes vs conflicting candidates, fallback, labels/evidence exclusion,
+     permissions, job races/cost caps and real-photo priority on isolated fixtures.
+     No paid/external calls in automated tests. This relaxation applies ONLY to
+     images: manuals and model-specific online instructions retain complete,
+     confirmed manufacturer/model gates.
 
 ### Visual continuity and delivery boundaries
 

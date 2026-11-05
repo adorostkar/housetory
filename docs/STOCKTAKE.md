@@ -23,7 +23,8 @@ No new top-level navigation was added.
 
 ## Scope and snapshot
 
-Starting from a room includes that room, descendant rooms, items assigned to
+Scope labels and snapshot paths include the property when the room belongs to
+one. Starting from a room includes that room, descendant rooms, items assigned to
 those rooms, and items inside storage places in those rooms. Starting from a
 container includes that container, descendant containers and the items assigned
 to them. Selecting both is supported; the union is de-duplicated by item ID.
@@ -119,7 +120,7 @@ present/missing/moved/quantity observation. The state stores:
 - verifier session and completion date;
 - observed status and counted at-home quantity;
 - owned and on-loan quantity at completion;
-- verified location/path;
+- verified location/path, including the property where known;
 - the item version at completion.
 
 The item serializer compares that state with current inventory. If the item,
@@ -218,6 +219,6 @@ Representative screenshots are in
 
 ![Room last-checked strip and item checked dates](walkthrough/stocktake/05-room-last-checked-desktop.png)
 
-Verification on the final local build: **300 PostgreSQL backend tests**,
-**129 Vitest tests** and **37 disposable-stack Playwright workflows** pass. Ruff,
+Verification on the final local build: **307 PostgreSQL backend tests**,
+**132 Vitest tests** and **39 disposable-stack Playwright workflows** pass. Ruff,
 strict TypeScript typecheck, production build and Alembic drift checks pass.

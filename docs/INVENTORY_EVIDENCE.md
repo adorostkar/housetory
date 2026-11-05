@@ -79,7 +79,7 @@ Contents:
 5. **Inventory items** — grouped by full location path; name, quantity, owned/at-home/
    on-loan amounts, brand/model/serial, condition, category, tags, purchase status,
    purchase merchant/date/currency, selected allocation if any, current estimate,
-   description, evidence references and, where an exact completed stocktake
+   description, property path, evidence references and, where an exact completed stocktake
    observation exists, a last-checked date/status/quantity. A changed item is
    labelled as changed since that check rather than claimed as verified now. Up to
    three photos per item are embedded (global PDF photo cap), with a clear
@@ -103,7 +103,8 @@ columns:
 `format_version`, `export_item_count`, `export_unit_count`, `item_id`,
 `item_name`, `description`, `brand`, `model`, `serial_number`,
 `quantity`, `at_home_quantity`, `on_loan_quantity`, `condition`, `category`, `tags`,
-`room_path`, `location_path`, `full_location_path`, `archived`, `purchase_status`,
+`room_path`, `property_id`, `property_name`, `location_path`,
+`full_location_path`, `archived`, `purchase_status`,
 `purchase_merchant`, `purchase_date`, `purchase_currency`, `purchase_total_cents`,
 `purchase_total_scope`, `purchase_item_allocation_cents`,
 `purchase_unallocated_cents`, `current_value_cents`, `current_value_currency`,
@@ -112,8 +113,9 @@ columns:
 `last_checked_on_loan_quantity`, `last_checked_location_path`,
 `last_checked_stale`, `photo_count`, `evidence_count`, `evidence_references`.
 
-Last-checked fields are populated only from completed stocktake observations for
-that item. `last_checked_stale=yes` means the item/loan/location changed after
+`property_id`/`property_name` identify the physical property when the item is
+located; the full path begins with the property. Last-checked fields are populated
+only from completed stocktake observations for that item. `last_checked_stale=yes` means the item/loan/location changed after
 that check; the historical date is still exported, but not as a current
 verification claim.
 
@@ -274,7 +276,7 @@ Representative screenshots and rendered PDF pages are in
 
 ## Verification
 
-- **300 PostgreSQL backend tests**, **129 Vitest tests** and **37 disposable-stack
+- **307 PostgreSQL backend tests**, **132 Vitest tests** and **39 disposable-stack
   Playwright workflows** pass; Ruff, strict TypeScript typecheck, production build
   and Alembic drift checks pass.
 - PostgreSQL backend tests cover item/room/container/home/overlap scope resolution,

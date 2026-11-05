@@ -17,6 +17,8 @@ membership again. A session stores the selected household id, not a global role.
 | Generate and manage own evidence package jobs | Yes | Yes | Yes (own packages only; no role escalation) |
 | Read stocktake sessions, observations and last-checked state | Yes | Yes | Yes |
 | Start, mark, refresh, review/apply, complete or abandon stocktakes | Yes | Yes | No |
+| Read properties and property-scoped inventory | Yes | Yes | Yes |
+| Create, rename, archive or delete properties; move room subtrees across properties | Yes | Yes | No |
 | Manage household name and reminder settings | Yes | No | No |
 | Manage AI providers, credentials, task models and consent | Yes | No | No |
 | Invite, revoke, resend, remove members and change roles | Yes | No | No |
@@ -32,7 +34,9 @@ membership again. A session stores the selected household id, not a global role.
   data the member can already read; viewers may manage only packages they created,
   and manual upload/attachment, identity confirmation, online search and online
   candidate download remain writer-only. Stocktake writes stay behind the same
-  household write guard; viewers may read sessions and reviews only.
+  household write guard; viewers may read sessions and reviews only. Property
+  management follows the same owner/member write rules; property IDs never grant
+  access outside the household.
 - Owner-only endpoints use `require_owner`. Account endpoints use the account
   session without requiring a household, so an invited existing account can sign
   in before accepting membership.
