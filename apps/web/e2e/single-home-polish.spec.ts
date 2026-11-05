@@ -89,7 +89,7 @@ test("unified search answers the heavy drill loan question without claiming it i
   await expect(page.getByText(/at home in Workshop/).first()).toBeVisible();
   await expect(page.getByText(/On loan: 1 with Alex/).first()).toBeVisible();
   await expect(page.getByText(new RegExp(`recorded due ${dueOn}`)).first()).toBeVisible();
-  await expect(page.getByText(/loaned units are not recorded there/).first()).toBeVisible();
+  await expect(page.getByText(/Loaned units are not recorded at the usual home/).first()).toBeVisible();
   await expect(page.getByText(/BOX-\d+ · Power tools/).first()).toBeVisible();
 
   await page.getByRole("link", { name: /Continue in Assistant/ }).click();

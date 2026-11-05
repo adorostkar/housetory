@@ -1193,8 +1193,9 @@ def tool_locate_item(
     if on_loan > 0:
         if at_home > 0:
             parts.append(
-                f"{at_home} of {owned} {item.name} "
-                f"{'is' if at_home == 1 else 'are'} at home in {home}."
+                f"{on_loan} of {owned} {item.name} "
+                f"{'is' if on_loan == 1 else 'are'} on loan; "
+                f"{at_home} {'is' if at_home == 1 else 'are'} at home in {home}."
             )
         else:
             parts.append(
@@ -1219,7 +1220,7 @@ def tool_locate_item(
             parts.append(f"The usual home is {home}, but the loaned units are not recorded there.")
         else:
             parts.append(
-                f"The at-home units are recorded at {home}; loaned units are not recorded there."
+                "Loaned units are not recorded at the usual home place; only at-home units are."
             )
         parts.append("A due date is a recorded fact, not a guarantee of return.")
     else:

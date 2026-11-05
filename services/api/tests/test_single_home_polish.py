@@ -151,10 +151,10 @@ def test_exact_heavy_drill_whereabouts_is_loan_first_and_quantity_accurate(owner
     assert whereabouts["loans"][0]["borrower_name"] == "Alex"
     assert whereabouts["loans"][0]["outstanding_quantity"] == 2
     assert whereabouts["loans"][0]["due_on"] == loan["due_on"]
-    assert "1 of 3" in body["answer"]
-    assert "at home in Workshop" in body["answer"]
+    assert "2 of 3 Heavy drill are on loan" in body["answer"]
+    assert "1 is at home in Workshop" in body["answer"]
     assert "On loan: 2 with Alex" in body["answer"]
-    assert body["answer"].index("at home") < body["answer"].index("On loan")
+    assert body["answer"].index("on loan") < body["answer"].index("at home")
     assert body["items"][0]["on_loan_quantity"] == 2
     assert body["references"][0]["type"] == "item"
     assert any(reference["type"] == "loan" for reference in body["references"])
