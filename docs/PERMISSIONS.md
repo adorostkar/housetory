@@ -13,7 +13,8 @@ membership again. A session stores the selected household id, not a global role.
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
 | Create imports, scans, recognition records, OCR and summary jobs | Yes | Yes | No |
 | Generate/download label PDFs that record label timestamps | Yes | Yes | No |
-| Read/export CSV reports and use read-only quick/natural search | Yes | Yes | Yes |
+| Read/export CSV reports, preview and download evidence packages, and use read-only quick/natural search | Yes | Yes | Yes |
+| Generate and manage own evidence package jobs | Yes | Yes | Yes (own packages only; no role escalation) |
 | Manage household name and reminder settings | Yes | No | No |
 | Manage AI providers, credentials, task models and consent | Yes | No | No |
 | Invite, revoke, resend, remove members and change roles | Yes | No | No |
@@ -23,10 +24,12 @@ membership again. A session stores the selected household id, not a global role.
 
 - `enforce_household_write_access` is attached at router level to all
   household-data routers. Unsafe HTTP methods are rejected for viewers before
-  endpoint code runs. The only read-only POST exceptions are assistant questions,
-  natural-language search and item manual questions. Manual upload/attachment,
-  identity confirmation, online search and online candidate download remain
-  writer-only.
+  endpoint code runs. The read-only POST exceptions are assistant questions,
+  natural-language search, item manual questions and evidence-package
+  preview/generation/cancel/retry. Evidence generation is a read-only report over
+  data the member can already read; viewers may manage only packages they created,
+  and manual upload/attachment, identity confirmation, online search and online
+  candidate download remain writer-only.
 - Owner-only endpoints use `require_owner`. Account endpoints use the account
   session without requiring a household, so an invited existing account can sign
   in before accepting membership.
@@ -52,6 +55,7 @@ membership again. A session stores the selected household id, not a global role.
 Viewers see a read-only banner. Add-items controls, scan/import routes, entity
 photo editing, item/document mutations, manual upload/attachment/identity/search
 controls, purchase/warranty edits and label generation are hidden or routed away.
-They retain manual reading, document downloads and attached-manual questions. The server remains the authority; UI
+They retain manual reading, document downloads, attached-manual questions, CSV
+exports and their own inventory evidence package previews/downloads. The server remains the authority; UI
 hiding is only a usability layer. Account settings are separate from household
 and member administration.

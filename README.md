@@ -57,6 +57,15 @@ Tailscale is optional.
   manuals, specifications and other files, associated with one or many items.
 - PDF, JPEG, PNG, WebP, HEIC and text uploads; original uploads are preserved,
   safe downloads are normalized, and older documents remain readable.
+- **Inventory evidence package**: select items, rooms, containers or the current
+  home, preview scope and included evidence, then generate a presentable PDF
+  report, optional formula-safe UTF-8 CSV and optional private ZIP of originals/
+  derivatives with a SHA-256 manifest. Recorded facts, currencies, shared purchase
+  totals, per-item allocations, on-loan quantities and missing/unknown values stay
+  explicit; borrower names and private notes are excluded. Packages run in the
+  durable worker, can be cancelled/retried, expire automatically and use
+  authenticated no-store downloads. No AI or external fetch is required. See
+  [`docs/INVENTORY_EVIDENCE.md`](docs/INVENTORY_EVIDENCE.md).
 - **Item manuals and grounded product help**: attach an uploaded manual (no
   make/model required) or reuse an existing Manual-library document across
   compatible items. Compact item actions include Add manual, Attach existing,
@@ -187,7 +196,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 286 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 291 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -218,11 +227,14 @@ stack, not just unit mocks:
   adapter with realistic fixtures, conservative manufacturer provenance,
   direct-PDF versus source-page discovery, 401/403/429/timeout/invalid-output
   handling, idempotent duplicate-aware downloads with provenance,
-  SSRF/redirect/size/type/timeout download guards,
+  SSRF/redirect/size/type/timeout download guards, evidence scope/overlap and
+  archived handling, shared/legacy/multicurrency purchase semantics, CSV formula
+  escaping, ZIP source bytes/manifests/missing files, snapshot reconfirmation,
+  idempotency, expiry/cancel/retry and authenticated package downloads,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 124 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 33 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 127 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 35 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -239,7 +251,8 @@ stack, not just unit mocks:
   populated photo galleries, the unified Add items chooser with contextual
   destinations, manual upload/attach/answer citations and a fixture Brave
   provider exercised through the real adapter for gated search/review/save at
-  mobile width.
+  mobile width, plus item selection, evidence preview, PDF/CSV/ZIP generation and
+  downloads, cancellation/error states and mobile package preview.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -270,7 +283,9 @@ extraction, matching, AI fallback and apply semantics are in
 [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md), and manual
 attachment, grounded citations, identity gates, reviewed online search/download,
 configuration and safety limits are in
-[`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md). The Phase 2 desktop/iPhone
+[`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md), and the inventory evidence PDF,
+CSV, ZIP, manifest, totals/privacy semantics, limits and walkthrough are in
+[`docs/INVENTORY_EVIDENCE.md`](docs/INVENTORY_EVIDENCE.md). The Phase 2 desktop/iPhone
 walkthrough, screenshots and remaining limitations are in
 [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
@@ -489,6 +504,14 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
+| `EVIDENCE_EXPORT_MAX_ITEMS` | `300` | Maximum items in one evidence package |
+| `EVIDENCE_EXPORT_MAX_DOCUMENTS` | `300` | Maximum candidate evidence documents |
+| `EVIDENCE_EXPORT_MAX_PHOTOS` | `500` | Maximum selected photos |
+| `EVIDENCE_EXPORT_MAX_BUNDLE_MB` | `100` | Maximum uncompressed evidence ZIP bytes |
+| `EVIDENCE_EXPORT_MAX_PDF_PHOTOS` | `60` | Maximum photos embedded in the PDF |
+| `EVIDENCE_EXPORT_RETENTION_HOURS` | `168` | Private package artifact lifetime |
+| `EVIDENCE_EXPORT_TIMEOUT_SECONDS` | `180` | Maximum background generation time |
+| `EXPORTS_DIR` | `/data/exports` in Compose | Separate writable private artifact volume |
 | `MANUAL_SEARCH_URL` | empty | Advanced JSON gateway URL when explicitly selected |
 | `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for the advanced gateway |
 | `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Gateway label shown in the manual UI |
@@ -933,6 +956,10 @@ docker compose down                   # stop, keep data
   `GET/POST /items/{id}/manuals`, confirmed `manual-profile`, attach-existing,
   grounded `manual-questions`, and reviewed `manual-search` candidate/download
   endpoints; optional online questions use the same confirmed identity gate.
+- Evidence exports add `POST /evidence-exports/preview`,
+  `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and
+  authenticated PDF/CSV/ZIP downloads. They use the existing durable worker and
+  a separate private exports volume.
 - Purchases, warranties, ownership reports and CSV exports have dedicated
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit

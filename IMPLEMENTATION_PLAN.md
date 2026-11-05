@@ -1371,11 +1371,103 @@ and SSRF-safe download path.
   token in `BRAVE_SEARCH_API_KEY` (or explicitly configure the advanced
   gateway), restart the API and perform one deliberate live verification.
 
+## Staged milestone — inventory evidence package
+
+This milestone adds a presentable, offline-readable inventory evidence package
+without adding an insurance-management area, a stocktake claim, public sharing or
+a new reporting framework. It reuses item/room/container scope, photos, documents,
+purchases/allocations, loans, warranties, the durable worker and the existing export
+entry points. Full output, totals, privacy, limits and limitations are in
+`docs/INVENTORY_EVIDENCE.md`.
+
+### Stage A — scope, evidence preview and snapshot
+
+- [x] Added explicit item, room, container and current-home scope resolution with
+  descendant hierarchy handling, union de-duplication and archived inclusion
+  control. Empty/missing/cross-household scopes are handled without leaking data.
+- [x] Added a read-only preview with item/unit counts, full location paths, evidence
+  counts, document list, per-category and per-document inclusion, evidence size,
+  purchase/current-value summaries and shared/legacy purchase warnings.
+- [x] Document inclusion is limited to selected item links, selected-item warranty
+  documents and selected-item purchase receipts. Shared documents are flagged and
+  can be excluded individually; manuals/other documents are off by default.
+- [x] Added snapshot fingerprinting and confirmation. A changed inventory/evidence
+  state returns `inventory_changed` and requires a refreshed preview; the confirmed
+  snapshot is stored and used by the worker. Request IDs make creation idempotent.
+- [x] Added a compact responsive dialog with home, items bulk, room and container
+  entry points. No mandatory new data-entry fields or top-level insurance section.
+
+### Stage B — PDF, CSV and originals bundle
+
+- [x] Generated a vector PDF with embedded Unicode fonts and PDF CID fallbacks,
+  wrapping/pagination, cover summary, currency-separated value summary, referenced
+  purchase table, per-item facts, photo thumbnails, evidence index and privacy/
+  non-appraisal notes. No active content, scripts or external URLs.
+- [x] Preserved purchase price versus current estimates, selected allocation versus
+  shared purchase total versus legacy unallocated amounts, and kept currencies
+  separate. Shared purchase totals appear once; no full receipt total is assigned
+  to every item.
+- [x] Excluded borrower names, loan notes, purchase notes and document notes. Loaned
+  units remain owned and are reported with at-home and recorded on-loan quantities.
+- [x] Added a stable, UTF-8 BOM CSV with formula-injection protection and no invented
+  prices/dates. No XLSX workbook is claimed; CSV is the supported spreadsheet.
+- [x] Added an optional ZIP with PDF, CSV, README and manifest; exact original
+  document roles, normalized/cleaned derivatives, scan source pages and stored photo
+  derivatives are distinguished. Files map to item/document IDs with byte counts and
+  SHA-256. Shared documents are written once, names are sanitized and missing files
+  are reported rather than silently omitted.
+- [x] Added explicit photo/receipt/warranty/manual/other/original/CSV/ZIP controls,
+  preview size estimates, bounded PDF photo count and package size limits.
+
+### Stage C — durable jobs, retention and security
+
+- [x] Added append-only `inventory_evidence_exports` storage and migration with
+  household/user/job links, scope/options/snapshot/manifest, artifact keys/SHA-256,
+  status, errors and expiry. The worker task updates the package and the API serves
+  authenticated no-store PDF/CSV/ZIP downloads.
+- [x] Generated artifacts use a separate private `/data/exports` volume mounted
+  writable in API/worker; source uploads remain read-only to the worker. Temporary
+  files are cleaned on failure/cancel/expiry. Source originals are never deleted.
+- [x] Added queued/running/succeeded/failed/cancelled/expired states, cancellation,
+  retry/regeneration, idempotent creation, background progress and 7-day default
+  retention. A maintenance worker task and access checks delete expired artifacts.
+- [x] Added household-scoped preview/create/list/detail/cancel/retry/download routes.
+  Viewers may preview/generate/download under established read-only export rules;
+  they can manage only their own package jobs, with cross-household IDs rejected.
+- [x] Bounded item/document/photo counts, uncompressed ZIP bytes, embedded PDF
+  photos, a wall-clock generation deadline and existing upload limits. ZIP paths
+  are sanitized; CSV formulas are neutralized; no raw private contents/download
+  URLs are logged.
+
+### Stage D — verification and local delivery
+
+- [x] 291 PostgreSQL backend tests, 127 Vitest tests and 35 disposable-stack
+  Playwright workflows pass; Ruff, strict TypeScript typecheck, production build
+  and Alembic drift checks pass. The Playwright run included the Brave/manual
+  fixture workflow and the new evidence package workflow.
+- [x] Added synthetic sample artifacts under `docs/samples/inventory-evidence/`
+  (PDF, CSV, ZIP) and rendered/screenshot walkthrough files under
+  `docs/walkthrough/inventory-evidence/`. The sample PDF was rendered and visually
+  checked page by page, including Unicode text, embedded photo, evidence references,
+  shared/legacy purchase notes and privacy statements.
+- [x] Backed up local data to `backups/housetory-20261105T145849Z` (all checksums
+  valid), applied append-only migration `b8d1e3f5a7c9`, and redeployed the local
+  Compose stack. The new private exports volume is separate from uploads/imports.
+- [x] Verified healthy api/db/worker/web services, served the new web assets,
+  preserved real-data counts (51 items, 1 user, 1 member, 1 AI provider,
+  6 task settings, 5 import batches, 328 entries, 1 loan, 0 purchases/documents/
+  returns; uploads 2 files/1,177,655 bytes; imports 5 files/75,620 bytes),
+  confirmed the new export table contains no real-household rows, and verified the
+  test-only PostgreSQL port remains unpublished.
+- [x] No real household evidence package was generated, no originals were deleted,
+  no remote deployment or email was sent, and no paid AI/network service was used.
+  XLSX is not implemented; CSV is the documented spreadsheet format.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6 and 7
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7 and 8
 are implemented and locally verified; later milestones still require a separate
 instruction.
 
@@ -1505,8 +1597,8 @@ instruction.
    a new top-level product section. Verify missing-make/model gates, mismatched
    variants, unknown sources, citations, download safety, consent, permissions and
    duplicate/manual reuse on isolated fixtures. No real online/paid calls in tests.
-8. **Inventory evidence package:** export selected items, boxes, rooms or the
-   current home as a presentable itemised PDF, with an optional spreadsheet and
+8. **Inventory evidence package (implemented locally):** export selected items,
+   boxes, rooms or the current home as a presentable itemised PDF, with an optional spreadsheet and
    bundle of original supporting attachments. Include recorded quantities,
    location paths, photos, serial/model identifiers, purchase details, receipts
    and recorded values where available. Clearly distinguish purchase price from
