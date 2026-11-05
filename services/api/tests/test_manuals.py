@@ -1,6 +1,8 @@
 import io
+import json
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from pypdf import PdfWriter
@@ -68,9 +70,9 @@ def populate_manual(document_id, text, *, pages=None, status="succeeded"):
 
 def confirmed_profile(client, item_id, **overrides):
     payload = {
-        "manufacturer": "Makita",
+        "manufacturer": "DeWalt",
         "model_identifier": "DCD791",
-        "variant": None,
+        "variant": "B",
         "confirmed": True,
         **overrides,
     }
@@ -111,15 +113,25 @@ def viewer_headers(owner_client, email="viewer@example.com"):
 
 def configure_search(monkeypatch):
     monkeypatch.setattr(
-        manual_web, "search_configuration", lambda: (True, "Test manual search", None)
+        manual_web,
+        "resolve_search_provider",
+        lambda: manual_web.SearchProviderConfig(
+            kind="gateway",
+            label="Test manual search",
+            gateway_url="https://search.example/manuals",
+        ),
     )
+    monkeypatch.setattr(get_settings(), "manual_search_url", "https://search.example/manuals")
 
 
 def disable_search(monkeypatch):
     monkeypatch.setattr(
         manual_web,
-        "search_configuration",
-        lambda: (False, None, "Online manual search is not configured."),
+        "resolve_search_provider",
+        lambda: manual_web.SearchProviderConfig(
+            kind="none",
+            reason="Online manual search is not configured.",
+        ),
     )
 
 
@@ -168,7 +180,7 @@ def test_manual_upload_without_model_links_multiple_items_and_viewer_is_read_onl
         f"/api/v1/items/{first['id']}/manual-profile",
         headers=headers,
         json={
-            "manufacturer": "Makita",
+            "manufacturer": "DeWalt",
             "model_identifier": "DCD791",
             "confirmed": True,
         },
@@ -237,19 +249,28 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
     )
     assert generic.status_code == 422
     assert generic.json()["detail"]["code"] == "incomplete_manual_identity"
-    partial = confirmed_profile(
-        owner_client, item["id"], manufacturer="Makita", model_identifier="DCD"
+    too_short = confirmed_profile(
+        owner_client, item["id"], manufacturer="DeWalt", model_identifier="A"
     )
-    assert partial.status_code == 422
-    assert partial.json()["detail"]["code"] == "incomplete_manual_identity"
-    no_digits = confirmed_profile(
-        owner_client, item["id"], manufacturer="Makita", model_identifier="Heavy drill"
+    assert too_short.status_code == 422
+    generic_model = confirmed_profile(
+        owner_client, item["id"], manufacturer="DeWalt", model_identifier="Heavy drill"
     )
-    assert no_digits.status_code == 422
+    assert generic_model.status_code == 422
 
-    saved = confirmed_profile(owner_client, item["id"])
+    letter_item = create_item(owner_client, "Wireless speaker")
+    letter_only = confirmed_profile(
+        owner_client,
+        letter_item["id"],
+        manufacturer="Sonos",
+        model_identifier="One",
+    )
+    assert letter_only.status_code == 200, letter_only.text
+    assert letter_only.json()["model_identifier"] == "One"
+
+    saved = confirmed_profile(owner_client, item["id"], variant="B")
     assert saved.status_code == 200, saved.text
-    assert saved.json()["manufacturer"] == "Makita"
+    assert saved.json()["manufacturer"] == "DeWalt"
     assert saved.json()["model_identifier"] == "DCD791"
 
     calls = []
@@ -259,14 +280,14 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
         return {
             "results": [
                 {
-                    "title": "Makita DCD791 cordless drill instruction manual",
-                    "source_url": "https://www.makita.example/support/DCD791",
-                    "file_url": "https://www.makita.example/support/DCD791.pdf",
-                    "publisher": "Makita",
+                    "title": "DeWalt DCD791B cordless drill instruction manual",
+                    "source_url": "https://www.dewalt.example/support/DCD791B",
+                    "file_url": "https://www.dewalt.example/support/DCD791B.pdf",
+                    "publisher": "DeWalt",
                     "language": "en",
                     "source_type": "manufacturer",
-                    "model_coverage": ["DCD791", "DCD791Z"],
-                    "snippet": "Instruction manual for DCD791.",
+                    "model_coverage": ["DCD791", "DCD791B"],
+                    "snippet": "Instruction manual for DCD791B.",
                 },
                 {
                     "title": "DCD790 cordless drill manual",
@@ -289,15 +310,15 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
     assert searched.status_code == 200, searched.text
     body = searched.json()
     assert [entry["title"] for entry in body["candidates"]] == [
-        "Makita DCD791 cordless drill instruction manual"
+        "DeWalt DCD791B cordless drill instruction manual"
     ]
     assert any("exact confirmed model" in notice for notice in body["notices"])
     assert calls == [
         {
             "mode": "manual",
-            "manufacturer": "Makita",
+            "manufacturer": "DeWalt",
             "model": "DCD791",
-            "variant": None,
+            "variant": "B",
         }
     ]
 
@@ -330,10 +351,10 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
     candidate_payload = {
         "results": [
             {
-                "title": "Makita DCD791 manual",
-                "source_url": "https://www.makita.example/DCD791",
-                "file_url": "https://www.makita.example/DCD791.pdf",
-                "publisher": "Makita",
+                "title": "DeWalt DCD791B manual",
+                "source_url": "https://www.dewalt.example/DCD791B",
+                "file_url": "https://www.dewalt.example/DCD791B.pdf",
+                "publisher": "DeWalt",
                 "language": "en",
                 "source_type": "manufacturer",
                 "model_coverage": ["DCD791"],
@@ -362,7 +383,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
         return manual_web.FetchedManual(
             content=pdf_bytes,
             content_type="application/pdf",
-            filename="DCD791 manual.pdf",
+            filename="DCD791B manual.pdf",
             final_url=url,
             retrieved_at=datetime.now(UTC),
         )
@@ -378,7 +399,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
     assert document["document_type"] == "manual"
     assert document["items"] == [{"id": first["id"], "name": "Drill one"}]
     assert document["extracted_metadata"]["manual_source"]["source_url"] == (
-        "https://www.makita.example/DCD791"
+        "https://www.dewalt.example/DCD791B"
     )
     assert document["extracted_metadata"]["manual_source"]["retrieved_at"]
 
@@ -417,9 +438,9 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
         lambda payload: {
             "results": [
                 {
-                    "title": "Makita DCD791 service manual",
-                    "source_url": "https://www.makita.example/DCD791-service",
-                    "file_url": "https://www.makita.example/DCD791-service.pdf",
+                    "title": "DeWalt DCD791B service manual",
+                    "source_url": "https://www.dewalt.example/DCD791B-service",
+                    "file_url": "https://www.dewalt.example/DCD791B-service.pdf",
                     "source_type": "manufacturer",
                     "model_coverage": ["DCD791"],
                 }
@@ -431,7 +452,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
         for candidate in owner_client.post(f"/api/v1/items/{first['id']}/manual-search").json()[
             "candidates"
         ]
-        if candidate["file_url"].endswith("DCD791-service.pdf")
+        if candidate["file_url"].endswith("DCD791B-service.pdf")
     )
     monkeypatch.setattr(
         manual_web,
@@ -581,27 +602,27 @@ def test_exact_model_filter_honours_confirmed_variant():
     def candidate(title):
         return manual_web.SearchCandidateData(
             title=title,
-            source_url="https://www.makita.example/manual",
-            file_url="https://www.makita.example/manual.pdf",
-            publisher="Makita",
+            source_url="https://www.dewalt.example/manual",
+            file_url="https://www.dewalt.example/manual.pdf",
+            publisher="DeWalt",
             language="en",
             source_type="manufacturer",
-            model_coverage=["DCD791"],
+            model_coverage=[],
             snippet=None,
             retrieved_at=datetime.now(UTC),
         )
 
     accepted, notices = manual_web._exact_model_candidates(
         [
-            candidate("Makita DCD791 drill manual"),
-            candidate("Makita DCD791Z drill manual"),
-            candidate("Makita DCD790 drill manual"),
+            candidate("DeWalt DCD791 drill manual"),
+            candidate("DeWalt DCD791B drill manual"),
+            candidate("DeWalt DCD790 drill manual"),
         ],
-        manufacturer="Makita",
+        manufacturer="DeWalt",
         model="DCD791",
-        variant="Z",
+        variant="B",
     )
-    assert [entry.title for entry in accepted] == ["Makita DCD791Z drill manual"]
+    assert [entry.title for entry in accepted] == ["DeWalt DCD791B drill manual"]
     assert any("exact confirmed model" in notice for notice in notices)
 
 
@@ -634,9 +655,9 @@ def test_online_questions_require_full_gate_and_send_only_product_context(
         return {
             "results": [
                 {
-                    "title": "Makita DCD791 battery specification",
-                    "url": "https://www.makita.example/DCD791",
-                    "publisher": "Makita",
+                    "title": "DeWalt DCD791B battery specification",
+                    "url": "https://www.dewalt.example/DCD791B",
+                    "publisher": "DeWalt",
                     "language": "en",
                     "source_type": "manufacturer",
                     "model_coverage": ["DCD791"],
@@ -660,13 +681,14 @@ def test_online_questions_require_full_gate_and_send_only_product_context(
     answer = response.json()
     assert answer["mode"] == "extractive"
     assert [citation["url"] for citation in answer["citations"]] == [
-        "https://www.makita.example/DCD791"
+        "https://www.dewalt.example/DCD791B"
     ]
     assert "18 V" in answer["citations"][0]["excerpt"]
     assert set(calls[0]) == {"mode", "manufacturer", "model", "variant", "question"}
     assert calls[0]["mode"] == "question"
-    assert calls[0]["manufacturer"] == "Makita"
+    assert calls[0]["manufacturer"] == "DeWalt"
     assert calls[0]["model"] == "DCD791"
+    assert calls[0]["variant"] == "B"
     assert calls[0]["question"] == "What battery does it use?"
     serialized = str(calls[0]).lower()
     assert "borrower" not in serialized
@@ -766,9 +788,9 @@ def test_public_ip_and_ssrf_download_guards(monkeypatch, pdf_bytes):
         "_request_once",
         lambda url, **kwargs: (200, {"content-type": "application/pdf"}, b"%PDF-1.7\nbody"),
     )
-    fetched = manual_web.fetch_manual_pdf("https://manual.example/files/DCD791%20manual.pdf")
+    fetched = manual_web.fetch_manual_pdf("https://manual.example/files/DCD791B%20manual.pdf")
     assert fetched.content.startswith(b"%PDF-")
-    assert fetched.filename == "DCD791 manual.pdf"
+    assert fetched.filename == "DCD791B manual.pdf"
 
     # HTTPS may not silently downgrade to plain HTTP on redirect.
     monkeypatch.setattr(
@@ -895,6 +917,350 @@ def test_bounded_read_enforces_total_deadline_not_only_per_read(monkeypatch):
         )
 
 
+def configure_brave(
+    monkeypatch,
+    *,
+    key: str = "fixture-brave-subscription-token",
+    base_url: str = "https://api.search.brave.com",
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "manual_search_provider", "brave")
+    monkeypatch.setattr(settings, "brave_search_api_key", key)
+    monkeypatch.setattr(settings, "brave_search_base_url", base_url)
+    monkeypatch.setattr(settings, "manual_search_url", "")
+
+
+class _FakeBraveResponse:
+    def __init__(self, status: int, body: bytes, headers: dict[str, str] | None = None):
+        self.status = status
+        self._body = body
+        self._headers = headers or {"content-type": "application/json"}
+        self._offset = 0
+
+    def getheaders(self):
+        return list(self._headers.items())
+
+    def read(self, amount):
+        chunk = self._body[self._offset : self._offset + amount]
+        self._offset += len(chunk)
+        return chunk
+
+
+class _FakeBraveConnection:
+    instances: list["_FakeBraveConnection"] = []
+    response_status = 200
+    response_body = b"{}"
+    response_headers: dict[str, str] = {"content-type": "application/json"}
+
+    def __init__(self, host, port, timeout):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.method = None
+        self.path = None
+        self.headers: dict[str, str] = {}
+        _FakeBraveConnection.instances.append(self)
+
+    def request(self, method, path, body=None, headers=None):
+        self.method = method
+        self.path = path
+        self.headers = headers or {}
+
+    def getresponse(self):
+        return _FakeBraveResponse(
+            _FakeBraveConnection.response_status,
+            _FakeBraveConnection.response_body,
+            _FakeBraveConnection.response_headers,
+        )
+
+    def close(self):
+        return None
+
+
+class _TimeoutBraveConnection(_FakeBraveConnection):
+    def request(self, method, path, body=None, headers=None):
+        raise TimeoutError("fixture timeout")
+
+
+def brave_response(*, status: int = 200, body: bytes | dict | None = None):
+    _FakeBraveConnection.response_status = status
+    if isinstance(body, dict):
+        _FakeBraveConnection.response_body = json.dumps(body).encode()
+    else:
+        _FakeBraveConnection.response_body = body or b"{}"
+
+
+def brave_fixture() -> dict:
+    return {
+        "type": "search",
+        "query": {"original": "DeWalt DCD791B manual", "more_results_available": False},
+        "web": {
+            "type": "search",
+            "results": [
+                {
+                    "title": "DeWalt DCD791B 20V MAX Drill Instruction Manual",
+                    "url": "https://www.dewalt.com/-/media/manuals/DCD791B.pdf",
+                    "description": (
+                        "Official DCD791B instruction manual covering safety, battery and "
+                        "chuck operation."
+                    ),
+                    "extra_snippets": [
+                        "Use only DeWALT 20V MAX batteries with the DCD791B.",
+                    ],
+                    "profile": {
+                        "name": "DeWalt",
+                        "long_name": "DeWalt",
+                        "url": "https://www.dewalt.com",
+                    },
+                    "language": "en",
+                },
+                {
+                    "title": "DCD791B Support and Manuals | DeWalt",
+                    "url": "https://www.dewalt.com/support/DCD791B",
+                    "description": "Support page for the DCD791B drill.",
+                    "profile": {"name": "DeWalt", "long_name": "DeWalt"},
+                    "language": "en",
+                },
+                {
+                    "title": "DeWalt DCD790 Drill Manual",
+                    "url": "https://manualslib.example/DCD790",
+                    "description": "A similar drill manual.",
+                    "profile": {"name": "ManualsLib", "long_name": "ManualsLib"},
+                },
+            ],
+        },
+    }
+
+
+def test_brave_adapter_constructs_request_normalizes_sources_and_downloads(
+    owner_client, monkeypatch, pdf_bytes
+):
+    configure_brave(monkeypatch)
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
+    monkeypatch.setattr(
+        manual_web,
+        "_find_landing_pdf",
+        lambda url, **kwargs: "https://www.dewalt.com/-/media/manuals/DCD791B-operator.pdf",
+    )
+    brave_response(body=brave_fixture())
+    item = create_item(owner_client, "DeWalt drill")
+    assert confirmed_profile(owner_client, item["id"]).status_code == 200
+
+    listing = owner_client.get(f"/api/v1/items/{item['id']}/manuals").json()
+    assert listing["search"]["configured"] is True
+    assert listing["search"]["provider"] == "brave"
+    assert listing["search"]["provider_label"] == "Brave Search API"
+    assert listing["search"]["can_search"] is True
+
+    searched = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert searched.status_code == 200, searched.text
+    body = searched.json()
+    assert len(body["candidates"]) == 2
+    assert all(candidate["source_type"] == "manufacturer" for candidate in body["candidates"])
+    assert all(candidate["direct_file"] is True for candidate in body["candidates"])
+    files = {candidate["file_url"] for candidate in body["candidates"]}
+    assert "https://www.dewalt.com/-/media/manuals/DCD791B.pdf" in files
+    assert "https://www.dewalt.com/-/media/manuals/DCD791B-operator.pdf" in files
+    assert any("exact confirmed model" in notice for notice in body["notices"])
+
+    request = _FakeBraveConnection.instances[-1]
+    assert request.host == "api.search.brave.com"
+    assert request.method == "GET"
+    parsed = urlparse(request.path)
+    assert parsed.path == "/res/v1/web/search"
+    query = parse_qs(parsed.query)
+    assert "DeWalt" in query["q"][0]
+    assert "DCD791" in query["q"][0]
+    assert "B" in query["q"][0]
+    assert "manual" in query["q"][0]
+    assert request.headers["X-Subscription-Token"] == "fixture-brave-subscription-token"
+    assert "Authorization" not in request.headers
+
+    monkeypatch.setattr(
+        manual_web,
+        "fetch_manual_pdf",
+        lambda url: manual_web.FetchedManual(
+            content=pdf_bytes,
+            content_type="application/pdf",
+            filename="DCD791B.pdf",
+            final_url=url,
+            retrieved_at=datetime.now(UTC),
+        ),
+    )
+    candidate = next(
+        entry for entry in body["candidates"] if entry["file_url"].endswith("DCD791B.pdf")
+    )
+    downloaded = owner_client.post(
+        f"/api/v1/items/{item['id']}/manual-search/{candidate['id']}/download",
+        json={"request_id": str(uuid.uuid4()), "confirm_model": True},
+    )
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.json()["document"]["document_type"] == "manual"
+    assert downloaded.json()["candidate"]["direct_file"] is True
+    assert (
+        downloaded.json()["document"]["extracted_metadata"]["manual_source"]["source_url"]
+        == "https://www.dewalt.com/-/media/manuals/DCD791B.pdf"
+    )
+
+
+def test_brave_landing_page_without_real_pdf_is_source_only(owner_client, monkeypatch):
+    configure_brave(monkeypatch)
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
+    monkeypatch.setattr(manual_web, "_find_landing_pdf", lambda url, **kwargs: None)
+    fixture = brave_fixture()
+    fixture["web"]["results"] = [fixture["web"]["results"][1]]
+    brave_response(body=fixture)
+    item = create_item(owner_client, "DeWalt drill landing")
+    assert confirmed_profile(owner_client, item["id"]).status_code == 200
+    searched = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert searched.status_code == 200, searched.text
+    candidate = searched.json()["candidates"][0]
+    assert candidate["direct_file"] is False
+    assert candidate["file_url"] == candidate["source_url"]
+    assert any(
+        "source pages without a discovered PDF" in notice for notice in searched.json()["notices"]
+    )
+
+
+def test_pdf_link_discovery_uses_actual_anchor_links_only():
+    page = """
+    <html><body>
+      <a href="/support/DCD791B.pdf">DCD791B operator manual</a>
+      <a href="/support/catalog.pdf">Product catalogue</a>
+      <a href="javascript:alert(1)">bad</a>
+      <a href="https://www.dewalt.com/guessed">No PDF here</a>
+    </body></html>
+    """
+    assert (
+        manual_web._extract_pdf_links(
+            page,
+            base_url="https://www.dewalt.com/support/DCD791B",
+            manufacturer="DeWalt",
+            model="DCD791",
+            variant="B",
+        )
+        == "https://www.dewalt.com/support/DCD791B.pdf"
+    )
+    assert (
+        manual_web._extract_pdf_links(
+            "<html><body><a href='/catalog.pdf'>Catalogue</a></body></html>",
+            base_url="https://www.dewalt.com/support/DCD791B",
+            manufacturer="DeWalt",
+            model="DCD791",
+            variant="B",
+        )
+        is None
+    )
+
+
+def test_brave_error_mapping_does_not_leak_key_or_query(owner_client, monkeypatch):
+    configure_brave(monkeypatch, key="super-secret-brave-token")
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
+    item = create_item(owner_client, "DeWalt error drill")
+    assert confirmed_profile(owner_client, item["id"]).status_code == 200
+
+    for status, expected in (
+        (401, "rejected"),
+        (403, "rejected"),
+        (429, "rate limit"),
+        (500, "HTTP 500"),
+    ):
+        brave_response(status=status, body=b"{}")
+        response = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+        assert response.status_code == 502
+        payload = response.json()["detail"]
+        assert payload["code"] == "manual_search_unavailable"
+        assert expected in payload["message"]
+        assert "super-secret-brave-token" not in response.text
+        assert "DCD791" not in response.text
+
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _TimeoutBraveConnection)
+    timed_out = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert timed_out.status_code == 502
+    assert "could not be reached" in timed_out.json()["detail"]["message"]
+
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
+    brave_response(body=b"not-json")
+    invalid = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert invalid.status_code == 502
+    assert "invalid JSON" in invalid.json()["detail"]["message"]
+
+    brave_response(body={"web": {"results": "not-a-list"}})
+    malformed = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
+    assert malformed.status_code == 502
+    assert "usable results" in malformed.json()["detail"]["message"]
+
+
+def test_brave_online_question_sends_only_product_identifiers_and_question(
+    owner_client, monkeypatch
+):
+    configure_brave(monkeypatch)
+    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
+    fixture = brave_fixture()
+    fixture["web"]["results"] = [
+        {
+            "title": "DeWalt DCD791B battery specification",
+            "url": "https://www.dewalt.com/support/DCD791B/battery",
+            "description": "The DCD791B uses 20V MAX battery packs.",
+            "profile": {"name": "DeWalt", "long_name": "DeWalt"},
+            "language": "en",
+        }
+    ]
+    brave_response(body=fixture)
+    item = create_item(owner_client, "DeWalt question drill")
+    assert confirmed_profile(owner_client, item["id"]).status_code == 200
+    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
+
+    response = owner_client.post(
+        f"/api/v1/items/{item['id']}/manual-questions/online",
+        json={"question": "What battery does it use?"},
+    )
+    assert response.status_code == 200, response.text
+    answer = response.json()
+    assert answer["mode"] == "extractive"
+    assert answer["citations"][0]["url"] == ("https://www.dewalt.com/support/DCD791B/battery")
+    assert answer["citations"][0]["source_type"] == "manufacturer"
+    query = parse_qs(urlparse(_FakeBraveConnection.instances[-1].path).query)["q"][0]
+    assert "DeWalt" in query
+    assert "DCD791" in query
+    assert "B" in query
+    assert "What battery does it use?" in query
+    for forbidden in ("borrower", "household", "loan", "Ada", "Ada's Home"):
+        assert forbidden.lower() not in query.lower()
+
+
+def test_brave_provider_configuration_and_unconfigured_reasons(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "manual_search_provider", "auto")
+    monkeypatch.setattr(settings, "manual_search_url", "")
+    monkeypatch.setattr(settings, "brave_search_api_key", "")
+    none = manual_web.resolve_search_provider()
+    assert none.kind == "none"
+    assert "BRAVE_SEARCH_API_KEY" in (none.reason or "")
+
+    monkeypatch.setattr(settings, "brave_search_api_key", "fixture-key")
+    brave = manual_web.resolve_search_provider()
+    assert brave.kind == "brave"
+    assert brave.label == "Brave Search API"
+
+    monkeypatch.setattr(settings, "manual_search_url", "https://gateway.example/search")
+    gateway = manual_web.resolve_search_provider()
+    assert gateway.kind == "gateway"
+    assert gateway.gateway_url == "https://gateway.example/search"
+
+    monkeypatch.setattr(settings, "manual_search_provider", "brave")
+    monkeypatch.setattr(settings, "brave_search_api_key", "")
+    missing = manual_web.resolve_search_provider()
+    assert missing.kind == "none"
+    assert "BRAVE_SEARCH_API_KEY" in (missing.reason or "")
+
+    monkeypatch.setattr(settings, "manual_search_provider", "gateway")
+    monkeypatch.setattr(settings, "manual_search_url", "")
+    missing_gateway = manual_web.resolve_search_provider()
+    assert missing_gateway.kind == "none"
+    assert "MANUAL_SEARCH_URL" in (missing_gateway.reason or "")
+
+
 def test_search_gateway_rejects_redirect_and_invalid_json(monkeypatch):
     configure_search(monkeypatch)
     monkeypatch.setattr(get_settings(), "manual_search_url", "https://search.example/manuals")
@@ -920,7 +1286,7 @@ def test_search_gateway_rejects_redirect_and_invalid_json(monkeypatch):
 
     monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", RedirectConnection)
     with pytest.raises(manual_web.ManualSearchUnavailable, match="redirect"):
-        manual_web._post_search({"mode": "manual", "manufacturer": "Makita", "model": "DCD791"})
+        manual_web._post_search({"mode": "manual", "manufacturer": "DeWalt", "model": "DCD791"})
 
     class InvalidResponse:
         status = 200
@@ -940,4 +1306,4 @@ def test_search_gateway_rejects_redirect_and_invalid_json(monkeypatch):
 
     monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", InvalidConnection)
     with pytest.raises(manual_web.ManualSearchUnavailable, match="invalid JSON"):
-        manual_web._post_search({"mode": "manual", "manufacturer": "Makita", "model": "DCD791"})
+        manual_web._post_search({"mode": "manual", "manufacturer": "DeWalt", "model": "DCD791"})

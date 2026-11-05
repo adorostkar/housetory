@@ -30,6 +30,9 @@ GENERIC_MODELS = {
     "tool",
     "manual",
     "heavy drill",
+    "cordless",
+    "cordless drill",
+    "power tool",
 }
 
 
@@ -40,19 +43,15 @@ def validate_manual_identifiers(
     model = " ".join(model_identifier.split()).strip()
     variant_value = " ".join(variant.split()).strip() if variant else None
     if len(maker) < 2 or maker.lower() in GENERIC_MANUFACTURERS:
-        raise ValueError(
-            "Confirm the actual manufacturer; a generic or empty label is not enough."
-        )
+        raise ValueError("Confirm the actual manufacturer; a generic or empty label is not enough.")
     if not any(character.isalpha() for character in maker):
         raise ValueError("The manufacturer must contain letters.")
-    if len(model) < 3 or model.lower() in GENERIC_MODELS:
+    if len(model) < 2 or model.lower() in GENERIC_MODELS:
         raise ValueError(
             "Confirm the complete model identifier; a generic item name is not enough."
         )
-    if not any(character.isdigit() for character in model):
-        raise ValueError(
-            "The complete model identifier must include its identifying digits."
-        )
+    if not any(character.isalnum() for character in model):
+        raise ValueError("The complete model identifier must contain letters or digits.")
     if variant_value is not None and len(variant_value) > 120:
         raise ValueError("Variant details must be 120 characters or fewer.")
     return maker, model, variant_value
@@ -60,7 +59,7 @@ def validate_manual_identifiers(
 
 class ManualProfileIn(BaseModel):
     manufacturer: trimmed(2, 120)
-    model_identifier: trimmed(3, 120)
+    model_identifier: trimmed(2, 120)
     variant: trimmed(1, 120) | None = None
     confirmed: bool = False
 
@@ -97,6 +96,7 @@ class ManualProfileOut(ORMModel):
 
 class ManualSearchStatusOut(BaseModel):
     configured: bool
+    provider: Literal["brave", "gateway"] | None = None
     provider_label: str | None = None
     reason: str | None = None
     profile: ManualProfileOut | None = None
@@ -147,6 +147,7 @@ class ManualCandidateOut(ORMModel):
     snippet: str | None
     retrieved_at: datetime
     document_id: uuid.UUID | None
+    direct_file: bool = False
     created_at: datetime
 
 

@@ -3,11 +3,13 @@ import {
   Check,
   Download,
   ExternalLink,
+  FileWarning,
   Globe2,
   Loader2,
   Pencil,
   Search,
   ShieldCheck,
+  Upload,
 } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
@@ -227,14 +229,14 @@ export function ManualFindDialog({
                       value={manufacturer}
                       maxLength={120}
                       onChange={(event) => setManufacturer(event.target.value)}
-                      placeholder="Makita"
+                      placeholder="DeWalt"
                       disabled={saveProfile.isPending}
                     />
                   </Field>
                   <Field
                     label="Complete model identifier"
                     htmlFor="manual-model"
-                    hint="Include identifying digits"
+                    hint="As printed on the label"
                   >
                     <Input
                       id="manual-model"
@@ -306,8 +308,10 @@ export function ManualFindDialog({
                   )}
                 </div>
                 <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
-                  Generic labels such as “Heavy drill” and model strings without identifying
-                  digits are rejected by the server. Saving identity never edits the item.
+                  Generic labels such as “Heavy drill” and unconfirmed fragments are rejected
+                  by the server. Completeness means the manufacturer-specific identity you
+                  verified, not a pattern such as “must contain a digit”. Saving identity never
+                  edits the item.
                 </p>
               </form>
             )}
@@ -335,6 +339,12 @@ export function ManualFindDialog({
                   are sent. Search results are saved for review; nothing downloads until you
                   confirm a specific candidate.
                 </p>
+                {status?.configured && status.provider_label && (
+                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                    Provider: <span className="font-medium">{status.provider_label}</span>. No
+                    provider request is made until you press Search.
+                  </p>
+                )}
               </div>
               <Button
                 type="button"
@@ -396,6 +406,10 @@ export function ManualFindDialog({
                       }}
                       onConfirmChange={setReviewConfirmed}
                       onDownload={() => download.mutate(candidate)}
+                      onUploadManual={() => {
+                        onOpenChange(false);
+                        onUploadManual();
+                      }}
                     />
                   </li>
                 ))}
@@ -451,6 +465,7 @@ function CandidateCard({
   onCancel,
   onConfirmChange,
   onDownload,
+  onUploadManual,
 }: {
   candidate: ManualSearchCandidate;
   identity: string;
@@ -461,6 +476,7 @@ function CandidateCard({
   onCancel: () => void;
   onConfirmChange: (value: boolean) => void;
   onDownload: () => void;
+  onUploadManual: () => void;
 }) {
   return (
     <div
@@ -520,12 +536,46 @@ function CandidateCard({
       <p className="mt-1 break-all text-[0.62rem] text-muted-foreground/80">
         {candidate.source_url}
       </p>
+      {candidate.direct_file && candidate.file_url !== candidate.source_url && (
+        <p className="mt-0.5 break-all text-[0.62rem] text-muted-foreground/80">
+          PDF:{" "}
+          <a
+            href={candidate.file_url}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {candidate.file_url}
+          </a>
+        </p>
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {candidate.document_id ? (
           <Button type="button" size="sm" variant="outline" asChild>
             <Link to={`/documents/${candidate.document_id}`}>Open saved manual</Link>
           </Button>
+        ) : !candidate.direct_file ? (
+          <>
+            <Badge variant="outline">
+              <FileWarning className="mr-1 size-3" />
+              Source page only
+            </Badge>
+            <p className="w-full text-[0.68rem] leading-relaxed text-muted-foreground">
+              No actual PDF link was found on this source page. Open it yourself or upload the
+              manual you trust; Housetory will not guess a PDF address.
+            </p>
+            <Button type="button" size="sm" variant="outline" asChild>
+              <a href={candidate.source_url} target="_blank" rel="noreferrer">
+                <ExternalLink />
+                Open source page
+              </a>
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={onUploadManual}>
+              <Upload />
+              Upload manual
+            </Button>
+          </>
         ) : reviewing ? (
           <>
             <label className="flex w-full items-start gap-2 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-[0.7rem] leading-relaxed">

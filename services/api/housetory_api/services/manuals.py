@@ -4,7 +4,7 @@ Attached manuals are ordinary household ``Document`` rows with
 ``document_type="manual"``. This module never invents manual pages: citations
 come from stored OCR page records when available and otherwise from explicit
 section/excerpt labels. Online search is only possible when an operator has
-configured a real search gateway, and every download must be explicitly
+configured a real search provider, and every download must be explicitly
 reviewed first.
 """
 
@@ -228,7 +228,9 @@ def manual_documents(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
 def _search_status(
     db: Session, household_id: uuid.UUID, item_id: uuid.UUID
 ) -> ManualSearchStatusOut:
-    configured, label, reason = manual_web.search_configuration()
+    provider = manual_web.resolve_search_provider()
+    configured = provider.configured
+    reason = provider.reason
     profile = get_profile(db, household_id, item_id)
     if profile is None:
         if configured:
@@ -238,7 +240,8 @@ def _search_status(
             )
         return ManualSearchStatusOut(
             configured=configured,
-            provider_label=label,
+            provider=provider.kind if configured else None,
+            provider_label=provider.label,
             reason=reason,
             profile=None,
             can_search=False,
@@ -246,6 +249,7 @@ def _search_status(
     if not configured:
         return ManualSearchStatusOut(
             configured=False,
+            provider=None,
             provider_label=None,
             reason=reason,
             profile=profile_out(profile),
@@ -253,7 +257,8 @@ def _search_status(
         )
     return ManualSearchStatusOut(
         configured=True,
-        provider_label=label,
+        provider=provider.kind,
+        provider_label=provider.label,
         reason=None,
         profile=profile_out(profile),
         can_search=True,
@@ -345,10 +350,12 @@ def _require_profile(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
 
 def _require_search(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> ItemManualProfile:
     profile = _require_profile(db, household_id, item_id)
-    configured, _label, reason = manual_web.search_configuration()
-    if not configured:
+    provider = manual_web.resolve_search_provider()
+    if not provider.configured:
         raise ApiError(
-            409, "manual_search_unconfigured", reason or "Manual search is not configured."
+            409,
+            "manual_search_unconfigured",
+            provider.reason or "Manual search is not configured.",
         )
     return profile
 
@@ -679,7 +686,12 @@ def ask_manual_question(
 
 
 def _candidate_out(candidate: ManualSearchCandidate) -> ManualCandidateOut:
-    return ManualCandidateOut.model_validate(candidate)
+    direct_file = candidate.file_url != candidate.source_url or manual_web.is_pdf_url(
+        candidate.file_url
+    )
+    return ManualCandidateOut.model_validate(candidate).model_copy(
+        update={"direct_file": direct_file}
+    )
 
 
 def search_candidates(
@@ -705,9 +717,9 @@ def search_candidates(
             )
         ).all()
     )
-    by_url = {(entry.source_url, entry.file_url): entry for entry in existing}
+    by_source = {entry.source_url: entry for entry in existing}
     for data in outcome.candidates:
-        candidate = by_url.get((data.source_url, data.file_url))
+        candidate = by_source.get(data.source_url)
         if candidate is None:
             candidate = ManualSearchCandidate(
                 household_id=household_id,
@@ -724,9 +736,10 @@ def search_candidates(
                 created_by_user_id=user_id,
             )
             db.add(candidate)
-            by_url[(data.source_url, data.file_url)] = candidate
+            by_source[data.source_url] = candidate
         else:
             candidate.title = data.title
+            candidate.file_url = data.file_url
             candidate.publisher = data.publisher
             candidate.language = data.language
             candidate.source_type = data.source_type
@@ -774,8 +787,9 @@ def list_candidates(
         ).all()
     )
     notices: list[str] = []
-    if not manual_web.search_configuration()[0]:
-        notices.append(manual_web.search_configuration()[2] or "Manual search is not configured.")
+    provider = manual_web.resolve_search_provider()
+    if not provider.configured:
+        notices.append(provider.reason or "Manual search is not configured.")
     return ManualCandidateList(
         item_id=item_id,
         candidates=[_candidate_out(candidate) for candidate in candidates],

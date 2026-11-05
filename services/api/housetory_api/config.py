@@ -71,10 +71,15 @@ class Settings(BaseSettings):
     ai_max_context_chars: int = Field(default=12000, ge=1000, le=100000)
     ai_import_max_chunks: int = Field(default=8, ge=1, le=50)
 
+    manual_search_provider: Literal["auto", "brave", "gateway", "none"] = "auto"
     manual_search_url: str = ""
     manual_search_api_key: str = ""
     manual_search_provider_label: str = "Configured manual search"
     manual_search_timeout_seconds: int = Field(default=20, ge=5, le=120)
+    brave_search_api_key: str = ""
+    brave_search_base_url: str = "https://api.search.brave.com"
+    brave_search_country: str = ""
+    brave_search_lang: str = ""
 
     @property
     def qr_effective_base_url(self) -> str:
@@ -142,7 +147,13 @@ class Settings(BaseSettings):
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
 
-    @field_validator("qr_base_url", "ai_base_url", "ai_cloud_base_url", "manual_search_url")
+    @field_validator(
+        "qr_base_url",
+        "ai_base_url",
+        "ai_cloud_base_url",
+        "manual_search_url",
+        "brave_search_base_url",
+    )
     @classmethod
     def _validate_service_url(cls, value: str) -> str:
         if not value:

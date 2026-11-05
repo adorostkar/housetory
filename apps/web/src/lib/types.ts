@@ -288,6 +288,7 @@ export interface ManualProfile {
 
 export interface ManualSearchStatus {
   configured: boolean;
+  provider: "brave" | "gateway" | null;
   provider_label: string | null;
   reason: string | null;
   profile: ManualProfile | null;
@@ -362,6 +363,7 @@ export interface ManualSearchCandidate {
   snippet: string | null;
   retrieved_at: string;
   document_id: UUID | null;
+  direct_file: boolean;
   created_at: string;
 }
 

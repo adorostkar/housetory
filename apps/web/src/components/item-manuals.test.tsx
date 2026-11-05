@@ -45,7 +45,7 @@ const item: ItemDetail = {
   id: "item-1",
   name: "Cordless drill",
   description: null,
-  brand: "Makita",
+  brand: "DeWalt",
   model: "DCD791",
   quantity: 1,
   condition: "good",
@@ -72,7 +72,7 @@ const item: ItemDetail = {
 
 const manualDocument: DocumentRecord = {
   id: "document-1",
-  title: "DCD791 instruction manual",
+  title: "DCD791B instruction manual",
   document_type: "manual",
   original_filename: "dcd791.pdf",
   content_type: "application/pdf",
@@ -80,7 +80,7 @@ const manualDocument: DocumentRecord = {
   byte_size: 4096,
   original_byte_size: 4096,
   document_date: null,
-  merchant: "Makita",
+  merchant: "DeWalt",
   notes: null,
   extracted_text: "Safety. Unplug before changing the bit.",
   extracted_metadata: { ocr_page_count: 12 },
@@ -101,9 +101,9 @@ const manualDocument: DocumentRecord = {
 const profile: ManualProfile = {
   id: "profile-1",
   item_id: item.id,
-  manufacturer: "Makita",
+  manufacturer: "DeWalt",
   model_identifier: "DCD791",
-  variant: null,
+  variant: "B",
   confirmed_at: "2026-01-02T00:00:00Z",
   updated_at: "2026-01-02T00:00:00Z",
 };
@@ -114,6 +114,7 @@ function manualsData(overrides: Partial<ItemManualsData> = {}): ItemManualsData 
     manuals: [manualDocument],
     search: {
       configured: false,
+      provider: null,
       provider_label: null,
       reason: "Online manual search is not configured.",
       profile: null,
@@ -213,7 +214,7 @@ beforeEach(() => {
 describe("ItemManuals", () => {
   it("shows attached manuals and renders grounded answers with real citations", async () => {
     renderManuals(manualsData());
-    expect(screen.getByText("DCD791 instruction manual")).toBeVisible();
+    expect(screen.getByText("DCD791B instruction manual")).toBeVisible();
     expect(screen.getByText("12 pages")).toBeVisible();
     expect(screen.getByText(/Exact make\/model is not confirmed/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Add manual" })).toBeVisible();
@@ -260,6 +261,7 @@ describe("ItemManuals", () => {
       manualsData({
         search: {
           configured: true,
+          provider: "gateway",
           provider_label: "Test search",
           reason: null,
           profile: null,
@@ -274,7 +276,7 @@ describe("ItemManuals", () => {
     ).toBeVisible();
 
     await userEvent.clear(screen.getByLabelText("Manufacturer"));
-    await userEvent.type(screen.getByLabelText("Manufacturer"), "Makita");
+    await userEvent.type(screen.getByLabelText("Manufacturer"), "DeWalt");
     await userEvent.clear(screen.getByLabelText("Complete model identifier"));
     await userEvent.type(screen.getByLabelText("Complete model identifier"), "DCD791");
     const confirm = screen.getByRole("checkbox");
@@ -285,7 +287,7 @@ describe("ItemManuals", () => {
 
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith(`/items/${item.id}/manual-profile`, {
-        manufacturer: "Makita",
+        manufacturer: "DeWalt",
         model_identifier: "DCD791",
         variant: null,
         confirmed: true,
@@ -299,6 +301,7 @@ describe("ItemManuals", () => {
       manualsData({
         search: {
           configured: true,
+          provider: "gateway",
           provider_label: "Test search",
           reason: null,
           profile,
@@ -309,16 +312,17 @@ describe("ItemManuals", () => {
     const candidate: ManualCandidateList["candidates"][number] = {
       id: "candidate-1",
       item_id: item.id,
-      title: "Makita DCD791 instruction manual",
-      source_url: "https://www.makita.example/DCD791",
-      file_url: "https://www.makita.example/DCD791.pdf",
-      publisher: "Makita",
+      title: "DeWalt DCD791B instruction manual",
+      source_url: "https://www.dewalt.example/DCD791B",
+      file_url: "https://www.dewalt.example/DCD791B.pdf",
+      publisher: "DeWalt",
       language: "en",
       source_type: "manufacturer",
-      model_coverage: ["DCD791"],
+      model_coverage: ["DCD791", "DCD791B"],
       snippet: "Exact model coverage.",
       retrieved_at: "2026-01-03T00:00:00Z",
       document_id: null,
+      direct_file: true,
       created_at: "2026-01-03T00:00:00Z",
     };
     vi.mocked(api.post).mockImplementation(async (path: string) => {
@@ -337,7 +341,7 @@ describe("ItemManuals", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Find manual" }));
     await userEvent.click(screen.getByRole("button", { name: "Search for exact model" }));
-    expect(await screen.findByText("Makita DCD791 instruction manual")).toBeVisible();
+    expect(await screen.findByText("DeWalt DCD791B instruction manual")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Review & download" }));
     expect(
       screen.getByText(/I reviewed this candidate and verified that it covers/),
@@ -362,6 +366,7 @@ describe("ItemManuals", () => {
       manualsData({
         search: {
           configured: true,
+          provider: "gateway",
           provider_label: "Test search",
           reason: null,
           profile,
@@ -375,9 +380,9 @@ describe("ItemManuals", () => {
       mode: "extractive",
       citations: [
         {
-          title: "Makita DCD791 battery specification",
-          url: "https://www.makita.example/DCD791",
-          publisher: "Makita",
+          title: "DeWalt DCD791B battery specification",
+          url: "https://www.dewalt.example/DCD791B",
+          publisher: "DeWalt",
           language: "en",
           source_type: "manufacturer",
           excerpt: "18 V LXT battery.",
@@ -406,10 +411,59 @@ describe("ItemManuals", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send online question" }));
     expect(await screen.findByText("18 V LXT battery.")).toBeVisible();
     expect(screen.getByText("Online sources")).toBeVisible();
-    expect(screen.getByRole("link", { name: /Makita DCD791 battery specification/ })).toHaveAttribute(
-      "href",
-      "https://www.makita.example/DCD791",
+    expect(
+      screen.getByRole("link", { name: /DeWalt DCD791B battery specification/ }),
+    ).toHaveAttribute("href", "https://www.dewalt.example/DCD791B");
+  });
+
+  it("shows source-page-only candidates without guessing a PDF and offers upload", async () => {
+    renderManuals(
+      manualsData({
+        search: {
+          configured: true,
+          provider: "brave",
+          provider_label: "Brave Search API",
+          reason: null,
+          profile,
+          can_search: true,
+        },
+      }),
     );
+    const sourceCandidate: ManualCandidateList["candidates"][number] = {
+      id: "candidate-source",
+      item_id: item.id,
+      title: "DeWalt DCD791B support page",
+      source_url: "https://www.dewalt.com/support/DCD791B",
+      file_url: "https://www.dewalt.com/support/DCD791B",
+      publisher: "DeWalt",
+      language: "en",
+      source_type: "manufacturer",
+      model_coverage: ["DCD791B"],
+      snippet: "Support page; no direct PDF link was found.",
+      retrieved_at: "2026-01-03T00:00:00Z",
+      document_id: null,
+      direct_file: false,
+      created_at: "2026-01-03T00:00:00Z",
+    };
+    vi.mocked(api.post).mockResolvedValue({
+      item_id: item.id,
+      candidates: [sourceCandidate],
+      notices: ["1 result is a source page without a discovered PDF link."],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Find manual" }));
+    expect(screen.getByText(/Provider:/)).toBeVisible();
+    expect(screen.getByText("Brave Search API")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Search for exact model" }));
+    expect(await screen.findByText("DeWalt DCD791B support page")).toBeVisible();
+    expect(screen.getByText("Source page only")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Review & download" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open source page" })).toHaveAttribute(
+      "href",
+      "https://www.dewalt.com/support/DCD791B",
+    );
+    expect(screen.getByRole("button", { name: "Upload manual" })).toBeVisible();
   });
 
   it("keeps write actions out of viewers' reach while leaving manual questions readable", () => {
