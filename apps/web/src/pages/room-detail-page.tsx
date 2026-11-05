@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   Boxes,
+  Building2,
   ChevronRight,
   Download,
   MoreHorizontal,
@@ -27,6 +28,7 @@ import { ItemCard } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
 import { PageHeader } from "@/components/page-header";
 import { RoomDialog } from "@/components/room-dialog";
+import { RoomPropertyMoveDialog } from "@/components/room-property-move-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
 import { LocationIcon, roomIcon } from "@/components/room-card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +47,7 @@ import {
   useInvalidateInventory,
   useItems,
   useLocations,
+  useProperties,
   useRooms,
 } from "@/lib/queries";
 import type { StorageLocation } from "@/lib/types";
@@ -82,6 +85,8 @@ export function RoomDetailPage() {
   const [deleteRoomOpen, setDeleteRoomOpen] = useState(false);
   const [deletingLocation, setDeletingLocation] = useState<StorageLocation | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [propertyMoveOpen, setPropertyMoveOpen] = useState(false);
+  const propertiesQuery = useProperties();
 
   const rooms = roomsQuery.data?.items ?? [];
   const room = rooms.find((entry) => entry.id === roomId);
@@ -97,6 +102,7 @@ export function RoomDetailPage() {
   const { openAddItems } = useAddItems();
   const addItemsContext = room
     ? {
+        propertyId: room.property_id,
         roomId: room.id,
         locationId: selectedLocationId ?? undefined,
         roomName: room.name,
@@ -190,7 +196,16 @@ export function RoomDetailPage() {
   return (
     <div className="animate-fade-up">
       <PageHeader
-        eyebrow={path.length > 1 ? path.slice(0, -1).map((entry) => entry.name).join(" / ") : "Your rooms"}
+        eyebrow={
+          [
+            room.property?.name,
+            ...(path.length > 1
+              ? path.slice(0, -1).map((entry) => entry.name)
+              : ["Your rooms"]),
+          ]
+            .filter(Boolean)
+            .join(" / ")
+        }
         title={room.name}
         description={room.description ?? undefined}
         backTo={parent ? `/rooms/${parent.id}` : "/rooms"}
@@ -214,6 +229,12 @@ export function RoomDetailPage() {
               >
                 <Plus />
                 Add a place
+              </Button>
+            )}
+            {canWrite && !room.parent_id && (propertiesQuery.data?.items.length ?? 0) > 1 && (
+              <Button variant="outline" onClick={() => setPropertyMoveOpen(true)}>
+                <Building2 />
+                Move to property
               </Button>
             )}
             <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
@@ -539,6 +560,12 @@ export function RoomDetailPage() {
         onConfirm={async () => {
           await deleteRoom.mutateAsync();
         }}
+      />
+
+      <RoomPropertyMoveDialog
+        open={propertyMoveOpen}
+        onOpenChange={setPropertyMoveOpen}
+        room={room}
       />
 
       <EvidenceExportDialog

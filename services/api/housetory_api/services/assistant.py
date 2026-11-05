@@ -332,7 +332,10 @@ def _ai_plan(
 
 
 def _summary_location(item) -> str:  # noqa: ANN001
-    parts = [item.room.name] if item.room else []
+    property_record = getattr(item, "property", None)
+    parts = [property_record.name] if property_record is not None else []
+    if item.room and item.room.name not in parts:
+        parts.append(item.room.name)
     for entry in item.location_path or ([item.location] if item.location else []):
         label = (
             f"{entry.identifier} · {entry.name}"

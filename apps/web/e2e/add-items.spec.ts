@@ -88,7 +88,7 @@ test("unified Add items chooser consolidates workflows and preserves context", a
   await expect(dialog.getByText(container.identifier)).toBeVisible();
   await dialog.getByRole("button", { name: /Scan a photo/ }).click();
   await expect(page).toHaveURL(
-    new RegExp(`/scan\\?room_id=${room.id}&location_id=${container.id}`),
+    new RegExp(`/scan\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
   );
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/containers/${container.id}`));
@@ -98,7 +98,7 @@ test("unified Add items chooser consolidates workflows and preserves context", a
     .getByRole("button", { name: /Import a list or file/ })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/imports\\?room_id=${room.id}&location_id=${container.id}`),
+    new RegExp(`/imports\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
   );
   await expect(page.getByText(/New entries without their own location/)).toBeVisible();
   await expect(page.getByText(container.identifier)).toBeVisible();
@@ -134,7 +134,7 @@ test("unified Add items chooser consolidates workflows and preserves context", a
     .getByRole("button", { name: /Enter manually/ })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/items/new\\?room_id=${room.id}&location_id=${shelf.id}`),
+    new RegExp(`/items/new\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${shelf.id}`),
   );
 
   const mobile = await browser.newContext({

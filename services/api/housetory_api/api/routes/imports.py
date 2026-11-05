@@ -19,6 +19,7 @@ from ...schemas.imports import (
     ImportBatchList,
     ImportBatchOut,
 )
+from ...services import properties as property_service
 from ...services import storage
 from ...services.import_pipeline import (
     apply_import,
@@ -105,6 +106,7 @@ def create_import(
     file: Annotated[UploadFile | None, File()] = None,
     text: Annotated[str | None, Form()] = None,
     title: Annotated[str | None, Form(max_length=200)] = None,
+    property_id: Annotated[uuid.UUID | None, Form()] = None,
     room_id: Annotated[uuid.UUID | None, Form()] = None,
     location_id: Annotated[uuid.UUID | None, Form()] = None,
     auth: AuthContext = Depends(require_auth),
@@ -168,6 +170,24 @@ def create_import(
             )
         if context_room is None:
             context_room = db.get(Room, context_location.room_id)
+    property_record = None
+    if context_room is not None:
+        property_record = context_room.property
+        if property_id is not None and property_id != property_record.id:
+            raise ApiError(
+                422,
+                "context_mismatch",
+                "The selected room belongs to a different property.",
+            )
+    elif location_id is not None:
+        property_record = context_location.room.property if context_location is not None else None
+    elif property_id is not None:
+        property_record = property_service.get_property(db, auth.household.id, property_id)
+    else:
+        property_record = property_service.resolve_room_property(db, auth.household.id, None)
+    if property_record is not None:
+        context["property_id"] = str(property_record.id)
+        context["property_name"] = property_record.name
     if context_room is not None:
         context["room_id"] = str(context_room.id)
         context["room_name"] = context_room.name

@@ -162,9 +162,6 @@ export function StocktakePage() {
   for (const row of session.items) {
     const rowStatus = row.latest_observation?.status ?? "unchecked";
     statusCounts[rowStatus] = (statusCounts[rowStatus] ?? 0) + 1;
-    if (rowStatus === "unchecked") {
-      statusCounts.unchecked = (statusCounts.unchecked ?? 0) + 1;
-    }
   }
   const updateQuery = (nextSearch: string, nextFilter: string) => {
     const params = new URLSearchParams(searchParams);

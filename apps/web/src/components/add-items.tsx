@@ -14,6 +14,7 @@ import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 export interface AddItemsContext {
+  propertyId?: string;
   roomId?: string;
   locationId?: string;
   roomName?: string;
@@ -30,8 +31,10 @@ const AddItemsReactContext = React.createContext<AddItemsApi | null>(null);
 function inferRouteContext(pathname: string, search: string): AddItemsContext | undefined {
   const params = new URLSearchParams(search);
   const context: AddItemsContext = {};
+  const queryProperty = params.get("property_id");
   const queryRoom = params.get("room_id");
   const queryLocation = params.get("location_id");
+  if (queryProperty) context.propertyId = queryProperty;
   if (queryRoom) context.roomId = queryRoom;
   if (queryLocation) context.locationId = queryLocation;
   const roomMatch = pathname.match(/^\/rooms\/([^/]+)/);
@@ -101,18 +104,19 @@ export function useAddItems() {
 export function useRegisterAddItemsContext(context: AddItemsContext | null) {
   const api = React.useContext(AddItemsReactContext);
   const roomId = context?.roomId;
+  const propertyId = context?.propertyId;
   const locationId = context?.locationId;
   const roomName = context?.roomName;
   const locationName = context?.locationName;
   React.useEffect(() => {
     if (!api) return;
     api.setPageContext(
-      roomId || locationId || roomName || locationName
-        ? { roomId, locationId, roomName, locationName }
+      propertyId || roomId || locationId || roomName || locationName
+        ? { propertyId, roomId, locationId, roomName, locationName }
         : null,
     );
     return () => api.setPageContext(null);
-  }, [api, roomId, locationId, roomName, locationName]);
+  }, [api, propertyId, roomId, locationId, roomName, locationName]);
 }
 
 export function AddItemsButton({
@@ -194,6 +198,7 @@ function AddItemsDialog({
     .join(" · ");
   const choose = (path: string) => {
     const params = new URLSearchParams();
+    if (context?.propertyId) params.set("property_id", context.propertyId);
     if (context?.roomId) params.set("room_id", context.roomId);
     if (context?.locationId) params.set("location_id", context.locationId);
     const query = params.toString();
@@ -211,7 +216,7 @@ function AddItemsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {(context?.roomId || context?.locationId) && (
+        {(context?.propertyId || context?.roomId || context?.locationId) && (
           <div className="flex items-start gap-2.5 rounded-xl border border-sage/25 bg-sage-soft/40 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
             <MapPin className="mt-0.5 size-4 shrink-0 text-sage" />
             <span>

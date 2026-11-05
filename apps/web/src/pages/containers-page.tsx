@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePropertyFilter } from "@/hooks/use-property-filter";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
@@ -47,7 +48,8 @@ const TYPES: ContainerType[] = ["box", "bin", "crate", "suitcase", "bag", "other
 
 export function ContainersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const roomsQuery = useRooms();
+  const { propertyId, setPropertyId, properties } = usePropertyFilter();
+  const roomsQuery = useRooms(propertyId || undefined);
   const locationsQuery = useLocations();
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
@@ -78,6 +80,7 @@ export function ContainersPage() {
 
   const containersQuery = useContainers({
     q: debounced.trim() || undefined,
+    property_id: propertyId || undefined,
     room_id: roomId || undefined,
     container_type: containerType || undefined,
     empty: empty === "all" ? undefined : empty === "empty",
@@ -213,7 +216,23 @@ export function ContainersPage() {
               className="pl-10"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Select
+              aria-label="Filter by property"
+              value={propertyId}
+              onChange={(event) => {
+                setPropertyId(event.target.value);
+                setRoomId("");
+                setSelected(new Set());
+              }}
+            >
+              <option value="">All properties</option>
+              {properties.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name}
+                </option>
+              ))}
+            </Select>
             <Select
               aria-label="Filter by room"
               value={roomId}
@@ -222,7 +241,7 @@ export function ContainersPage() {
               <option value="">All rooms</option>
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
-                  {room.name}
+                  {room.property?.name ? `${room.property.name} / ${room.name}` : room.name}
                 </option>
               ))}
             </Select>

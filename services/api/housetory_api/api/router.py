@@ -23,6 +23,7 @@ from .routes import (
     manuals,
     overview,
     ownership,
+    properties,
     purchases,
     rooms,
     scans,
@@ -41,6 +42,7 @@ api_router.include_router(accounts.router)
 api_router.include_router(household.router, dependencies=write_guard)
 api_router.include_router(overview.router)
 api_router.include_router(ownership.router)
+api_router.include_router(properties.router, dependencies=write_guard)
 api_router.include_router(rooms.router, dependencies=write_guard)
 api_router.include_router(search.router)
 api_router.include_router(locations.router, dependencies=write_guard)

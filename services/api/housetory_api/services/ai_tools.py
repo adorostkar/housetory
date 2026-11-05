@@ -94,27 +94,34 @@ def _location_display(location: Any) -> str:
 
 
 def _item_reference(item: ItemSummary | Item) -> AssistantReference:
+    if isinstance(item, Item):
+        property_name = (
+            item.room.property.name
+            if item.room is not None and item.room.property is not None
+            else None
+        )
+        room_name = getattr(item.room, "name", None)
+    else:
+        property_name = item.property.name if item.property else None
+        room_name = item.room.name if item.room else None
+    subtitle = " / ".join(part for part in (property_name, room_name) if part) or None
     return AssistantReference(
         type="item",
         id=item.id,
         title=item.name,
-        subtitle=(
-            getattr(item.room, "name", None)
-            if isinstance(item, Item)
-            else item.room.name
-            if item.room
-            else None
-        ),
+        subtitle=subtitle,
         url=f"/items/{item.id}",
     )
 
 
 def _home_path(db: Session, household_id: uuid.UUID, item: Item) -> str | None:
-    room_parts = (
-        [room.name for room in room_ancestors(db, household_id, item.room_id)]
-        if item.room_id
-        else []
+    room_records = room_ancestors(db, household_id, item.room_id) if item.room_id else []
+    property_name = (
+        room_records[0].property.name
+        if room_records and room_records[0].property is not None
+        else None
     )
+    room_parts = [room.name for room in room_records]
     location_parts = (
         [
             _location_display(location)
@@ -123,7 +130,9 @@ def _home_path(db: Session, household_id: uuid.UUID, item: Item) -> str | None:
         if item.storage_location_id
         else []
     )
-    parts = [" → ".join(room_parts)] if room_parts else []
+    parts = [property_name] if property_name else []
+    if room_parts:
+        parts.append(" → ".join(room_parts))
     if location_parts:
         parts.append(" → ".join(location_parts))
     return " → ".join(parts) if parts else None
@@ -598,6 +607,7 @@ def tool_search_locations(
             "type": "room",
             "name": room.name,
             "url": f"/rooms/{room.id}",
+            "property": room.property.name if room.property is not None else None,
             "item_count": sum(
                 1
                 for item in db.scalars(
@@ -619,6 +629,12 @@ def tool_search_locations(
             "is_container": location.is_container,
             "container_type": location.container_type,
             "room": room_map.get(location.room_id).name if room_map.get(location.room_id) else None,
+            "property": (
+                room_map.get(location.room_id).property.name
+                if room_map.get(location.room_id)
+                and room_map.get(location.room_id).property is not None
+                else None
+            ),
             "url": f"/containers/{location.id}",
         }
         for location in locations[:20]
@@ -727,8 +743,13 @@ def tool_get_container_contents(
         db, household_id, items, household_reminder_days=household_reminder_days
     )
     live = deterministic_summary(items)
+    room_chain = room_ancestors(db, household_id, location.room_id)
+    property_name = (
+        room_chain[0].property.name if room_chain and room_chain[0].property is not None else None
+    )
     path = " / ".join(
-        [entry.name for entry in room_ancestors(db, household_id, location.room_id)]
+        ([property_name] if property_name else [])
+        + [entry.name for entry in room_chain]
         + [entry.name for entry in location_ancestors(db, household_id, location.id)]
     )
     label = location.identifier or location.name
@@ -1249,7 +1270,11 @@ def tool_locate_item(
         db, household_id, candidates, household_reminder_days=household_reminder_days
     )
     if len(candidates) > 1:
-        names = ", ".join(item.name for item in summaries[:6])
+        names = ", ".join(
+            f"{item.name} ({item.property.name + ' / ' if item.property else ''}"
+            f"{item.room.name if item.room else 'No room'})"
+            for item in summaries[:6]
+        )
         summary = (
             f"I found {len(candidates)} items that could match “{query}”: {names}. "
             "Which one did you mean?"

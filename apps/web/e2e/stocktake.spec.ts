@@ -80,7 +80,9 @@ test("checks a room, resumes after refresh, reviews a move and completes partial
   await createLoan(request, drill.item.id);
 
   await startViaUi(page, room.id);
-  await expect(page.getByRole("heading", { name: `Room: ${room.name}` })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Room: Home / ${room.name}` }),
+  ).toBeVisible();
   await expect(page.getByText(/Opening this page does not mark it present/).first()).toBeVisible();
 
   await page.getByRole("button", { name: `Mark ${drill.item.name} present` }).click();
@@ -95,7 +97,9 @@ test("checks a room, resumes after refresh, reviews a move and completes partial
   await expect(page.getByText("Reported missing; no inventory deletion or write-off.")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: `Room: ${room.name}` })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Room: Home / ${room.name}` }),
+  ).toBeVisible();
   await expect(page.getByText("Reported missing; no inventory deletion or write-off.")).toBeVisible();
   await page.getByRole("button", { name: /^Unchecked/ }).click();
   await expect(page.getByRole("button", { name: /^Unchecked/ })).toHaveAttribute(

@@ -11,6 +11,7 @@ from housetory_api.models import (
     Category,
     Household,
     HouseholdMember,
+    Property,
     Room,
     Tag,
     User,
@@ -472,7 +473,14 @@ def test_bulk_request_id_reuse_and_cross_household_isolation(owner_client, anon_
             ip_address="127.0.0.1",
             household_id=other.id,
         )
-        other_room = Room(household_id=other.id, name="Other Room")
+        other_property = Property(household_id=other.id, name="Home")
+        db.add(other_property)
+        db.flush()
+        other_room = Room(
+            household_id=other.id,
+            property_id=other_property.id,
+            name="Other Room",
+        )
         other_tag = Tag(household_id=other.id, name="Other Tag")
         other_category = Category(household_id=other.id, name="Other Category")
         db.add_all([other_room, other_tag, other_category])

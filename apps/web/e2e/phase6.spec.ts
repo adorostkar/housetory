@@ -358,7 +358,7 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
     .getByRole("button", { name: /Scan a photo/ })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/scan\\?room_id=${room.id}&location_id=${container.id}`),
+    new RegExp(`/scan\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
   );
   await expect(
     page.getByText(/A vision-capable model is selected/),

@@ -185,7 +185,11 @@ export function ImportDetailPage() {
   });
 
   const createRoom = async (_entryId: string, name: string) => {
-    const room = await api.post<Room>("/rooms", { name });
+    const context = batch?.metadata.context as { property_id?: string } | undefined;
+    const room = await api.post<Room>("/rooms", {
+      name,
+      property_id: context?.property_id,
+    });
     void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
     return room;
   };
@@ -226,6 +230,12 @@ export function ImportDetailPage() {
     | undefined) ?? {};
   const reviewable = batch.status === "review" || batch.status === "completed";
   const hierarchyMode = batch.metadata.hierarchy === true;
+  const contextPropertyId = (
+    batch.metadata.context as { property_id?: string } | undefined
+  )?.property_id;
+  const scopedRooms = contextPropertyId
+    ? rooms.filter((room) => room.property_id === contextPropertyId)
+    : rooms;
   const rawContext = batch.metadata.context as
     | {
         room_id?: string;
@@ -564,7 +574,7 @@ export function ImportDetailPage() {
                       mergeFields: [],
                     }
                   }
-                  rooms={rooms}
+                  rooms={scopedRooms}
                   locations={locations}
                   categories={categories}
                   disabled={apply.isPending}

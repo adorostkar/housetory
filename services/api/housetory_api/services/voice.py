@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..api.errors import ApiError
 from ..config import get_settings
@@ -30,6 +30,7 @@ from ..schemas.voice import (
     VoiceSuggestionEdit,
 )
 from . import ai, storage, transcription
+from . import properties as property_service
 from .containers import create_containers, household_hierarchy_lock
 from .import_matching import (
     LOCATION_THRESHOLD,
@@ -481,6 +482,7 @@ def build_voice_suggestions(
     transcript: str,
     result: AiVoiceResult,
     *,
+    default_property_id: uuid.UUID | None = None,
     default_room_id: uuid.UUID | None = None,
     default_location_id: uuid.UUID | None = None,
 ) -> tuple[list[VoiceSuggestion], list[dict[str, Any]]]:
@@ -490,7 +492,7 @@ def build_voice_suggestions(
     summary suppression, location grouping and duplicate detection happen here.
     """
     settings = get_settings()
-    index = build_index(db, household_id)
+    index = build_index(db, household_id, default_property_id)
     groups: list[_Group] = []
     warnings: list[dict[str, Any]] = []
     position = 0
@@ -806,6 +808,7 @@ def serialize_voice_note(note: VoiceNote) -> dict[str, Any]:
         "byte_size": note.audio_byte_size,
         "duration_seconds": note.duration_seconds,
         "audio_retained": note.audio_storage_key is not None,
+        "default_property_id": note.default_property_id,
         "default_room_id": note.default_room_id,
         "default_location_id": note.default_location_id,
         "transcript": note.transcript,
@@ -993,6 +996,7 @@ def process_interpretation(note_id: uuid.UUID | str) -> dict[str, Any] | None:
         note.interpretation_error = None
         db.commit()
         household_id = note.household_id
+        default_property_id = note.default_property_id
         default_room_id = note.default_room_id
         default_location_id = note.default_location_id
         try:
@@ -1014,6 +1018,7 @@ def process_interpretation(note_id: uuid.UUID | str) -> dict[str, Any] | None:
                 household_id,
                 transcript,
                 result,
+                default_property_id=default_property_id,
                 default_room_id=default_room_id,
                 default_location_id=default_location_id,
             )
@@ -1049,18 +1054,24 @@ def _validate_room(
     db: Session,
     household_id: uuid.UUID,
     room: VoiceLocation | None,
+    *,
+    property_id: uuid.UUID | None = None,
 ) -> tuple[Room | None, LocationProposal | None]:
     if room is None:
         return None, None
     if room.matched_id is not None:
         existing = db.scalar(
-            select(Room).where(
+            select(Room)
+            .options(joinedload(Room.property))
+            .where(
                 Room.id == room.matched_id,
                 Room.household_id == household_id,
             )
         )
         if existing is None:
             raise ValueError("Choose a valid room.")
+        if property_id is not None and existing.property_id != property_id:
+            raise ValueError("Choose a room from the selected property.")
         return existing, _proposal_from_voice_location(room)
     if not room.create:
         if room.status == "ambiguous":
@@ -1070,6 +1081,7 @@ def _validate_room(
     if not name:
         raise ValueError("Enter a name for the new room.")
     parent_id = room.parent_id
+    parent = None
     if parent_id is not None:
         parent = db.scalar(
             select(Room).where(
@@ -1079,8 +1091,15 @@ def _validate_room(
         )
         if parent is None:
             raise ValueError("Choose a valid parent room.")
+        if property_id is not None and parent.property_id != property_id:
+            raise ValueError("Choose a parent room from the selected property.")
+    if property_id is None and parent is not None:
+        property_id = parent.property_id
+    if property_id is None:
+        property_id = property_service.resolve_room_property(db, household_id, None).id
     query = select(Room).where(
         Room.household_id == household_id,
+        Room.property_id == property_id,
         func.lower(Room.name) == name.casefold(),
     )
     if parent_id is None:
@@ -1091,6 +1110,7 @@ def _validate_room(
     if existing is None:
         existing = Room(
             household_id=household_id,
+            property_id=property_id,
             parent_id=parent_id,
             name=name,
             sort_order=0,
@@ -1116,6 +1136,8 @@ def _validate_location(
     household_id: uuid.UUID,
     room: Room | None,
     location: VoiceLocation | None,
+    *,
+    property_id: uuid.UUID | None = None,
 ) -> tuple[StorageLocation | None, LocationProposal | None]:
     if location is None:
         return None, None
@@ -1130,6 +1152,10 @@ def _validate_location(
             raise ValueError("Choose a valid container or storage place.")
         if room is not None and existing.room_id != room.id:
             raise ValueError("The selected container belongs to a different room.")
+        if property_id is not None:
+            existing_room = db.get(Room, existing.room_id)
+            if existing_room is None or existing_room.property_id != property_id:
+                raise ValueError("Choose a location from the selected property.")
         return existing, _proposal_from_voice_location(location)
     if not location.create:
         if location.status == "ambiguous":
@@ -1337,9 +1363,19 @@ def apply_voice_note(
                 )
                 if category is None:
                     raise ValueError("Choose a valid category.")
-            room, room_proposal = _validate_room(db, note.household_id, entry.room)
+            property_id = note.default_property_id
+            if property_id is None and note.default_room_id is not None:
+                default_room = db.get(Room, note.default_room_id)
+                property_id = default_room.property_id if default_room else None
+            room, room_proposal = _validate_room(
+                db, note.household_id, entry.room, property_id=property_id
+            )
             location, location_proposal = _validate_location(
-                db, note.household_id, room, entry.storage_location
+                db,
+                note.household_id,
+                room,
+                entry.storage_location,
+                property_id=property_id,
             )
             proposed = _proposed_item(entry, room_proposal, location_proposal)
             candidates = find_duplicates(db, note.household_id, proposed)

@@ -147,6 +147,7 @@ class VoiceNoteOut(BaseModel):
     byte_size: int | None
     duration_seconds: int | None
     audio_retained: bool
+    default_property_id: uuid.UUID | None
     default_room_id: uuid.UUID | None
     default_location_id: uuid.UUID | None
     transcript: str | None

@@ -94,10 +94,34 @@ export interface InvitationPublic {
   authenticated_email_matches: boolean;
 }
 
+export interface PropertyBrief {
+  id: UUID;
+  name: string;
+  is_archived: boolean;
+}
+
+export interface Property extends PropertyBrief {
+  description: string | null;
+  sort_order: number;
+  room_count: number;
+  container_count: number;
+  location_count: number;
+  item_count: number;
+  total_quantity: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PropertyList {
+  items: Property[];
+}
+
 export interface Room {
   id: UUID;
   name: string;
   description: string | null;
+  property_id?: UUID;
+  property?: PropertyBrief;
   parent_id: UUID | null;
   sort_order: number;
   item_count: number;
@@ -111,6 +135,32 @@ export interface Room {
 export interface RoomList {
   items: Room[];
 }
+export interface RoomPropertyMovePreview {
+  room_id: UUID;
+  room_name: string;
+  current_property: PropertyBrief;
+  destination_property: PropertyBrief;
+  descendant_room_count: number;
+  descendant_container_count: number;
+  item_count: number;
+  total_quantity: number;
+  on_loan_quantity: number;
+  fingerprint: string;
+  can_move: boolean;
+  warning: string | null;
+}
+
+export interface RoomPropertyMoveResult extends RoomPropertyMovePreview {
+  history_event_id: UUID;
+  affected_item_ids: UUID[];
+}
+
+export interface RoomPropertyMoveResponse {
+  preview: RoomPropertyMovePreview;
+  result: RoomPropertyMoveResult | null;
+}
+
+
 
 export interface StorageLocation {
   id: UUID;
@@ -628,6 +678,7 @@ export interface ItemSummary {
   condition: ItemCondition;
   is_archived: boolean;
   room: RoomBrief | null;
+  property?: PropertyBrief | null;
   location: LocationBrief | null;
   location_path: LocationBrief[];
   category: CategoryBrief | null;
@@ -1348,6 +1399,7 @@ export interface ContainerSummary {
 
 export interface Container {
   id: UUID;
+  property?: PropertyBrief;
   identifier: string | null;
   legacy_identifier?: string | null;
   aliases?: string[];
@@ -1621,6 +1673,7 @@ export interface VoiceNote {
   byte_size: number | null;
   duration_seconds: number | null;
   audio_retained: boolean;
+  default_property_id?: UUID | null;
   default_room_id: UUID | null;
   default_location_id: UUID | null;
   transcript: string | null;
@@ -1878,6 +1931,8 @@ export interface EvidenceItemPreview {
   condition: string;
   is_archived: boolean;
   category: string | null;
+  property_id?: UUID | null;
+  property_name?: string | null;
   full_location_path: string;
   purchase_info_status: string;
   purchase_currency: string | null;

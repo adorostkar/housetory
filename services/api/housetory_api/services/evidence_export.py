@@ -43,7 +43,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..api.errors import ApiError
@@ -56,6 +56,7 @@ from ..models import (
     Household,
     InventoryEvidenceExport,
     Item,
+    Property,
     Room,
     StorageLocation,
 )
@@ -117,6 +118,8 @@ CSV_COLUMNS = [
     "category",
     "tags",
     "room_path",
+    "property_id",
+    "property_name",
     "location_path",
     "full_location_path",
     "archived",
@@ -239,7 +242,14 @@ def _scope_roots(
     db: Session, household_id: uuid.UUID, scope: EvidenceScopeIn
 ) -> tuple[set[uuid.UUID], set[uuid.UUID], str]:
     room_rows = db.execute(
-        select(Room.id, Room.parent_id, Room.name).where(Room.household_id == household_id)
+        select(
+            Room.id,
+            Room.parent_id,
+            Room.name,
+            Property.name,
+        )
+        .join(Property, Property.id == Room.property_id)
+        .where(Room.household_id == household_id)
     ).all()
     location_rows = db.execute(
         select(
@@ -247,7 +257,11 @@ def _scope_roots(
             StorageLocation.parent_id,
             StorageLocation.name,
             StorageLocation.identifier,
-        ).where(StorageLocation.household_id == household_id)
+            Property.name,
+        )
+        .join(Room, Room.id == StorageLocation.room_id)
+        .join(Property, Property.id == Room.property_id)
+        .where(StorageLocation.household_id == household_id)
     ).all()
     room_by_id = {row[0]: row for row in room_rows}
     location_by_id = {row[0]: row for row in location_rows}
@@ -260,7 +274,7 @@ def _scope_roots(
     room_ids: set[uuid.UUID] = set()
     if room_root_ids:
         children: dict[uuid.UUID | None, list[uuid.UUID]] = defaultdict(list)
-        for room_id, parent_id, _name in room_rows:
+        for room_id, parent_id, _name, _property_name in room_rows:
             children[parent_id].append(room_id)
         stack = list(room_root_ids)
         while stack:
@@ -272,7 +286,7 @@ def _scope_roots(
     location_ids: set[uuid.UUID] = set()
     if container_root_ids:
         children = defaultdict(list)
-        for location_id, parent_id, _name, _identifier in location_rows:
+        for location_id, parent_id, _name, _identifier, _property_name in location_rows:
             children[parent_id].append(location_id)
         stack = list(container_root_ids)
         while stack:
@@ -283,7 +297,8 @@ def _scope_roots(
             stack.extend(children.get(current, []))
     labels: list[str] = []
     for room_id in sorted(room_root_ids, key=lambda value: room_by_id[value][2].lower()):
-        labels.append(f"Room: {room_by_id[room_id][2]}")
+        room_id_value, _parent, name, property_name = room_by_id[room_id]
+        labels.append(f"Room: {property_name} / {name}")
     for location_id in sorted(
         container_root_ids,
         key=lambda value: (
@@ -291,13 +306,22 @@ def _scope_roots(
             location_by_id[value][2].lower(),
         ),
     ):
-        _id, _parent, name, identifier = location_by_id[location_id]
-        labels.append(f"Container: {identifier or name}")
+        _id, _parent, name, identifier, property_name = location_by_id[location_id]
+        labels.append(f"Container: {property_name} / {identifier or name}")
     if scope.item_ids:
         count = len(scope.item_ids)
         labels.append(f"{count} selected item" + ("s" if count != 1 else ""))
     if scope.include_home:
-        labels.insert(0, "Current home")
+        property_count = int(
+            db.scalar(
+                select(func.count(Property.id)).where(
+                    Property.household_id == household_id,
+                    Property.is_archived.is_(False),
+                )
+            )
+            or 0
+        )
+        labels.insert(0, "All properties" if property_count > 1 else "Current home")
     if not labels:
         labels.append("Selected inventory")
     if len(labels) > 4:
@@ -587,7 +611,17 @@ def build_snapshot(
             else ""
         )
         location_path = _location_path(item.storage_location, location_by_id)
-        full_path = " / ".join(part for part in (room_path, location_path) if part)
+        property_record = (
+            item.room.property
+            if item.room is not None
+            else (
+                item.storage_location.room.property
+                if item.storage_location is not None and item.storage_location.room is not None
+                else None
+            )
+        )
+        property_name = property_record.name if property_record is not None else ""
+        full_path = " / ".join(part for part in (property_name, room_path, location_path) if part)
         if not full_path:
             full_path = "No location recorded"
         on_loan = min(item.quantity, max(0, loan_quantities.get(item.id, 0)))
@@ -659,6 +693,8 @@ def build_snapshot(
             "category": item.category.name if item.category else None,
             "tags": sorted(tag.name for tag in item.tags),
             "room_path": room_path,
+            "property_id": str(property_record.id) if property_record is not None else None,
+            "property_name": property_name or None,
             "location_path": location_path,
             "full_location_path": full_path,
             "is_archived": item.is_archived,
@@ -988,6 +1024,8 @@ def _preview_from_snapshot(snapshot: dict[str, Any]) -> EvidencePreviewOut:
             condition=item["condition"],
             is_archived=item["is_archived"],
             category=item["category"],
+            property_id=(uuid.UUID(item["property_id"]) if item.get("property_id") else None),
+            property_name=item.get("property_name"),
             full_location_path=item["full_location_path"],
             purchase_info_status=item["purchase_info_status"],
             purchase_currency=(item.get("purchase") or {}).get("currency"),
@@ -1712,6 +1750,8 @@ def build_csv(snapshot: dict[str, Any], *, deadline: float | None = None) -> byt
             item.get("category") or "",
             "; ".join(item.get("tags") or []),
             item.get("room_path") or "",
+            item.get("property_id") or "",
+            item.get("property_name") or "",
             item.get("location_path") or "",
             item.get("full_location_path") or "",
             "yes" if item.get("is_archived") else "no",
@@ -2053,6 +2093,8 @@ def write_bundle(
                         "on_loan_quantity": item["on_loan_quantity"],
                         "at_home_quantity": item["at_home_quantity"],
                         "full_location_path": item["full_location_path"],
+                        "property_id": item["property_id"],
+                        "property_name": item["property_name"],
                         "evidence_references": item["document_refs"],
                         "last_checked": item.get("last_checked"),
                     }

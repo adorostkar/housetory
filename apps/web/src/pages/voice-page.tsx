@@ -29,6 +29,7 @@ import {
   useAiStatus,
   useInvalidateInventory,
   useLocations,
+  useProperties,
   useRooms,
   useVoiceConfig,
   useVoiceNote,
@@ -71,10 +72,14 @@ interface ReviewState {
 export function VoicePage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryPropertyId = searchParams.get("property_id") ?? "";
   const queryRoomId = searchParams.get("room_id") ?? "";
   const queryLocationId = searchParams.get("location_id") ?? "";
   const queryNoteId = searchParams.get("note_id") ?? "";
-  const roomsQuery = useRooms();
+  const propertiesQuery = useProperties();
+  const properties = propertiesQuery.data?.items ?? [];
+  const [propertyId, setPropertyId] = React.useState(queryPropertyId);
+  const roomsQuery = useRooms(propertyId || undefined);
   const locationsQuery = useLocations();
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
@@ -106,6 +111,19 @@ export function VoicePage() {
   }, [queryLocationId, locations]);
 
   React.useEffect(() => {
+    if (propertyId) return;
+    const room = rooms.find((entry) => entry.id === (queryRoomId || defaultRoomId));
+    if (room?.property_id) setPropertyId(room.property_id);
+    else if (properties.length === 1) setPropertyId(properties[0]!.id);
+  }, [propertyId, properties, queryRoomId, defaultRoomId, rooms]);
+
+  const changeProperty = (value: string) => {
+    setPropertyId(value);
+    setDefaultRoomId("");
+    setDefaultLocationId("");
+  };
+
+  React.useEffect(() => {
     if (!note) return;
     if (
       transcriptSyncedFor.current !== note.id &&
@@ -133,6 +151,7 @@ export function VoicePage() {
       const formData = new FormData();
       formData.append("file", file);
       if (duration != null) formData.append("duration_seconds", String(duration));
+      if (propertyId) formData.append("property_id", propertyId);
       if (defaultRoomId) formData.append("room_id", defaultRoomId);
       if (defaultLocationId) formData.append("location_id", defaultLocationId);
       return api.postForm<VoiceNote>("/voice", formData);
@@ -343,6 +362,9 @@ export function VoicePage() {
               transcriptionReady={transcriptionReady}
               transcriptionStatus={transcriptionStatus.data}
               uploadPending={upload.isPending}
+              properties={properties}
+              propertyId={propertyId}
+              onPropertyChange={changeProperty}
               rooms={rooms}
               defaultRoomId={defaultRoomId}
               defaultLocationId={defaultLocationId}
@@ -719,6 +741,9 @@ function Recorder({
   transcriptionReady,
   transcriptionStatus,
   uploadPending,
+  properties,
+  propertyId,
+  onPropertyChange,
   rooms,
   defaultRoomId,
   defaultLocationId,
@@ -731,6 +756,9 @@ function Recorder({
   transcriptionReady: boolean;
   transcriptionStatus: ReturnType<typeof useAiStatus>["data"];
   uploadPending: boolean;
+  properties: Array<{ id: string; name: string }>;
+  propertyId: string;
+  onPropertyChange: (propertyId: string) => void;
   rooms: Room[];
   defaultRoomId: string;
   defaultLocationId: string;
@@ -1040,6 +1068,21 @@ function Recorder({
       {fileError && <p className="mt-3 text-[0.75rem] text-destructive" role="alert">{fileError}</p>}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Field label="Property" htmlFor="voice-property">
+          <Select
+            id="voice-property"
+            className="mt-2"
+            value={propertyId}
+            onChange={(event) => onPropertyChange(event.target.value)}
+          >
+            <option value="">Choose a property</option>
+            {properties.map((property) => (
+              <option key={property.id} value={property.id}>
+                {property.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <Field label="Default room" htmlFor="voice-room" optional>
           <Select
             id="voice-room"
@@ -1050,7 +1093,7 @@ function Recorder({
             <option value="">No default room</option>
             {rooms.map((room) => (
               <option key={room.id} value={room.id}>
-                {room.name}
+                {room.property?.name ? `${room.property.name} / ${room.name}` : room.name}
               </option>
             ))}
           </Select>

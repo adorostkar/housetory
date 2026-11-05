@@ -29,6 +29,7 @@ import {
   useInvalidateInventory,
   useItems,
   useLocations,
+  useProperties,
   useRecognition,
   useRooms,
 } from "@/lib/queries";
@@ -60,8 +61,11 @@ export function ScanPage() {
   const locationIdParam = searchParams.get("location_id") ?? "";
   const roomIdParam = searchParams.get("room_id") ?? "";
   const aiStatus = useAiStatus("vision");
+  const propertiesQuery = useProperties();
+  const properties = propertiesQuery.data?.items ?? [];
+  const [propertyId, setPropertyId] = React.useState(searchParams.get("property_id") ?? "");
   const locationsQuery = useLocations();
-  const roomsQuery = useRooms();
+  const roomsQuery = useRooms(propertyId || undefined);
   const itemsQuery = useItems({ sort: "name_asc" }, 100);
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
@@ -87,6 +91,13 @@ export function ScanPage() {
     setDefaultRoomId(match.room_id);
     setDefaultLocationId(match.id);
   }, [locationIdParam, locations]);
+
+  React.useEffect(() => {
+    if (propertyId) return;
+    const room = rooms.find((entry) => entry.id === (roomIdParam || defaultRoomId));
+    if (room?.property_id) setPropertyId(room.property_id);
+    else if (properties.length === 1) setPropertyId(properties[0]!.id);
+  }, [propertyId, properties, roomIdParam, defaultRoomId, rooms]);
 
   const defaultLocations = locations.filter(
     (location) => location.room_id === defaultRoomId,
@@ -345,6 +356,25 @@ export function ScanPage() {
               </div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Field label="Property" htmlFor="scan-property">
+                <Select
+                  id="scan-property"
+                  className="mt-2"
+                  value={propertyId}
+                  onChange={(event) => {
+                    setPropertyId(event.target.value);
+                    setDefaultRoomId("");
+                    setDefaultLocationId("");
+                  }}
+                >
+                  <option value="">Choose a property</option>
+                  {properties.map((property) => (
+                    <option key={property.id} value={property.id}>
+                      {property.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
               <Field label="Default room" htmlFor="scan-room" optional>
                 <Select
                   id="scan-room"
@@ -355,7 +385,7 @@ export function ScanPage() {
                   <option value="">No default room</option>
                   {rooms.map((room) => (
                     <option key={room.id} value={room.id}>
-                      {room.name}
+                      {room.property?.name ? `${room.property.name} / ${room.name}` : room.name}
                     </option>
                   ))}
                 </Select>

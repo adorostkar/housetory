@@ -43,6 +43,7 @@ from .inventory import (
     item_tags,
 )
 from .jobs import Job
+from .property import Property
 from .stocktake import (
     StocktakeApplication,
     StocktakeCorrection,
@@ -87,6 +88,7 @@ __all__ = [
     "InventoryEvidenceExport",
     "Job",
     "Purchase",
+    "Property",
     "PurchaseAllocation",
     "Room",
     "StocktakeApplication",

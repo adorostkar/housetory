@@ -2,7 +2,7 @@ import uuid
 
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
-from housetory_api.models import Household, HouseholdMember, User
+from housetory_api.models import Household, HouseholdMember, Property, User
 from housetory_api.services.auth import create_session
 
 
@@ -19,6 +19,7 @@ def _other_household_headers(email: str = "grace@example.com", name: str = "Grac
                 role="owner",
             )
         )
+        db.add(Property(household_id=household.id, name="Home"))
         token = create_session(
             db,
             user=user,

@@ -184,8 +184,11 @@ export function BulkMoveDialog({
                 <option value="">Choose a room</option>
                 {rooms.map((room) => (
                   <option key={room.id} value={room.id}>
-                    {roomPath(rooms, room.id)
-                      .map((entry) => entry.name)
+                    {[
+                      room.property?.name,
+                      ...roomPath(rooms, room.id).map((entry) => entry.name),
+                    ]
+                      .filter(Boolean)
                       .join(" / ")}
                   </option>
                 ))}

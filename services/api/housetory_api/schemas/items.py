@@ -8,6 +8,7 @@ from ..domain import ItemCondition
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.documents import DocumentList, DocumentOut
 from ..schemas.imports import ImportSourceBrief
+from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseIn, PurchaseOut
 from ..schemas.warranties import WarrantyIn, WarrantyOut
 
@@ -129,6 +130,7 @@ class ItemSummary(ORMModel):
     condition: str
     is_archived: bool
     room: RoomBrief | None
+    property: PropertyBrief | None = None
     location: LocationBrief | None
     location_path: list[LocationBrief] = Field(default_factory=list)
     category: CategoryBrief | None

@@ -29,6 +29,7 @@ from ...schemas.items import (
 )
 from ...services import items as item_service
 from ...services import lending, storage
+from ...services import properties as property_service
 from ...services.container_serializers import location_path_map
 from ...services.containers import location_breadcrumb
 from ...services.hierarchy import descendant_ids
@@ -83,6 +84,7 @@ def _category(db: Session, household_id: uuid.UUID, category_id: uuid.UUID) -> C
 @router.get("/items", response_model=ItemList)
 def list_items(
     q: Annotated[str | None, Query(max_length=200)] = None,
+    property_id: uuid.UUID | None = None,
     room_id: uuid.UUID | None = None,
     location_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
@@ -101,6 +103,16 @@ def list_items(
     conditions = [Item.household_id == auth.household.id]
     if not include_archived:
         conditions.append(Item.is_archived.is_(False))
+    if property_id is not None:
+        property_service.get_property(db, auth.household.id, property_id)
+        conditions.append(
+            or_(
+                Item.room.has(Room.property_id == property_id),
+                Item.storage_location.has(
+                    StorageLocation.room.has(Room.property_id == property_id)
+                ),
+            )
+        )
     if room_id is not None:
         _room(db, auth.household.id, room_id)
         if include_descendants:

@@ -143,6 +143,10 @@ export function ItemCard({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.72rem] text-muted-foreground">
+            {item.property && <span className="truncate">{item.property.name}</span>}
+            {item.property && (item.room || container || item.location) && (
+              <span className="text-border">/</span>
+            )}
             {item.room && <span className="truncate">{item.room.name}</span>}
             {item.room && (container || item.location) && (
               <span className="text-border">/</span>
@@ -221,10 +225,18 @@ export function ItemRow({
   const onLoan = item.on_loan_quantity ?? 0;
   const path =
     item.location_path.length > 0
-      ? [item.room?.name, ...item.location_path.map((entry) => locationLabel(entry))]
+      ? [
+          item.property?.name,
+          item.room?.name,
+          ...item.location_path.map((entry) => locationLabel(entry)),
+        ]
           .filter(Boolean)
           .join(" / ")
-      : [item.room?.name, item.location ? locationLabel(item.location) : null]
+      : [
+          item.property?.name,
+          item.room?.name,
+          item.location ? locationLabel(item.location) : null,
+        ]
           .filter(Boolean)
           .join(" / ");
   const row = (

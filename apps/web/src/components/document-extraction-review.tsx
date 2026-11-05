@@ -1290,7 +1290,9 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                           <option value="">Choose a room</option>
                           {rooms.map((room) => (
                             <option key={room.id} value={room.id}>
-                              {room.name}
+                              {room.property?.name
+                                ? `${room.property.name} / ${room.name}`
+                                : room.name}
                             </option>
                           ))}
                         </Select>
@@ -1440,7 +1442,9 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                           <option value="">Keep current room</option>
                           {rooms.map((room) => (
                             <option key={room.id} value={room.id}>
-                              {room.name}
+                              {room.property?.name
+                                ? `${room.property.name} / ${room.name}`
+                                : room.name}
                             </option>
                           ))}
                         </Select>

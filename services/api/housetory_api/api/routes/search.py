@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Text, cast, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ...db import get_db
 from ...models import Category, Item, Room, StorageLocation, Tag
@@ -12,6 +12,7 @@ from ...schemas.search import QuickSearchLoan, QuickSearchResponse, QuickSearchR
 from ...services.container_serializers import location_path_map
 from ...services.hierarchy import descendant_ids
 from ...services.lending import loan_overview_for_items
+from ...services.properties import get_property
 from ...services.query_text import clean_subject, looks_like_question, search_term_variants
 from ...services.serializers import item_load_options
 from ..deps import AuthContext, require_auth
@@ -61,7 +62,11 @@ def _context(
     path: list,
     rooms: dict[uuid.UUID, Room],
 ) -> str | None:
+    room = rooms.get(room_id) if room_id else None
+    property_name = room.property.name if room is not None and room.property is not None else None
     parts = _room_path_labels(room_id, rooms)
+    if property_name:
+        parts.insert(0, property_name)
     for entry in path:
         label = _location_label(entry)
         if label and label not in parts:
@@ -83,6 +88,7 @@ def _item_subtitle(item: Item) -> str | None:
 @router.get("/quick", response_model=QuickSearchResponse)
 def quick_search(
     q: Annotated[str, Query(min_length=2, max_length=200)],
+    property_id: uuid.UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 4,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
@@ -97,23 +103,62 @@ def quick_search(
     patterns = _patterns(effective_term)
     household_id = auth.household.id
     results: list[QuickSearchResult] = []
+    property_room_ids: set[uuid.UUID] | None = None
+    property_location_ids: set[uuid.UUID] | None = None
+    if property_id is not None:
+        get_property(db, household_id, property_id)
+        property_room_ids = set(
+            db.scalars(
+                select(Room.id).where(
+                    Room.household_id == household_id,
+                    Room.property_id == property_id,
+                )
+            ).all()
+        )
+        property_location_ids = set(
+            db.scalars(
+                select(StorageLocation.id)
+                .join(Room, Room.id == StorageLocation.room_id)
+                .where(
+                    StorageLocation.household_id == household_id,
+                    Room.property_id == property_id,
+                )
+            ).all()
+        )
 
     room_rows = db.execute(
-        select(Room.id, Room.parent_id).where(Room.household_id == household_id)
+        select(Room.id, Room.parent_id).where(
+            Room.household_id == household_id,
+            *([Room.id.in_(property_room_ids)] if property_room_ids is not None else []),
+        )
     ).all()
     location_rows = db.execute(
         select(StorageLocation.id, StorageLocation.parent_id).where(
-            StorageLocation.household_id == household_id
+            StorageLocation.household_id == household_id,
+            *(
+                [StorageLocation.id.in_(property_location_ids)]
+                if property_location_ids is not None
+                else []
+            ),
         )
     ).all()
     rooms = {
-        room.id: room for room in db.scalars(select(Room).where(Room.household_id == household_id))
+        room.id: room
+        for room in db.scalars(
+            select(Room)
+            .options(joinedload(Room.property))
+            .where(
+                Room.household_id == household_id,
+                *([Room.id.in_(property_room_ids)] if property_room_ids is not None else []),
+            )
+        ).all()
     }
     matched_room_ids: set[uuid.UUID] = set()
     for matched_id in db.scalars(
         select(Room.id).where(
             Room.household_id == household_id,
             _any_like(Room.name, patterns),
+            *([Room.id.in_(property_room_ids)] if property_room_ids is not None else []),
         )
     ):
         matched_room_ids.update(descendant_ids(room_rows, matched_id))
@@ -127,6 +172,11 @@ def quick_search(
                 _any_like(StorageLocation.identifier, patterns),
                 _any_like(StorageLocation.legacy_identifier, patterns),
                 _alias_like(StorageLocation.aliases, effective_term),
+            ),
+            *(
+                [StorageLocation.id.in_(property_location_ids)]
+                if property_location_ids is not None
+                else []
             ),
         )
     ):
@@ -147,6 +197,13 @@ def quick_search(
             Item.storage_location_id.in_(matched_location_ids) if matched_location_ids else False,
         ),
     ]
+    if property_room_ids is not None:
+        item_conditions.append(
+            or_(
+                Item.room_id.in_(property_room_ids),
+                Item.storage_location_id.in_(property_location_ids or set()),
+            )
+        )
     items = db.scalars(
         select(Item)
         .options(*item_load_options())
@@ -181,6 +238,11 @@ def quick_search(
 
     location_conditions = [
         StorageLocation.household_id == household_id,
+        *(
+            [StorageLocation.id.in_(property_location_ids)]
+            if property_location_ids is not None
+            else []
+        ),
         or_(
             _any_like(StorageLocation.name, patterns),
             _any_like(StorageLocation.identifier, patterns),

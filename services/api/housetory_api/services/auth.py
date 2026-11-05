@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from ..config import Settings
-from ..models import AuthSession, Household, HouseholdMember, User
+from ..models import AuthSession, Household, HouseholdMember, Property, User
 from ..security import (
     dummy_verify,
     generate_session_token,
@@ -42,6 +42,14 @@ def create_user_with_household(
     db.add_all([user, household])
     db.flush()
     db.add(HouseholdMember(household_id=household.id, user_id=user.id, role="owner"))
+    db.flush()
+    db.add(
+        Property(
+            household_id=household.id,
+            name="Home",
+            sort_order=0,
+        )
+    )
     db.flush()
     return user, household
 

@@ -22,6 +22,7 @@ from ..models import (
     ImportEntry,
     ImportSourceFile,
     Item,
+    Property,
     Room,
     StorageLocation,
     Tag,
@@ -41,6 +42,7 @@ from ..schemas.imports import (
 )
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import ai, storage
+from . import properties as property_service
 from .containers import create_containers
 from .import_hierarchy import _extract_quantity, parse_hierarchy
 from .import_matching import build_index, find_duplicates, to_proposed_item
@@ -638,6 +640,22 @@ def _apply_ai_hierarchy(db: Session, household_id: uuid.UUID, hierarchy):
     return metadata
 
 
+def _context_property(db: Session, batch: ImportBatch) -> Property:
+    raw = (batch.metadata_json or {}).get("context") or {}
+    property_id = raw.get("property_id")
+    if property_id:
+        try:
+            record = db.get(Property, uuid.UUID(str(property_id)))
+        except (ValueError, TypeError):
+            record = None
+        if record is not None and record.household_id == batch.household_id:
+            return record
+    room, _location = _context_destination(db, batch)
+    if room is not None:
+        return property_service.get_property(db, batch.household_id, room.property_id)
+    return property_service.resolve_room_property(db, batch.household_id, None)
+
+
 def _context_destination(
     db: Session, batch: ImportBatch
 ) -> tuple[Room | None, StorageLocation | None]:
@@ -804,7 +822,8 @@ def process_import_batch(
             db.commit()
             parsed = parse_documents(bundle)
             file_mapping = _store_vault_files(db, batch, bundle)
-            index = build_index(db, batch.household_id)
+            property_record = _context_property(db, batch)
+            index = build_index(db, batch.household_id, property_record.id)
             hierarchy = parse_hierarchy(bundle)
             ai_metadata: dict[str, Any] = {"ai_used": False, "ai_error": None}
             hierarchy_mode = hierarchy.active and bool(hierarchy.items)
@@ -1143,10 +1162,16 @@ def _hierarchy_depth(
 
 
 def _find_room(
-    db: Session, household_id: uuid.UUID, name: str, parent_id: uuid.UUID | None
+    db: Session,
+    household_id: uuid.UUID,
+    property_id: uuid.UUID,
+    name: str,
+    parent_id: uuid.UUID | None,
 ) -> Room | None:
     query = select(Room).where(
-        Room.household_id == household_id, func.lower(Room.name) == name.strip().lower()
+        Room.household_id == household_id,
+        Room.property_id == property_id,
+        func.lower(Room.name) == name.strip().lower(),
     )
     if parent_id is None:
         query = query.where(Room.parent_id.is_(None))
@@ -1158,13 +1183,19 @@ def _find_room(
 def _ensure_room(
     db: Session,
     household_id: uuid.UUID,
+    property_id: uuid.UUID,
     name: str,
     parent_id: uuid.UUID | None,
 ) -> Room:
-    existing = _find_room(db, household_id, name, parent_id)
+    existing = _find_room(db, household_id, property_id, name, parent_id)
     if existing is not None:
         return existing
-    room = Room(household_id=household_id, name=name[:120], parent_id=parent_id)
+    room = Room(
+        household_id=household_id,
+        property_id=property_id,
+        name=name[:120],
+        parent_id=parent_id,
+    )
     db.add(room)
     db.flush()
     return room
@@ -1173,15 +1204,21 @@ def _ensure_room(
 def _find_existing_container(
     db: Session,
     household_id: uuid.UUID,
+    property_id: uuid.UUID,
     room_id: uuid.UUID,
     parent_id: uuid.UUID | None,
     name: str,
     legacy_identifier: str | None,
 ) -> StorageLocation | None:
+    room_ids = select(Room.id).where(
+        Room.household_id == household_id,
+        Room.property_id == property_id,
+    )
     if legacy_identifier:
         found = db.scalar(
             select(StorageLocation).where(
                 StorageLocation.household_id == household_id,
+                StorageLocation.room_id.in_(room_ids),
                 (
                     (func.upper(StorageLocation.legacy_identifier) == legacy_identifier.upper())
                     | (func.upper(StorageLocation.identifier) == legacy_identifier.upper())
@@ -1222,6 +1259,7 @@ def apply_hierarchy_import(
             entry.position,
         ),
     )
+    property_record = _context_property(db, batch)
     created = merged = skipped = rejected = failed = 0
     failures: list[ImportApplyFailure] = []
     for entry in ordered:
@@ -1263,6 +1301,7 @@ def apply_hierarchy_import(
                 room = _ensure_room(
                     db,
                     batch.household_id,
+                    property_record.id,
                     proposed.name,
                     parent_room_id,
                 )
@@ -1291,7 +1330,13 @@ def apply_hierarchy_import(
                     or None
                 )
                 existing = _find_existing_container(
-                    db, batch.household_id, room_id, parent_location_id, proposed.name, legacy
+                    db,
+                    batch.household_id,
+                    property_record.id,
+                    room_id,
+                    parent_location_id,
+                    proposed.name,
+                    legacy,
                 )
                 if existing is not None:
                     location = existing

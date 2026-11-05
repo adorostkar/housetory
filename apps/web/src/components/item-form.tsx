@@ -18,6 +18,7 @@ import {
   useDocuments,
   useInvalidateInventory,
   useLocations,
+  useProperties,
   useRooms,
   useTags,
 } from "@/lib/queries";
@@ -73,11 +74,13 @@ function FormSection({
 
 export function ItemForm({
   item,
+  defaultPropertyId,
   defaultRoomId,
   defaultLocationId,
   defaultName,
 }: {
   item?: ItemDetail;
+  defaultPropertyId?: string;
   defaultRoomId?: string;
   defaultLocationId?: string;
   defaultName?: string;
@@ -85,7 +88,12 @@ export function ItemForm({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const invalidate = useInvalidateInventory();
-  const roomsQuery = useRooms();
+  const propertiesQuery = useProperties();
+  const properties = propertiesQuery.data?.items ?? [];
+  const [propertyId, setPropertyId] = React.useState(
+    item?.property?.id ?? defaultPropertyId ?? "",
+  );
+  const roomsQuery = useRooms(propertyId || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
   const documentsQuery = useDocuments({}, 100);
@@ -101,6 +109,21 @@ export function ItemForm({
   const [locationId, setLocationId] = React.useState(
     item?.location?.id ?? defaultLocationId ?? "",
   );
+  React.useEffect(() => {
+    if (propertyId) return;
+    const selectedRoom = roomsQuery.data?.items.find((room) => room.id === roomId);
+    if (item?.property?.id) setPropertyId(item.property.id);
+    else if (defaultPropertyId) setPropertyId(defaultPropertyId);
+    else if (selectedRoom?.property_id) setPropertyId(selectedRoom.property_id);
+    else if (properties.length === 1) setPropertyId(properties[0]!.id);
+  }, [
+    propertyId,
+    item?.property?.id,
+    defaultPropertyId,
+    properties,
+    roomId,
+    roomsQuery.data?.items,
+  ]);
   const [categoryId, setCategoryId] = React.useState(item?.category?.id ?? "");
   const [tagIds, setTagIds] = React.useState<string[]>(item?.tags.map((tag) => tag.id) ?? []);
   const [newTag, setNewTag] = React.useState("");
@@ -663,6 +686,27 @@ export function ItemForm({
               title="Its place"
               description="Every item can belong to a room and a more specific place."
             >
+              {properties.length > 0 && (
+                <Field label="Property" htmlFor="item-property">
+                  <Select
+                    id="item-property"
+                    value={propertyId}
+                    onChange={(event) => {
+                      setPropertyId(event.target.value);
+                      setRoomId("");
+                      setLocationId("");
+                    }}
+                  >
+                    <option value="">No property / unlocated</option>
+                    {properties.map((property) => (
+                      <option key={property.id} value={property.id}>
+                        {property.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+
               <Field label="Room" htmlFor="item-room" error={fieldErrors?.room_id}>
                 <Select
                   id="item-room"
@@ -675,8 +719,13 @@ export function ItemForm({
                   <option value="">No room yet</option>
                   {roomOptions.map(({ room }) => (
                     <option key={room.id} value={room.id}>
-                      {roomPath(roomsQuery.data?.items ?? [], room.id)
-                        .map((entry) => entry.name)
+                      {[
+                        propertyId ? null : room.property?.name,
+                        ...roomPath(roomsQuery.data?.items ?? [], room.id).map(
+                          (entry) => entry.name,
+                        ),
+                      ]
+                        .filter(Boolean)
                         .join(" / ")}
                     </option>
                   ))}

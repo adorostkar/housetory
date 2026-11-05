@@ -101,7 +101,7 @@ class ActivityEvent(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "activity_events"
     __table_args__ = (
         CheckConstraint(
-            "entity_type in ('item', 'container', 'loan', 'batch')",
+            "entity_type in ('item', 'container', 'loan', 'batch', 'room')",
             name="valid_entity_type",
         ),
         UniqueConstraint(

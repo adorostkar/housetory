@@ -69,6 +69,8 @@ class EvidenceItemPreview(BaseModel):
     condition: str
     is_archived: bool
     category: str | None = None
+    property_id: uuid.UUID | None = None
+    property_name: str | None = None
     full_location_path: str
     purchase_info_status: str
     purchase_currency: str | None = None

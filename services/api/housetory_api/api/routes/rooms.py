@@ -1,12 +1,18 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ...db import get_db
 from ...models import Item, Room, StorageLocation
+from ...schemas.properties import (
+    RoomPropertyMovePreview,
+    RoomPropertyMoveRequest,
+    RoomPropertyMoveResponse,
+)
 from ...schemas.rooms import RoomCreate, RoomList, RoomOut, RoomUpdate
+from ...services import properties as property_service
 from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -15,7 +21,11 @@ router = APIRouter(prefix="/rooms", tags=["rooms"])
 
 
 def _get_room(db: Session, household_id: uuid.UUID, room_id: uuid.UUID) -> Room:
-    room = db.scalar(select(Room).where(Room.id == room_id, Room.household_id == household_id))
+    room = db.scalar(
+        select(Room)
+        .options(joinedload(Room.property))
+        .where(Room.id == room_id, Room.household_id == household_id)
+    )
     if room is None:
         raise ApiError(404, "room_not_found", "Room not found.")
     return room
@@ -25,12 +35,14 @@ def _ensure_unique_name(
     db: Session,
     household_id: uuid.UUID,
     name: str,
+    property_id: uuid.UUID,
     parent_id: uuid.UUID | None,
     *,
     exclude_id: uuid.UUID | None = None,
 ) -> None:
     query = select(Room.id).where(
         Room.household_id == household_id,
+        Room.property_id == property_id,
         func.lower(Room.name) == name.lower(),
     )
     if parent_id is None:
@@ -48,17 +60,25 @@ def _validate_parent(
     household_id: uuid.UUID,
     parent_id: uuid.UUID | None,
     *,
+    property_id: uuid.UUID,
     room_id: uuid.UUID | None = None,
-) -> None:
+) -> Room | None:
     if parent_id is None:
-        return
+        return None
     if room_id is not None and parent_id == room_id:
         raise ApiError(422, "room_cycle", "A room cannot be its own parent.")
     cursor: Room | None = _get_room(db, household_id, parent_id)
+    if cursor.property_id != property_id:
+        raise ApiError(
+            422,
+            "room_property_mismatch",
+            "A sub-room must stay in the same property as its parent.",
+        )
     while cursor is not None:
         if room_id is not None and cursor.id == room_id:
             raise ApiError(422, "room_cycle", "That would create a loop in the room hierarchy.")
         cursor = db.get(Room, cursor.parent_id) if cursor.parent_id else None
+    return _get_room(db, household_id, parent_id)
 
 
 def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
@@ -104,6 +124,8 @@ def _to_out(
         id=room.id,
         name=room.name,
         description=room.description,
+        property_id=room.property_id,
+        property=property_service.property_brief(room.property),
         parent_id=room.parent_id,
         sort_order=room.sort_order,
         item_count=item_counts.get(room.id, 0),
@@ -117,12 +139,18 @@ def _to_out(
 
 @router.get("", response_model=RoomList)
 def list_rooms(
+    property_id: uuid.UUID | None = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> RoomList:
+    conditions = [Room.household_id == auth.household.id]
+    if property_id is not None:
+        property_service.get_property(db, auth.household.id, property_id)
+        conditions.append(Room.property_id == property_id)
     rooms = db.scalars(
         select(Room)
-        .where(Room.household_id == auth.household.id)
+        .options(joinedload(Room.property))
+        .where(*conditions)
         .order_by(Room.sort_order, func.lower(Room.name))
     ).all()
     item_counts, location_counts = _counts(db, auth.household.id)
@@ -141,10 +169,37 @@ def create_room(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> RoomOut:
-    _validate_parent(db, auth.household.id, payload.parent_id)
-    _ensure_unique_name(db, auth.household.id, payload.name, payload.parent_id)
+    property_service.household_hierarchy_lock(db, auth.household.id)
+    parent = None
+    if payload.parent_id is not None:
+        parent = _get_room(db, auth.household.id, payload.parent_id)
+        if payload.property_id is not None and payload.property_id != parent.property_id:
+            raise ApiError(
+                422,
+                "room_property_mismatch",
+                "A sub-room must stay in the same property as its parent.",
+            )
+        property_record = parent.property
+    else:
+        property_record = property_service.resolve_room_property(
+            db, auth.household.id, payload.property_id
+        )
+    _validate_parent(
+        db,
+        auth.household.id,
+        payload.parent_id,
+        property_id=property_record.id,
+    )
+    _ensure_unique_name(
+        db,
+        auth.household.id,
+        payload.name,
+        property_record.id,
+        payload.parent_id,
+    )
     room = Room(
         household_id=auth.household.id,
+        property_id=property_record.id,
         parent_id=payload.parent_id,
         name=payload.name,
         description=payload.description,
@@ -152,6 +207,7 @@ def create_room(
     )
     db.add(room)
     db.commit()
+    room = _get_room(db, auth.household.id, room.id)
     return _to_out(room, {}, {}, {}, {})
 
 
@@ -175,18 +231,26 @@ def update_room(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> RoomOut:
+    property_service.household_hierarchy_lock(db, auth.household.id)
     room = _get_room(db, auth.household.id, room_id)
     fields = payload.model_fields_set
     new_parent_id = payload.parent_id if "parent_id" in fields else room.parent_id
 
     if "parent_id" in fields:
-        _validate_parent(db, auth.household.id, new_parent_id, room_id=room_id)
+        _validate_parent(
+            db,
+            auth.household.id,
+            new_parent_id,
+            property_id=room.property_id,
+            room_id=room_id,
+        )
 
     if payload.name is not None and payload.name != room.name:
         _ensure_unique_name(
             db,
             auth.household.id,
             payload.name,
+            room.property_id,
             new_parent_id,
             exclude_id=room.id,
         )
@@ -195,6 +259,7 @@ def update_room(
             db,
             auth.household.id,
             room.name,
+            room.property_id,
             new_parent_id,
             exclude_id=room.id,
         )
@@ -209,10 +274,52 @@ def update_room(
         room.parent_id = new_parent_id
 
     db.commit()
-    rooms = db.scalars(select(Room).where(Room.household_id == auth.household.id)).all()
+    room = _get_room(db, auth.household.id, room.id)
+    rooms = db.scalars(
+        select(Room)
+        .options(joinedload(Room.property))
+        .where(Room.household_id == auth.household.id)
+    ).all()
     item_counts, location_counts = _counts(db, auth.household.id)
     total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
     return _to_out(room, item_counts, location_counts, total_items, total_locations)
+
+
+@router.get(
+    "/{room_id}/property-move/preview",
+    response_model=RoomPropertyMovePreview,
+)
+def preview_room_property_move(
+    room_id: uuid.UUID,
+    property_id: uuid.UUID = Query(...),
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> RoomPropertyMovePreview:
+    return property_service.room_property_move_preview(db, auth.household.id, room_id, property_id)
+
+
+@router.post(
+    "/{room_id}/property-move",
+    response_model=RoomPropertyMoveResponse,
+)
+def move_room_property(
+    room_id: uuid.UUID,
+    payload: RoomPropertyMoveRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> RoomPropertyMoveResponse:
+    result = property_service.move_room_to_property(
+        db,
+        auth.household.id,
+        room_id,
+        payload,
+        actor_user_id=auth.user.id,
+        actor_name=auth.user.name,
+    )
+    preview = property_service.room_property_move_preview(
+        db, auth.household.id, room_id, payload.property_id
+    )
+    return RoomPropertyMoveResponse(preview=preview, result=result)
 
 
 @router.delete("/{room_id}", status_code=204)
@@ -221,6 +328,7 @@ def delete_room(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> Response:
+    property_service.household_hierarchy_lock(db, auth.household.id)
     room = _get_room(db, auth.household.id, room_id)
     has_children = db.scalar(select(Room.id).where(Room.parent_id == room.id).limit(1)) is not None
     has_locations = (

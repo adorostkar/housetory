@@ -28,6 +28,7 @@ class VoiceNote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="valid_status",
         ),
         Index("ix_voice_notes_household_created", "household_id", "created_at"),
+        Index("ix_voice_notes_household_property", "household_id", "default_property_id"),
         Index("ix_voice_notes_status", "status"),
     )
 
@@ -45,6 +46,9 @@ class VoiceNote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     audio_content_type: Mapped[str | None] = mapped_column(String(100))
     audio_byte_size: Mapped[int | None] = mapped_column(BigInteger)
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    default_property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("properties.id", ondelete="SET NULL")
+    )
     default_room_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="SET NULL")
     )

@@ -32,11 +32,15 @@ for file in database.dump uploads.tar.gz SHA256SUMS manifest.txt; do
   fi
 done
 
-# Imports were added after the original backup format. Older backups remain
-# restorable; new backups include the private import-source volume.
+# Imports and private evidence exports were added after the original backup
+# format. Older backups remain restorable; newer backups include both volumes.
 has_imports=false
 if [ -f "$source_dir/imports.tar.gz" ]; then
   has_imports=true
+fi
+has_exports=false
+if [ -f "$source_dir/exports.tar.gz" ]; then
+  has_exports=true
 fi
 
 echo "Verifying backup checksums..."
@@ -87,6 +91,14 @@ if [ "$has_imports" = true ]; then
     < "$source_dir/imports.tar.gz"
 fi
 
+if [ "$has_exports" = true ]; then
+  echo "Validating evidence export archive..."
+  docker compose run --rm --no-deps -T \
+    -v "$ROOT/scripts:/scripts:ro" \
+    --entrypoint python api /scripts/restore_uploads.py --check \
+    < "$source_dir/exports.tar.gz"
+fi
+
 if [ "$assume_yes" != true ]; then
   echo
   echo "This will REPLACE the current database and uploaded files with:"
@@ -134,6 +146,14 @@ if [ "$has_imports" = true ]; then
     -v "$ROOT/scripts:/scripts:ro" \
     --entrypoint python api /scripts/restore_uploads.py --extract --root /data/imports \
     < "$source_dir/imports.tar.gz"
+fi
+
+if [ "$has_exports" = true ]; then
+  echo "Restoring private evidence export artifacts..."
+  docker compose run --rm --no-deps -T \
+    -v "$ROOT/scripts:/scripts:ro" \
+    --entrypoint python api /scripts/restore_uploads.py --extract --root /data/exports \
+    < "$source_dir/exports.tar.gz"
 fi
 
 echo "Applying any newer migrations..."

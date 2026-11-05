@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,7 +27,7 @@ import {
   IMPORT_STATUS_LABELS,
   IMPORT_STATUS_TONE,
 } from "@/lib/labels";
-import { useImports, useLocations, useRooms } from "@/lib/queries";
+import { useImports, useLocations, useProperties, useRooms } from "@/lib/queries";
 import type { ImportBatch, ImportBatchDetail } from "@/lib/types";
 import { formatDate, formatFileSize, pluralize } from "@/lib/utils";
 
@@ -40,21 +41,32 @@ type Mode = (typeof MODES)[number]["id"];
 export function ImportsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const propertyParam = searchParams.get("property_id") ?? "";
   const roomId = searchParams.get("room_id") ?? "";
   const locationId = searchParams.get("location_id") ?? "";
   const importsQuery = useImports();
-  const roomsQuery = useRooms();
+  const propertiesQuery = useProperties();
+  const properties = propertiesQuery.data?.items ?? [];
+  const [propertyId, setPropertyId] = React.useState(propertyParam);
+  const roomsQuery = useRooms(propertyId || undefined);
   const locationsQuery = useLocations();
   const contextRoom = roomsQuery.data?.items.find((room) => room.id === roomId);
   const contextLocation = locationsQuery.data?.items.find(
     (location) => location.id === locationId,
   );
   const contextLabel = [
+    contextRoom?.property?.name ?? properties.find((entry) => entry.id === propertyId)?.name,
     contextRoom?.name,
     contextLocation?.identifier ?? contextLocation?.name,
   ]
     .filter(Boolean)
     .join(" · ");
+
+  React.useEffect(() => {
+    if (propertyId) return;
+    if (contextRoom?.property_id) setPropertyId(contextRoom.property_id);
+    else if (properties.length === 1) setPropertyId(properties[0]!.id);
+  }, [propertyId, contextRoom?.property_id, properties]);
   const [mode, setMode] = React.useState<Mode>("paste");
   const [title, setTitle] = React.useState("");
   const [text, setText] = React.useState("");
@@ -64,6 +76,7 @@ export function ImportsPage() {
     mutationFn: () => {
       const formData = new FormData();
       if (title.trim()) formData.append("title", title.trim());
+      if (propertyId) formData.append("property_id", propertyId);
       if (roomId) formData.append("room_id", roomId);
       if (locationId) formData.append("location_id", locationId);
       if (mode === "paste") {
@@ -118,6 +131,7 @@ export function ImportsPage() {
               setSearchParams(
                 (previous) => {
                   const next = new URLSearchParams(previous);
+                  next.delete("property_id");
                   next.delete("room_id");
                   next.delete("location_id");
                   return next;
@@ -217,6 +231,41 @@ export function ImportsPage() {
               )}
             </div>
             <div className="space-y-4">
+              <Field
+                label="Property"
+                htmlFor="import-property"
+                hint={
+                  properties.length > 1
+                    ? "New rooms and entries use this property."
+                    : undefined
+                }
+              >
+                <Select
+                  id="import-property"
+                  value={propertyId}
+                  onChange={(event) => {
+                    setPropertyId(event.target.value);
+                    setSearchParams(
+                      (previous) => {
+                        const next = new URLSearchParams(previous);
+                        if (event.target.value) next.set("property_id", event.target.value);
+                        else next.delete("property_id");
+                        next.delete("room_id");
+                        next.delete("location_id");
+                        return next;
+                      },
+                      { replace: true },
+                    );
+                  }}
+                >
+                  <option value="">Choose a property</option>
+                  {properties.map((property) => (
+                    <option key={property.id} value={property.id}>
+                      {property.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
               <Field label="Import name" htmlFor="import-title" optional>
                 <Input
                   id="import-title"

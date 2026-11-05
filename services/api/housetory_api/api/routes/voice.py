@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ...config import get_settings
 from ...db import get_db
 from ...domain import VoiceNoteStatus
-from ...models import Room, StorageLocation, VoiceNote
+from ...models import Property, Room, StorageLocation, VoiceNote
 from ...schemas.voice import (
     VoiceApplyRequest,
     VoiceApplyResult,
@@ -16,6 +16,7 @@ from ...schemas.voice import (
     VoiceNoteOut,
     VoiceTranscriptRequest,
 )
+from ...services import properties as property_service
 from ...services import storage
 from ...services.voice import (
     active_voice_note_count,
@@ -47,7 +48,8 @@ def _context(
     household_id: uuid.UUID,
     room_id: uuid.UUID | None,
     location_id: uuid.UUID | None,
-) -> tuple[Room | None, StorageLocation | None]:
+    property_id: uuid.UUID | None = None,
+) -> tuple[Property, Room | None, StorageLocation | None]:
     room: Room | None = None
     location: StorageLocation | None = None
     if room_id is not None:
@@ -76,7 +78,26 @@ def _context(
                     Room.household_id == household_id,
                 )
             )
-    return room, location
+    property_record = None
+    if room is not None:
+        property_record = room.property
+        if property_id is not None and property_id != property_record.id:
+            raise ApiError(
+                422,
+                "context_mismatch",
+                "The selected room belongs to a different property.",
+            )
+    elif property_id is not None:
+        property_record = property_service.get_property(db, household_id, property_id)
+    else:
+        property_record = property_service.resolve_room_property(db, household_id, None)
+    if property_record.is_archived:
+        raise ApiError(
+            422,
+            "property_archived",
+            "Restore the selected property before recording a voice note.",
+        )
+    return property_record, room, location
 
 
 @router.get("/config", response_model=VoiceConfigOut)
@@ -103,6 +124,7 @@ def voice_config(
 def create_voice_note(
     file: Annotated[UploadFile, File()],
     duration_seconds: Annotated[int | None, Form(ge=0, le=86_400)] = None,
+    property_id: Annotated[uuid.UUID | None, Form()] = None,
     room_id: Annotated[uuid.UUID | None, Form()] = None,
     location_id: Annotated[uuid.UUID | None, Form()] = None,
     auth: AuthContext = Depends(require_auth),
@@ -131,12 +153,15 @@ def create_voice_note(
             "too_many_voice_notes",
             "Too many voice notes are waiting for review. Finish or cancel one first.",
         )
-    room, location = _context(db, auth.household.id, room_id, location_id)
+    property_record, room, location = _context(
+        db, auth.household.id, room_id, location_id, property_id
+    )
     note = VoiceNote(
         household_id=auth.household.id,
         created_by_user_id=auth.user.id,
         status=VoiceNoteStatus.QUEUED.value,
         duration_seconds=duration_seconds,
+        default_property_id=property_record.id,
         default_room_id=room.id if room else None,
         default_location_id=location.id if location else None,
         warnings=[],

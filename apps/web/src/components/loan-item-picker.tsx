@@ -20,7 +20,11 @@ import { itemContainer, locationLabel } from "@/lib/utils";
 function placeLabel(item: ItemSummary) {
   const container = itemContainer(item);
   const trail = item.location_path.map((entry) => locationLabel(entry));
-  const parts = [item.room?.name, ...(trail.length ? trail : container ? [locationLabel(container)] : [])];
+  const parts = [
+    item.property?.name,
+    item.room?.name,
+    ...(trail.length ? trail : container ? [locationLabel(container)] : []),
+  ].filter(Boolean);
   return parts.filter(Boolean).join(" → ") || "No home location recorded";
 }
 

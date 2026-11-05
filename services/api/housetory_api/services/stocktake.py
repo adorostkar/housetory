@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..api.errors import ApiError
 from ..config import get_settings
@@ -105,8 +105,11 @@ def _room_path_map(rooms: list[Room]) -> dict[uuid.UUID, str]:
             return by_id[room_id].name
         seen.add(room_id)
         room = by_id[room_id]
-        prefix = resolve(room.parent_id, seen) if room.parent_id in by_id else ""
-        value = f"{prefix} / {room.name}" if prefix else room.name
+        if room.parent_id in by_id:
+            value = f"{resolve(room.parent_id, seen)} / {room.name}"
+        else:
+            property_name = room.property.name if room.property is not None else ""
+            value = f"{property_name} / {room.name}" if property_name else room.name
         result[room_id] = value
         return value
 
@@ -208,7 +211,12 @@ def _expand_roots(
 
     labels: list[str] = []
     for room_id in sorted(room_ids, key=lambda value: rooms_by_id[value].name.lower()):
-        labels.append(f"Room: {rooms_by_id[room_id].name}")
+        room = rooms_by_id[room_id]
+        labels.append(
+            f"Room: {room.property.name} / {room.name}"
+            if room.property is not None
+            else f"Room: {room.name}"
+        )
     for location_id in sorted(
         container_ids,
         key=lambda value: (
@@ -217,8 +225,14 @@ def _expand_roots(
         ),
     ):
         location = locations_by_id[location_id]
+        property_name = (
+            location.room.property.name
+            if location.room is not None and location.room.property is not None
+            else None
+        )
         labels.append(
-            f"Container: {location.identifier or location.name}"
+            f"Container: {property_name + ' / ' if property_name else ''}"
+            f"{location.identifier or location.name}"
             + (f" · {location.name}" if location.identifier and location.name else "")
         )
     scope_label = " · ".join(labels) if labels else "Selected inventory"
@@ -688,7 +702,11 @@ def session_detail(
             ).all()
         }
     loan_quantities = lending.loan_quantities_for_items(db, household_id, list(current_items))
-    rooms = list(db.scalars(select(Room).where(Room.household_id == household_id)).all())
+    rooms = list(
+        db.scalars(
+            select(Room).options(joinedload(Room.property)).where(Room.household_id == household_id)
+        ).all()
+    )
     locations = list(
         db.scalars(
             select(StorageLocation).where(StorageLocation.household_id == household_id)
@@ -1739,7 +1757,11 @@ def complete_session(
         else {}
     )
     loan_quantities = lending.loan_quantities_for_items(db, household_id, list(current_items))
-    rooms = list(db.scalars(select(Room).where(Room.household_id == household_id)).all())
+    rooms = list(
+        db.scalars(
+            select(Room).options(joinedload(Room.property)).where(Room.household_id == household_id)
+        ).all()
+    )
     locations = list(
         db.scalars(
             select(StorageLocation).where(StorageLocation.household_id == household_id)

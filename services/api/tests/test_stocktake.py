@@ -153,8 +153,8 @@ def test_scope_snapshot_dedupes_hierarchy_and_excludes_loaned_units(owner_client
     )
     assert response.status_code == 201, response.text
     session = response.json()
-    assert session["scope_label"].startswith("Room: Parent room")
-    assert "Container: BOX-" in session["scope_label"]
+    assert session["scope_label"].startswith("Room: Home / Parent room")
+    assert "Container: Home / BOX-" in session["scope_label"]
     assert session["expected_item_count"] == 2
     assert session["expected_unit_count"] == 5
     assert session["expected_at_home_unit_count"] == 4

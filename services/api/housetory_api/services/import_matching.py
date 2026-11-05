@@ -33,20 +33,25 @@ class InventoryIndex:
     tags: list[Tag]
 
 
-def build_index(db: Session, household_id: uuid.UUID) -> InventoryIndex:
+def build_index(
+    db: Session,
+    household_id: uuid.UUID,
+    property_id: uuid.UUID | None = None,
+) -> InventoryIndex:
+    room_conditions = [Room.household_id == household_id]
+    if property_id is not None:
+        room_conditions.append(Room.property_id == property_id)
+    room_query = select(Room).where(*room_conditions)
+    location_query = select(StorageLocation).where(StorageLocation.household_id == household_id)
+    if property_id is not None:
+        location_query = location_query.join(Room, Room.id == StorageLocation.room_id).where(
+            Room.property_id == property_id
+        )
     return InventoryIndex(
-        rooms=list(
-            db.scalars(
-                select(Room)
-                .where(Room.household_id == household_id)
-                .order_by(Room.sort_order, Room.name)
-            ).all()
-        ),
+        rooms=list(db.scalars(room_query.order_by(Room.sort_order, Room.name)).all()),
         locations=list(
             db.scalars(
-                select(StorageLocation)
-                .where(StorageLocation.household_id == household_id)
-                .order_by(StorageLocation.sort_order, StorageLocation.name)
+                location_query.order_by(StorageLocation.sort_order, StorageLocation.name)
             ).all()
         ),
         categories=list(

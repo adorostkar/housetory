@@ -14,6 +14,7 @@ from ..schemas.containers import (
     ContainerSummaryOut,
 )
 from ..schemas.items import LocationBrief, RoomBrief
+from ..schemas.properties import PropertyBrief
 from .containers import (
     container_children,
     contents_updated_at,
@@ -142,6 +143,11 @@ def serialize_container(
     )
     return ContainerOut(
         id=location.id,
+        property=PropertyBrief(
+            id=location.room.property.id,
+            name=location.room.property.name,
+            is_archived=location.room.property.is_archived,
+        ),
         identifier=location.identifier,
         legacy_identifier=location.legacy_identifier,
         aliases=location.aliases or [],

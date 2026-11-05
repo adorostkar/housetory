@@ -20,6 +20,7 @@ from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from .inventory import Category, Document, Item, Room, StorageLocation, Tag
+    from .property import Property
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -58,6 +59,9 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     members: Mapped[list["HouseholdMember"]] = relationship(
+        back_populates="household", cascade="all, delete-orphan"
+    )
+    properties: Mapped[list["Property"]] = relationship(
         back_populates="household", cascade="all, delete-orphan"
     )
     rooms: Mapped[list["Room"]] = relationship(

@@ -31,6 +31,8 @@ import type {
   LabelTemplateList,
   Overview,
   PhotoList,
+  Property,
+  PropertyList,
   PurchaseList,
   QuickSearchResponse,
   RoomList,
@@ -57,6 +59,8 @@ export const queryKeys = {
   session: ["session"] as const,
   overview: ["overview"] as const,
   rooms: ["rooms"] as const,
+  properties: ["properties"] as const,
+  property: (propertyId: string) => ["properties", propertyId] as const,
   locations: (roomId?: string) => ["locations", roomId ?? "all"] as const,
   categories: ["categories"] as const,
   tags: ["tags"] as const,
@@ -248,10 +252,26 @@ export function useOverview() {
   });
 }
 
-export function useRooms() {
+export function useProperties(includeArchived = false) {
   return useQuery({
-    queryKey: queryKeys.rooms,
-    queryFn: () => api.get<RoomList>("/rooms"),
+    queryKey: [...queryKeys.properties, includeArchived],
+    queryFn: () =>
+      api.get<PropertyList>(`/properties${buildQuery({ include_archived: includeArchived })}`),
+  });
+}
+
+export function useProperty(propertyId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.property(propertyId ?? ""),
+    queryFn: () => api.get<Property>(`/properties/${propertyId}`),
+    enabled: Boolean(propertyId),
+  });
+}
+
+export function useRooms(propertyId?: string) {
+  return useQuery({
+    queryKey: [...queryKeys.rooms, propertyId ?? "all"],
+    queryFn: () => api.get<RoomList>(`/rooms${buildQuery({ property_id: propertyId })}`),
   });
 }
 
@@ -281,6 +301,7 @@ export function useTags() {
 
 export interface ItemFilters {
   q?: string;
+  property_id?: string;
   room_id?: string;
   location_id?: string;
   category_id?: string;
@@ -496,6 +517,7 @@ export function useInvalidateInventory() {
   return () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
     void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.properties });
     void queryClient.invalidateQueries({ queryKey: ["locations"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.items });
     void queryClient.invalidateQueries({ queryKey: ["item"] });
@@ -531,6 +553,7 @@ export function useLogout() {
 
 export interface ContainerFilters {
   q?: string;
+  property_id?: string;
   room_id?: string;
   container_type?: string;
   empty?: boolean;

@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..api.errors import ApiError
 from ..domain import ContainerType, prefix_for_container_type, prefix_for_location_kind
@@ -70,6 +70,8 @@ def get_location(
     )
     if for_update:
         query = query.with_for_update()
+    else:
+        query = query.options(joinedload(StorageLocation.room).joinedload(Room.property))
     location = db.scalar(query)
     if location is None:
         raise ApiError(404, "location_not_found", "Storage location not found.")
@@ -617,13 +619,23 @@ def move_container(
             container_id=moved.id,
             summary=(
                 f"Moved container {moved.identifier or moved.name} from "
+                f"{from_room.property.name + ' / ' if from_room and from_room.property else ''}"
                 f"{from_room.name if from_room else 'an unknown room'}"
                 f"{' / ' + from_parent.name if from_parent else ''} to "
+                f"{destination_room.property.name + ' / ' if destination_room.property else ''}"
                 f"{destination_room.name}"
                 f"{' / ' + destination_parent.name if destination_parent else ''}"
                 f" · {affected_items} item(s), {affected_quantity} unit(s) moved with it"
             ),
             details={
+                "from_property_id": (
+                    str(from_room.property.id) if from_room and from_room.property else None
+                ),
+                "from_property_name": (
+                    from_room.property.name if from_room and from_room.property else None
+                ),
+                "to_property_id": str(destination_room.property.id),
+                "to_property_name": destination_room.property.name,
                 "from_room_id": str(from_room.id) if from_room else None,
                 "from_room_name": from_room.name if from_room else None,
                 "from_parent_id": str(from_parent.id) if from_parent else None,

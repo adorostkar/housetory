@@ -13,6 +13,8 @@ from ..models import (
     ItemPhoto,
     Purchase,
     PurchaseAllocation,
+    Room,
+    StorageLocation,
     Warranty,
 )
 from ..schemas.common import ItemReference
@@ -28,6 +30,7 @@ from ..schemas.items import (
     RoomBrief,
     TagBrief,
 )
+from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseOut
 from ..schemas.warranties import WarrantyOut
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
@@ -39,8 +42,10 @@ _settings = get_settings()
 def item_load_options() -> list:
     return [
         joinedload(Item.household),
-        joinedload(Item.room),
-        joinedload(Item.storage_location),
+        joinedload(Item.room).joinedload(Room.property),
+        joinedload(Item.storage_location)
+        .joinedload(StorageLocation.room)
+        .joinedload(Room.property),
         joinedload(Item.category),
         joinedload(Item.purchase).joinedload(Purchase.receipt_document),
         joinedload(Item.purchase).selectinload(Purchase.items),
@@ -313,6 +318,15 @@ def item_summary(
         if household_reminder_days is not None
         else item.household.warranty_reminder_days
     )
+    property_record = (
+        item.room.property
+        if item.room is not None
+        else (
+            item.storage_location.room.property
+            if item.storage_location is not None and item.storage_location.room is not None
+            else None
+        )
+    )
     return ItemSummary(
         id=item.id,
         name=item.name,
@@ -324,6 +338,15 @@ def item_summary(
         condition=item.condition,
         is_archived=item.is_archived,
         room=RoomBrief(id=item.room.id, name=item.room.name) if item.room else None,
+        property=(
+            PropertyBrief(
+                id=property_record.id,
+                name=property_record.name,
+                is_archived=property_record.is_archived,
+            )
+            if property_record is not None
+            else None
+        ),
         location=(
             LocationBrief(
                 id=item.storage_location.id,

@@ -15,6 +15,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
+import { PropertiesSettings } from "@/components/properties-settings";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -231,6 +232,8 @@ export function SettingsPage() {
             </p>
           )}
         </section>
+
+        <PropertiesSettings />
 
         <section className="surface p-5 sm:p-6">
           <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">

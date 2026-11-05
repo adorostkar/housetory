@@ -10,6 +10,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -32,6 +33,7 @@ from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from .auth import Household
+    from .property import Property
     from .stocktake import StocktakeItemState
 
 
@@ -40,11 +42,24 @@ class Room(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("parent_id IS NULL OR parent_id <> id", name="not_own_parent"),
         CheckConstraint("length(name) between 1 and 120", name="name_length"),
+        UniqueConstraint("id", "property_id", name="uq_rooms_id_property"),
+        ForeignKeyConstraint(
+            ["parent_id", "property_id"],
+            ["rooms.id", "rooms.property_id"],
+            name="fk_rooms_parent_property",
+            ondelete="NO ACTION",
+        ),
         Index("ix_rooms_household_parent", "household_id", "parent_id"),
+        Index("ix_rooms_household_property_parent", "household_id", "property_id", "parent_id"),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="SET NULL")
@@ -54,8 +69,16 @@ class Room(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     household: Mapped["Household"] = relationship(back_populates="rooms")
-    parent: Mapped["Room | None"] = relationship(remote_side="Room.id", back_populates="children")
-    children: Mapped[list["Room"]] = relationship(back_populates="parent")
+    property: Mapped["Property"] = relationship(back_populates="rooms")
+    parent: Mapped["Room | None"] = relationship(
+        remote_side="Room.id",
+        back_populates="children",
+        foreign_keys=[parent_id],
+    )
+    children: Mapped[list["Room"]] = relationship(
+        back_populates="parent",
+        foreign_keys=[parent_id],
+    )
     storage_locations: Mapped[list["StorageLocation"]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )

@@ -4,11 +4,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from ..schemas.common import Description, Name, ORMModel
+from ..schemas.properties import PropertyBrief
 
 
 class RoomCreate(BaseModel):
     name: Name
     description: Description | None = None
+    property_id: uuid.UUID | None = None
     parent_id: uuid.UUID | None = None
     sort_order: int = Field(default=0, ge=-10000, le=10000)
 
@@ -24,6 +26,8 @@ class RoomOut(ORMModel):
     id: uuid.UUID
     name: str
     description: str | None
+    property_id: uuid.UUID
+    property: PropertyBrief
     parent_id: uuid.UUID | None
     sort_order: int
     item_count: int = 0

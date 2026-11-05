@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { usePropertyFilter } from "@/hooks/use-property-filter";
 
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
@@ -66,6 +67,7 @@ export function ItemsPage() {
   const { openAddItems } = useAddItems();
   const canWrite = useCanWrite();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { propertyId, setPropertyId, properties } = usePropertyFilter();
   const qParam = searchParams.get("q") ?? "";
   const roomFilter = searchParams.get("room_id") ?? "";
   const locationFilter = searchParams.get("location_id") ?? "";
@@ -94,7 +96,7 @@ export function ItemsPage() {
   const selectAllRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  const roomsQuery = useRooms();
+  const roomsQuery = useRooms(propertyId || undefined);
   const locationsQuery = useLocations(roomFilter || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
@@ -123,6 +125,7 @@ export function ItemsPage() {
 
   const filters = {
     q: qParam || undefined,
+    property_id: propertyId || undefined,
     room_id: roomFilter || undefined,
     location_id: locationFilter || undefined,
     category_id: categoryFilter || undefined,
@@ -137,6 +140,7 @@ export function ItemsPage() {
   const total = itemsQuery.data?.pages[0]?.total ?? 0;
   const filterSignature = JSON.stringify([
     qParam,
+    propertyId,
     roomFilter,
     locationFilter,
     categoryFilter,
@@ -160,6 +164,7 @@ export function ItemsPage() {
   const hasArchivedSelection = selectedItems.some((item) => item.is_archived);
   const hasFilters = Boolean(
     qParam ||
+      propertyId ||
       roomFilter ||
       locationFilter ||
       categoryFilter ||
@@ -235,6 +240,15 @@ export function ItemsPage() {
     missing_price: "Missing purchase price",
   };
   const activeFilterChips = [
+    propertyId
+      ? {
+          key: "property",
+          label: `Property: ${
+            properties.find((property) => property.id === propertyId)?.name ?? "Selected"
+          }`,
+          remove: () => updatePropertyFilter(""),
+        }
+      : null,
     qParam
       ? {
           key: "q",
@@ -330,6 +344,20 @@ export function ItemsPage() {
     });
   };
 
+  const updatePropertyFilter = (propertyIdValue: string) => {
+    clearSelection("Selection cleared because the view changed.");
+    setPropertyId(propertyIdValue);
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("room_id");
+        next.delete("location_id");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const updateRoomFilter = (roomId: string) => {
     clearSelection("Selection cleared because the view changed.");
     setSearchParams((previous) => {
@@ -344,6 +372,7 @@ export function ItemsPage() {
   const clearFilters = () => {
     setSearch("");
     clearSelection("Selection cleared because the view changed.");
+    setPropertyId("");
     setSearchParams({}, { replace: true });
   };
 
@@ -357,7 +386,11 @@ export function ItemsPage() {
             ? `${pluralize(total, "item")} recorded${hasFilters ? " matching your filters" : " across your home"}.`
             : "Everything in your home, in one considered place."
         }
-        actions={<AddItemsButton />}
+        actions={
+          <AddItemsButton
+            context={propertyId ? { propertyId } : undefined}
+          />
+        }
       />
 
       <div className="surface mb-8 p-3.5 sm:p-4">
@@ -391,7 +424,22 @@ export function ItemsPage() {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-6">
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-7">
+          <div className="min-w-[150px] shrink-0 sm:min-w-0">
+            <Select
+              aria-label="Filter by property"
+              value={propertyId}
+              onChange={(event) => updatePropertyFilter(event.target.value)}
+              className="h-9 rounded-lg text-[0.8rem]"
+            >
+              <option value="">All properties</option>
+              {properties.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name}
+                </option>
+              ))}
+            </Select>
+          </div>
           <div className="min-w-[145px] shrink-0 sm:min-w-0">
             <Select
               aria-label="Filter by room"

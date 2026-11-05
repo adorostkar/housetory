@@ -17,13 +17,14 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
-import { queryKeys } from "@/lib/queries";
+import { queryKeys, useProperties } from "@/lib/queries";
 import type { Room } from "@/lib/types";
 import { collectDescendantIds, flattenRoomTree } from "@/lib/utils";
 
 interface RoomPayload {
   name: string;
   description: string | null;
+  property_id?: string;
   parent_id: string | null;
 }
 
@@ -33,24 +34,38 @@ export function RoomDialog({
   rooms,
   room,
   defaultParentId,
+  defaultPropertyId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rooms: Room[];
   room?: Room;
   defaultParentId?: string;
+  defaultPropertyId?: string;
 }) {
   const queryClient = useQueryClient();
+  const propertiesQuery = useProperties();
+  const properties = propertiesQuery.data?.items ?? [];
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [propertyId, setPropertyId] = useState("");
   const [parentId, setParentId] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setName(room?.name ?? "");
     setDescription(room?.description ?? "");
+    const parentRoom = defaultParentId
+      ? rooms.find((entry) => entry.id === defaultParentId)
+      : undefined;
+    setPropertyId(
+      room?.property_id ??
+        parentRoom?.property_id ??
+        defaultPropertyId ??
+        (properties.length === 1 ? properties[0]!.id : ""),
+    );
     setParentId(room?.parent_id ?? defaultParentId ?? "");
-  }, [open, room, defaultParentId]);
+  }, [open, room, rooms, defaultParentId, defaultPropertyId, properties]);
 
   const save = useMutation({
     mutationFn: (payload: RoomPayload) =>
@@ -68,7 +83,11 @@ export function RoomDialog({
   const excluded = room
     ? new Set([room.id, ...collectDescendantIds(rooms, room.id)])
     : new Set<string>();
-  const options = flattenRoomTree(rooms).filter(({ room: option }) => !excluded.has(option.id));
+  const options = flattenRoomTree(rooms).filter(
+    ({ room: option }) =>
+      !excluded.has(option.id) &&
+      (!propertyId || option.property_id === propertyId),
+  );
   const fieldErrors = save.error instanceof ApiError ? save.error.fields : undefined;
   const generalError = save.error && !fieldErrors ? getApiErrorMessage(save.error) : null;
 
@@ -92,11 +111,54 @@ export function RoomDialog({
             save.mutate({
               name: name.trim(),
               description: description.trim() || null,
+              ...(!room ? { property_id: propertyId || undefined } : {}),
               parent_id: parentId || null,
             });
           }}
         >
           {generalError && <FormError message={generalError} />}
+          {room ? (
+            <Field label="Property" htmlFor="room-property">
+              <p
+                id="room-property"
+                className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-2.5 text-[0.82rem] text-muted-foreground"
+              >
+                {room.property?.name ?? "Property"} · use Move to property from the room page to
+                move the whole subtree.
+              </p>
+            </Field>
+          ) : (
+            <Field
+              label="Property"
+              htmlFor="room-property"
+              hint={
+                properties.length > 1
+                  ? "Choose where this room belongs."
+                  : properties.length === 0
+                    ? "Create a property in Settings first."
+                    : undefined
+              }
+            >
+              <Select
+                id="room-property"
+                value={propertyId}
+                onChange={(event) => {
+                  setPropertyId(event.target.value);
+                  setParentId("");
+                }}
+                disabled={propertiesQuery.isPending || properties.length === 0}
+                required
+              >
+                <option value="">Choose a property</option>
+                {properties.map((property) => (
+                  <option key={property.id} value={property.id}>
+                    {property.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+
           <Field label="Room name" htmlFor="room-name" error={fieldErrors?.name}>
             <Input
               id="room-name"
@@ -140,7 +202,10 @@ export function RoomDialog({
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={save.isPending || !name.trim()}>
+            <Button
+              type="submit"
+              disabled={save.isPending || !name.trim() || (!room && !propertyId)}
+            >
               {save.isPending && <Spinner />}
               {room ? "Save changes" : "Add room"}
             </Button>

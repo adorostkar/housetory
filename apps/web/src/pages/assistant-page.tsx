@@ -310,11 +310,17 @@ function AssistantAnswer({
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {response.items.slice(0, 8).map((item) => {
             const container = itemContainer(item);
-            const place = container
-              ? locationLabel(container)
-              : item.location
-                ? locationLabel(item.location)
-                : item.room?.name ?? "No place recorded";
+            const place = [
+              item.property?.name,
+              item.room?.name,
+              container
+                ? locationLabel(container)
+                : item.location
+                  ? locationLabel(item.location)
+                  : null,
+            ]
+              .filter(Boolean)
+              .join(" / ") || "No place recorded";
             return (
               <Link
                 key={item.id}

@@ -89,7 +89,7 @@ test("unified search answers the heavy drill loan question without claiming it i
   await expect(
     page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
   ).toBeVisible();
-  await expect(page.getByText(/at home in Workshop/).first()).toBeVisible();
+  await expect(page.getByText(/at home in Home → Workshop/).first()).toBeVisible();
   await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
   await expect(page.getByText(/BOX-\d+ · Power tools/).first()).toBeVisible();
   await expect(page.getByText(/On loan: 1 with Alex/)).toHaveCount(0);

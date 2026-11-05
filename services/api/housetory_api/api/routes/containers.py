@@ -4,12 +4,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ...config import get_settings
 from ...db import get_db
 from ...domain import AiTask
-from ...models import Item, StorageLocation
+from ...models import Item, Room, StorageLocation
 from ...schemas.containers import (
     AiContainerSummary,
     ContainerBulkCreate,
@@ -26,6 +26,7 @@ from ...schemas.containers import (
     ContainerUpdate,
 )
 from ...services import ai
+from ...services import properties as property_service
 from ...services.container_serializers import (
     serialize_container,
     serialize_container_detail,
@@ -75,6 +76,7 @@ def qr_config(auth: AuthContext = Depends(require_auth)) -> ContainerQrConfig:
 @router.get("", response_model=ContainerList)
 def list_containers(
     q: Annotated[str | None, Query(max_length=120)] = None,
+    property_id: uuid.UUID | None = None,
     room_id: uuid.UUID | None = None,
     container_type: str | None = None,
     empty: bool | None = None,
@@ -87,6 +89,9 @@ def list_containers(
     conditions = [StorageLocation.household_id == auth.household.id]
     if not include_fixed:
         conditions.append(StorageLocation.is_container.is_(True))
+    if property_id is not None:
+        property_service.get_property(db, auth.household.id, property_id)
+        conditions.append(StorageLocation.room.has(Room.property_id == property_id))
     if room_id is not None:
         conditions.append(StorageLocation.room_id == room_id)
     if container_type:
@@ -100,6 +105,7 @@ def list_containers(
     locations = list(
         db.scalars(
             select(StorageLocation)
+            .options(joinedload(StorageLocation.room).joinedload(Room.property))
             .where(*conditions)
             .order_by(
                 StorageLocation.identifier.asc().nullslast(),

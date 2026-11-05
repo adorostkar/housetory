@@ -97,6 +97,7 @@ export function ContainerDetailPage() {
     () =>
       container
         ? {
+            propertyId: container.property?.id,
             roomId: container.room_id,
             locationId: container.id,
             roomName: container.room.name,
@@ -257,6 +258,12 @@ export function ContainerDetailPage() {
             </div>
             <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[0.82rem] text-muted-foreground">
               <MapPin className="size-3.5" />
+              {detail.property && (
+                <>
+                  <span className="font-medium text-foreground/80">{detail.property.name}</span>
+                  <ChevronRight className="size-3" />
+                </>
+              )}
               <span className="font-medium text-foreground/80">{roomLabel}</span>
               {insideLabel && (
                 <>

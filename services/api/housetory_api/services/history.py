@@ -42,6 +42,7 @@ ACTION_LABELS = {
     ActivityAction.CONTAINER_MOVE_UNDONE.value: "Container move undone",
     ActivityAction.LOAN_CREATION_UNDONE.value: "Loan creation undone",
     ActivityAction.LOAN_RETURN_UNDONE.value: "Return undone",
+    ActivityAction.ROOM_MOVED.value: "Room moved",
 }
 
 
@@ -79,7 +80,10 @@ def location_snapshot(
         )
         cursor = db.get(StorageLocation, cursor.parent_id) if cursor.parent_id else None
     path.reverse()
+    property_record = room.property if room is not None else None
     return {
+        "property_id": str(property_record.id) if property_record is not None else None,
+        "property_name": property_record.name if property_record is not None else None,
         "room_id": str(room.id) if room else None,
         "room_name": room.name if room else None,
         "location_id": str(location.id) if location else None,

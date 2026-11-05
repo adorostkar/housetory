@@ -231,6 +231,7 @@ class ActivityAction(StrEnum):
     LOAN_CREATION_UNDONE = "loan.creation_undone"
     LOAN_RETURN_UNDONE = "loan.return_undone"
     STOCKTAKE_QUANTITY_CORRECTED = "stocktake.quantity_corrected"
+    ROOM_MOVED = "room.moved"
 
 
 class ImportEntityType(StrEnum):

@@ -8,6 +8,7 @@ from ..domain import ContainerType
 from ..schemas.common import Description, Name, ORMModel, trimmed
 from ..schemas.documents import DocumentBrief
 from ..schemas.items import ItemSummary, LocationBrief, RoomBrief
+from ..schemas.properties import PropertyBrief
 
 
 class ContainerSummaryOut(BaseModel):
@@ -90,6 +91,7 @@ class ContainerBrief(ORMModel):
 
 class ContainerOut(ORMModel):
     id: uuid.UUID
+    property: PropertyBrief
     identifier: str | None
     legacy_identifier: str | None = None
     aliases: list[str] = Field(default_factory=list)
