@@ -259,3 +259,56 @@ verify live, configure the operator gateway described above, configure a real
 assistant task/provider with consent, then perform one deliberate search and one
 download while watching the API/worker logs. No live network, paid AI, email or
 remote deployment is performed by the automated tests.
+
+## Representative screenshots
+
+The walkthrough used a disposable Compose stack, a synthetic text manual and a
+mocked search candidate. No real household record or live search provider was
+used.
+
+### Before and after on the item page
+
+The existing item layout, typography, palette, photo area, lending, purchase,
+warranty and Documents panels are unchanged. The manual card is added compactly
+in the main column.
+
+![Item page before adding a manual, desktop](walkthrough/item-manuals/01-item-before-manual-desktop.png)
+
+![Empty manual card with Add manual, Attach existing and Ask actions, desktop](walkthrough/item-manuals/02-manuals-empty-desktop.png)
+
+![Item page before adding a manual, mobile](walkthrough/item-manuals/03-item-before-manual-mobile.png)
+
+![Item page with an attached manual, desktop](walkthrough/item-manuals/04-item-with-manual-desktop.png)
+
+![Compact manual card with source, page count and confirmed identity, desktop](walkthrough/item-manuals/05-manual-card-desktop.png)
+
+![Compact manual card on mobile](walkthrough/item-manuals/09b-manual-card-mobile.png)
+
+### Grounded answers and reviewed discovery
+
+![Grounded answer with real page citation and source links, desktop](walkthrough/item-manuals/06-ask-citations-desktop.png)
+
+![Mobile answer scrolled to citations, sources and honest unconfigured online state](walkthrough/item-manuals/10-ask-citations-mobile.png)
+
+![Find manual with confirmed identity and honest unconfigured search state, desktop](walkthrough/item-manuals/07-find-manual-unconfigured-desktop.png)
+
+![Reviewed candidate with source evidence and explicit download confirmation, desktop](walkthrough/item-manuals/08-find-manual-review-desktop.png)
+
+## Verification
+
+- **279 PostgreSQL-backed backend tests** pass, including the new manual
+  attachment, identity-gate, citation, idempotency, duplicate, provider-output
+  and SSRF tests.
+- **123 Vitest frontend tests** pass, including manual card/actions, Ask dialogs,
+  real-page citations, no-AI/unconfigured states, identity confirmation,
+  candidate review/download and viewer controls.
+- **33 disposable-stack Playwright workflows** pass, including two named manual
+  workflows: a real synthetic upload/attach/answer flow and a mocked
+  gated search/review/save flow at mobile width.
+- Ruff, strict TypeScript typecheck, production build and Alembic migration drift
+  check pass. The new migration is append-only.
+- The local Compose deployment was backed up first, migrated to
+  `c4e6a8b0d2f4`, and preserved all real inventory, loan, settings, AI, SMTP,
+  document and upload data. The test-only PostgreSQL port remained unpublished.
+- No live manufacturer search, real vendor PDF download, paid AI manual answer,
+  email send or remote deployment was performed.

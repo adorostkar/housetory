@@ -186,7 +186,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 268 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 279 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -211,11 +211,14 @@ stack, not just unit mocks:
   purchase-information status/filter parity, ambiguous-item handling,
   view-scoped assistant access, title-level loan state and usual-home semantics,
   natural loan-wording factual parity, Loans-page new-loan stock checks and
-  direct-return validation,
+  direct-return validation, manual upload/reuse, exact make/model and variant
+  gates on search/download/online questions, grounded page citations and
+  extractive/AI fallback, idempotent duplicate-aware downloads with provenance,
+  SSRF/redirect/size/type/timeout download guards,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 117 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 31 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 123 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 33 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -229,8 +232,9 @@ stack, not just unit mocks:
   exact loaned Heavy drill question, mobile keyword search with no inference,
   missing-purchase filter parity, assistant conversation handoff, item title /
   usual-home loan state, authorized return, viewer restrictions, compact and
-  populated photo galleries and the unified Add items chooser with contextual
-  destinations.
+  populated photo galleries, the unified Add items chooser with contextual
+  destinations, manual upload/attach/answer citations and gated manual
+  search/review/save at desktop and mobile widths.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt

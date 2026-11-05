@@ -1251,6 +1251,31 @@ limitations are in `docs/ITEM_MANUALS.md`.
   live-provider steps that remain unverified. No live internet search, paid AI,
   email, credential creation or real household mutation was used in tests.
 
+### Verification and local delivery
+
+- [x] 279 PostgreSQL tests, 123 Vitest tests and 33 disposable-stack Playwright
+  workflows pass; Ruff, strict TypeScript typecheck, production build and Alembic
+  drift checks pass. The new workflow uploads a synthetic text manual without
+  make/model, asks a grounded question with a real page citation and attaches the
+  same manual to a second item; a mocked workflow confirms identity, searches,
+  reviews and downloads at mobile width.
+- [x] Backed up local data to `backups/housetory-20261105T120400Z` (all
+  checksums valid), applied the append-only migration locally and deployed the
+  standard Compose stack. The test-only PostgreSQL port remains unpublished.
+- [x] Verified healthy api/db/worker/web services, served the new web assets,
+  schema head `c4e6a8b0d2f4`, and preserved real-data counts (51 items, 1 user,
+  1 member, 1 AI provider, 6 task settings, 5 import batches, 328 entries,
+  1 loan, 0 purchases/documents/returns; uploads 2 files/1,177,655 bytes;
+  imports 5 files/75,620 bytes). The new manual tables contain no real-household
+  rows.
+- [x] Screenshots for empty/populated desktop and mobile item states, grounded
+  citations, honest unconfigured search and reviewed candidate download are in
+  `docs/walkthrough/item-manuals/` and linked from `docs/ITEM_MANUALS.md`.
+- [x] No live internet search, real vendor download, paid AI answer, email,
+  credential creation or real household mutation was used. `MANUAL_SEARCH_URL`
+  remains unset; live gateway/provider verification steps are documented and
+  explicitly unverified.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
