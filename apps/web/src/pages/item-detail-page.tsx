@@ -421,6 +421,34 @@ export function ItemDetailPage() {
                     This amount is the shared purchase total, not a per-item price.
                   </p>
                 )}
+                {(() => {
+                  const allocations = item.purchase.allocations.filter(
+                    (allocation) => allocation.item_id === item.id,
+                  );
+                  const total = allocations.reduce(
+                    (sum, allocation) => sum + (allocation.allocated_cents ?? 0),
+                    0,
+                  );
+                  if (allocations.length === 0) return null;
+                  return (
+                    <div className="mt-2 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 text-[0.7rem]">
+                      <p className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium">Reviewed item allocation</span>
+                        <span className="tabular-nums">
+                          {formatCurrency(total, item.purchase.currency)}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        {allocations
+                          .map(
+                            (allocation) =>
+                              `${allocation.description} ×${allocation.quantity}`,
+                          )
+                          .join(" · ")}
+                      </p>
+                    </div>
+                  );
+                })()}
                 <dl className="mt-4 space-y-2.5 text-[0.8rem]">
                   {(item.purchase.merchant || item.purchase.vendor) && (
                     <div className="flex justify-between gap-4">

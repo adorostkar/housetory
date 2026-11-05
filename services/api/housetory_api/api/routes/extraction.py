@@ -10,10 +10,16 @@ from ...schemas.extraction import (
     ExtractionApplyResult,
     ExtractionMatchOut,
     ExtractionMatchRequest,
+    ExtractionRefinementOut,
     ExtractionReviewOut,
     LineMatchInput,
 )
-from ...services import document_extraction, document_extraction_apply, document_matching
+from ...services import (
+    document_extraction,
+    document_extraction_apply,
+    document_matching,
+    document_refinement,
+)
 from ...services.documents import get_document
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -89,6 +95,17 @@ def read_extraction(
 ) -> ExtractionReviewOut:
     document = _review_document(db, auth.household.id, document_id)
     return document_extraction.extraction_review(db, document)
+
+
+@router.post("/{document_id}/extraction/refine", response_model=ExtractionRefinementOut)
+def refine_extraction(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionRefinementOut:
+    document = _review_document(db, auth.household.id, document_id)
+    document_extraction.ensure_extraction(db, document)
+    return document_refinement.refine_extraction(db, auth.household.id, document)
 
 
 @router.post("/{document_id}/extraction/matches", response_model=ExtractionMatchOut)

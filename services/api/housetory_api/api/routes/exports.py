@@ -102,9 +102,24 @@ def export_purchases(
             "items",
             "receipt_document",
             "notes",
+            "allocated_total_cents",
+            "unallocated_cents",
+            "allocations",
         ]
     ]
     for purchase in purchases:
+        allocations = sorted(
+            purchase.allocations,
+            key=lambda allocation: (
+                allocation.item.name.lower() if allocation.item else "",
+                allocation.created_at,
+            ),
+        )
+        allocated_total = sum(
+            allocation.allocated_cents
+            for allocation in allocations
+            if allocation.allocated_cents is not None
+        )
         rows.append(
             [
                 purchase.vendor or "",
@@ -116,6 +131,17 @@ def export_purchases(
                 "; ".join(sorted(item.name for item in purchase.items)),
                 purchase.receipt_document.title if purchase.receipt_document is not None else "",
                 purchase.notes or "",
+                allocated_total,
+                (purchase.price_cents - allocated_total)
+                if purchase.price_cents is not None
+                else "",
+                "; ".join(
+                    f"{allocation.item.name if allocation.item else 'Deleted item'} "
+                    f"×{allocation.quantity}: "
+                    f"{(allocation.allocated_cents or 0) / 100:.2f} "
+                    f"{allocation.currency}"
+                    for allocation in allocations
+                ),
             ]
         )
     return _csv_response(rows, "purchases")

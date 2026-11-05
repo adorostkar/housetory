@@ -66,6 +66,23 @@ class PurchaseUpdate(BaseModel):
         return self.merchant or self.vendor
 
 
+class PurchaseAllocationOut(ORMModel):
+    id: uuid.UUID
+    item_id: uuid.UUID
+    item: ItemReference
+    document_id: uuid.UUID | None
+    extraction_version: str | None
+    source_line_id: str | None
+    description: str
+    quantity: int
+    unit_price_cents: int | None
+    line_total_cents: int | None
+    allocated_cents: int | None
+    currency: str
+    source_evidence: str | None
+    created_at: datetime
+
+
 class PurchaseOut(ORMModel):
     id: uuid.UUID
     merchant: str | None
@@ -78,6 +95,9 @@ class PurchaseOut(ORMModel):
     receipt_document_id: uuid.UUID | None
     receipt: DocumentBrief | None
     items: list[ItemReference]
+    allocations: list[PurchaseAllocationOut] = Field(default_factory=list)
+    allocated_total_cents: int = 0
+    unallocated_cents: int | None = None
     item_count: int
     is_shared: bool
     created_at: datetime

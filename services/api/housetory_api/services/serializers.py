@@ -5,7 +5,16 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from ..config import get_settings
 from ..domain import WarrantyStatus
-from ..models import Document, DocumentScan, DocumentScanPage, Item, ItemPhoto, Purchase, Warranty
+from ..models import (
+    Document,
+    DocumentScan,
+    DocumentScanPage,
+    Item,
+    ItemPhoto,
+    Purchase,
+    PurchaseAllocation,
+    Warranty,
+)
 from ..schemas.common import ItemReference
 from ..schemas.documents import DocumentBrief, DocumentOut, DocumentPageOut, ScanAdjustments
 from ..schemas.imports import ImportSourceBrief
@@ -33,6 +42,9 @@ def item_load_options() -> list:
         joinedload(Item.category),
         joinedload(Item.purchase).joinedload(Purchase.receipt_document),
         joinedload(Item.purchase).selectinload(Purchase.items),
+        joinedload(Item.purchase)
+        .selectinload(Purchase.allocations)
+        .joinedload(PurchaseAllocation.item),
         joinedload(Item.warranty).joinedload(Warranty.document),
         selectinload(Item.tags),
         selectinload(Item.photos),
@@ -156,6 +168,18 @@ def document_out(document: Document) -> DocumentOut:
 
 def purchase_out(purchase: Purchase) -> PurchaseOut:
     items = sorted(purchase.items, key=lambda item: item.name.lower())
+    allocations = sorted(
+        purchase.allocations,
+        key=lambda allocation: (
+            allocation.item.name.lower() if allocation.item else "",
+            allocation.created_at,
+        ),
+    )
+    allocated_total = sum(
+        allocation.allocated_cents
+        for allocation in allocations
+        if allocation.allocated_cents is not None
+    )
     return PurchaseOut(
         id=purchase.id,
         merchant=purchase.vendor,
@@ -172,6 +196,34 @@ def purchase_out(purchase: Purchase) -> PurchaseOut:
             else None
         ),
         items=[ItemReference(id=item.id, name=item.name) for item in items],
+        allocations=[
+            {
+                "id": allocation.id,
+                "item_id": allocation.item_id,
+                "item": ItemReference(
+                    id=allocation.item.id,
+                    name=allocation.item.name,
+                )
+                if allocation.item is not None
+                else ItemReference(id=allocation.item_id, name="Deleted item"),
+                "document_id": allocation.document_id,
+                "extraction_version": allocation.extraction_version,
+                "source_line_id": allocation.source_line_id,
+                "description": allocation.description,
+                "quantity": allocation.quantity,
+                "unit_price_cents": allocation.unit_price_cents,
+                "line_total_cents": allocation.line_total_cents,
+                "allocated_cents": allocation.allocated_cents,
+                "currency": allocation.currency,
+                "source_evidence": allocation.source_evidence,
+                "created_at": allocation.created_at,
+            }
+            for allocation in allocations
+        ],
+        allocated_total_cents=allocated_total,
+        unallocated_cents=(
+            purchase.price_cents - allocated_total if purchase.price_cents is not None else None
+        ),
         item_count=len(items),
         is_shared=len(items) > 1,
         created_at=purchase.created_at,

@@ -401,6 +401,20 @@ export interface ExtractionReview {
   ai_status: AiStatus;
 }
 
+export interface ExtractionRefinement {
+  document_id: UUID;
+  base_version: string;
+  version: string;
+  source_artifact: string;
+  generated_at: string;
+  fields: ExtractionFields;
+  lines: ExtractionLine[];
+  warnings: string[];
+  matches: ExtractionLineMatch[];
+  ai_status: AiStatus;
+  ai_used: boolean;
+}
+
 export interface ExtractionMatchResponse {
   document_id: UUID;
   version: string;
@@ -424,6 +438,23 @@ export interface ExtractionApplyResponse {
   items: ItemReference[];
 }
 
+export interface PurchaseAllocation {
+  id: UUID;
+  item_id: UUID;
+  item: ItemReference;
+  document_id: UUID | null;
+  extraction_version: string | null;
+  source_line_id: string | null;
+  description: string;
+  quantity: number;
+  unit_price_cents: number | null;
+  line_total_cents: number | null;
+  allocated_cents: number | null;
+  currency: string;
+  source_evidence: string | null;
+  created_at: string;
+}
+
 export interface Purchase {
   id: UUID;
   merchant: string | null;
@@ -436,6 +467,9 @@ export interface Purchase {
   receipt_document_id: UUID | null;
   receipt: DocumentBrief | null;
   items: ItemReference[];
+  allocations: PurchaseAllocation[];
+  allocated_total_cents: number;
+  unallocated_cents: number | null;
   item_count: number;
   is_shared: boolean;
   created_at: string;

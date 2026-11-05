@@ -305,6 +305,56 @@ export function PurchasesPage() {
                   </div>
                 )}
 
+                {purchase.allocations.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-border/60 bg-secondary/20 p-3 text-[0.7rem]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-foreground/80">
+                        Reviewed item allocations
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {formatCurrency(purchase.allocated_total_cents, purchase.currency)}{" "}
+                        allocated
+                      </span>
+                    </div>
+                    <ul className="mt-2 space-y-1.5">
+                      {purchase.allocations.map((allocation) => (
+                        <li
+                          key={allocation.id}
+                          className="flex flex-wrap items-baseline justify-between gap-2 text-muted-foreground"
+                        >
+                          <span className="min-w-0 truncate">
+                            {allocation.item.name} ×{allocation.quantity}
+                            <span className="ml-1 text-muted-foreground/70">
+                              {allocation.description}
+                            </span>
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            {allocation.allocated_cents == null
+                              ? "amount unknown"
+                              : formatCurrency(
+                                  allocation.allocated_cents,
+                                  allocation.currency,
+                                )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {purchase.unallocated_cents != null && purchase.unallocated_cents !== 0 && (
+                      <p className="mt-2 border-t border-border/60 pt-2 text-[0.66rem] text-muted-foreground">
+                        {purchase.unallocated_cents > 0
+                          ? `${formatCurrency(
+                              purchase.unallocated_cents,
+                              purchase.currency,
+                            )} of the purchase total is not allocated to product lines.`
+                          : `Product allocations exceed the purchase total by ${formatCurrency(
+                              Math.abs(purchase.unallocated_cents),
+                              purchase.currency,
+                            )} because of recorded discounts or charges.`}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/60 pt-3 text-[0.72rem]">
                   {purchase.receipt ? (
                     <Link

@@ -303,9 +303,9 @@ def match_lines(
     warnings: list[str] = []
     if not use_ai:
         return matches, status, False, warnings
-    if not status.configured or not status.available:
+    if not status.configured:
         warnings.append(
-            "AI ranking is unavailable or not consented; deterministic household matches are shown."
+            "AI ranking is not configured or consented; deterministic household matches are shown."
         )
         return matches, status, False, warnings
     if status.mode == "cloud" and not status.cloud_consent:

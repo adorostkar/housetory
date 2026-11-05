@@ -7,8 +7,8 @@ user confirms the reviewed changes.
 
 The existing document/scan/OCR pipeline, purchase model, warranty model, role rules
 and visual shell are reused. The milestone does not add a new AI provider, change
-task assignments, create purchase line tables, start unified search or implement
-later stocktake/property/household work.
+task assignments, create one purchase per receipt line, start unified search or
+implement later stocktake/property/household work.
 
 ## Flow
 
@@ -72,19 +72,37 @@ Matching is household-scoped and always available without AI:
 - Multiple distinct lines may be explicitly linked to one existing item, with a
   warning; Housetory does not automatically collapse them.
 
-### Optional AI ranking
+### Optional AI field/line refinement and match ranking
 
-When the existing **documents** AI task is configured and available under the
-household's provider/consent settings, the review can explicitly request a ranking
-refinement. The request sends only the reviewed line text and at most five supplied
-candidate records per line. The AI may only reorder those candidate IDs. Unknown
-IDs are discarded, exact identifier candidates remain pinned ahead of vague
-suggestions, and the deterministic candidate reasons remain the visible evidence.
-AI output is schema-validated and never applies changes itself.
+The existing **documents** AI task can do two separate explicit actions:
+
+1. **Refine fields and lines.** Housetory sends the OCR text and deterministic
+   proposal to the configured/consented provider. The AI may interpret ambiguous
+   abbreviations, restructure product/charge lines, clarify quantities and unit vs.
+   line totals, and propose brand/model/serial/warranty evidence. It must return a
+   bounded, schema-validated structure with an exact OCR evidence excerpt for every
+   field and line. Housetory rejects the whole refinement, with a clear error and no
+   stored proposal, when evidence is missing, a monetary/date value is not present in
+   that evidence, quantity arithmetic is inconsistent, or the output is malformed.
+   The AI cannot invent missing facts, add inventory/candidate IDs or execute tools.
+2. **Re-rank matches.** The request sends only reviewed line text and at most five
+   supplied candidate records per line. The AI may only reorder those candidate IDs;
+   unknown IDs are discarded and exact identifier candidates remain pinned ahead of
+   vague suggestions.
+
+A successful field/line refinement is stored as a separate versioned proposal under
+`extraction_refinements`, bound to the deterministic base version. The UI compares
+the AI values with the current draft and requires explicit **accept** or **reject**;
+accepting replaces the current draft only after showing that warning, and applying
+inventory changes is still a separate confirmation. AI refinement never writes
+inventory, purchases, warranties or links by itself. Repeated identical output maps
+to the same refinement version; only the most recent five proposals are retained.
 
 If no provider, capability or consent is available, the UI shows the provider state
-and keeps deterministic matching. No provider is silently switched. Automated tests
-mock the optional AI path and do not use a paid provider or live credentials.
+and keeps deterministic extraction/matching. Availability is confirmed when the
+explicit action is requested; a provider error or invalid response falls back with a
+clear message. No provider is silently switched. Automated tests mock the optional
+AI path and do not use a paid provider or live credentials.
 
 ## Reviewed apply
 
@@ -106,10 +124,10 @@ Stock rules:
 - Creating an item creates exactly the reviewed quantity. Lines left as skip do not
   create items.
 - A purchase can be created, linked to an existing selected purchase, or left
-  unchanged. Housetory stores one shared purchase total for the linked items; the
-  receipt's per-line amounts stay as document-level review evidence rather than
-  being silently written as per-item purchase fields. Tax/discount/shipping
-  allocations are not invented.
+  unchanged. Housetory still stores one shared purchase total for the linked items,
+  but reviewed product-line amounts are also persisted as explicit per-item
+  allocations. Tax/discount/shipping amounts remain separate and are not invented or
+  equal-split across items.
 - Warranty evidence is offered only for lines where the document contains
   warranty/provider/date/duration evidence. Applying it is a separate checkbox and
   a warranty document link is recorded explicitly. Existing warranty details are
@@ -119,17 +137,46 @@ Stock rules:
 - Existing values remain visible; changed document/item fields in the request are
   explicit reviewed choices. No automatic overwrite is hidden behind a match.
 
+### Purchase allocations
+
+Reviewed product-line decisions persist in `purchase_allocations` when a purchase is
+created or linked:
+
+- Each row stores the item, purchase, source document, extraction version, source
+  line id, description, reviewed quantity, optional unit price, line total, allocated
+  amount, currency and exact source evidence.
+- Several receipt lines may map to one item; several items may share one purchase.
+  Rows are unique per purchase/source line and are upserted on explicit re-apply, so
+  retries do not duplicate them.
+- The purchase grand total remains the single shared amount and is counted once in
+  ownership totals. Allocation rows are not another purchase total. Product
+  allocations may sum below the total (tax/shipping/unknown charges) or above it
+  (recorded discount); the UI shows the unallocated/over-total balance and reports do
+  not silently rebalance it.
+- Purchase and item displays show reviewed allocations and their line evidence.
+  Inventory exports use persisted allocation cents; purchases exports include
+  allocated, unallocated and per-item breakdown columns. Currencies are never
+  combined.
+- Legacy purchases without allocation rows remain valid and still contribute their
+  shared total once, but no historical per-item split is fabricated.
+- Allocations with a currency different from the purchase currency are rejected, as
+  are product allocations exceeding the purchase total plus recorded discounts.
+- Allocation is money/evidence only. It does not increase owned quantity; the explicit
+  new-stock checkbox remains the only way an existing item's quantity increases.
+
 ### Idempotency, stale state and failure semantics
 
 - Apply requires a client `request_id` and the extraction version shown in the
   review. Repeating the same request returns the stored result without new items,
   purchases, stock or links.
-- Reusing a request id for another document/action is rejected.
+- Reusing a request id for another document or a different payload/action is
+  rejected; the stored apply result is bound to the reviewed payload fingerprint.
 - If the OCR/extraction proposal changed, `extraction_stale` requires a refresh.
 - A previously applied extraction returns a warning and is blocked unless the user
   explicitly allows a re-apply. The same request id still replays the original.
-- The reviewed apply is atomic: all chosen item creates/updates, purchase changes,
-  warranty changes, document links and metadata changes commit together, or none do.
+- The reviewed apply is atomic: all chosen item creates/updates, purchase/allocation
+  changes, warranty changes, document links and metadata changes commit together, or
+  none do.
   There is no partial-success response. Invalid/deleted/archived items, stale
   destinations, conflicting updates and revoked member access return useful errors
   and leave all data unchanged.
@@ -152,8 +199,11 @@ Stock rules:
 - Limits: extraction keeps at most 50 source lines; matching accepts at most 30
   reviewed lines and returns at most five candidates per line from a bounded
   household inventory scan; AI candidate IDs are limited to the supplied set.
-- Apply is bounded to 50 line decisions. All referenced items, rooms, locations,
-  categories, purchases, warranties and documents are rechecked at confirmation.
+- AI field/line refinement is limited to 50 lines; every evidence/value is validated
+  before storage, and only five refinement versions are retained.
+- Apply is bounded to 50 line decisions and corresponding allocation rows. All
+  referenced items, rooms, locations, categories, purchases, warranties and
+  documents are rechecked at confirmation.
 - Provider credentials and raw OCR/candidate payloads are not logged. Automated
   tests use synthetic text documents and mocked AI, not real household records or
   paid calls.
@@ -162,23 +212,26 @@ Stock rules:
 
 - There is no barcode field, so barcode matching is not available.
 - Tax, discount and shipping amounts are not allocated to product lines; the UI
-  flags the unallocated amount and keeps the shared purchase total.
-- Per-line receipt amounts are retained as review evidence, not as item-level
-  purchase allocation records.
+  flags the unallocated balance and keeps the shared purchase total. Proportional
+  charge splitting is not implemented.
+- Per-line allocation amounts are product-line amounts; there is no general manual
+  allocation editor outside the reviewed extraction flow. Legacy purchases keep no
+  fabricated split.
 - Source evidence is shown as raw OCR source lines with line numbers; page-level
   mapping is not added for OCR text.
-- AI extraction of missing fields is not expanded. AI is an optional ranking aid for
-  existing household candidates; deterministic OCR extraction/manual review is the
-  fallback.
+- AI field/line refinement is explicit and bounded. Automatically merging AI output
+  into confirmed data or expanding missing facts remains out of scope; deterministic
+  OCR extraction/manual review is the fallback.
 - A live paid-provider extraction/matching run was not performed. Automated tests
-  mock provider behavior and validate consent/fallback/unknown-ID handling.
+  mock provider behavior and validate evidence, malformed output, consent/fallback
+  and unknown-ID handling.
 - The editor does not combine or flatten existing PDFs; that remains the scanning
   milestone limitation.
 
 ## Verification
 
-The current suite contains **256 PostgreSQL tests**, **93 frontend tests** and
-**23 disposable-stack browser workflows**. Extraction tests cover multi-line
+The current suite contains **262 PostgreSQL tests**, **94 frontend tests** and
+**24 disposable-stack browser workflows**. Extraction tests cover multi-line
 receipts, quantities/unit-vs-total totals, tax/discount/payment separation, date and
 currency ambiguity, exact/approximate/no-match ranking, mocked AI forbidden IDs,
 prompt-injection text, consent/unavailable fallback, duplicate content warnings,
@@ -187,8 +240,9 @@ cross-household isolation, atomic mixed-batch rollback, explicit new-stock behav
 with active loans, purchase/warranty creation, document links and no automatic item
 creation. Frontend tests cover editable fields, line matching, manual/type choices,
 new-item destination/warranty review, AI action wiring and stable apply payloads.
-The browser workflow covers upload, OCR, review, exact match, create-new-item
-selection, apply, purchase creation and stock preservation.
+The browser workflows cover upload, OCR, review, exact match, create-new-item
+selection, apply, purchase/allocation creation and stock preservation, plus mocked
+AI field/line refinement through accept/edit/apply and allocation readback.
 
 ## Representative screenshots
 
@@ -200,3 +254,15 @@ source evidence, charge separation and manual/create/skip actions:
 Mobile review with stacked editable fields and product-line controls:
 
 ![Intelligent extraction review mobile](walkthrough/intelligent-extraction/02-extraction-matching-mobile.png)
+
+AI field/line refinement proposal with evidence and explicit accept/reject:
+
+![AI refinement proposal desktop](walkthrough/intelligent-extraction/03-ai-refinement-desktop.png)
+
+Persisted reviewed allocations under a shared purchase total:
+
+![Purchase allocations desktop](walkthrough/intelligent-extraction/04-purchase-allocations-desktop.png)
+
+Mobile purchase allocation review:
+
+![Purchase allocations mobile](walkthrough/intelligent-extraction/05-purchase-allocations-mobile.png)

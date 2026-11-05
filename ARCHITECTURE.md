@@ -141,8 +141,8 @@ All application endpoints are versioned under `/api/v1`.
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Document scans | `POST/GET/DELETE /documents/scans`, add/update/delete/reorder pages, authenticated original/cleaned page files, idempotent `POST /documents/scans/{id}/commit` |
-| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
-| Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
+| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/refine`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
+| Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items and reviewed per-item allocations |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
@@ -261,6 +261,7 @@ ai_task_settings (provider/model per task)
 document_scans >── documents (one committed document per scan)
 document_scan_pages >── document_scans (exact originals + cleaned derivatives)
 document_extraction_applies >── documents (request-id replay results)
+purchase_allocations >── purchases/items/documents (reviewed per-line amounts)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -328,14 +329,20 @@ Key decisions:
   separate. Manuals and warranty documents are not purchase evidence. Candidate
   matching is household-scoped, ranks exact serial/model/name/brand evidence first
   and exposes deterministic reasons plus current location/purchase context; there is
-  no fabricated percentage confidence. If the existing `documents` AI task is
-  configured and consented, an explicit refinement request may only reorder supplied
-  candidate IDs; unknown IDs are discarded and exact identifiers stay pinned.
-  Apply is one transaction with a required request id, extraction-version check and
-  `document_extraction_applies` replay record. Linking purchase evidence does not
-  increase an existing item's stock unless the user explicitly requests new stock;
-  loans are preserved. Per-line amounts remain document evidence while the existing
-  purchase model stores one shared total. Exact duplicate content is warned about by
+  no fabricated percentage confidence. When the existing `documents` AI task is
+  configured and consented, explicit actions can either (a) refine document fields
+  and product/charge lines into a stored, separately versioned `extraction_refinements`
+  proposal with exact OCR evidence validation, or (b) re-rank supplied candidate IDs
+  only. AI proposals must be accepted before they populate the review draft; they
+  never write inventory. Unknown IDs and unsupported evidence are discarded/rejected,
+  and exact identifiers stay pinned. Apply is one transaction with a required request
+  id, extraction-version check, payload fingerprint and `document_extraction_applies`
+  replay record. Linking purchase evidence does not increase an existing item's
+  stock unless the user explicitly requests new stock; loans are preserved. Reviewed
+  product-line amounts persist in `purchase_allocations` under the one shared purchase
+  total, including source document/extraction/line evidence. Tax/discount/shipping
+  charges are not fabricated or equal-split; legacy purchases without allocation rows
+  keep no invented historical split. Exact duplicate content is warned about by
   SHA-256; it is never auto-merged or deleted.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
@@ -343,7 +350,9 @@ Key decisions:
   `purchases.id`; one purchase can cover many items without duplicating the date,
   amount, merchant, order number, notes or receipt document. Prices are stored
   as integer minor units plus an ISO-4217 currency. Multiple currencies are never
-  silently summed.
+  silently summed. Reviewed extraction lines add `purchase_allocations` rows linked
+  to the purchase/item/document/source line, without multiplying the shared purchase
+  total in ownership totals.
 - **Warranties** remain one-to-one with an item. They store provider, start date,
   optional duration in calendar months, resolved end date, optional per-warranty
   reminder override, coverage notes and an optional certificate document.
@@ -436,8 +445,9 @@ adds append-only migration `d4f6b8c0e2a1`, allowing `entity_type="batch"` on
 activity events. The document-scanning milestone adds append-only migration
 `e5a7c9d1f3b2` for temporary scan sessions and retained source pages. The
 intelligent-extraction milestone adds append-only migration `f6b8d0e2a4c3` for
-document content hashes and idempotent extraction-apply records. No earlier
-migration or record is rewritten.
+document content hashes and idempotent extraction-apply records. The extraction gap
+fix adds append-only migration `a7c9e1f3b5d4` for persistent purchase allocations.
+No earlier migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -727,8 +737,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   counts and installed language packs. It proposes values only; review is
   mandatory.
 - No exchange-rate provider or conversion configuration. Multi-currency values
-  are reported separately, and category/room shared-purchase allocation is
-  equal across active linked items rather than manually assignable.
+  are reported separately. Category/room purchase breakdowns use persisted reviewed
+  allocations only; legacy purchases without allocation rows have no fabricated
+  per-item split.
 - Original files are preserved for new uploads; documents created before Phase 3
   only have their already-sanitized copy because the original bytes were removed
   by the earlier security hardening.

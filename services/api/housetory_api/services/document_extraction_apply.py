@@ -7,6 +7,8 @@ stored result instead of creating another purchase or stock increment.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -16,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
-from ..models import Document, DocumentExtractionApply, Item, Purchase
+from ..models import Document, DocumentExtractionApply, Item, Purchase, PurchaseAllocation
 from ..schemas.common import ItemReference
 from ..schemas.extraction import (
     ExtractionApplyRequest,
@@ -99,9 +101,19 @@ def _merge_update_fields(
         target["warranty"] = decision.warranty
 
 
+def _payload_fingerprint(payload: ExtractionApplyRequest) -> str:
+    canonical = json.dumps(
+        payload.model_dump(mode="json", exclude={"request_id"}),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _stored_summary(
     *,
     request_id: uuid.UUID,
+    payload_fingerprint: str,
     created_item_ids: list[uuid.UUID],
     updated_item_ids: list[uuid.UUID],
     linked_item_ids: list[uuid.UUID],
@@ -113,6 +125,7 @@ def _stored_summary(
 ) -> dict[str, Any]:
     return {
         "request_id": str(request_id),
+        "payload_fingerprint": payload_fingerprint,
         "created_item_ids": [str(value) for value in created_item_ids],
         "updated_item_ids": [str(value) for value in updated_item_ids],
         "linked_item_ids": [str(value) for value in linked_item_ids],
@@ -187,24 +200,37 @@ def apply_extraction(
             DocumentExtractionApply.request_id == payload.request_id,
         )
     )
+    fingerprint = _payload_fingerprint(payload)
     if existing is not None:
-        if existing.document_id != document.id:
+        if (
+            existing.document_id != document.id
+            or existing.result.get("payload_fingerprint") != fingerprint
+        ):
             raise ApiError(
                 409,
                 "request_id_reused",
-                "That request id was used for a different document extraction.",
+                "That request id was used for a different document extraction payload.",
             )
         return _result_from_stored(db, document, existing.result)
 
-    extraction = (document.extracted_metadata or {}).get("extraction")
-    if not isinstance(extraction, dict):
+    metadata = document.extracted_metadata or {}
+    base_extraction = metadata.get("extraction")
+    if not isinstance(base_extraction, dict):
         raise ApiError(409, "extraction_unavailable", "Run extraction before applying changes.")
-    if str(extraction.get("version")) != payload.extraction_version:
-        raise ApiError(
-            409,
-            "extraction_stale",
-            "The extracted document changed. Refresh and review the proposal again.",
+    base_version = str(base_extraction.get("version"))
+    extraction = base_extraction
+    if payload.extraction_version != base_version:
+        refinements = metadata.get("extraction_refinements")
+        refinement = (
+            refinements.get(payload.extraction_version) if isinstance(refinements, dict) else None
         )
+        if not isinstance(refinement, dict) or refinement.get("base_version") != base_version:
+            raise ApiError(
+                409,
+                "extraction_stale",
+                "The extracted document changed. Refresh and review the proposal again.",
+            )
+        extraction = refinement
 
     previous_applies = list(
         db.scalars(
@@ -223,7 +249,7 @@ def apply_extraction(
         )
 
     lines = {str(line.get("id")): line for line in extraction.get("lines", [])}
-    purchase_eligible = bool(extraction.get("purchase_eligible"))
+    purchase_eligible = bool(base_extraction.get("purchase_eligible"))
     if payload.purchase_action != "none" and not purchase_eligible:
         raise ApiError(
             422,
@@ -340,6 +366,7 @@ def apply_extraction(
     updated_ids: list[uuid.UUID] = []
     warranty_item_ids: list[uuid.UUID] = []
     applied_lines: list[dict[str, Any]] = []
+    allocation_drafts: list[dict[str, Any]] = []
     document_items: list[Item] = []
 
     for decision, line in created_drafts:
@@ -382,6 +409,24 @@ def apply_extraction(
                 else line.get("line_total_cents"),
             }
         )
+        if purchase is not None:
+            reviewed_amount = (
+                decision.line_total_cents
+                if decision.line_total_cents is not None
+                else line.get("line_total_cents")
+            )
+            allocation_drafts.append(
+                {
+                    "item_id": item.id,
+                    "source_line_id": decision.line_id,
+                    "description": draft.name,
+                    "quantity": draft.quantity,
+                    "unit_price_cents": line.get("unit_price_cents"),
+                    "line_total_cents": reviewed_amount,
+                    "allocated_cents": reviewed_amount,
+                    "source_evidence": (line.get("evidence") or {}).get("text"),
+                }
+            )
 
     for _item_id, target in grouped.items():
         item = target["item"]
@@ -420,17 +465,35 @@ def apply_extraction(
         for decision in existing_decisions:
             if decision.item_id != item.id:
                 continue
+            line_record = lines[decision.line_id]
+            reviewed_amount = (
+                decision.line_total_cents
+                if decision.line_total_cents is not None
+                else line_record.get("line_total_cents")
+            )
+            reviewed_quantity = decision.quantity or int(line_record.get("quantity") or 1)
             applied_lines.append(
                 {
                     "line_id": decision.line_id,
                     "action": decision.action,
                     "item_id": str(item.id),
-                    "quantity": decision.quantity or int(line.get("quantity") or 1),
-                    "line_total_cents": decision.line_total_cents
-                    if decision.line_total_cents is not None
-                    else lines[decision.line_id].get("line_total_cents"),
+                    "quantity": reviewed_quantity,
+                    "line_total_cents": reviewed_amount,
                 }
             )
+            if purchase is not None:
+                allocation_drafts.append(
+                    {
+                        "item_id": item.id,
+                        "source_line_id": decision.line_id,
+                        "description": line_record.get("description") or "Purchase line",
+                        "quantity": reviewed_quantity,
+                        "unit_price_cents": line_record.get("unit_price_cents"),
+                        "line_total_cents": reviewed_amount,
+                        "allocated_cents": reviewed_amount,
+                        "source_evidence": (line_record.get("evidence") or {}).get("text"),
+                    }
+                )
 
     if len(linked_ids) > 1 and len(set(linked_ids)) < len(linked_ids):
         warnings.append(
@@ -441,6 +504,89 @@ def apply_extraction(
             purchase.receipt_document_id = document.id
         if not document_items:
             raise ApiError(422, "item_required", "Choose at least one item for the purchase.")
+        extraction_currency = (extraction.get("fields") or {}).get("currency")
+        if extraction_currency and str(extraction_currency).upper() != purchase.currency.upper():
+            raise ApiError(
+                422,
+                "allocation_currency_mismatch",
+                "The receipt currency does not match the purchase currency. "
+                "Choose the matching currency before applying allocations.",
+            )
+        allocated_total = sum(int(draft["allocated_cents"] or 0) for draft in allocation_drafts)
+        discount_cents = int((extraction.get("fields") or {}).get("discount_cents") or 0)
+        if purchase.price_cents is not None:
+            if allocated_total > purchase.price_cents + discount_cents + 1:
+                raise ApiError(
+                    422,
+                    "allocation_exceeds_purchase",
+                    "The reviewed product allocations exceed the purchase total plus recorded "
+                    "discounts. Correct the line amounts or purchase total before applying.",
+                )
+            if allocated_total > purchase.price_cents:
+                warnings.append(
+                    f"Product allocations exceed the purchase total by "
+                    f"{allocated_total - purchase.price_cents}¢ because of recorded discounts; "
+                    "no amounts were rebalanced automatically."
+                )
+            elif allocated_total < purchase.price_cents:
+                warnings.append(
+                    f"{purchase.price_cents - allocated_total}¢ of the purchase total remains "
+                    "unallocated to product lines (tax, shipping or discounts may be included)."
+                )
+        if any(draft["allocated_cents"] is None for draft in allocation_drafts):
+            warnings.append(
+                "Some reviewed lines have no monetary amount. Their evidence is retained without "
+                "a monetary allocation."
+            )
+        source_ids = [str(draft["source_line_id"]) for draft in allocation_drafts]
+        existing_allocations = {
+            allocation.source_line_id: allocation
+            for allocation in db.scalars(
+                select(PurchaseAllocation).where(
+                    PurchaseAllocation.household_id == household_id,
+                    PurchaseAllocation.purchase_id == purchase.id,
+                    PurchaseAllocation.source_line_id.in_(source_ids),
+                )
+            ).all()
+        }
+        for draft in allocation_drafts:
+            allocation = existing_allocations.get(str(draft["source_line_id"]))
+            if allocation is None:
+                allocation = PurchaseAllocation(
+                    household_id=household_id,
+                    purchase_id=purchase.id,
+                    item_id=draft["item_id"],
+                    document_id=document.id,
+                    extraction_version=payload.extraction_version,
+                    source_line_id=str(draft["source_line_id"]),
+                    currency=purchase.currency,
+                    created_by_user_id=actor_user_id,
+                    request_id=payload.request_id,
+                    description=str(draft["description"])[:300],
+                    quantity=int(draft["quantity"]),
+                    unit_price_cents=draft["unit_price_cents"],
+                    line_total_cents=draft["line_total_cents"],
+                    allocated_cents=draft["allocated_cents"],
+                    source_evidence=(
+                        str(draft["source_evidence"])[:4000] if draft["source_evidence"] else None
+                    ),
+                )
+                db.add(allocation)
+            else:
+                allocation.item_id = draft["item_id"]
+                allocation.document_id = document.id
+                allocation.extraction_version = payload.extraction_version
+                allocation.description = str(draft["description"])[:300]
+                allocation.quantity = int(draft["quantity"])
+                allocation.unit_price_cents = draft["unit_price_cents"]
+                allocation.line_total_cents = draft["line_total_cents"]
+                allocation.allocated_cents = draft["allocated_cents"]
+                allocation.currency = purchase.currency
+                allocation.source_evidence = (
+                    str(draft["source_evidence"])[:4000] if draft["source_evidence"] else None
+                )
+                allocation.request_id = payload.request_id
+                allocation.created_by_user_id = actor_user_id
     if payload.document_fields is not None:
         fields = payload.document_fields.model_fields_set
         if "merchant" in fields:
@@ -473,6 +619,7 @@ def apply_extraction(
 
     summary = _stored_summary(
         request_id=payload.request_id,
+        payload_fingerprint=fingerprint,
         created_item_ids=created_ids,
         updated_item_ids=updated_ids,
         linked_item_ids=sorted(set(linked_ids)),

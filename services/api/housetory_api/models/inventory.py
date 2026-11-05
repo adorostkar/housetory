@@ -341,6 +341,65 @@ class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     items: Mapped[list[Item]] = relationship(back_populates="purchase")
     receipt_document: Mapped["Document | None"] = relationship(foreign_keys=[receipt_document_id])
+    allocations: Mapped[list["PurchaseAllocation"]] = relationship(
+        back_populates="purchase", cascade="all, delete-orphan"
+    )
+
+
+class PurchaseAllocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "purchase_allocations"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        CheckConstraint(
+            "unit_price_cents IS NULL OR unit_price_cents >= 0",
+            name="unit_price_non_negative",
+        ),
+        CheckConstraint(
+            "line_total_cents IS NULL OR line_total_cents >= 0",
+            name="line_total_non_negative",
+        ),
+        CheckConstraint(
+            "allocated_cents IS NULL OR allocated_cents >= 0",
+            name="allocated_non_negative",
+        ),
+        CheckConstraint("char_length(currency) = 3", name="currency_length"),
+        UniqueConstraint(
+            "purchase_id", "source_line_id", name="uq_purchase_allocations_purchase_line"
+        ),
+        Index("ix_purchase_allocations_purchase", "purchase_id"),
+        Index("ix_purchase_allocations_item", "item_id"),
+        Index("ix_purchase_allocations_document", "document_id"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    purchase_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL")
+    )
+    extraction_version: Mapped[str | None] = mapped_column(String(80))
+    source_line_id: Mapped[str | None] = mapped_column(String(80))
+    description: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price_cents: Mapped[int | None] = mapped_column(BigInteger)
+    line_total_cents: Mapped[int | None] = mapped_column(BigInteger)
+    allocated_cents: Mapped[int | None] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    source_evidence: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    purchase: Mapped[Purchase] = relationship(back_populates="allocations")
+    item: Mapped[Item] = relationship()
+    document: Mapped["Document | None"] = relationship()
 
 
 class Warranty(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -671,6 +730,7 @@ __all__ = [
     "ItemCustomValue",
     "ItemPhoto",
     "Purchase",
+    "PurchaseAllocation",
     "Room",
     "StorageLocation",
     "Tag",

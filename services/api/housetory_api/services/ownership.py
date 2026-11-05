@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Item
+from ..models import Item, PurchaseAllocation
 from ..schemas.items import ItemSummary
 from ..schemas.ownership import (
     CurrencyOwnership,
@@ -28,7 +28,7 @@ from .serializers import item_load_options, item_summary
 
 
 @dataclass
-class PurchaseAllocation:
+class PurchaseShare:
     item_id: uuid.UUID
     purchase_id: uuid.UUID
     allocated_cents: int
@@ -46,27 +46,44 @@ def _active_items(db: Session, household_id: uuid.UUID) -> list[Item]:
     )
 
 
-def _allocate_purchases(items: list[Item]) -> dict[uuid.UUID, PurchaseAllocation]:
-    by_purchase: dict[uuid.UUID, list[Item]] = defaultdict(list)
-    for item in items:
-        if item.purchase_id is not None and item.purchase is not None:
-            by_purchase[item.purchase_id].append(item)
+def _purchase_shares(
+    db: Session, household_id: uuid.UUID, items: list[Item]
+) -> dict[uuid.UUID, PurchaseShare]:
+    """Return only explicitly persisted reviewed allocations.
 
-    allocations: dict[uuid.UUID, PurchaseAllocation] = {}
-    for purchase_id, linked in by_purchase.items():
-        purchase = linked[0].purchase
-        if purchase is None or purchase.price_cents is None:
+    Legacy purchases without allocation rows still contribute their total once in
+    the purchase totals, but no historical split is invented for category/room
+    breakdowns or exports.
+    """
+    item_ids = [item.id for item in items]
+    if not item_ids:
+        return {}
+    rows = db.scalars(
+        select(PurchaseAllocation).where(
+            PurchaseAllocation.household_id == household_id,
+            PurchaseAllocation.item_id.in_(item_ids),
+        )
+    ).all()
+    totals: dict[tuple[uuid.UUID, uuid.UUID, str], int] = defaultdict(int)
+    for allocation in rows:
+        if allocation.allocated_cents is None:
             continue
-        ordered = sorted(linked, key=lambda entry: str(entry.id))
-        base, remainder = divmod(purchase.price_cents, len(ordered))
-        for index, item in enumerate(ordered):
-            allocations[item.id] = PurchaseAllocation(
-                item_id=item.id,
-                purchase_id=purchase_id,
-                allocated_cents=base + (1 if index < remainder else 0),
-                currency=purchase.currency,
-            )
-    return allocations
+        totals[(allocation.item_id, allocation.purchase_id, allocation.currency)] += (
+            allocation.allocated_cents
+        )
+    shares: dict[uuid.UUID, PurchaseShare] = {}
+    item_map = {item.id: item for item in items}
+    for (item_id, purchase_id, currency), amount in totals.items():
+        item = item_map.get(item_id)
+        if item is None or item.purchase_id != purchase_id:
+            continue
+        shares[item_id] = PurchaseShare(
+            item_id=item_id,
+            purchase_id=purchase_id,
+            allocated_cents=amount,
+            currency=currency,
+        )
+    return shares
 
 
 def _missing_purchase(item: Item) -> bool:
@@ -103,7 +120,7 @@ def financial_overview(
     missing_limit: int = 20,
 ) -> FinancialOverview:
     items = _active_items(db, household_id)
-    allocations = _allocate_purchases(items)
+    allocations = _purchase_shares(db, household_id, items)
 
     purchase_totals: dict[str, int] = defaultdict(int)
     purchase_item_counts: dict[str, int] = defaultdict(int)
@@ -233,7 +250,7 @@ def financial_overview(
 def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict[str, Any]]:
     """Flat rows used by the inventory CSV export."""
     items = _active_items(db, household_id)
-    allocations = _allocate_purchases(items)
+    allocations = _purchase_shares(db, household_id, items)
     rows: list[dict[str, Any]] = []
     for item in items:
         allocation = allocations.get(item.id)

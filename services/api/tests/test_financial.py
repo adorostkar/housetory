@@ -91,8 +91,9 @@ def test_financial_overview_separates_currencies_and_purchase_from_current(owner
         if row["name"] == "Furniture" and row["currency"] == "USD"
     ]
     assert len(furniture_rows) == 1
-    # The shared 900.00 purchase is counted once and split 450/450.
-    assert furniture_rows[0]["purchase_total_cents"] == 90000
+    # The legacy shared 900.00 purchase is counted once in the overall total, but
+    # no historical per-item split is fabricated without persisted allocations.
+    assert furniture_rows[0]["purchase_total_cents"] == 0
     assert furniture_rows[0]["current_value_cents"] == 80000
     assert furniture_rows[0]["item_count"] == 2
 

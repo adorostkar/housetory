@@ -39,6 +39,7 @@ import type {
   ExtractionLineAction,
   ExtractionLineMatch,
   ExtractionMatchResponse,
+  ExtractionRefinement,
   ExtractionReview,
   ItemSummary,
 } from "@/lib/types";
@@ -284,43 +285,69 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   const [aiWarnings, setAiWarnings] = React.useState<string[]>([]);
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [applyResult, setApplyResult] = React.useState<ExtractionApplyResponse | null>(null);
+  const [activeVersion, setActiveVersion] = React.useState("");
+  const [refinement, setRefinement] = React.useState<ExtractionRefinement | null>(null);
+  const [refinementActive, setRefinementActive] = React.useState(false);
   const versionRef = React.useRef<string | null>(null);
   const data = extractionQuery.data;
 
-  React.useEffect(() => {
-    if (!data || versionRef.current === data.version) return;
-    versionRef.current = data.version;
-    const nextMatches = Object.fromEntries(data.matches.map((match) => [match.line_id, match]));
-    const productLines = data.lines.filter((line) => line.kind === "product");
+  const loadProposal = (
+    fields: ExtractionReview["fields"],
+    lines: ExtractionReview["lines"],
+    proposalMatches: ExtractionLineMatch[],
+    version: string,
+    purchaseEligible: boolean,
+  ) => {
+    const matchMap = Object.fromEntries(
+      proposalMatches.map((match) => [match.line_id, match]),
+    );
+    const productLines = lines.filter((line) => line.kind === "product");
     setDrafts(
       productLines.map((line) =>
         lineDraft(
           line,
-          nextMatches[line.id]?.candidates[0],
-          data.fields,
+          matchMap[line.id]?.candidates[0],
+          fields,
           productLines.length === 1,
         ),
       ),
     );
-    setMatches(data.matches);
-    setMerchant(fieldValue(data.fields.merchant ?? document.merchant));
-    setPurchaseDate(fieldValue(data.fields.purchase_date));
-    setDocumentDate(fieldValue(data.fields.document_date ?? document.document_date));
-    setCurrency(data.fields.currency ?? "USD");
-    setTotal(centsInput(data.fields.total_cents));
-    setOrderNumber(fieldValue(data.fields.order_number));
-    setPurchaseAction(data.purchase_eligible ? "create" : "none");
+    setMatches(proposalMatches);
+    setMerchant(fieldValue(fields.merchant ?? document.merchant));
+    setPurchaseDate(fieldValue(fields.purchase_date));
+    setDocumentDate(fieldValue(fields.document_date ?? document.document_date));
+    setCurrency(fields.currency ?? "USD");
+    setTotal(centsInput(fields.total_cents));
+    setOrderNumber(fieldValue(fields.order_number));
+    setPurchaseAction(purchaseEligible && fields.total_cents != null ? "create" : "none");
     setPurchaseId("");
     setUpdatePurchaseFields(false);
     setAttachAsReceipt(true);
     setLinkDocument(true);
     setAllowReapply(false);
-    setAiStatus(data.ai_status);
-    setAiWarnings([]);
+    setActiveVersion(version);
     setApplyResult(null);
     setManualLineId(null);
     setRequestId(crypto.randomUUID());
-  }, [data, document.merchant, document.document_date]);
+  };
+
+  React.useEffect(() => {
+    if (!data || versionRef.current === data.version) return;
+    versionRef.current = data.version;
+    loadProposal(
+      data.fields,
+      data.lines,
+      data.matches,
+      data.version,
+      data.purchase_eligible,
+    );
+    setAiStatus(data.ai_status);
+    setAiWarnings([]);
+    setRefinement(null);
+    setRefinementActive(false);
+    // The proposal identity intentionally resets drafts only for a new OCR version.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   const matchMutation = useMutation({
     mutationFn: (useAi: boolean) =>
@@ -353,11 +380,26 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
+  const refineMutation = useMutation({
+    mutationFn: () =>
+      api.post<ExtractionRefinement>(
+        `/documents/${document.id}/extraction/refine`,
+        {},
+      ),
+    onSuccess: (result) => {
+      setRefinement(result);
+      setAiStatus(result.ai_status);
+      setAiWarnings(result.warnings);
+      toast.success("AI proposed a field and line refinement; review before accepting");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
   const applyMutation = useMutation({
     mutationFn: () =>
       api.post<ExtractionApplyResponse>(
         `/documents/${document.id}/extraction/apply`,
-        buildApplyPayload({ data: data as ExtractionReview, drafts, merchant, purchaseDate, documentDate, currency, total, orderNumber, purchaseAction, purchaseId, updatePurchaseFields, attachAsReceipt, linkDocument, allowReapply, requestId }),
+        buildApplyPayload({ extractionVersion: activeVersion, drafts, merchant, purchaseDate, documentDate, currency, total, orderNumber, purchaseAction, purchaseId, updatePurchaseFields, attachAsReceipt, linkDocument, allowReapply, requestId }),
       ),
     onSuccess: (result) => {
       setApplyResult(result);
@@ -460,7 +502,10 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   const updateCount = drafts.filter((draft) => draft.action === "update").length;
   const linkCount = drafts.filter((draft) => draft.action === "link").length;
   const skipCount = drafts.filter((draft) => draft.action === "skip").length;
-  const aiAvailable = Boolean(aiStatus?.configured && aiStatus.available);
+  const aiAvailable = Boolean(
+    aiStatus?.configured &&
+      (aiStatus.mode === "local" || aiStatus.cloud_consent),
+  );
 
   const updateDraft = (lineId: string, update: (draft: LineDraft) => LineDraft) => {
     setDrafts((current) =>
@@ -523,6 +568,56 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       data.fields.warranty_end ||
       data.fields.warranty_months,
   );
+
+  const acceptRefinement = () => {
+    if (!refinement) return;
+    loadProposal(
+      refinement.fields,
+      refinement.lines,
+      refinement.matches,
+      refinement.version,
+      data.purchase_eligible,
+    );
+    setRefinementActive(true);
+    toast.success("AI refinement added to the review draft; apply is still separate");
+  };
+
+  const rejectRefinement = () => {
+    setRefinement(null);
+    setRefinementActive(false);
+  };
+
+  const revertRefinement = () => {
+    loadProposal(
+      data.fields,
+      data.lines,
+      data.matches,
+      data.version,
+      data.purchase_eligible,
+    );
+    setRefinement(null);
+    setRefinementActive(false);
+  };
+
+  const refinementFieldRows = refinement
+    ? [
+        ["Merchant", refinement.fields.merchant],
+        ["Purchase date", refinement.fields.purchase_date],
+        ["Document date", refinement.fields.document_date],
+        ["Currency", refinement.fields.currency],
+        [
+          "Total",
+          refinement.fields.total_cents == null
+            ? null
+            : formatCurrency(refinement.fields.total_cents, refinement.fields.currency ?? currency),
+        ],
+        ["Order", refinement.fields.order_number],
+        ["Brand", refinement.fields.brand],
+        ["Model", refinement.fields.model],
+        ["Serial", refinement.fields.serial_numbers.join(", ") || null],
+        ["Warranty", refinement.fields.warranty_provider],
+      ].filter((entry): entry is [string, string] => Boolean(entry[1]))
+    : [];
 
   const applyDisabled =
     applyMutation.isPending ||
@@ -606,6 +701,84 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         </div>
       )}
 
+      {(refinement || refinementActive) && (
+        <div className="rounded-xl border border-brass/30 bg-brass-soft/35 p-3.5 text-[0.74rem] leading-relaxed">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 font-medium text-brass">
+              <Sparkles className="size-3.5" />
+              AI refinement proposal
+              {refinementActive && <Badge variant="brass">Active</Badge>}
+            </p>
+            {refinement && (
+              <span className="text-[0.66rem] text-muted-foreground">
+                {refinement.ai_status.provider_label ?? refinement.ai_status.provider} ·{" "}
+                {refinement.version.slice(0, 8)}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            AI suggestions are separate from the deterministic proposal and your edits.
+            Nothing is saved until you accept the refinement and then apply the reviewed
+            changes. Accepting replaces the current draft fields and lines.
+          </p>
+          {refinement && refinementFieldRows.length > 0 && (
+            <div className="mt-2 grid gap-1 rounded-lg border border-border/50 bg-background/40 p-2.5 sm:grid-cols-2">
+              {refinementFieldRows.map(([label, value]) => (
+                <div key={label} className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="max-w-[65%] truncate text-right font-medium">{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {refinement && (
+            <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto rounded-lg border border-border/50 bg-background/40 p-2.5">
+              {refinement.lines.map((line) => (
+                <div key={line.id} className="border-b border-border/40 pb-1.5 last:border-0 last:pb-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {line.description}{" "}
+                      <span className="font-normal text-muted-foreground">({line.kind})</span>
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {line.quantity ? `×${line.quantity} · ` : ""}
+                      {line.line_total_cents == null
+                        ? "amount unknown"
+                        : formatCurrency(line.line_total_cents, refinement.fields.currency ?? currency)}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-[0.66rem] text-muted-foreground">
+                    {line.evidence.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          {refinement?.warnings && refinement.warnings.length > 0 && (
+            <p className="mt-2 text-[0.68rem] text-brass">{refinement.warnings.join(" ")}</p>
+          )}
+          {refineMutation.error && (
+            <FormError message={getApiErrorMessage(refineMutation.error)} />
+          )}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {refinementActive ? (
+              <Button type="button" size="sm" variant="outline" onClick={revertRefinement}>
+                Use deterministic proposal
+              </Button>
+            ) : (
+              <>
+                <Button type="button" size="sm" onClick={acceptRefinement}>
+                  <Check /> Accept AI refinement
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={rejectRefinement}>
+                  Reject AI suggestion
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-xl border border-border/70 bg-secondary/20 p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -652,7 +825,10 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               not support them.
             </p>
           </div>
-          {editedDocumentFields && <Badge variant="brass">Edited</Badge>}
+          <div className="flex flex-wrap gap-1.5">
+            {refinementActive && <Badge variant="brass">AI-refined proposal</Badge>}
+            {editedDocumentFields && <Badge variant="brass">Edited</Badge>}
+          </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Merchant" htmlFor="extraction-merchant" optional>
@@ -758,7 +934,22 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               are not inventory.
             </p>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => refineMutation.mutate()}
+              disabled={!aiAvailable || refineMutation.isPending || drafts.length === 0}
+              title={
+                aiAvailable
+                  ? "Ask the configured document AI to refine fields and product lines"
+                  : "Configure and consent to the documents AI task first"
+              }
+            >
+              {refineMutation.isPending ? <Spinner /> : <Sparkles />}
+              Refine fields &amp; lines
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -782,7 +973,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               }
             >
               <Wand2 />
-              Refine with AI
+              Re-rank matches
             </Button>
           </div>
         </div>
@@ -827,6 +1018,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                     >
                       {qualityLabel(lineMatch?.quality ?? "none")}
                     </Badge>
+                    {refinementActive && <Badge variant="brass">AI-refined line</Badge>}
                     {edited && <Badge variant="brass">Edited</Badge>}
                   </div>
                   <span className="text-[0.68rem] text-muted-foreground">
@@ -1546,20 +1738,36 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           </p>
           {aiStatus?.error && <p className="text-brass">{aiStatus.error}</p>}
           <p>
-            AI may only reorder the household candidates supplied by Housetory. Exact
-            identifier candidates stay ahead of vague suggestions; unknown IDs are discarded.
-            Deterministic matching remains available when no provider or consent exists.
+            Field/line refinement and match re-ranking are separate explicit actions. AI
+            field/line output is validated against OCR evidence before it appears here; it
+            never writes inventory or overwrites the deterministic proposal. Match ranking may
+            only reorder the household candidates supplied by Housetory. Exact identifier
+            candidates stay ahead of vague suggestions; unknown IDs are discarded.
+            Deterministic extraction/matching remains available when no provider or consent
+            exists.
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => matchMutation.mutate(true)}
-            disabled={!aiAvailable || matchMutation.isPending}
-          >
-            {matchMutation.isPending ? <Spinner /> : <Sparkles />}
-            Refine with configured AI
-          </Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => refineMutation.mutate()}
+              disabled={!aiAvailable || refineMutation.isPending}
+            >
+              {refineMutation.isPending ? <Spinner /> : <Sparkles />}
+              Refine fields &amp; lines
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => matchMutation.mutate(true)}
+              disabled={!aiAvailable || matchMutation.isPending}
+            >
+              {matchMutation.isPending ? <Spinner /> : <Wand2 />}
+              Re-rank matches
+            </Button>
+          </div>
         </div>
       </details>
 
@@ -1602,7 +1810,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 }
 
 function buildApplyPayload({
-  data,
+  extractionVersion,
   drafts,
   merchant,
   purchaseDate,
@@ -1618,7 +1826,7 @@ function buildApplyPayload({
   allowReapply,
   requestId,
 }: {
-  data: ExtractionReview;
+  extractionVersion: string;
   drafts: LineDraft[];
   merchant: string;
   purchaseDate: string;
@@ -1693,7 +1901,7 @@ function buildApplyPayload({
 
   return {
     request_id: requestId,
-    extraction_version: data.version,
+    extraction_version: extractionVersion,
     document_fields: {
       merchant: merchant.trim() || null,
       document_date: documentDate || null,

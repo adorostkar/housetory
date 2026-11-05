@@ -900,6 +900,62 @@ start unified search/stocktake/property work or make automatic inventory changes
       `docs/INTELLIGENT_EXTRACTION.md`.
 - [x] Local deployment after backup; remote server remains untouched.
 
+## Extraction milestone gap fixes
+
+This follow-up completes the two gaps identified after local verification. It does
+not start single-home polish or add another AI provider/task framework.
+
+### Stage A — actual AI field and line refinement
+
+- [x] Explicit `POST /documents/{id}/extraction/refine` action using the existing
+      consented `documents` task; fields, product/charge lines, quantities,
+      unit/line totals, abbreviations, models/serials and warranty evidence can be
+      proposed.
+- [x] Structured output schema, evidence excerpts, monetary/date/quantity support
+      validation and bounded line/field limits. Missing evidence, malformed output,
+      invented numbers, unsupported provider state and unconsented cloud use fail
+      clearly without changing the deterministic proposal.
+- [x] Refinements are stored separately and version-bound to the deterministic base;
+      repeated output maps to the same version and only the latest five are retained.
+- [x] UI shows provider/model/consent state, a distinct AI proposal with evidence,
+      explicit accept/reject, warning that accepting replaces the current draft, and
+      an AI-refined marker after acceptance. Apply remains a separate confirmation.
+- [x] Match ranking remains a separate AI action constrained to supplied candidate
+      IDs; exact identifiers stay pinned and unknown IDs are discarded.
+
+### Stage B — persistent per-item purchase allocations
+
+- [x] Append-only migration `a7c9e1f3b5d4` for `purchase_allocations`, with
+      household/purchase/item/document/source-line provenance and least-privilege
+      defaults.
+- [x] Reviewed product-line decisions persist quantity, optional unit price, line
+      total, allocated cents, currency, source document/version/line and evidence.
+      Multiple lines may map to one item and multiple items may share a purchase;
+      retries upsert rather than duplicate.
+- [x] Shared purchase total remains the single reported spend; allocations are not
+      another purchase total. Product amounts, unallocated charges/discounts and
+      legacy no-split purchases are distinguished without equal-splitting history.
+- [x] Currency, allocation-over-total-plus-discount, stale version, conflicting
+      payload/request replay and ownership validation are enforced atomically.
+- [x] Purchase API/UI, item purchase display, financial overview and inventory/
+      purchases exports expose reviewed allocations and unallocated balances without
+      changing current-value or multi-currency rules.
+- [x] Documentation distinguishes what AI refines from deterministic/user data and
+      what allocations persist versus unallocated charges.
+
+### Stage C — verification and local delivery
+
+- [x] PostgreSQL tests for AI field/line refinement evidence/schema/provider
+      fallback, actual mocked-call wiring, user edit/accept flows, persistent
+      allocations, multi-line/one-item mapping, shared-total reporting, export
+      columns, currency/amount guards, replay payload mismatch, rollback and loan
+      preservation.
+- [x] Frontend/component tests for AI refinement accept/reject, edited values,
+      versioned apply and allocation display.
+- [x] Disposable-stack browser workflows for mocked AI refinement, accept/edit/apply,
+      persisted allocations and refresh/already-applied state.
+- [ ] Local deployment after backup; remote server remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are

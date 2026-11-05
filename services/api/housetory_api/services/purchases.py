@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..api.errors import ApiError
-from ..models import Document, Item, Purchase
+from ..models import Document, Item, Purchase, PurchaseAllocation
 from ..schemas.purchases import PurchaseCreate, PurchaseIn, PurchaseUpdate
 
 
@@ -12,6 +12,7 @@ def purchase_load_options() -> list:
     return [
         joinedload(Purchase.receipt_document),
         selectinload(Purchase.items),
+        selectinload(Purchase.allocations).joinedload(PurchaseAllocation.item),
     ]
 
 

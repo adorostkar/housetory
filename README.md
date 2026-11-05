@@ -120,10 +120,11 @@ Tailscale is optional.
   and date fields, product lines with quantities/unit prices/line totals, separate
   tax/discount/shipping evidence and uncertain values. Likely existing items are
   ranked by household-scoped serial/model/name/brand evidence, with manual search,
-  create/link/update/skip choices, optional consented AI re-ranking, and an itemised
-  change preview. Apply is reviewed, atomic and idempotent; linking a receipt does
-  not increase stock unless explicitly requested, and manuals are not treated as
-  proof of purchase. See
+  create/link/update/skip choices, optional consented AI field/line refinement and
+  match re-ranking, and an itemised change preview. Reviewed product-line amounts
+  persist as per-item purchase allocations under the shared purchase total; linking
+  a receipt does not increase stock unless explicitly requested, and manuals are not
+  treated as proof of purchase. See
   [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
@@ -160,7 +161,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 256 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 262 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -174,15 +175,17 @@ stack, not just unit mocks:
   per-item bulk-move undo, private document scan crop/perspective/rotation/
   contrast, HEIC original preservation, ordered multi-page PDF assembly, scan
   cleanup and cleaned-artifact OCR selection, deterministic multi-line receipt/
-  invoice extraction, household candidate matching, mocked AI ranking/consent
-  fallback, duplicate-content warnings, reviewed atomic/idempotent extraction apply
-  and new-stock/loan preservation, the unchanged actual Inventory.md upload/paste
-  path, semantic AI-edit validation
+  invoice extraction, household candidate matching, mocked AI field/line refinement
+  and ranking with evidence/consent validation, duplicate-content warnings,
+  persistent per-item purchase allocations with shared-total/no-double-count
+  reporting, reviewed atomic/idempotent extraction apply and new-stock/loan
+  preservation, the unchanged actual Inventory.md upload/paste path, semantic
+  AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 93 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 23 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 94 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 24 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -190,7 +193,8 @@ stack, not just unit mocks:
   history, loaded-only bulk selection with move/tag/category dialogs and
   compact-list persistence, desktop/mobile multi-page scan editing, reorder,
   save, page-original access and cancel, OCR-to-line-item review with exact
-  household matching and reviewed apply, the actual Inventory.md hierarchy,
+  household matching, optional AI-refined fields/lines, reviewed apply and persisted
+  purchase allocations, the actual Inventory.md hierarchy,
   duplicate prevention, PWA/service-worker/deep-link routing, quick search and the
   unified Add items chooser with contextual destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
@@ -246,10 +250,11 @@ configured OpenAI-compatible or Gemini provider; paid-provider and physical-
 microphone smoke tests still require the operator's credentials and hardware.
 Borrower reminders and borrower accounts are intentionally not implemented.
 Image-page scanning accepts up to 20 pages; existing PDFs are attached unchanged
-and are not recombined in the scan editor. Receipt line amounts are review evidence;
-Housetory stores one shared purchase total rather than inventing per-item purchase
-allocations, and there is no barcode field. Live paid-provider extraction/matching
-was not tested. See
+and are not recombined in the scan editor. Per-item product allocations persist
+under one shared purchase total; tax, discount and shipping amounts remain separate
+and unallocated by design, and there is no barcode field. Legacy purchases without
+allocation rows do not receive fabricated historical splits. Live paid-provider
+extraction/matching was not tested. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
 from remaining work and states the OCR, AI and multi-currency limitations
 honestly.

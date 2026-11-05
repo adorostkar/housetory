@@ -10,6 +10,7 @@ import type {
   AiStatus,
   DocumentRecord,
   ExtractionApplyResponse,
+  ExtractionRefinement,
   ExtractionReview,
 } from "@/lib/types";
 
@@ -328,14 +329,84 @@ describe("DocumentExtractionReview", () => {
     );
   });
 
-  it("refines supplied candidates through the optional AI action", async () => {
+  it("re-ranks supplied candidates through the optional AI action", async () => {
     renderReview();
     await screen.findByText("Product lines");
-    await userEvent.click(screen.getByRole("button", { name: "Refine with AI" }));
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Re-rank matches" })[0]!,
+    );
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
         "/documents/document-1/extraction/matches",
         expect.objectContaining({ use_ai: true }),
+      ),
+    );
+  });
+
+  it("shows AI field/line refinement separately and only applies it after acceptance", async () => {
+    const refinement: ExtractionRefinement = {
+      document_id: "document-1",
+      base_version: "version-1",
+      version: "refined-version-1",
+      source_artifact: "original",
+      generated_at: "2026-01-01T00:00:00Z",
+      fields: {
+        ...review.fields,
+        merchant: "Corner Hardware AI",
+        total_cents: 18844,
+      },
+      lines: [
+        {
+          ...review.lines[0]!,
+          id: "refined-line-1",
+          description: "Cordless Drill XPH12",
+          evidence: {
+            ...review.lines[0]!.evidence,
+            text: "Cordless Drill XPH12 2 x 79.99 159.98",
+          },
+        },
+      ],
+      warnings: ["AI proposal requires review."],
+      matches: [
+        {
+          ...review.matches[0]!,
+          line_id: "refined-line-1",
+        },
+      ],
+      ai_status: aiStatus,
+      ai_used: true,
+    };
+    vi.mocked(api.post).mockImplementation(async (path) => {
+      if (path.endsWith("/extraction/refine")) return refinement;
+      return applied;
+    });
+    renderReview();
+    await screen.findByText("Product lines");
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "Refine fields & lines" })[0]!,
+    );
+    expect(await screen.findByText("AI refinement proposal")).toBeVisible();
+    expect(screen.getAllByText("AI proposal requires review.")[0]).toBeVisible();
+    expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Accept AI refinement" }));
+    expect(screen.getByText("AI-refined proposal")).toBeVisible();
+    expect(screen.getByDisplayValue("Corner Hardware AI")).toBeVisible();
+    expect(screen.getByDisplayValue("Cordless Drill XPH12")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Apply reviewed changes" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/documents/document-1/extraction/apply",
+        expect.objectContaining({
+          extraction_version: "refined-version-1",
+          lines: [
+            expect.objectContaining({
+              line_id: "refined-line-1",
+              action: "link",
+              item_id: "item-1",
+            }),
+          ],
+        }),
       ),
     );
   });

@@ -251,3 +251,61 @@ class ExtractionApplyResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     applied_at: datetime
     items: list[ItemReference] = Field(default_factory=list)
+
+
+class AiRefinedFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merchant: trimmed(1, 160) | None = None
+    purchase_date: date | None = None
+    document_date: date | None = None
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    subtotal_cents: int | None = Field(default=None, ge=0, le=10**12)
+    tax_cents: int | None = Field(default=None, ge=0, le=10**12)
+    discount_cents: int | None = Field(default=None, ge=0, le=10**12)
+    shipping_cents: int | None = Field(default=None, ge=0, le=10**12)
+    order_number: str | None = Field(default=None, max_length=120)
+    brand: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=120)
+    serial_numbers: list[str] = Field(default_factory=list, max_length=50)
+    warranty_provider: str | None = Field(default=None, max_length=160)
+    warranty_start: date | None = None
+    warranty_end: date | None = None
+    warranty_months: int | None = Field(default=None, ge=1, le=1200)
+    evidence: dict[str, str] = Field(default_factory=dict)
+
+
+class AiRefinedLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=300)
+    kind: LineKind
+    quantity: int | None = Field(default=None, ge=1, le=100_000)
+    unit_price_cents: int | None = Field(default=None, ge=0, le=10**12)
+    line_total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    evidence: str = Field(min_length=1, max_length=1000)
+    uncertainty: list[str] = Field(default_factory=list, max_length=10)
+
+
+class AiExtractionRefinementResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: AiRefinedFields = Field(default_factory=AiRefinedFields)
+    lines: list[AiRefinedLine] = Field(default_factory=list, max_length=50)
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    notes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ExtractionRefinementOut(BaseModel):
+    document_id: uuid.UUID
+    base_version: str
+    version: str
+    source_artifact: str
+    generated_at: datetime
+    fields: ExtractionFields
+    lines: list[ExtractionLine]
+    warnings: list[str] = Field(default_factory=list)
+    matches: list[LineMatch] = Field(default_factory=list)
+    ai_status: AiStatus
+    ai_used: bool = False
