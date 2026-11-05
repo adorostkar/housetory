@@ -79,9 +79,11 @@ Contents:
 5. **Inventory items** — grouped by full location path; name, quantity, owned/at-home/
    on-loan amounts, brand/model/serial, condition, category, tags, purchase status,
    purchase merchant/date/currency, selected allocation if any, current estimate,
-   description and evidence references. Up to three photos per item are embedded
-   (global PDF photo cap), with a clear missing-photo warning if a stored file
-   cannot be read.
+   description, evidence references and, where an exact completed stocktake
+   observation exists, a last-checked date/status/quantity. A changed item is
+   labelled as changed since that check rather than claimed as verified now. Up to
+   three photos per item are embedded (global PDF photo cap), with a clear
+   missing-photo warning if a stored file cannot be read.
 6. **Evidence index** — reference (`E-001` etc.), title, type, source/date and bundle
    note. Shared-document warnings are repeated. No external URLs or active content
    are embedded.
@@ -105,8 +107,15 @@ columns:
 `purchase_merchant`, `purchase_date`, `purchase_currency`, `purchase_total_cents`,
 `purchase_total_scope`, `purchase_item_allocation_cents`,
 `purchase_unallocated_cents`, `current_value_cents`, `current_value_currency`,
-`warranty_provider`, `warranty_end_date`, `warranty_status`, `photo_count`,
-`evidence_count`, `evidence_references`.
+`warranty_provider`, `warranty_end_date`, `warranty_status`, `last_checked_at`,
+`last_checked_status`, `last_checked_quantity`, `last_checked_owned_quantity`,
+`last_checked_on_loan_quantity`, `last_checked_location_path`,
+`last_checked_stale`, `photo_count`, `evidence_count`, `evidence_references`.
+
+Last-checked fields are populated only from completed stocktake observations for
+that item. `last_checked_stale=yes` means the item/loan/location changed after
+that check; the historical date is still exported, but not as a current
+verification claim.
 
 `purchase_total_scope` explicitly identifies a shared purchase total and whether it
 includes unselected items. The purchase total is not duplicated into a per-item
@@ -265,7 +274,7 @@ Representative screenshots and rendered PDF pages are in
 
 ## Verification
 
-- **291 PostgreSQL backend tests**, **127 Vitest tests** and **35 disposable-stack
+- **300 PostgreSQL backend tests**, **129 Vitest tests** and **37 disposable-stack
   Playwright workflows** pass; Ruff, strict TypeScript typecheck, production build
   and Alembic drift checks pass.
 - PostgreSQL backend tests cover item/room/container/home/overlap scope resolution,

@@ -15,6 +15,8 @@ membership again. A session stores the selected household id, not a global role.
 | Generate/download label PDFs that record label timestamps | Yes | Yes | No |
 | Read/export CSV reports, preview and download evidence packages, and use read-only quick/natural search | Yes | Yes | Yes |
 | Generate and manage own evidence package jobs | Yes | Yes | Yes (own packages only; no role escalation) |
+| Read stocktake sessions, observations and last-checked state | Yes | Yes | Yes |
+| Start, mark, refresh, review/apply, complete or abandon stocktakes | Yes | Yes | No |
 | Manage household name and reminder settings | Yes | No | No |
 | Manage AI providers, credentials, task models and consent | Yes | No | No |
 | Invite, revoke, resend, remove members and change roles | Yes | No | No |
@@ -29,7 +31,8 @@ membership again. A session stores the selected household id, not a global role.
   preview/generation/cancel/retry. Evidence generation is a read-only report over
   data the member can already read; viewers may manage only packages they created,
   and manual upload/attachment, identity confirmation, online search and online
-  candidate download remain writer-only.
+  candidate download remain writer-only. Stocktake writes stay behind the same
+  household write guard; viewers may read sessions and reviews only.
 - Owner-only endpoints use `require_owner`. Account endpoints use the account
   session without requiring a household, so an invited existing account can sign
   in before accepting membership.
@@ -56,6 +59,7 @@ Viewers see a read-only banner. Add-items controls, scan/import routes, entity
 photo editing, item/document mutations, manual upload/attachment/identity/search
 controls, purchase/warranty edits and label generation are hidden or routed away.
 They retain manual reading, document downloads, attached-manual questions, CSV
-exports and their own inventory evidence package previews/downloads. The server remains the authority; UI
+exports, their own inventory evidence package previews/downloads and read-only
+stocktake history/last-checked information. The server remains the authority; UI
 hiding is only a usability layer. Account settings are separate from household
 and member administration.

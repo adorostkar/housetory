@@ -66,6 +66,18 @@ Tailscale is optional.
   durable worker, can be cancelled/retried, expire automatically and use
   authenticated no-store downloads. No AI or external fetch is required. See
   [`docs/INVENTORY_EVIDENCE.md`](docs/INVENTORY_EVIDENCE.md).
+- **Stocktake / last verified here**: start a bounded check from a room or
+  container, including descendants. The expected snapshot keeps owned, at-home
+  and on-loan quantities separate; loaned units are never marked missing.
+  Compact checklist statuses (present, missing, moved, quantity differs,
+  couldn't check, unexpected) are observations, not edits. Old/current/new
+  corrections are reviewed and applied atomically with stale/conflict detection,
+  request-id replay and loan-safe quantity reductions. Partial completion records
+  exact coverage and unresolved discrepancies; completed checks update compact
+  item and scope “Last checked” state, with later changes labelled stale rather
+  than misleadingly verified. Evidence exports include exact last-checked facts
+  only when a real completed observation exists. See
+  [`docs/STOCKTAKE.md`](docs/STOCKTAKE.md).
 - **Item manuals and grounded product help**: attach an uploaded manual (no
   make/model required) or reuse an existing Manual-library document across
   compatible items. Compact item actions include Add manual, Attach existing,
@@ -196,7 +208,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 291 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 300 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -231,10 +243,14 @@ stack, not just unit mocks:
   archived handling, shared/legacy/multicurrency purchase semantics, CSV formula
   escaping, ZIP source bytes/manifests/missing files, snapshot reconfirmation,
   idempotency, expiry/cancel/retry and authenticated package downloads,
-  endpoint classification/redirect safety, hierarchical imports and exhaustive
+  endpoint classification/redirect safety, hierarchy/overlap stocktake snapshots,
+  present/missing/partial/on-loan behavior, reviewed moves and quantity
+  corrections, stale item/loan/review conflicts, idempotent observation/apply/
+  complete requests, partial coverage, last-checked staleness, viewer isolation,
+  exact evidence last-checked fields, hierarchical imports and exhaustive
   cross-household access checks.
-- 127 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 35 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 129 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 37 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -251,8 +267,11 @@ stack, not just unit mocks:
   populated photo galleries, the unified Add items chooser with contextual
   destinations, manual upload/attach/answer citations and a fixture Brave
   provider exercised through the real adapter for gated search/review/save at
-  mobile width, plus item selection, evidence preview, PDF/CSV/ZIP generation and
-  downloads, cancellation/error states and mobile package preview.
+  mobile width, item selection, evidence preview, PDF/CSV/ZIP generation and
+  downloads, cancellation/error states and mobile package preview, and the
+  stocktake start → mark → refresh/resume → review/apply → complete flow with
+  partial completion, keyboard close, failed-save recovery, abandonment and
+  light/dark desktop/mobile screenshots.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -512,6 +531,11 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `EVIDENCE_EXPORT_RETENTION_HOURS` | `168` | Private package artifact lifetime |
 | `EVIDENCE_EXPORT_TIMEOUT_SECONDS` | `180` | Maximum background generation time |
 | `EXPORTS_DIR` | `/data/exports` in Compose | Separate writable private artifact volume |
+| `STOCKTAKE_MAX_ITEMS` | `500` | Maximum expected items in one stocktake |
+| `STOCKTAKE_MAX_APPLY_BATCH` | `200` | Maximum reviewed corrections in one atomic apply |
+| `STOCKTAKE_MAX_ACTIVE_SESSIONS` | `25` | Maximum unfinished stocktakes per household |
+| `STOCKTAKE_MAX_NOTES_CHARS` | `2000` | Maximum observation note length |
+| `STOCKTAKE_MAX_OBSERVATIONS_PER_SESSION` | `2000` | Maximum observations in one session |
 | `MANUAL_SEARCH_URL` | empty | Advanced JSON gateway URL when explicitly selected |
 | `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for the advanced gateway |
 | `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Gateway label shown in the manual UI |
@@ -960,6 +984,10 @@ docker compose down                   # stop, keep data
   `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and
   authenticated PDF/CSV/ZIP downloads. They use the existing durable worker and
   a separate private exports volume.
+- Stocktake adds household-scoped session start/list/detail, observation,
+  refresh, review/apply, complete/abandon and compact scope-summary routes. The
+  checklist, review and finish UI lives at `/stocktake/{sessionId}` and is
+  reachable from room/container detail without new primary navigation.
 - Purchases, warranties, ownership reports and CSV exports have dedicated
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit

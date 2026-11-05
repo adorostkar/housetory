@@ -1463,11 +1463,92 @@ entry points. Full output, totals, privacy, limits and limitations are in
   no remote deployment or email was sent, and no paid AI/network service was used.
   XLSX is not implemented; CSV is the documented spreadsheet format.
 
+## Staged milestone — stocktake and last verified here
+
+This milestone adds a bounded room/container stocktake that records field
+observations separately from reviewed inventory edits. It does not add a
+background monitoring system, a write-off/archive shortcut, properties,
+households or a new primary navigation area. Full status definitions, coverage,
+privacy, limits and last-checked semantics are in `docs/STOCKTAKE.md`.
+
+### Stage A — snapshot, scope and observations
+
+- [x] Added append-only stocktake session/snapshot tables with immutable expected
+  item/quantity/location/version facts, room and container descendant scope,
+  overlap de-duplication, archived exclusion and bounded item counts.
+- [x] Expected quantities keep owned, at-home and on-loan values separate. Loaned
+  units are never expected at home and cannot be marked missing.
+- [x] Added request-ID idempotency for start and observations, version/loan-context
+  conflict checks, deleted-item handling and explicit refresh that only adds new
+  in-scope items without deleting existing snapshot/history rows.
+- [x] Added checklist statuses (unchecked, present, missing, moved, quantity
+  discrepancy, couldn't check) plus unexpected findings. No page load or item view
+  auto-marks unchecked items present.
+- [x] Observations are immutable evidence with verifier/time, counted quantity,
+  existing room/place, notes, loan context, ownership and a payload hash. They do
+  not mutate inventory.
+
+### Stage B — reviewed edits, history and completion
+
+- [x] Added a review endpoint returning old/current/new quantity/location values,
+  loan reduction warnings and conflicts for item/loan/destination changes.
+- [x] Added atomic reviewed apply with a review fingerprint, sorted item locks,
+  stale-review rejection, bounded correction batches, loan-safe quantity
+  reductions, existing-place validation and no missing-item deletion/archive/
+  write-off.
+- [x] Reused item move history/safe undo for moves and added a non-undoable
+  `stocktake.quantity_corrected` event for quantity corrections. Request-ID replay
+  returns the original application and payload mismatch is rejected.
+- [x] Added partial completion with explicit acknowledgement, exact item/unit
+  coverage, unresolved missing/quantity/unknown/unexpected summaries and completed
+  versus abandoned semantics. No fabricated legacy verification history.
+- [x] Completed observations upsert a derived per-item last-checked state;
+  later item, location, quantity or loan changes are labelled stale rather than
+  remaining misleadingly “verified here”. Abandoned sessions never update state.
+
+### Stage C — UI, permissions and evidence
+
+- [x] Added compact room/container stocktake entry/history/resume, `/stocktake/:id`
+  checklist with search/status filters, observation dialogs, unexpected finding
+  flow, review/apply and partial finish/abandon dialogs.
+- [x] Added last-checked display on item cards/details and room/container scope
+  strips, with session links and changed-since labels. Mobile and keyboard states
+  use existing cards, rounded controls, palette and shell; viewers are read-only.
+- [x] Evidence PDF/CSV/manifest include exact last-checked facts and stale labels
+  only when a real completed observation exists; the package keeps its recorded-
+  not-verified and non-appraisal wording rather than broadly redesigning reports.
+- [x] Added frontend/backend/E2E coverage and screenshots under
+  `docs/walkthrough/stocktake/`.
+
+### Stage D — final verification and local delivery
+
+- [x] 300 PostgreSQL backend tests, 129 Vitest tests and 37 disposable-stack
+  Playwright workflows pass; Ruff, strict TypeScript typecheck, production build
+  and Alembic drift checks pass. The Playwright run includes the full stocktake
+  start → mark → refresh/resume → review/apply → complete flow, partial
+  completion, keyboard/failed-save/abandonment states and mobile screenshots.
+- [x] Captured light/dark desktop and mobile screenshots plus a room last-checked
+  strip under `docs/walkthrough/stocktake/`; no sample data was written to the
+  real household.
+- [x] Backed up local data to `backups/housetory-20261105T194957Z` (checksums
+  valid), applied append-only migration `e9f3a5b7c1d2`, and redeployed the local
+  Compose stack. The new tables remain empty for the real household and the app
+  role has DML privileges on them.
+- [x] Verified healthy api/db/worker/web services, served the new assets, and
+  preserved real-data counts (51 items, 1 user, 1 member, 1 AI provider,
+  6 task settings, 5 import batches, 328 entries, 1 loan, 0 purchases/documents/
+  returns; uploads 2 files/1,177,655 bytes; imports 5 files/75,620 bytes). The
+  existing evidence-export table remains empty and the test-only PostgreSQL port
+  remains unpublished.
+- [x] No remote deployment, paid AI, email, credential creation, real-household
+  stocktake observation, upload deletion or arbitrary Docker cleanup was performed.
+  Properties and multiple households were not started.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7 and 8
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8 and 9
 are implemented and locally verified; later milestones still require a separate
 instruction.
 
@@ -1612,7 +1693,7 @@ instruction.
    and moving; do not claim insurer acceptance, coverage or professional appraisal.
    Reuse existing export infrastructure and avoid adding an insurance-management
    section or mandatory purchase data entry.
-9. **Stocktake / last verified here:** allow checking a room or box against its
+9. **Stocktake / last verified here (implemented locally):** allow checking a room or box against its
    recorded contents, explicitly marking present, missing, moved or quantity
    discrepancies. Record who verified what and when; distinguish a verification
    from an edit. Do not mark unchecked contents as present or overwrite quantities
