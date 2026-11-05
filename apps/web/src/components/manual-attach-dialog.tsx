@@ -155,7 +155,10 @@ export function ManualAttachDialog({
                         )}
                         {(document.extracted_metadata.ocr_page_count as number | undefined) ? (
                           <Badge variant="secondary">
-                            {String(document.extracted_metadata.ocr_page_count)} pages
+                            {String(document.extracted_metadata.ocr_page_count)}{" "}
+                            {document.extracted_metadata.ocr_page_count === 1
+                              ? "page"
+                              : "pages"}
                           </Badge>
                         ) : null}
                       </div>

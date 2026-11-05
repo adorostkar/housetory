@@ -227,11 +227,12 @@ export function ManualAskDialog({
               </ul>
             )}
 
-            <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
-              {answer.ai_status.configured
-                ? `${answer.ai_status.provider_label ?? answer.ai_status.provider} · ${answer.ai_status.mode}. ${answer.ai_status.privacy_note}`
-                : "AI assistance is optional and not configured for the assistant task. This answer comes directly from stored manual text."}
-            </p>
+            {answer.ai_status.configured && (
+              <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
+                {answer.ai_status.provider_label ?? answer.ai_status.provider} ·{" "}
+                {answer.ai_status.mode}. {answer.ai_status.privacy_note}
+              </p>
+            )}
           </section>
         )}
 

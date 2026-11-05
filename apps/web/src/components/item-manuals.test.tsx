@@ -251,9 +251,7 @@ describe("ItemManuals", () => {
     await userEvent.type(screen.getByLabelText("Question"), "What is the charger warranty?");
     await userEvent.click(screen.getByRole("button", { name: "Ask attached manuals" }));
     expect(await screen.findByText("No matching manual evidence")).toBeVisible();
-    expect(
-      screen.getByText(/AI assistance is optional and not configured/),
-    ).toBeVisible();
+    expect(screen.getByText("No AI required")).toBeVisible();
     expect(screen.queryByText("Ask configured online sources")).not.toBeInTheDocument();
   });
 

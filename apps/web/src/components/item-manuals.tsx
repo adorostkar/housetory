@@ -79,6 +79,10 @@ export function ItemManuals({ item }: { item: ItemDetail }) {
                   <Paperclip />
                   Attach existing
                 </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setFindOpen(true)}>
+                  <Globe2 />
+                  Find manual
+                </Button>
               </div>
             )}
           </div>
@@ -107,7 +111,7 @@ export function ItemManuals({ item }: { item: ItemDetail }) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {canWrite && (
+          {canWrite && manuals.length > 0 && (
             <>
               <Button type="button" size="sm" variant="ghost" onClick={() => setUploadOpen(true)}>
                 <Plus />
@@ -188,7 +192,9 @@ function ManualRow({ manual }: { manual: DocumentRecord }) {
           {reading ? (
             <Badge variant="secondary">Reading…</Badge>
           ) : pageCount ? (
-            <Badge variant="outline">{pageCount} pages</Badge>
+            <Badge variant="outline">
+              {pageCount} {pageCount === 1 ? "page" : "pages"}
+            </Badge>
           ) : null}
           {manual.item_count > 1 && (
             <Badge variant="secondary">{manual.item_count} items</Badge>

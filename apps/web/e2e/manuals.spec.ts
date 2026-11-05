@@ -38,7 +38,7 @@ test("uploads a manual without make/model, answers from its text, and attaches i
   await uploadDialog.getByLabel("Title").fill(title);
   await uploadDialog.getByRole("button", { name: "Add manual" }).click();
   await expect(uploadDialog).toBeHidden();
-  await expect(page.getByText(title)).toBeVisible();
+  await expect(page.getByText(title).first()).toBeVisible();
 
   await expect
     .poll(
@@ -54,7 +54,7 @@ test("uploads a manual without make/model, answers from its text, and attaches i
     .toBe("succeeded");
 
   await page.reload();
-  await expect(page.getByText(title)).toBeVisible();
+  await expect(page.getByText(title).first()).toBeVisible();
   await page.getByRole("button", { name: "Ask about this item" }).click();
   const askDialog = page.getByRole("dialog", { name: `Ask about ${first.item.name}` });
   await askDialog.getByLabel("Question").fill("How do I change the drill bit?");
@@ -73,7 +73,7 @@ test("uploads a manual without make/model, answers from its text, and attaches i
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Attach" }).click();
   await expect(attachDialog).toBeHidden();
-  await expect(page.getByText(title)).toBeVisible();
+  await expect(page.getByText(title).first()).toBeVisible();
 });
 
 test("confirms identity, then searches, reviews and saves a mocked manual candidate", async ({
