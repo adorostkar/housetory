@@ -20,6 +20,7 @@ TEST_DATABASE_URL = os.environ.get(
 )
 UPLOAD_ROOT = Path(tempfile.mkdtemp(prefix="housetory-test-uploads-"))
 IMPORTS_ROOT = Path(tempfile.mkdtemp(prefix="housetory-test-imports-"))
+EXPORTS_ROOT = Path(tempfile.mkdtemp(prefix="housetory-test-exports-"))
 
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "test"
@@ -27,6 +28,7 @@ os.environ["APP_BASE_URL"] = "http://testserver"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["UPLOADS_DIR"] = str(UPLOAD_ROOT)
 os.environ["IMPORTS_DIR"] = str(IMPORTS_ROOT)
+os.environ["EXPORTS_DIR"] = str(EXPORTS_ROOT)
 # Deterministic Fernet key for credential tests. Production operators generate
 # their own key outside the database.
 os.environ["AI_CREDENTIAL_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
@@ -90,6 +92,8 @@ def clean_state(database: None) -> Iterator[None]:
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
     shutil.rmtree(IMPORTS_ROOT, ignore_errors=True)
     IMPORTS_ROOT.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(EXPORTS_ROOT, ignore_errors=True)
+    EXPORTS_ROOT.mkdir(parents=True, exist_ok=True)
     login_limiter.reset_all()
     reset_captured_email()
     yield

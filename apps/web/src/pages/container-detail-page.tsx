@@ -8,6 +8,7 @@ import {
   Pencil,
   Printer,
   QrCode,
+  Download,
   Sparkles,
   Truck,
 } from "lucide-react";
@@ -28,6 +29,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
+import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +81,7 @@ export function ContainerDetailPage() {
   const [moveOpen, setMoveOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
   const [summaryEditing, setSummaryEditing] = React.useState(false);
+  const [evidenceOpen, setEvidenceOpen] = React.useState(false);
   const [editName, setEditName] = React.useState("");
   const [editDescription, setEditDescription] = React.useState("");
   const [editType, setEditType] = React.useState<ContainerType>("box");
@@ -215,6 +218,10 @@ export function ContainerDetailPage() {
             <Button variant="outline" onClick={() => setQrOpen(true)}>
               <QrCode />
               QR
+            </Button>
+            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
+              <Download />
+              Export evidence
             </Button>
             {canWrite && detail.is_container && (
               <Button variant="outline" onClick={() => setMoveOpen(true)}>
@@ -542,6 +549,13 @@ export function ContainerDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+      <EvidenceExportDialog
+        open={evidenceOpen}
+        onOpenChange={setEvidenceOpen}
+        scope={{ container_ids: [detail.id] }}
+        title={`Export ${identifier} with evidence`}
+      />
+
       <Dialog open={summaryEditing} onOpenChange={setSummaryEditing}>
         <DialogContent>
           <DialogHeader>

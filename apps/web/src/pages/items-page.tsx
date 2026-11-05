@@ -1,4 +1,5 @@
 import {
+  Download,
   FolderTree,
   LayoutGrid,
   List,
@@ -16,6 +17,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import {
   BulkCategoryDialog,
   BulkMoveDialog,
@@ -88,6 +90,7 @@ export function ItemsPage() {
   const [bulkDialog, setBulkDialog] = useState<"move" | "tags" | "category" | null>(
     null,
   );
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -677,6 +680,10 @@ export function ItemsPage() {
               <FolderTree />
               Category
             </Button>
+            <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)}>
+              <Download />
+              Export evidence
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => clearSelection()}>
               Clear
             </Button>
@@ -798,6 +805,12 @@ export function ItemsPage() {
             )}.`,
           );
         }}
+      />
+      <EvidenceExportDialog
+        open={evidenceOpen}
+        onOpenChange={setEvidenceOpen}
+        scope={{ item_ids: selectedItems.map((item) => item.id) }}
+        title={`Export ${pluralize(selectedItems.length, "selected item")} with evidence`}
       />
       <BulkCategoryDialog
         open={bulkDialog === "category"}

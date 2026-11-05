@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   Boxes,
   ChevronRight,
+  Download,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -21,6 +22,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -78,6 +80,7 @@ export function RoomDetailPage() {
   const [locationParentId, setLocationParentId] = useState<string | undefined>();
   const [deleteRoomOpen, setDeleteRoomOpen] = useState(false);
   const [deletingLocation, setDeletingLocation] = useState<StorageLocation | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   const rooms = roomsQuery.data?.items ?? [];
   const room = rooms.find((entry) => entry.id === roomId);
@@ -212,6 +215,10 @@ export function RoomDetailPage() {
                 Add a place
               </Button>
             )}
+            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
+              <Download />
+              Export evidence
+            </Button>
             <AddItemsButton context={addItemsContext} />
             {canWrite && <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -529,6 +536,13 @@ export function RoomDetailPage() {
         onConfirm={async () => {
           await deleteRoom.mutateAsync();
         }}
+      />
+
+      <EvidenceExportDialog
+        open={evidenceOpen}
+        onOpenChange={setEvidenceOpen}
+        scope={{ room_ids: [room.id] }}
+        title={`Export ${room.name} with evidence`}
       />
 
       <ConfirmDialog

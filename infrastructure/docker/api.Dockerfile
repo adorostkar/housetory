@@ -23,9 +23,9 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apk add --no-cache libstdc++ \
     && addgroup -S housetory \
     && adduser -S -G housetory -h /home/housetory housetory \
-    && mkdir -p /data/uploads /data/imports \
+    && mkdir -p /data/uploads /data/imports /data/exports \
     && chown -R housetory:housetory /data \
-    && chmod 700 /data /data/uploads /data/imports
+    && chmod 700 /data /data/uploads /data/imports /data/exports
 
 WORKDIR /app
 COPY --from=builder /app /app

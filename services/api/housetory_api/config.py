@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     uploads_dir: Path | None = None
     imports_dir: Path | None = None
+    exports_dir: Path | None = None
 
     app_base_url: str = "http://localhost:8080"
     qr_base_url: str = ""
@@ -80,6 +81,13 @@ class Settings(BaseSettings):
     brave_search_base_url: str = "https://api.search.brave.com"
     brave_search_country: str = ""
     brave_search_lang: str = ""
+    evidence_export_max_items: int = Field(default=300, ge=1, le=2000)
+    evidence_export_max_documents: int = Field(default=300, ge=1, le=2000)
+    evidence_export_max_photos: int = Field(default=500, ge=1, le=2000)
+    evidence_export_max_bundle_mb: int = Field(default=100, ge=1, le=1000)
+    evidence_export_max_pdf_photos: int = Field(default=60, ge=0, le=500)
+    evidence_export_retention_hours: int = Field(default=168, ge=1, le=720)
+    evidence_export_timeout_seconds: int = Field(default=180, ge=10, le=900)
 
     @property
     def qr_effective_base_url(self) -> str:
@@ -191,6 +199,10 @@ class Settings(BaseSettings):
     @property
     def resolved_imports_dir(self) -> Path:
         return self.imports_dir or (self.data_dir / "imports")
+
+    @property
+    def resolved_exports_dir(self) -> Path:
+        return self.exports_dir or (self.data_dir / "exports")
 
     @property
     def max_upload_bytes(self) -> int:

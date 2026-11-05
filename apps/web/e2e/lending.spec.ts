@@ -164,6 +164,9 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
   await createdRow.scrollIntoViewIfNeeded();
   await expect(createdRow.getByText(/of 1 out/)).toBeVisible();
 
+  // Reload so the picker cannot open with a still-invalidated inventory cache
+  // immediately after the first loan mutation.
+  await page.reload();
   await newLoan.click();
   await itemSearch.fill(`Tent ${suffix}`);
   await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();

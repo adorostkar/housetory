@@ -8,6 +8,7 @@ from .auth import (
     User,
 )
 from .base import Base
+from .exports import InventoryEvidenceExport
 from .intelligence import (
     AiProvider,
     AiRecognition,
@@ -75,6 +76,7 @@ __all__ = [
     "ImportBatch",
     "ImportEntry",
     "ImportSourceFile",
+    "InventoryEvidenceExport",
     "Job",
     "Purchase",
     "PurchaseAllocation",

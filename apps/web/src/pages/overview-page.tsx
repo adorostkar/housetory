@@ -16,6 +16,7 @@ import { useState } from "react";
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { RoomCard } from "@/components/room-card";
 import { QuickSearch } from "@/components/quick-search";
@@ -53,6 +54,7 @@ export function OverviewPage() {
   const financialQuery = useFinancialOverview();
   const roomsQuery = useRooms();
   const [roomDialogOpen, setRoomDialogOpen] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   const { openAddItems } = useAddItems();
   const canWrite = useCanWrite();
 
@@ -119,6 +121,12 @@ export function OverviewPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          {data.item_count > 0 && (
+            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
+              <Download />
+              Export evidence
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setRoomDialogOpen(true)}>
             <DoorOpen />
             New room
@@ -379,6 +387,11 @@ export function OverviewPage() {
         open={roomDialogOpen}
         onOpenChange={setRoomDialogOpen}
         rooms={rooms}
+      />
+      <EvidenceExportDialog
+        open={evidenceOpen}
+        onOpenChange={setEvidenceOpen}
+        scope={{ include_home: true }}
       />
     </div>
   );

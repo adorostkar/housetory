@@ -16,6 +16,11 @@ import type {
   DocumentList,
   DocumentRecord,
   DocumentRelations,
+  EvidenceExportList,
+  EvidenceExportRecord,
+  EvidenceOptions,
+  EvidencePreview,
+  EvidenceScope,
   FinancialOverview,
   ItemManuals,
   ManualCandidateList,
@@ -86,6 +91,8 @@ export const queryKeys = {
   itemManuals: (itemId: string) => ["items", itemId, "manuals"] as const,
   itemManualCandidates: (itemId: string) =>
     ["items", itemId, "manual-search"] as const,
+  evidenceExports: ["evidence-exports"] as const,
+  evidenceExport: (exportId: string) => ["evidence-exports", exportId] as const,
   containerHistory: (containerId: string) =>
     ["containers", containerId, "history"] as const,
 };
@@ -140,6 +147,52 @@ export function useItemManuals(itemId: string | undefined) {
     queryKey: queryKeys.itemManuals(itemId ?? ""),
     queryFn: () => api.get<ItemManuals>(`/items/${itemId}/manuals`),
     enabled: Boolean(itemId),
+  });
+}
+
+export function useEvidenceExports(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.evidenceExports,
+    queryFn: () => api.get<EvidenceExportList>("/evidence-exports?limit=20"),
+    enabled,
+  });
+}
+
+export function useEvidenceExport(exportId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.evidenceExport(exportId ?? ""),
+    queryFn: () => api.get<EvidenceExportRecord>(`/evidence-exports/${exportId}`),
+    enabled: Boolean(exportId) && enabled,
+    refetchInterval: (query) => {
+      const status = (query.state.data as EvidenceExportRecord | undefined)?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+}
+
+export function useEvidencePreview(
+  scope: EvidenceScope | null,
+  includeArchived: boolean,
+  options: EvidenceOptions,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: [
+      "evidence-exports",
+      "preview",
+      scope,
+      includeArchived,
+      options,
+    ],
+    queryFn: () =>
+      api.post<EvidencePreview>("/evidence-exports/preview", {
+        scope,
+        include_archived: includeArchived,
+        options,
+      }),
+    enabled: enabled && Boolean(scope),
+    retry: false,
+    staleTime: 0,
   });
 }
 

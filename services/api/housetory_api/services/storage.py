@@ -820,3 +820,132 @@ def store_voice_audio(
         raise
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def _export_root_path() -> Path:
+    return get_settings().resolved_exports_dir
+
+
+def _export_root() -> Path:
+    root = _export_root_path()
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    return root
+
+
+def _evidence_export_dir(household_id: uuid.UUID, export_id: uuid.UUID) -> Path:
+    directory = _export_root() / "households" / str(household_id) / "exports" / str(export_id)
+    _mkdir_private(directory)
+    return directory
+
+
+def write_evidence_export_bytes(
+    household_id: uuid.UUID,
+    export_id: uuid.UUID,
+    filename: str,
+    data: bytes,
+) -> tuple[str, int, str]:
+    """Write one private generated artifact and return key, size and SHA-256."""
+    directory = _evidence_export_dir(household_id, export_id)
+    safe_name = _safe_filename(filename)
+    destination = directory / safe_name
+    temp_fd, temp_name = tempfile.mkstemp(prefix="artifact-", dir=directory)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(temp_fd, "wb") as output:
+            output.write(data)
+        _chmod_file(temp_path)
+        os.replace(temp_path, destination)
+        _chmod_file(destination)
+        return (
+            destination.relative_to(_export_root()).as_posix(),
+            len(data),
+            hashlib.sha256(data).hexdigest(),
+        )
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def evidence_export_temp_path(
+    household_id: uuid.UUID, export_id: uuid.UUID, suffix: str = ".tmp"
+) -> Path:
+    directory = _evidence_export_dir(household_id, export_id)
+    fd, name = tempfile.mkstemp(prefix="artifact-", suffix=suffix, dir=directory)
+    os.close(fd)
+    path = Path(name)
+    _chmod_file(path)
+    return path
+
+
+def finalize_evidence_export_temp(
+    household_id: uuid.UUID,
+    export_id: uuid.UUID,
+    temp_path: Path,
+    filename: str,
+) -> tuple[str, int, str]:
+    directory = _evidence_export_dir(household_id, export_id)
+    destination = directory / _safe_filename(filename)
+    try:
+        os.replace(temp_path, destination)
+        _chmod_file(destination)
+        digest = hashlib.sha256()
+        with destination.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        return (
+            destination.relative_to(_export_root()).as_posix(),
+            destination.stat().st_size,
+            digest.hexdigest(),
+        )
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def delete_evidence_export_artifacts(household_id: uuid.UUID, export_id: uuid.UUID) -> None:
+    directory = _export_root() / "households" / str(household_id) / "exports" / str(export_id)
+    try:
+        resolved = directory.resolve()
+        root = _export_root().resolve()
+        if root not in resolved.parents:
+            return
+        if resolved.is_dir():
+            shutil.rmtree(resolved, ignore_errors=True)
+        _remove_empty_export_parents(directory.parent)
+    except OSError:
+        return
+
+
+def _remove_empty_export_parents(directory: Path) -> None:
+    exports_root = _export_root() / "households"
+    try:
+        resolved = directory.resolve()
+        root = exports_root.resolve()
+        if root not in resolved.parents:
+            return
+        while resolved != root and resolved.is_dir() and not any(resolved.iterdir()):
+            resolved.rmdir()
+            resolved = resolved.parent
+    except OSError:
+        return
+
+
+def evidence_export_key_exists(storage_key: str | None) -> bool:
+    if not storage_key:
+        return False
+    try:
+        resolve_key(storage_key)
+    except (ApiError, OSError):
+        return False
+    return True
+
+
+def resolve_export_key(storage_key: str) -> Path:
+    root = _export_root().resolve()
+    path = (root / storage_key).resolve()
+    if root not in path.parents and path != root:
+        raise ApiError(404, "file_not_found", "File not found.")
+    if not path.is_file():
+        raise ApiError(404, "file_not_found", "File not found.")
+    return path

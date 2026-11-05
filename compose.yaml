@@ -27,6 +27,7 @@ x-api-environment: &api-environment
   DATA_DIR: /data
   UPLOADS_DIR: /data/uploads
   IMPORTS_DIR: /data/imports
+  EXPORTS_DIR: /data/exports
   AI_CREDENTIAL_KEY: ${AI_CREDENTIAL_KEY:-}
   AI_CREDENTIAL_KEY_PREVIOUS: ${AI_CREDENTIAL_KEY_PREVIOUS:-}
   AI_PROVIDER: ${AI_PROVIDER:-disabled}
@@ -50,6 +51,13 @@ x-api-environment: &api-environment
   BRAVE_SEARCH_BASE_URL: ${BRAVE_SEARCH_BASE_URL:-https://api.search.brave.com}
   BRAVE_SEARCH_COUNTRY: ${BRAVE_SEARCH_COUNTRY:-}
   BRAVE_SEARCH_LANG: ${BRAVE_SEARCH_LANG:-}
+  EVIDENCE_EXPORT_MAX_ITEMS: ${EVIDENCE_EXPORT_MAX_ITEMS:-300}
+  EVIDENCE_EXPORT_MAX_DOCUMENTS: ${EVIDENCE_EXPORT_MAX_DOCUMENTS:-300}
+  EVIDENCE_EXPORT_MAX_PHOTOS: ${EVIDENCE_EXPORT_MAX_PHOTOS:-500}
+  EVIDENCE_EXPORT_MAX_BUNDLE_MB: ${EVIDENCE_EXPORT_MAX_BUNDLE_MB:-100}
+  EVIDENCE_EXPORT_MAX_PDF_PHOTOS: ${EVIDENCE_EXPORT_MAX_PDF_PHOTOS:-60}
+  EVIDENCE_EXPORT_RETENTION_HOURS: ${EVIDENCE_EXPORT_RETENTION_HOURS:-168}
+  EVIDENCE_EXPORT_TIMEOUT_SECONDS: ${EVIDENCE_EXPORT_TIMEOUT_SECONDS:-180}
   IMPORT_MAX_FILES: ${IMPORT_MAX_FILES:-2000}
   IMPORT_MAX_TOTAL_MB: ${IMPORT_MAX_TOTAL_MB:-50}
   IMPORT_MAX_FILE_MB: ${IMPORT_MAX_FILE_MB:-10}
@@ -130,6 +138,7 @@ services:
     volumes:
       - housetory_uploads:/data/uploads
       - housetory_imports:/data/imports
+      - housetory_exports:/data/exports
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -166,6 +175,7 @@ services:
       DATA_DIR: /data
       UPLOADS_DIR: /data/uploads
       IMPORTS_DIR: /data/imports
+      EXPORTS_DIR: /data/exports
       OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
       OCR_MAX_PDF_PAGES: ${OCR_MAX_PDF_PAGES:-5}
       AI_CREDENTIAL_KEY: ${AI_CREDENTIAL_KEY:-}
@@ -190,9 +200,17 @@ services:
       VOICE_MAX_ACTIVE_NOTES: ${VOICE_MAX_ACTIVE_NOTES:-10}
       VOICE_MAX_SUGGESTIONS: ${VOICE_MAX_SUGGESTIONS:-50}
       VOICE_MAX_TRANSCRIPT_CHARS: ${VOICE_MAX_TRANSCRIPT_CHARS:-12000}
+      EVIDENCE_EXPORT_MAX_ITEMS: ${EVIDENCE_EXPORT_MAX_ITEMS:-300}
+      EVIDENCE_EXPORT_MAX_DOCUMENTS: ${EVIDENCE_EXPORT_MAX_DOCUMENTS:-300}
+      EVIDENCE_EXPORT_MAX_PHOTOS: ${EVIDENCE_EXPORT_MAX_PHOTOS:-500}
+      EVIDENCE_EXPORT_MAX_BUNDLE_MB: ${EVIDENCE_EXPORT_MAX_BUNDLE_MB:-100}
+      EVIDENCE_EXPORT_MAX_PDF_PHOTOS: ${EVIDENCE_EXPORT_MAX_PDF_PHOTOS:-60}
+      EVIDENCE_EXPORT_RETENTION_HOURS: ${EVIDENCE_EXPORT_RETENTION_HOURS:-168}
+      EVIDENCE_EXPORT_TIMEOUT_SECONDS: ${EVIDENCE_EXPORT_TIMEOUT_SECONDS:-180}
     volumes:
       - housetory_uploads:/data/uploads:ro
       - housetory_imports:/data/imports
+      - housetory_exports:/data/exports
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -249,3 +267,5 @@ volumes:
     name: housetory_uploads
   housetory_imports:
     name: housetory_imports
+  housetory_exports:
+    name: housetory_exports

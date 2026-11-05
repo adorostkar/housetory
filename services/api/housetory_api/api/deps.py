@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
@@ -134,6 +135,11 @@ READ_ONLY_POST_SUFFIXES = (
     "/manual-questions",
     "/manual-questions/online",
 )
+READ_ONLY_POST_PATTERNS = (
+    re.compile(r"/evidence-exports/preview$"),
+    re.compile(r"/evidence-exports$"),
+    re.compile(r"/evidence-exports/[0-9a-f-]+/(cancel|retry)$"),
+)
 
 
 def enforce_household_write_access(
@@ -150,7 +156,10 @@ def enforce_household_write_access(
         return auth
     if auth.role in {"owner", "member"}:
         return auth
-    if any(request.url.path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES):
+    path = request.url.path
+    if any(path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES) or any(
+        pattern.search(path) for pattern in READ_ONLY_POST_PATTERNS
+    ):
         return auth
     raise ApiError(
         403,
