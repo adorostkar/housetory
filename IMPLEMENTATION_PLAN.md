@@ -1091,7 +1091,13 @@ drill/Mohsen loan was not used as a fixture.
       borrower selection for returns, authorized return update, viewer restriction,
       returned/no-due-date state, usual-home wording, note privacy and
       empty/populated photo controls.
-- [ ] Local backup/deployment verification and served-asset/real-data count check.
+- [x] Backed up local data to `backups/housetory-20261105T103325Z` (checksums
+      valid), deployed locally with the standard Compose workflow, and verified
+      healthy api/db/worker/web services, served item-detail assets, migration
+      `e2f4a6c8b0d2`, and preserved real-data counts (51 items, 1 user, 1 member,
+      1 AI provider, 6 task settings, 5 import batches, 328 entries, 1 loan,
+      0 purchases/documents/returns; uploads 2 files/1,177,655 bytes; imports
+      5 files/75,620 bytes). The test-only PostgreSQL port is not published.
       Remote deployment remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
@@ -1192,6 +1198,32 @@ instruction.
      mutation controls. Reuse compact existing UI and verify mobile/keyboard,
      multiple/partial loans, no available stock, stale requests and error states
      with isolated fixtures. Preserve the user's actual loans and visual style.
+
+   **Search/assistant wording follow-up — natural, concise inventory answers:**
+   user screenshot of “Where is Dewalt drill” exposes repetitive database-style
+   wording and implementation disclaimers. Keep existing factual retrieval and
+   permission checks; improve presentation before the manuals milestone.
+   - Lead with a direct answer: “Mohsen has your DeWalt drill. No return date is
+     set.” Then, if useful, “You normally keep it in Storage Room Right → BOX-006.”
+     Use stored brand/name accurately; do not invent a model or rewrite records.
+   - Partial loans: “Mohsen has one of your three drills. The other two are in
+     [location]” only when records actually support the at-home quantity/location.
+     Multiple borrowers get a concise accurate breakdown; omit absent dates and
+     repetitive quantities where unnecessary. Keep due dates factual without the
+     boilerplate “not a guarantee of return” disclaimer.
+   - Remove user-facing “Grounded answer”, awkward internal intent headings such
+     as “whereabouts of …”, “fully on loan: 1 of 1 unit is out” repetition and
+     implementation phrases such as “loaned units are not recorded there”. Keep
+     useful item/source links and make deeper evidence available unobtrusively.
+   - Simplify search helper text to “Search for an item or ask a question.” Avoid
+     explaining routing machinery or requiring users to understand “ordinary
+     matches” versus “question-like text”. Preserve keyboard/Enter behavior.
+   - Apply consistent concise wording to deterministic fallback and assistant
+     answers, with quantity-aware singular/plural, no-match and ambiguous states.
+     Do not require a paid LLM solely to rewrite a simple factual loan answer.
+     Test fully/partially loaned, multiple borrowers, no due date, returned stock,
+     missing location and matching brand/name in isolated fixtures. Preserve the
+     current visual feel and existing search correctness/privacy.
 
 7. **Item manuals and grounded product help:** build on existing Manual document
    type and item attachments rather than a parallel library. Deliver in stages:
