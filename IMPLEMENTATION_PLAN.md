@@ -739,14 +739,15 @@ replacement, a household-wide activity page, email or later roadmap work.
 - [x] Document selection boundaries, batch limits, atomic/replay semantics,
       active-loan interaction, history/undo scope and limitations in
       `docs/BULK_ORGANISATION.md`.
-- [ ] Local deployment after backup; remote server remains untouched.
+- [x] Local deployment after backup; remote server remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
 Voice notes are complete and locally verified. Milestone 2 is implemented and
-locally verified; later milestones still require a separate instruction.
+locally verified, and milestone 3 is implemented and locally verified; later
+milestones still require a separate instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
@@ -761,10 +762,11 @@ locally verified; later milestones still require a separate instruction.
    Add who/when/from/to history for item and container moves, including lending
    events where relevant. Offer safe undo with permission and intervening-change
    checks. Inspect/reuse existing movement functionality rather than duplicating it.
-3. **Bulk organisation:** select multiple items to move, tag or categorise; offer
-   a compact list view alongside existing cards. Preview affected items and
-   destination, handle quantity/location ambiguity and partial failures clearly,
-   preserve permissions and record changes in history. Reuse safe undo primitives.
+3. **Bulk organisation (implemented locally):** select multiple items to move,
+   tag or categorise; offer a compact list view alongside existing cards. Preview
+   affected items and destination, handle quantity/location ambiguity and partial
+   failures clearly, preserve permissions and record changes in history. Reuse
+   safe undo primitives.
 4. **Receipt and document scanning:** inspect existing Documents/OCR capabilities
    first; add capture, crop, perspective correction, rotation, contrast cleanup
    and multi-page PDFs while preserving originals. Accept files from dedicated
@@ -802,8 +804,7 @@ locally verified; later milestones still require a separate instruction.
    - Standardise container/storage terminology and present display name, permanent
      identifier and full room path consistently across cards, filters and details.
      Do not rename user records or identifiers merely to improve presentation.
-   - Hide irrelevant empty filters, show active filter chips, and preserve chosen
-     list/card views. Reduce empty item-photo placeholders and redundant upload
+   - Hide irrelevant empty filters and show active filter chips. Reduce empty item-photo placeholders and redundant upload
      controls. Remove empty-library export calls to action while retaining normal
      export capability once useful. Lead assistant with the question and retain
      accurate provider/privacy information in compact expandable details.
