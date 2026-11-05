@@ -1144,8 +1144,14 @@ real loans were not used as fixtures.
       brand/name matching, ambiguous/no-match, New loan selection, over-lending,
       stale stock, direct partial return, separate item/details navigation and
       viewer restrictions.
-- [ ] Local backup/deployment, served-asset and preserved real-data count check.
-      Remote deployment remains untouched.
+- [x] Backed up local data to `backups/housetory-20261105T110600Z` (checksums
+      valid), deployed locally with the standard Compose workflow, and verified
+      healthy api/db/worker/web services, served Loans/search/assistant assets,
+      migration `e2f4a6c8b0d2`, and preserved real-data counts (51 items, 1 user,
+      1 member, 1 AI provider, 6 task settings, 5 import batches, 328 entries,
+      1 loan, 0 purchases/documents/returns; uploads 2 files/1,177,655 bytes;
+      imports 5 files/75,620 bytes). The test-only PostgreSQL port is not
+      published. Remote deployment remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
