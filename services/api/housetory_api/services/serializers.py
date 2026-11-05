@@ -5,9 +5,9 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from ..config import get_settings
 from ..domain import WarrantyStatus
-from ..models import Document, Item, ItemPhoto, Purchase, Warranty
+from ..models import Document, DocumentScan, DocumentScanPage, Item, ItemPhoto, Purchase, Warranty
 from ..schemas.common import ItemReference
-from ..schemas.documents import DocumentBrief, DocumentOut
+from ..schemas.documents import DocumentBrief, DocumentOut, DocumentPageOut, ScanAdjustments
 from ..schemas.imports import ImportSourceBrief
 from ..schemas.items import (
     CategoryBrief,
@@ -37,6 +37,7 @@ def item_load_options() -> list:
         selectinload(Item.tags),
         selectinload(Item.photos),
         selectinload(Item.documents).selectinload(Document.items),
+        selectinload(Item.documents).selectinload(Document.scan).selectinload(DocumentScan.pages),
     ]
 
 
@@ -48,6 +49,29 @@ def photo_url(photo_id, *, thumbnail: bool = False) -> str:  # noqa: ANN001
 def document_url(document_id, *, original: bool = False) -> str:  # noqa: ANN001
     suffix = "/original" if original else "/file"
     return f"{_settings.api_prefix}/documents/{document_id}{suffix}"
+
+
+def document_page_out(page: DocumentScanPage) -> DocumentPageOut:
+    prefix = f"{_settings.api_prefix}/documents/scans/{page.scan_id}/pages/{page.id}"
+    try:
+        adjustments = ScanAdjustments.model_validate(page.adjustments or {})
+    except ValueError:
+        adjustments = ScanAdjustments()
+    return DocumentPageOut(
+        id=page.id,
+        page_number=page.page_index + 1,
+        width=page.width,
+        height=page.height,
+        original_filename=page.original_filename,
+        original_content_type=page.original_content_type,
+        original_byte_size=page.original_byte_size,
+        cleaned_content_type=page.cleaned_content_type,
+        cleaned_byte_size=page.cleaned_byte_size,
+        original_url=f"{prefix}/original",
+        cleaned_url=f"{prefix}/file",
+        adjustments=adjustments,
+        updated_at=page.updated_at,
+    )
 
 
 def photo_out(photo: ItemPhoto) -> PhotoOut:
@@ -93,6 +117,14 @@ def document_brief(document: Document) -> DocumentBrief:
 
 def document_out(document: Document) -> DocumentOut:
     items = sorted(document.items, key=lambda item: item.name.lower())
+    pages = (
+        [
+            document_page_out(page)
+            for page in sorted(document.scan.pages, key=lambda page: page.page_index)
+        ]
+        if document.scan is not None
+        else []
+    )
     return DocumentOut(
         id=document.id,
         title=document.title,
@@ -115,6 +147,8 @@ def document_out(document: Document) -> DocumentOut:
         updated_at=document.updated_at,
         items=[ItemReference(id=item.id, name=item.name) for item in items],
         item_count=len(items),
+        pages=pages,
+        page_count=len(pages),
         url=document_url(document.id),
         original_url=document_url(document.id, original=True),
     )
@@ -266,6 +300,7 @@ def item_detail(
 __all__ = [
     "document_brief",
     "document_out",
+    "document_page_out",
     "document_url",
     "item_detail",
     "item_load_options",

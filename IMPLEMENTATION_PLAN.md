@@ -741,6 +741,85 @@ replacement, a household-wide activity page, email or later roadmap work.
       `docs/BULK_ORGANISATION.md`.
 - [x] Local deployment after backup; remote server remains untouched.
 
+## Staged milestone — receipt and document scanning
+
+This milestone extends the existing Documents library, upload storage, OCR worker
+and role model. It adds image-page capture and cleanup with a bounded multi-page
+PDF commit. It does not add new AI extraction, line-item ranking, automatic item or
+purchase creation, PDF recombination, or later roadmap milestones.
+
+### Stage A — capture and private page drafts
+
+- [x] **Scan pages** entry points on the Documents library and item document
+      section; the existing single-file **Add document** path remains unchanged.
+- [x] Camera capture input plus multi-file image chooser for JPEG, PNG, WebP, HEIC
+      and HEIF; browser camera permission and unsupported-browser states are
+      handled by the native file input.
+- [x] Draft scan sessions and page records distinct from committed documents;
+      thumbnails, add/remove, reorder, cancel, reset and explicit save.
+- [x] Retain item context with a reviewed `ItemMultiSelect`; scanning never creates
+      inventory items, purchases or automatic links.
+- [x] Bounded page count, source pixels, upload size, draft total size and active
+      draft count; stale drafts are pruned after 24 hours.
+
+### Stage B — cleanup editor
+
+- [x] Manual four-corner crop/perspective/straighten control with pointer dragging
+      and keyboard arrow adjustment; no unreliable automatic edge detection.
+- [x] 90° left/right rotation, Color/Grayscale/Document modes, conservative
+      contrast slider, per-page reset and original/cleaned comparison.
+- [x] Original page bytes preserved exactly; cleaned JPEGs are regenerated from the
+      original and never overwrite it.
+- [x] Receipt-length images preserve aspect ratio in the editor/PDF; no fixed-page
+      squashing or invented text.
+- [x] Existing Pillow/HEIC/reportlab dependencies reused; no new image editor
+      dependency.
+
+### Stage C — multi-page PDF and OCR
+
+- [x] Ordered A4 portrait/landscape PDF assembly with consistent page orientation,
+      bounded image dimensions and sensible compression.
+- [x] Exact page originals retained under the one document; cleaned PDF is the
+      default download, assembled source PDF is the Original, and page originals are
+      available individually.
+- [x] Direct scanner-app PDFs still attach as-is; editing/recombining existing PDFs
+      is explicitly unsupported rather than silently flattened.
+- [x] OCR runs on the cleaned PDF for scans and original uploads otherwise;
+      `ocr_artifact` records the choice. Existing review/metadata behavior is
+      unchanged and no new extraction is added.
+- [x] Existing background OCR job status/retry is reused; empty/unreadable text is
+      marked failed with adjustment/retry guidance rather than silent success.
+- [x] Commit request id is required; same request returns the same document and
+      different reuse is rejected. Cancel/delete/prune remove every retained page
+      and derivative.
+
+### Stage D — security and storage
+
+- [x] Household-scoped scan sessions/pages, authenticated private media, viewer
+      write rejection and cross-household 404 behavior.
+- [x] Signature-based image validation, allowlisted decoders, decompression and
+      dimension limits, sanitized names and generated storage keys.
+- [x] No network fetch of embedded references, no cloud/LLM dependency, private
+      no-store file headers and no public static storage.
+- [x] Item/document deletion removes scan originals, derivatives, assembled PDFs
+      and cleaned PDFs; no orphaned page files.
+- [x] Append-only migration `e5a7c9d1f3b2` for scan sessions and source pages; no
+      existing row is rewritten.
+
+### Stage E — verification, documentation and local delivery
+
+- [x] PostgreSQL tests for crop/perspective/rotation/contrast, original bytes, HEIC,
+      ordered PDF pages, idempotent commit, request reuse, cancel/prune cleanup,
+      viewer/isolation rules, item attachment, no automatic writes and OCR artifact
+      selection.
+- [x] Frontend tests for upload, previews, keyboard corners, rotation, reorder,
+      removal, cancel, save metadata and stable retry request ids.
+- [x] Disposable-stack browser workflows for desktop/mobile scan editing, save,
+      page-original access and cancel.
+- [x] Document supported formats/limits, original/derivative storage, cleanup,
+      OCR behavior and limitations in `docs/DOCUMENT_SCANNING.md`.
+- [ ] Local deployment after backup; remote server remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are

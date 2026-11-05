@@ -217,6 +217,35 @@ export interface ExtractedMetadata {
   [key: string]: unknown;
 }
 
+export interface DocumentPage {
+  id: UUID;
+  page_number: number;
+  width: number;
+  height: number;
+  original_filename: string;
+  original_content_type: string;
+  original_byte_size: number;
+  cleaned_content_type: string;
+  cleaned_byte_size: number;
+  original_url: string;
+  cleaned_url: string;
+  adjustments: {
+    rotation: 0 | 90 | 180 | 270;
+    corners: Array<{ x: number; y: number }>;
+    color_mode: "color" | "grayscale" | "document";
+    contrast: number;
+  };
+  updated_at: string;
+}
+
+export interface DocumentScan {
+  id: UUID;
+  status: "draft" | "committed";
+  pages: DocumentPage[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DocumentRecord {
   id: UUID;
   title: string;
@@ -239,6 +268,8 @@ export interface DocumentRecord {
   updated_at: string;
   items: ItemReference[];
   item_count: number;
+  pages: DocumentPage[];
+  page_count: number;
   url: string;
   original_url: string;
 }

@@ -516,6 +516,72 @@ class Document(UUIDPrimaryKeyMixin, Base):
 
     household: Mapped["Household"] = relationship(back_populates="documents")
     items: Mapped[list[Item]] = relationship(secondary=item_documents, back_populates="documents")
+    scan: Mapped["DocumentScan | None"] = relationship(
+        back_populates="document", uselist=False, passive_deletes=True
+    )
+
+
+class DocumentScan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "document_scans"
+    __table_args__ = (
+        CheckConstraint("status in ('draft', 'committed')", name="valid_status"),
+        UniqueConstraint(
+            "household_id", "request_id", name="uq_document_scans_household_request_id"
+        ),
+        UniqueConstraint("document_id", name="uq_document_scans_document_id"),
+        Index("ix_document_scans_household_status", "household_id", "status"),
+        Index("ix_document_scans_household_updated", "household_id", "updated_at"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="draft")
+    request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    document: Mapped[Document | None] = relationship(back_populates="scan")
+    pages: Mapped[list["DocumentScanPage"]] = relationship(
+        back_populates="scan",
+        cascade="all, delete-orphan",
+        order_by="DocumentScanPage.page_index",
+        passive_deletes=True,
+    )
+
+
+class DocumentScanPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "document_scan_pages"
+    __table_args__ = (
+        CheckConstraint("page_index >= 0", name="page_index_nonnegative"),
+        CheckConstraint("original_byte_size > 0", name="original_byte_size_positive"),
+        CheckConstraint("cleaned_byte_size > 0", name="cleaned_byte_size_positive"),
+        Index("ix_document_scan_pages_scan_order", "scan_id", "page_index"),
+    )
+
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_scans.id", ondelete="CASCADE"), nullable=False
+    )
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    page_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    cleaned_storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    cleaned_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    original_byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cleaned_byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    adjustments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+
+    scan: Mapped[DocumentScan] = relationship(back_populates="pages")
 
 
 class CustomFieldDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -565,6 +631,8 @@ __all__ = [
     "Category",
     "CustomFieldDefinition",
     "Document",
+    "DocumentScan",
+    "DocumentScanPage",
     "Item",
     "ItemCustomValue",
     "ItemPhoto",

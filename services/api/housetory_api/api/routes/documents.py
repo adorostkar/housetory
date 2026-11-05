@@ -22,6 +22,7 @@ from ...services.document_ocr import enqueue_ocr
 from ...services.documents import (
     create_document,
     delete_document,
+    document_load_options,
     get_document,
     resolve_document_items,
 )
@@ -47,7 +48,11 @@ def _file_headers(document: Document) -> dict[str, str]:
 
 
 def _document_query(household_id: uuid.UUID):
-    return select(Document).where(Document.household_id == household_id)
+    return (
+        select(Document)
+        .options(*document_load_options())
+        .where(Document.household_id == household_id)
+    )
 
 
 @router.get("/documents", response_model=DocumentList)

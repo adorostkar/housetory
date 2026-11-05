@@ -1,11 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
-import { Download, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Download, Plus, ScanLine, Search, SlidersHorizontal, X } from "lucide-react";
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DocumentCard } from "@/components/document-card";
+import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -30,6 +31,7 @@ export function DocumentsPage() {
   const debouncedSearch = useDebouncedValue(search, 250);
   const canWrite = useCanWrite();
   const [uploadOpen, setUploadOpen] = React.useState(false);
+  const [scanOpen, setScanOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] = React.useState<DocumentRecord | null>(null);
 
   const typeFilter = searchParams.get("type") ?? "";
@@ -95,10 +97,16 @@ export function DocumentsPage() {
               </a>
             </Button>
             {canWrite && (
-              <Button onClick={() => setUploadOpen(true)}>
-                <Plus />
-                Add document
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setScanOpen(true)}>
+                  <ScanLine />
+                  Scan pages
+                </Button>
+                <Button onClick={() => setUploadOpen(true)}>
+                  <Plus />
+                  Add document
+                </Button>
+              </>
             )}
           </>
         }
@@ -225,17 +233,15 @@ export function DocumentsPage() {
                 ? "Try a broader search, another type, or clear the filters."
                 : "Add a receipt, invoice, warranty certificate or manual. Housetory keeps the original file and extracts useful details locally."
             }
-            actionLabel={hasFilters ? "Clear filters" : "Add your first document"}
+            actionLabel={hasFilters ? "Clear filters" : "Scan a document"}
             onAction={
-              hasFilters ? clearFilters : canWrite ? () => setUploadOpen(true) : undefined
+              hasFilters ? clearFilters : canWrite ? () => setScanOpen(true) : undefined
             }
             secondary={
-              !hasFilters ? (
-                <Button variant="ghost" asChild>
-                  <a href="/api/v1/exports/documents.csv">
-                    <Download />
-                    Export an empty library
-                  </a>
+              !hasFilters && canWrite ? (
+                <Button variant="ghost" onClick={() => setUploadOpen(true)}>
+                  <Plus />
+                  Upload a file
                 </Button>
               ) : undefined
             }
@@ -264,6 +270,15 @@ export function DocumentsPage() {
         open={uploadOpen}
         onOpenChange={setUploadOpen}
         onUploaded={(document) => {
+          navigate(`/documents/${document.id}`);
+        }}
+      />
+
+      <DocumentScanDialog
+        open={scanOpen}
+        onOpenChange={setScanOpen}
+        defaultType="receipt"
+        onSaved={(document) => {
           navigate(`/documents/${document.id}`);
         }}
       />

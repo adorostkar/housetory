@@ -69,6 +69,11 @@ export function DocumentCard({
               {DOCUMENT_TYPE_LABELS[document.document_type]}
             </Badge>
           )}
+          {!compact && document.page_count > 1 && (
+            <Badge variant="secondary" className="shrink-0">
+              {pluralize(document.page_count, "page")}
+            </Badge>
+          )}
         </div>
         <p className="mt-1 truncate text-[0.7rem] text-muted-foreground">
           {document.merchant ? `${document.merchant} · ` : ""}

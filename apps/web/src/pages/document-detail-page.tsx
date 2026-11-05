@@ -4,6 +4,7 @@ import {
   Check,
   Download,
   FileText,
+  Images,
   Link2,
   Pencil,
   RefreshCw,
@@ -134,6 +135,7 @@ export function DocumentDetailPage() {
   const document = documentQuery.data;
   if (!document) return <DocumentDetailSkeleton />;
   const busy = retry.isPending || remove.isPending;
+  const firstPage = document.pages[0];
 
   return (
     <div className="animate-fade-up">
@@ -160,7 +162,7 @@ export function DocumentDetailPage() {
             <Button variant="outline" asChild>
               <a href={document.original_url}>
                 <FileText />
-                Original
+                {document.page_count > 0 ? "Original PDF" : "Original"}
               </a>
             </Button>
             {canWrite && (
@@ -194,6 +196,20 @@ export function DocumentDetailPage() {
                   className="max-h-[65vh] max-w-full rounded-lg object-contain shadow-sm"
                 />
               </div>
+            ) : firstPage ? (
+              <div className="relative flex max-h-[70vh] items-center justify-center bg-secondary/30 p-4">
+                <img
+                  src={firstPage.cleaned_url}
+                  alt={`${document.title} · page 1`}
+                  className="max-h-[65vh] max-w-full rounded-lg object-contain shadow-sm"
+                />
+                <Badge
+                  variant="secondary"
+                  className="absolute left-6 top-6 bg-background/85 backdrop-blur-md"
+                >
+                  Page 1 of {document.page_count}
+                </Badge>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
                 <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
@@ -215,6 +231,50 @@ export function DocumentDetailPage() {
             )}
           </section>
 
+          {document.pages.length > 0 && (
+            <section className="surface p-5 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Images className="size-4 text-brass" strokeWidth={1.7} />
+                  <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                    Scanned pages
+                  </h2>
+                </div>
+                <Badge variant="outline">{document.page_count} pages</Badge>
+              </div>
+              <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+                The cleaned PDF is the default download. Exact original page files are
+                preserved separately and can be downloaded below.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {document.pages.map((page) => (
+                  <figure
+                    key={page.id}
+                    className="overflow-hidden rounded-xl border border-border/70 bg-secondary/20"
+                  >
+                    <a href={page.cleaned_url} target="_blank" rel="noreferrer">
+                      <img
+                        src={page.cleaned_url}
+                        alt={`Cleaned page ${page.page_number}`}
+                        className="h-36 w-full object-contain p-2"
+                      />
+                    </a>
+                    <figcaption className="flex items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-[0.68rem] text-muted-foreground">
+                      <span>Page {page.page_number}</span>
+                      <a
+                        href={page.original_url}
+                        download={page.original_filename}
+                        className="font-medium underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        Original
+                      </a>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="surface p-5 sm:p-6">
             <div className="flex items-center gap-2">
               <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
@@ -223,8 +283,9 @@ export function DocumentDetailPage() {
               </h2>
             </div>
             <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
-              OCR proposes values only. Your inventory changes after you confirm
-              them below.
+              {document.pages.length > 0
+                ? "OCR reads the cleaned PDF; original page files remain available above. Proposals only — your inventory changes after you confirm them below."
+                : "OCR proposes values only. Your inventory changes after you confirm them below."}
             </p>
             <OcrReview document={document} />
           </section>
@@ -257,6 +318,9 @@ export function DocumentDetailPage() {
                 value={document.document_date ? formatDate(document.document_date) : "—"}
               />
               <MetadataRow label="File" value={document.original_filename} />
+              {document.page_count > 0 && (
+                <MetadataRow label="Pages" value={String(document.page_count)} />
+              )}
               <MetadataRow
                 label="Size"
                 value={`${formatFileSize(document.byte_size)} · original ${formatFileSize(
@@ -448,8 +512,12 @@ export function DocumentDetailPage() {
             </h2>
             <ul className="mt-3 space-y-2 text-[0.72rem] leading-relaxed text-muted-foreground">
               <li>Downloads are authenticated and never cached by the browser.</li>
-              <li>The original upload is kept byte-for-byte for your records.</li>
-              <li>Image downloads are re-encoded with metadata stripped.</li>
+              <li>
+                {document.page_count > 0
+                  ? "Each scanned source page is kept byte-for-byte; the Original PDF is assembled from those pages."
+                  : "The original upload is kept byte-for-byte for your records."}
+              </li>
+              <li>Cleaned image pages are re-encoded derivatives with metadata stripped.</li>
               <li>PDFs and text files are validated before they are stored.</li>
             </ul>
           </section>
@@ -466,7 +534,11 @@ export function DocumentDetailPage() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title="Delete this document?"
-        description="The original upload and safe download copy will be removed, and the document will be detached from every item and purchase. This cannot be undone."
+        description={
+          document.page_count > 0
+            ? "The cleaned PDF, assembled source PDF and retained scan pages will be removed, and the document will be detached from every item and purchase. This cannot be undone."
+            : "The original upload and safe download copy will be removed, and the document will be detached from every item and purchase. This cannot be undone."
+        }
         confirmLabel="Delete document"
         onConfirm={async () => {
           await remove.mutateAsync();

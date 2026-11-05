@@ -140,6 +140,7 @@ All application endpoints are versioned under `/api/v1`.
 | Bulk organisation | `POST /items/bulk/move`, `POST /items/bulk/tags`, `POST /items/bulk/category`; bounded atomic batches with required request-id replay safety |
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
+| Document scans | `POST/GET/DELETE /documents/scans`, add/update/delete/reorder pages, authenticated original/cleaned page files, idempotent `POST /documents/scans/{id}/commit` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
@@ -256,6 +257,8 @@ recognition_item_links >── items
 room_photos / location_photos (entity photographs)
 ai_providers (encrypted credentials, consent, provider endpoint)
 ai_task_settings (provider/model per task)
+document_scans >── documents (one committed document per scan)
+document_scan_pages >── document_scans (exact originals + cleaned derivatives)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -306,6 +309,16 @@ Key decisions:
   replay result. Tag/category batches store one batch event and are not undoable.
   Required request ids are fingerprinted so identical retries return the stored
   result while different payloads are rejected.
+- **Document scanning** keeps draft pages in household-scoped scan sessions
+  distinct from committed documents. Each page preserves its exact uploaded bytes
+  and has a separately generated cleaned JPEG. The server applies a normalized
+  four-corner perspective crop, 90° rotation and conservative color/grayscale/
+  contrast adjustments with Pillow; no text restoration or automatic edge
+  detection is claimed. Commit locks the scan row, validates all page order and
+  references, assembles an A4-oriented cleaned PDF and an assembled source PDF,
+  creates one document, and enqueues the existing OCR job. A required request id
+  makes retries return the same document. Cleaned derivatives and source pages are
+  bounded to 20 pages, 40 MP inputs, 100 MB draft files and 3500 px output edges.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
 - **Purchases** are household-owned shared records. Items reference
@@ -402,7 +415,9 @@ legacy identifiers/aliases. The voice milestone adds append-only migration
 voice indexes. The lending milestone adds append-only migration `c9e1f3a5b7d2`
 for loans, partial returns and activity events. The bulk-organisation milestone
 adds append-only migration `d4f6b8c0e2a1`, allowing `entity_type="batch"` on
-activity events. No earlier migration or record is rewritten.
+activity events. The document-scanning milestone adds append-only migration
+`e5a7c9d1f3b2` for temporary scan sessions and retained source pages. No earlier
+migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -455,6 +470,12 @@ columns.
   ReportLab text primitives (no HTML/XML interpolation), QR payloads come from
   `QR_BASE_URL`/`APP_BASE_URL` plus a random UUID, and output is clipped to each
   label rectangle.
+- Scan drafts and retained source pages use
+  `households/<household_uuid>/documents/scans/<scan_uuid>/...`; assembled
+  cleaned/source PDFs use the ordinary document paths. Draft originals and
+  derivatives are removed when the draft is cancelled, when it is pruned after 24
+  hours, or when its committed document/item is deleted. Page files carry private
+  authenticated `no-store` responses and are never served from nginx.
 - Backups capture the database, uploads volume and private imports volume. Backup
   directories are `0700` and files `0600`; restores verify checksums and refuse
   database or Compose-project mismatches. Uploads and imports archives are
@@ -499,7 +520,10 @@ deployment.
   recorded and labelled. Lending and undo are synchronous authenticated API
   operations using row locks, request-id idempotency and compensating events;
   bulk move/tag/category batches are likewise synchronous, bounded transactions
-  with no background job and no borrower email or reminder job. Fixed
+  with no background job and no borrower email or reminder job. Scan PDF assembly
+  is a bounded synchronous request; OCR remains the existing background job and
+  reads the cleaned PDF for scanned documents. Abandoned scan drafts are pruned by
+  the API at startup and opportunistically when a new scan starts. Fixed
   fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 
@@ -536,6 +560,12 @@ deployment.
 - Item cards resolve the nearest container from `location_path`; item detail
   links to container pages; room place menus link to container pages and show
   identifiers.
+- The Documents page adds a multi-page scan dialog alongside the unchanged
+  single-file upload. Draft pages have thumbnails, original/cleaned previews,
+  keyboard-adjustable crop corners, rotation, color/document mode, contrast,
+  reorder/remove controls and a persistent save/cancel footer. Saved scans show a
+  page strip with exact original page downloads and identify the cleaned PDF as
+  the default download/OCR artifact. Viewers see no write controls.
 - The Items page supports explicit loaded-record selection and a remembered
   card/compact-list toggle. Checkboxes sit outside item links; archived rows are
   disabled; viewers have no selection controls. Search/filter/sort changes clear

@@ -37,6 +37,14 @@ PHOTO_FORMATS = {
     "HEIC": ("image/heic", "heic"),
 }
 
+SCAN_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+
 DOCUMENT_TYPES = {
     "application/pdf": ".pdf",
     "image/jpeg": ".jpg",
@@ -70,6 +78,16 @@ class StoredDocument:
     original_content_type: str
     byte_size: int
     original_byte_size: int
+
+
+@dataclass(frozen=True)
+class StoredScanPageOriginal:
+    storage_key: str
+    original_filename: str
+    content_type: str
+    byte_size: int
+    width: int
+    height: int
 
 
 @dataclass(frozen=True)
@@ -141,6 +159,10 @@ def _filename_with_extension(filename: str | None, extension: str) -> str:
     stem = PurePosixPath(safe).stem or "document"
     suffix = f".{extension}" if not extension.startswith(".") else extension
     return f"{stem[: 255 - len(suffix)]}{suffix}"
+
+
+def safe_document_filename(title: str | None, extension: str = "pdf") -> str:
+    return _filename_with_extension(title or "document", extension)
 
 
 def _open_image(path: Path) -> Image.Image:
@@ -432,6 +454,141 @@ def resolve_key(storage_key: str) -> Path:
     if not path.is_file():
         raise ApiError(404, "file_not_found", "File not found.")
     return path
+
+
+def _scan_dir(household_id: uuid.UUID, scan_id: uuid.UUID) -> Path:
+    return _root() / "households" / str(household_id) / "documents" / "scans" / str(scan_id)
+
+
+def store_scan_page_original(
+    household_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    page_id: uuid.UUID,
+    upload: UploadFile,
+) -> StoredScanPageOriginal:
+    settings = get_settings()
+    declared_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+    if declared_type not in SCAN_IMAGE_TYPES:
+        raise ApiError(
+            422,
+            "unsupported_scan_page",
+            "Scan pages must be JPEG, PNG, WebP, HEIC or HEIF images.",
+        )
+
+    temp_path, size = _write_temp(upload, settings.max_upload_bytes)
+    original_dir = _scan_dir(household_id, scan_id) / "originals"
+    destination: Path | None = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            try:
+                with _open_image(temp_path) as image:
+                    image_format = image.format
+                    image.verify()
+                with _open_image(temp_path) as image:
+                    oriented = ImageOps.exif_transpose(image)
+                    width, height = oriented.size
+            except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+                raise ApiError(
+                    422,
+                    "invalid_scan_page",
+                    "This file is not a readable scan page image.",
+                ) from exc
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+    if image_format not in PHOTO_FORMATS:
+        temp_path.unlink(missing_ok=True)
+        raise ApiError(
+            422,
+            "unsupported_scan_page",
+            "Scan pages must be JPEG, PNG, WebP, HEIC or HEIF images.",
+        )
+    if width < 1 or height < 1 or width * height > 40_000_000:
+        temp_path.unlink(missing_ok=True)
+        raise ApiError(422, "scan_page_dimensions", "The scan page dimensions are not supported.")
+
+    content_type, extension = PHOTO_FORMATS[image_format]
+    try:
+        _mkdir_private(original_dir)
+        destination = original_dir / f"{page_id}.{extension}"
+        shutil.copyfile(temp_path, destination)
+        _chmod_file(destination)
+        return StoredScanPageOriginal(
+            storage_key=destination.relative_to(_root()).as_posix(),
+            original_filename=_safe_filename(upload.filename),
+            content_type=content_type,
+            byte_size=destination.stat().st_size,
+            width=width,
+            height=height,
+        )
+    except Exception:
+        if destination is not None:
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def save_scan_cleaned(
+    household_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    page_id: uuid.UUID,
+    image: Image.Image,
+) -> tuple[str, str, int, int, int]:
+    cleaned_dir = _scan_dir(household_id, scan_id) / "cleaned"
+    _mkdir_private(cleaned_dir)
+    destination = cleaned_dir / f"{page_id}.jpg"
+    fd, temp_name = tempfile.mkstemp(prefix="cleaned-", suffix=".jpg", dir=cleaned_dir)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            image.convert("RGB").save(
+                output,
+                format="JPEG",
+                quality=86,
+                optimize=True,
+                progressive=True,
+            )
+        _chmod_file(temp_path)
+        os.replace(temp_path, destination)
+        _chmod_file(destination)
+        return (
+            destination.relative_to(_root()).as_posix(),
+            "image/jpeg",
+            destination.stat().st_size,
+            image.width,
+            image.height,
+        )
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def write_document_pdf(
+    household_id: uuid.UUID,
+    document_id: uuid.UUID,
+    data: bytes,
+    *,
+    original: bool = False,
+) -> tuple[str, int]:
+    documents_dir = _root() / "households" / str(household_id) / "documents"
+    destination_dir = documents_dir / "originals" if original else documents_dir
+    _mkdir_private(destination_dir)
+    destination = destination_dir / f"{document_id}.pdf"
+    fd, temp_name = tempfile.mkstemp(prefix="pdf-", suffix=".pdf", dir=destination_dir)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(data)
+        _chmod_file(temp_path)
+        os.replace(temp_path, destination)
+        _chmod_file(destination)
+        return destination.relative_to(_root()).as_posix(), len(data)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def resolve_import_key(storage_key: str) -> Path:

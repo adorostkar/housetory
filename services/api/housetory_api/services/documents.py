@@ -6,13 +6,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..api.errors import ApiError
 from ..domain import DocumentType, OcrStatus
-from ..models import Document, Item
+from ..models import Document, DocumentScan, Item
 from . import storage
 from .document_ocr import enqueue_ocr
 
 
 def document_load_options() -> list:
-    return [selectinload(Document.items)]
+    return [
+        selectinload(Document.items),
+        selectinload(Document.scan).selectinload(DocumentScan.pages),
+    ]
 
 
 def get_document(db: Session, household_id: uuid.UUID, document_id: uuid.UUID) -> Document:
@@ -96,6 +99,13 @@ def create_document(
 
 def delete_document(db: Session, document: Document) -> None:
     keys = [document.storage_key, document.original_storage_key]
+    if document.scan is not None:
+        keys.extend(
+            key
+            for page in document.scan.pages
+            for key in (page.original_storage_key, page.cleaned_storage_key)
+        )
+        db.delete(document.scan)
     db.delete(document)
     db.commit()
     for key in keys:

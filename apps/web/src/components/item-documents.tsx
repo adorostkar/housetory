@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { Download, Paperclip, Plus, Trash2 } from "lucide-react";
+import { Download, Paperclip, Plus, ScanLine, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
   const invalidate = useInvalidateInventory();
   const canWrite = useCanWrite();
   const [uploadOpen, setUploadOpen] = React.useState(false);
+  const [scanOpen, setScanOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] = React.useState<DocumentRecord | null>(null);
 
   const remove = useMutation({
@@ -46,10 +48,16 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
             <Link to="/documents">Library</Link>
           </Button>
           {canWrite && (
-            <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
-              <Plus />
-              Attach
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={() => setScanOpen(true)}>
+                <ScanLine />
+                Scan
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+                <Plus />
+                Attach
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -57,17 +65,23 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
       <div className="mt-5">
         {item.documents.length === 0 ? (
           canWrite ? (
-            <button
-              type="button"
-              onClick={() => setUploadOpen(true)}
-              className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center transition-colors hover:bg-secondary/40"
-            >
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-7 text-center">
               <Paperclip className="size-5 text-muted-foreground/70" strokeWidth={1.5} />
               <span className="mt-3 text-[0.8rem] font-medium">Attach a document</span>
               <span className="mt-1 text-[0.72rem] text-muted-foreground">
-                PDF, JPEG, PNG, WebP, HEIC or plain text
+                Upload a PDF or image, or combine camera pages into one scanned document.
               </span>
-            </button>
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setUploadOpen(true)}>
+                  <Plus />
+                  Choose a file
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setScanOpen(true)}>
+                  <ScanLine />
+                  Scan pages
+                </Button>
+              </div>
+            </div>
           ) : (
             <p className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[0.76rem] text-muted-foreground">
               No documents attached.
@@ -126,6 +140,13 @@ export function ItemDocuments({ item }: { item: ItemDetail }) {
       <DocumentUploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
+        defaultItemIds={[item.id]}
+        defaultType="other"
+      />
+
+      <DocumentScanDialog
+        open={scanOpen}
+        onOpenChange={setScanOpen}
         defaultItemIds={[item.id]}
         defaultType="other"
       />

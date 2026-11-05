@@ -13,6 +13,8 @@ from .api.errors import ApiError, error_body, install_exception_handlers
 from .api.router import api_router
 from .api.routes.health import live_payload
 from .config import get_settings
+from .db import SessionLocal
+from .services.scan import prune_expired_scans
 from .services.storage import ensure_storage
 
 logging.basicConfig(
@@ -26,6 +28,13 @@ logger = logging.getLogger("housetory.api")
 async def lifespan(_: FastAPI):
     settings = get_settings()
     ensure_storage()
+    try:
+        with SessionLocal() as db:
+            pruned = prune_expired_scans(db)
+        if pruned["scans"]:
+            logger.info("Pruned %s abandoned scan session(s)", pruned["scans"])
+    except Exception:  # noqa: BLE001 - startup cleanup must not block the API
+        logger.exception("Could not prune abandoned scan sessions")
     logger.info("Housetory API starting (environment=%s)", settings.environment)
     yield
     logger.info("Housetory API stopping")

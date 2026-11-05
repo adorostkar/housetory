@@ -119,7 +119,11 @@ export function DocumentUploadDialog({
         >
           {upload.error && <FormError message={getApiErrorMessage(upload.error)} />}
 
-          <Field label="File" htmlFor="document-file" hint="PDF, JPEG, PNG, WebP or plain text · up to 25 MB">
+          <Field
+            label="File"
+            htmlFor="document-file"
+            hint="PDF, JPEG, PNG, WebP or plain text · up to 25 MB. Multi-page PDFs are attached unchanged."
+          >
             <label
               htmlFor="document-file"
               className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-4 transition-colors hover:bg-secondary/40"

@@ -30,6 +30,8 @@ const document: DocumentRecord = {
     { id: "item-2", name: "Grinder" },
   ],
   item_count: 2,
+  pages: [],
+  page_count: 0,
   url: "/api/v1/documents/doc-1/file",
   original_url: "/api/v1/documents/doc-1/original",
 };

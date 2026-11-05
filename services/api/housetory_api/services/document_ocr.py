@@ -9,12 +9,13 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
 from ..domain import AiTask, OcrStatus
 from ..jobs import enqueue
-from ..models import Document
+from ..models import Document, DocumentScan
 from ..schemas.ai import AiDocumentMetadata
 from . import ai, storage
 from .ocr import OcrError, extract_text, parse_receipt
@@ -207,13 +208,29 @@ def run_document_ocr(
         db.commit()
 
         try:
-            key = document.original_storage_key or document.storage_key
+            scan = db.scalar(select(DocumentScan).where(DocumentScan.document_id == document.id))
+            if scan is not None:
+                key = document.storage_key
+                content_type = document.content_type
+                artifact = "cleaned_pdf"
+            else:
+                key = document.original_storage_key or document.storage_key
+                content_type = document.original_content_type or document.content_type
+                artifact = "original"
             path = storage.resolve_key(key)
-            content_type = document.original_content_type or document.content_type
             extracted = (extractor or extract_text)(path, content_type)
-            metadata = (parser or parse_receipt)(extracted.text)
+            if not extracted.text.strip():
+                raise OcrError(
+                    "No readable text was found. Adjust the scan crop, rotation or "
+                    "contrast, or upload a clearer page and retry OCR."
+                )
+            metadata = {
+                **(document.extracted_metadata or {}),
+                **(parser or parse_receipt)(extracted.text),
+            }
             metadata["source"] = extracted.source
             metadata["confidence"] = extracted.confidence
+            metadata["ocr_artifact"] = artifact
             metadata = _apply_ai_document_metadata(db, document, extracted.text, metadata)
             _apply_result(
                 document,

@@ -288,6 +288,13 @@ def delete_item(
     for document in exclusive_documents:
         keys.append(document.storage_key)
         keys.append(document.original_storage_key)
+        if document.scan is not None:
+            keys.extend(
+                key
+                for page in document.scan.pages
+                for key in (page.original_storage_key, page.cleaned_storage_key)
+            )
+            db.delete(document.scan)
         db.delete(document)
 
     if item.purchase_id is not None:

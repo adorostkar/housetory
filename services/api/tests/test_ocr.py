@@ -233,3 +233,19 @@ def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_clien
             "serial number" in warning and "not present" in warning
             for warning in metadata["ai_warnings"]
         )
+
+
+def test_empty_ocr_text_is_a_failed_read_not_a_silent_success(owner_client):
+    item = create_item(owner_client)
+    document = upload_text_document(owner_client, item["id"]).json()
+    with pytest.raises(OcrError, match="No readable text"):
+        run_document_ocr(
+            document["id"],
+            extractor=lambda path, content_type: ExtractedText(
+                text="   ", confidence=0, source="ocr"
+            ),
+        )
+    stored = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert stored["ocr_status"] == "failed"
+    assert "No readable text" in stored["ocr_error"]
+    assert stored["ocr_processed_at"] is not None
