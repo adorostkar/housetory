@@ -89,7 +89,7 @@ const item: ItemSummary = {
 
 const firstAnswer: AssistantResponse = {
   answer:
-    "1 of 2 Heavy drill is at home in Workshop / BOX-006 · Power tools. On loan: 1 with Alex, recorded due 2026-11-15.",
+    "Alex has 1 of your 2 units of Makita Heavy drill. Due 15 Nov 2026. The other 1 is at home in Workshop → BOX-006 · Power tools.",
   mode: "deterministic",
   tool: "locate_item",
   filters: { q: "heavy drill" },
@@ -153,7 +153,7 @@ describe("AssistantPage", () => {
       `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
     );
     expect(
-      await screen.findByText(/1 of 2 Heavy drill is at home/),
+      await screen.findByText(/Alex has 1 of your 2 units/),
     ).toBeVisible();
     expect(api.post).toHaveBeenCalledWith("/assistant/query", {
       question: "where is my heavy drill",
@@ -161,6 +161,7 @@ describe("AssistantPage", () => {
     });
     expect(screen.getByText("Privacy & model details")).toBeVisible();
     expect(screen.getByText("Local AI")).toBeVisible();
+    expect(screen.queryByText("Grounded answer")).not.toBeInTheDocument();
     expect(screen.getByText("Heavy drill loan to Alex")).toBeVisible();
     expect(api.patch).not.toHaveBeenCalled();
     expect(api.delete).not.toHaveBeenCalled();
@@ -170,7 +171,7 @@ describe("AssistantPage", () => {
     renderPage(
       `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
     );
-    await screen.findByText(/1 of 2 Heavy drill is at home/);
+    await screen.findByText(/Alex has 1 of your 2 units/);
     const input = screen.getByRole("textbox", {
       name: "Ask the Housetory assistant",
     });

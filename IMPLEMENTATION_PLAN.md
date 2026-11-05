@@ -1100,6 +1100,53 @@ drill/Mohsen loan was not used as a fixture.
       5 files/75,620 bytes). The test-only PostgreSQL port is not published.
       Remote deployment remains untouched.
 
+## Loans usability and natural-wording follow-up
+
+This queued follow-up adds point-of-use lending actions on the Loans page and
+rewrites deterministic loan answers in natural language. It reuses existing
+server validation and history; no schema or stock rule changed, and the user's
+real loans were not used as fixtures.
+
+### Stage A — Loans page actions
+
+- [x] New loan action with inventory search, brand/model/home context, available
+      quantities, disabled fully loaned items, loading/no-match/error states and
+      archived-item exclusion.
+- [x] Reuses the existing Lend dialog and server rechecks stock/archive state;
+      over-lending and stale-stock errors are shown in the dialog. Successful
+      creation refreshes the Outstanding list and restores focus.
+- [x] Outstanding rows use plain borrower text, item-detail links, recorded home
+      and dates, independent View details and direct Record return actions.
+      Return reuses the existing dialog with partial returns, explicit
+      confirmation, idempotency, history and undo. Closed/cancelled rows and
+      viewers cannot return stock.
+
+### Stage B — natural search/assistant wording
+
+- [x] Location answers lead with a direct borrower/quantity statement and natural
+      recorded home path, using stored brand/name/model without rewriting records.
+- [x] Partial, multiple-borrower, no-return-date, returned, missing-home,
+      ambiguous and no-match cases are quantity-aware and honest; no fabricated
+      borrower, date or location.
+- [x] Removed the “Grounded answer” badge, internal intent headings and generic
+      return-guarantee disclaimer. Search helper is “Search for an item or ask a
+      question.” Useful item/loan/source links remain; provider/consent details
+      stay secondary.
+- [x] No paid model is required to paraphrase basic facts; all retrieval,
+      permissions and read-only boundaries are unchanged.
+
+### Stage C — verification and local delivery
+
+- [x] 268 PostgreSQL tests, 117 Vitest tests and 31 disposable-stack Playwright
+      workflows pass; Ruff, strict TypeScript typecheck, production build and
+      migration checks pass.
+- [x] Covers fully/partial/multiple loan wording, returned/no-date/no-home,
+      brand/name matching, ambiguous/no-match, New loan selection, over-lending,
+      stale stock, direct partial return, separate item/details navigation and
+      viewer restrictions.
+- [ ] Local backup/deployment, served-asset and preserved real-data count check.
+      Remote deployment remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
@@ -1179,51 +1226,23 @@ instruction.
    `docs/ITEM_LOAN_STATUS.md`. The next lending-usability follow-up below remains
    queued and has not been started.
 
-   **Next lending usability follow-up — actions at the point of use:** after the
-   item-status work, review what is already implemented and fill remaining gaps.
-   - On item details, Record return opens the existing return flow directly;
-     choose the relevant loan when multiple borrowers/loans are outstanding.
-   - Add New loan to the Loans page: search/select an authorised household item,
-     then record borrower, quantity and dates using the existing loan dialog and
-     server validation. Show available quantities; prevent over-lending and keep
-     the normal home location intact.
-   - Each outstanding loan row exposes Record return and View details separately;
-     the item name links to its item page. Borrower name is plain text unless an
-     explicit borrower filter is provided; do not disguise a loan-detail link as
-     a person page. No borrower accounts or new person-management subsystem.
-   - Return dialog defaults to the outstanding quantity, supports partial returns
-     and requires confirmation. Opening a row/action must never itself return
-     stock. Preserve validation, idempotency, history and safe undo.
-   - Closed loans have View details but no return action; viewer roles have no
-     mutation controls. Reuse compact existing UI and verify mobile/keyboard,
-     multiple/partial loans, no available stock, stale requests and error states
-     with isolated fixtures. Preserve the user's actual loans and visual style.
-
-   **Search/assistant wording follow-up — natural, concise inventory answers:**
-   user screenshot of “Where is Dewalt drill” exposes repetitive database-style
-   wording and implementation disclaimers. Keep existing factual retrieval and
-   permission checks; improve presentation before the manuals milestone.
-   - Lead with a direct answer: “Mohsen has your DeWalt drill. No return date is
-     set.” Then, if useful, “You normally keep it in Storage Room Right → BOX-006.”
-     Use stored brand/name accurately; do not invent a model or rewrite records.
-   - Partial loans: “Mohsen has one of your three drills. The other two are in
-     [location]” only when records actually support the at-home quantity/location.
-     Multiple borrowers get a concise accurate breakdown; omit absent dates and
-     repetitive quantities where unnecessary. Keep due dates factual without the
-     boilerplate “not a guarantee of return” disclaimer.
-   - Remove user-facing “Grounded answer”, awkward internal intent headings such
-     as “whereabouts of …”, “fully on loan: 1 of 1 unit is out” repetition and
-     implementation phrases such as “loaned units are not recorded there”. Keep
-     useful item/source links and make deeper evidence available unobtrusively.
-   - Simplify search helper text to “Search for an item or ask a question.” Avoid
-     explaining routing machinery or requiring users to understand “ordinary
-     matches” versus “question-like text”. Preserve keyboard/Enter behavior.
-   - Apply consistent concise wording to deterministic fallback and assistant
-     answers, with quantity-aware singular/plural, no-match and ambiguous states.
-     Do not require a paid LLM solely to rewrite a simple factual loan answer.
-     Test fully/partially loaned, multiple borrowers, no due date, returned stock,
-     missing location and matching brand/name in isolated fixtures. Preserve the
-     current visual feel and existing search correctness/privacy.
+   **Loans-page actions and natural wording follow-up (implemented locally):**
+   the Loans page now has a New loan picker over active household inventory with
+   current available stock, disabled fully loaned items and clear
+   loading/no-match/error states. The existing Lend dialog enforces server stock,
+   archive, permission and idempotency rules; stale stock errors stay in the
+   dialog. Outstanding rows show plain borrower text, an item link, recorded home
+   and dates, separate View details and direct Record return actions; the return
+   dialog defaults to outstanding quantity and supports partial return. Closed
+   rows and viewers have no return action. See `docs/LOANS_USABILITY.md`.
+   Simple grounded loan answers now use direct natural language (“Mohsen has your
+   DeWalt drill. No return date is set.”), quantity-aware partial/multiple
+   breakdowns, recorded dates and home paths, with missing/ambiguous/no-match
+   states stated honestly. Internal “Grounded answer”/“whereabouts of …” labels and
+   the generic return guarantee disclaimer were removed; search helper text is
+   “Search for an item or ask a question.” Provider/consent details remain
+   secondary. No paid model is used to paraphrase basic facts. The manuals
+   milestone below remains queued and was not started.
 
 7. **Item manuals and grounded product help:** build on existing Manual document
    type and item attachments rather than a parallel library. Deliver in stages:

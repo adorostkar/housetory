@@ -150,9 +150,9 @@ test("item title area states the full loan truth and labels the usual home", asy
   await page.goto(`/items/${full.item.item.id}`);
   await expect(page.getByText("On loan to Mohsen")).toBeVisible();
   await expect(
-    page.getByText(/Owned 1 · at home 0 · on loan 1 · No due date recorded/),
+    page.getByText(/Owned 1 · at home 0 · on loan 1 · No return date set/),
   ).toBeVisible();
-  await expect(page.getByText(/No due date recorded/)).toBeVisible();
+  await expect(page.getByText(/No return date set/)).toBeVisible();
   await expect(page.getByText(/usual home, not a current physical location/)).toBeVisible();
   await expect(page.getByText("Usual home location")).toBeVisible();
   await expect(page.getByText(/PRIVATE BORROWER NOTE/)).toHaveCount(0);
@@ -168,7 +168,7 @@ test("item title area states the full loan truth and labels the usual home", asy
   await expect(
     page.getByText(/Owned 3 · at home 2 · on loan 1 · Due/),
   ).toBeVisible();
-  await expect(page.getByText(/usual home for the 2 at-home units/)).toBeVisible();
+  await expect(page.getByText(/covers only the 2 at-home units/)).toBeVisible();
   await expect(page.getByText("Usual home location")).toBeVisible();
 
   await page.goto(`/items/${multiple.item.item.id}`);
@@ -263,5 +263,11 @@ test("viewers see loan state but no return or editing actions", async ({
   await expect(page.getByRole("button", { name: "Record return" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Lend" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
+
+  await page.goto("/loans");
+  await expect(page.getByRole("heading", { name: "Loans" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New loan" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Record return" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "View details" }).first()).toBeVisible();
   await context.close();
 });

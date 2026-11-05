@@ -302,11 +302,6 @@ function AssistantAnswer({
         <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Housetory
         </span>
-        {response && (
-          <Badge variant={response.mode === "ai" ? "sage" : "outline"}>
-            {response.mode === "ai" ? "Model answer" : "Grounded answer"}
-          </Badge>
-        )}
       </div>
       <div className="mt-3 whitespace-pre-line text-[0.86rem] leading-[1.8] text-foreground/85">
         {text}

@@ -20,7 +20,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useQuickSearch } from "@/lib/queries";
 import { looksLikeQuestion } from "@/lib/search";
 import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const GROUPS: Array<{
   kind: QuickSearchKind;
@@ -46,9 +46,10 @@ function contextLine(result: QuickSearchResult) {
     ? result.loan.borrower_names.slice(0, 2).join(", ")
     : "unnamed borrower";
   const due = result.loan.next_due_on
-    ? `recorded due ${result.loan.next_due_on}`
-    : "no due date recorded";
-  const loan = `On loan to ${borrower} · ${result.loan.on_loan_quantity} · ${due}`;
+    ? ` · due ${formatDate(result.loan.next_due_on)}`
+    : "";
+  const quantity = result.loan.on_loan_quantity;
+  const loan = `On loan to ${borrower} · ${quantity} ${quantity === 1 ? "unit" : "units"}${due}`;
   return [loan, base].filter(Boolean).join(" · ");
 }
 

@@ -50,7 +50,7 @@ export function ItemLoanStatus({
   const singleDue = singleLoan
     ? activeLoans[0]?.due_on
       ? `Due ${formatDate(activeLoans[0].due_on)}`
-      : "No due date recorded"
+      : "No return date set"
     : null;
 
   return (
@@ -118,8 +118,8 @@ export function ItemLoanStatus({
 
           <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
             {fullyLoaned
-              ? "The recorded room and container are the usual home, not a current physical location while loaned out."
-              : `The recorded room and container are the usual home for the ${atHomeQuantity} at-home ${unitLabel(atHomeQuantity)}; loaned units are not recorded there.`}
+              ? "The recorded room and container are its usual home, not a current physical location while loaned out."
+              : `The recorded room and container are where the ${atHomeQuantity} at-home ${unitLabel(atHomeQuantity)} normally live.`}
           </p>
         </div>
 

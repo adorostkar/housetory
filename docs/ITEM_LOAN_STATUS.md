@@ -11,7 +11,7 @@ The item header now shows a prominent, text-backed loan panel directly beneath t
 title for any item with open loans:
 
 - **Fully loaned, one borrower:** “On loan to Mohsen”, with owned/at-home/on-loan
-  quantities and the recorded due date or “No due date recorded”.
+  quantities and the recorded return date or “No return date set”.
 - **Partially loaned:** an accurate quantity summary such as “1 of 3 units on loan
   to Mohsen”, plus owned, at-home and on-loan counts.
 - **Multiple borrowers/loans:** a total summary plus one row per open loan with
@@ -21,7 +21,7 @@ title for any item with open loans:
 - **Returned/cancelled or no open loan:** no loan panel is shown; the existing
   lending card reports that everything is at home and history retains the closed
   loan.
-- **No due date:** shown as “No due date recorded”, never guessed.
+- **No return date:** shown as “No return date set”, never guessed.
 - Private borrower notes are not rendered in the header or status panel.
 
 The panel includes one **Record return** action when exactly one loan is open.

@@ -62,7 +62,7 @@ describe("ItemLoanStatus", () => {
     renderStatus();
     expect(screen.getByText("On loan to Mohsen")).toBeVisible();
     expect(screen.getByText(/Owned 1 · at home 0 · on loan 1/)).toBeVisible();
-    expect(screen.getByText(/No due date recorded/)).toBeVisible();
+    expect(screen.getByText(/No return date set/)).toBeVisible();
     expect(
       screen.getByText(/usual home, not a current physical location/),
     ).toBeVisible();
@@ -82,7 +82,7 @@ describe("ItemLoanStatus", () => {
     expect(screen.getByText(/at home 2 · on loan 1/)).toBeVisible();
     expect(screen.getByText(/Due/)).toBeVisible();
     expect(
-      screen.getByText(/usual home for the 2 at-home units/),
+      screen.getByText(/where the 2 at-home units normally live/),
     ).toBeVisible();
   });
 

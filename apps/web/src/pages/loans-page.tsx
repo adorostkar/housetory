@@ -1,9 +1,11 @@
-import { AlertTriangle, HandCoins, Package, Search } from "lucide-react";
+import { AlertTriangle, HandCoins, Package, RotateCcw, Search } from "lucide-react";
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
+import { LoanItemPickerDialog } from "@/components/loan-item-picker";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
-import { useLoans } from "@/lib/queries";
-import type { Loan, LoanFilterStatus } from "@/lib/types";
+import { useCanWrite, useLoans } from "@/lib/queries";
+import type { ItemSummary, Loan, LoanFilterStatus } from "@/lib/types";
 import { cn, formatDate, pluralize } from "@/lib/utils";
 
 const FILTERS: Array<{ value: LoanFilterStatus; label: string }> = [
@@ -24,9 +26,14 @@ const FILTERS: Array<{ value: LoanFilterStatus; label: string }> = [
 export function LoansPage() {
   const [searchParams] = useSearchParams();
   const itemId = searchParams.get("item_id") ?? undefined;
+  const canWrite = useCanWrite();
   const [status, setStatus] = React.useState<LoanFilterStatus>("open");
   const [overdue, setOverdue] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  const [newLoanOpen, setNewLoanOpen] = React.useState(false);
+  const [selectedItem, setSelectedItem] = React.useState<ItemSummary | null>(null);
+  const [returnLoan, setReturnLoan] = React.useState<Loan | null>(null);
+  const newLoanButtonRef = React.useRef<HTMLButtonElement>(null);
   const deferredSearch = React.useDeferredValue(search);
   const loansQuery = useLoans({
     status,
@@ -49,6 +56,19 @@ export function LoansPage() {
   const hasFilters =
     Boolean(deferredSearch.trim()) || Boolean(itemId) || overdue || status !== "open";
 
+  const restoreNewLoanFocus = () => {
+    window.requestAnimationFrame(() => newLoanButtonRef.current?.focus());
+  };
+  const beginNewLoan = () => setNewLoanOpen(true);
+  const selectItem = (item: ItemSummary) => {
+    setNewLoanOpen(false);
+    setSelectedItem(item);
+  };
+  const closeSelectedItem = () => {
+    setSelectedItem(null);
+    restoreNewLoanFocus();
+  };
+
   return (
     <div className="animate-fade-up">
       <PageHeader
@@ -56,9 +76,17 @@ export function LoansPage() {
         title="Loans"
         description="Who has what, what is still outstanding and what has come home. Lending preserves each item's normal home location."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/items">Inventory</Link>
-          </Button>
+          <>
+            {canWrite && (
+              <Button ref={newLoanButtonRef} onClick={beginNewLoan}>
+                <HandCoins />
+                New loan
+              </Button>
+            )}
+            <Button variant="outline" asChild>
+              <Link to="/items">Inventory</Link>
+            </Button>
+          </>
         }
       />
 
@@ -146,13 +174,32 @@ export function LoansPage() {
             ) : (
               <EmptyState
                 title="Everything is at home."
-                description="Open an item and use Lend to record who borrowed it, when it is due and how many units are out."
-                actionLabel="Browse inventory"
-                actionTo="/items"
+                description={
+                  canWrite
+                    ? "Record a new loan here or open an item to lend it directly."
+                    : "This household has no open loans right now."
+                }
+                actionLabel={canWrite ? "New loan" : "Browse inventory"}
+                onAction={canWrite ? beginNewLoan : undefined}
+                actionTo={canWrite ? undefined : "/items"}
+                secondary={
+                  canWrite ? (
+                    <Button variant="ghost" asChild>
+                      <Link to="/items">Browse inventory</Link>
+                    </Button>
+                  ) : undefined
+                }
               />
             )
           ) : (
-            data.items.map((loan) => <LoanRow key={loan.id} loan={loan} />)
+            data.items.map((loan) => (
+              <LoanRow
+                key={loan.id}
+                loan={loan}
+                canWrite={canWrite}
+                onReturn={setReturnLoan}
+              />
+            ))
           )}
         </div>
         {data.total > data.items.length && (
@@ -162,26 +209,78 @@ export function LoansPage() {
           </p>
         )}
       </section>
+
+      <LoanItemPickerDialog
+        open={newLoanOpen}
+        onOpenChange={(open) => {
+          setNewLoanOpen(open);
+          if (!open) restoreNewLoanFocus();
+        }}
+        onSelect={selectItem}
+      />
+
+      {selectedItem && (
+        <LendLoanDialog
+          open={Boolean(selectedItem)}
+          onOpenChange={(open) => {
+            if (!open) closeSelectedItem();
+          }}
+          itemId={selectedItem.id}
+          itemName={selectedItem.name}
+          available={Math.max(
+            0,
+            selectedItem.quantity - (selectedItem.on_loan_quantity ?? 0),
+          )}
+          onCreated={() => {
+            setStatus("open");
+            setSelectedItem(null);
+            void loansQuery.refetch();
+            restoreNewLoanFocus();
+          }}
+        />
+      )}
+
+      {returnLoan && (
+        <ReturnLoanDialog
+          open={Boolean(returnLoan)}
+          onOpenChange={(open) => {
+            if (!open) setReturnLoan(null);
+          }}
+          loan={returnLoan}
+          onReturned={() => {
+            setReturnLoan(null);
+            void loansQuery.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-export function LoanRow({ loan }: { loan: Loan }) {
+export function LoanRow({
+  loan,
+  canWrite,
+  onReturn,
+}: {
+  loan: Loan;
+  canWrite: boolean;
+  onReturn: (loan: Loan) => void;
+}) {
   const itemLabel = loan.item_name || loan.item_name_snapshot;
   const home =
     [loan.home_room_name_snapshot, loan.home_location_name_snapshot]
       .filter(Boolean)
       .join(" / ") || "Home location not recorded";
+  const open =
+    loan.status === "outstanding" || loan.status === "partially_returned";
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/35 px-4 py-3.5 transition-colors hover:bg-secondary/30 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      data-testid="loan-row"
+      className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/35 px-4 py-3.5 transition-colors hover:bg-secondary/30 sm:flex-row sm:items-center sm:justify-between"
+    >
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to={`/loans/${loan.id}`}
-            className="text-[0.86rem] font-medium underline-offset-4 hover:underline"
-          >
-            {loan.borrower_name}
-          </Link>
+          <span className="text-[0.86rem] font-medium">{loan.borrower_name}</span>
           <Badge variant={LOAN_STATUS_TONE[loan.status]}>
             {LOAN_STATUS_LABELS[loan.status]}
           </Badge>
@@ -202,24 +301,39 @@ export function LoanRow({ loan }: { loan: Loan }) {
         </p>
         <p className="mt-1 text-[0.67rem] text-muted-foreground">
           Lent {formatDate(loan.lent_on)}
-          {loan.due_on ? ` · due ${formatDate(loan.due_on)}` : " · no due date"}
+          {loan.due_on ? ` · due ${formatDate(loan.due_on)}` : " · no return date set"}
         </p>
       </div>
-      <Link
-        to={`/loans/${loan.id}`}
-        className="shrink-0 text-left sm:text-right"
-        aria-label={`Open loan for ${loan.borrower_name}`}
-      >
-        <p className="font-display text-[1.4rem] leading-none tracking-[-0.02em] tabular-nums">
-          {loan.status === "cancelled" ? "—" : loan.outstanding_quantity}
-          <span className="ml-1 font-sans text-[0.68rem] font-normal text-muted-foreground">
-            of {loan.quantity} out
-          </span>
-        </p>
-        <p className="mt-1 text-[0.66rem] text-muted-foreground">
-          {loan.returned_quantity > 0 ? `${loan.returned_quantity} returned` : "No returns"}
-        </p>
-      </Link>
+      <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+        <div className="text-left sm:text-right">
+          <p className="font-display text-[1.4rem] leading-none tracking-[-0.02em] tabular-nums">
+            {loan.status === "cancelled" ? "—" : loan.outstanding_quantity}
+            <span className="ml-1 font-sans text-[0.68rem] font-normal text-muted-foreground">
+              of {loan.quantity} out
+            </span>
+          </p>
+          <p className="mt-1 text-[0.66rem] text-muted-foreground">
+            {loan.returned_quantity > 0
+              ? `${loan.returned_quantity} returned`
+              : "No returns"}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to={`/loans/${loan.id}`}>View details</Link>
+          </Button>
+          {canWrite && open && loan.outstanding_quantity > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onReturn(loan)}
+            >
+              <RotateCcw />
+              Record return
+            </Button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

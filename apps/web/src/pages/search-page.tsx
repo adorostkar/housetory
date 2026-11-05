@@ -193,10 +193,7 @@ export function SearchPage() {
       </div>
 
       <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[0.72rem] text-muted-foreground">
-        <p>
-          Type for ordinary matches. Press Enter to search; question-like text
-          opens a grounded answer.
-        </p>
+        <p>Search for an item or ask a question.</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => submit(false)}>
             <SearchIcon /> Search
@@ -380,21 +377,25 @@ function AnswerResults({
         ? "Open matching filters"
         : "Open matching records";
   const answerItems = answer.items;
+  const showInterpretation =
+    answer.tool === "search_items" &&
+    Boolean(answer.interpretation) &&
+    answer.interpretation !== "keyword search";
   return (
     <div className="space-y-5">
       <section className="surface p-5 sm:p-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={answer.mode === "ai" ? "brass" : "outline"}>
-            {answer.mode === "ai" ? (
-              <Sparkles className="size-3" />
-            ) : null}
-            {answer.mode === "ai" ? "AI interpretation" : "Grounded answer"}
-          </Badge>
-          <span className="text-[0.7rem] text-muted-foreground">
+        {showInterpretation && (
+          <p className="text-[0.7rem] text-muted-foreground">
             {answer.interpretation}
-          </span>
-        </div>
-        <p className="mt-3 whitespace-pre-line text-[0.9rem] leading-[1.75] text-foreground/90">
+          </p>
+        )}
+        <p
+          className={
+            showInterpretation
+              ? "mt-2 whitespace-pre-line text-[0.9rem] leading-[1.75] text-foreground/90"
+              : "whitespace-pre-line text-[0.9rem] leading-[1.75] text-foreground/90"
+          }
+        >
           {answer.answer ||
             "Housetory found matching records below and did not invent an answer."}
         </p>

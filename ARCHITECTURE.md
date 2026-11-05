@@ -599,10 +599,13 @@ deployment.
   Assistant answers render grounded references and cannot mutate data.
 - Unified search/assistant: typing performs bounded keyword matching; Enter submits
   the query. Clear structured intents use deterministic fixed-tool answers with
-  item/loan/document references. Question-like quick results offer an explicit
-  assistant handoff. The dedicated Assistant keeps the conversation, shows
-  provider/privacy details in a secondary disclosure and passes the prior turns for
-  context. Filters and result counts remain server-derived and household-scoped.
+  item/loan/document references. Simple loan answers lead with a direct
+  borrower/quantity/date sentence and a natural home-path sentence, using stored
+  brand/name without fabricating models; no internal intent labels or generic
+  disclaimer are shown. Question-like quick results offer an explicit assistant
+  handoff. The dedicated Assistant keeps the conversation, shows provider/privacy
+  details in a secondary disclosure and passes the prior turns for context.
+  Filters and result counts remain server-derived and household-scoped.
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
 - Sparse overviews collapse empty value/warranty sections while recent items, rooms
@@ -621,6 +624,12 @@ deployment.
   the same state without mutation controls. While units are loaned, the stored
   room/container is labelled “Usual home location” and explained as the recorded
   home for at-home stock only. The detailed lending card and history remain.
+- The Loans page has a New loan picker over active household inventory with current
+  available stock, disabled fully loaned items and picker/loading/no-match/error
+  states. The existing Lend and Return dialogs enforce server stock/archive checks
+  and idempotency. Outstanding rows show plain borrower text, item-detail link,
+  recorded home/dates, independent View details and direct Record return actions;
+  closed rows and viewers have no return action.
 - Empty item galleries use a compact single Take photo/Choose photo pair; actual
   photography retains the full gallery, ordering, removal, lightbox and upload
   controls.
@@ -724,14 +733,15 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 30 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 31 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
   routing, quick search, exact loan whereabouts, mobile keyword search without
   inference, missing-purchase filter parity, assistant continuation, item title
   loan truth, per-loan return/viewer rules, usual-home labels, compact/populated
-  photo galleries and the unified Add items chooser with contextual destinations
-  and import-history access.
+  photo galleries, New loan from the Loans page, stale-stock and over-lending
+  errors, direct partial row returns and the unified Add items chooser with
+  contextual destinations and import-history access.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.

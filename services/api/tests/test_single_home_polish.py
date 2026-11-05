@@ -151,10 +151,11 @@ def test_exact_heavy_drill_whereabouts_is_loan_first_and_quantity_accurate(owner
     assert whereabouts["loans"][0]["borrower_name"] == "Alex"
     assert whereabouts["loans"][0]["outstanding_quantity"] == 2
     assert whereabouts["loans"][0]["due_on"] == loan["due_on"]
-    assert "2 of 3 Heavy drill are on loan" in body["answer"]
-    assert "1 is at home in Workshop" in body["answer"]
-    assert "On loan: 2 with Alex" in body["answer"]
-    assert body["answer"].index("on loan") < body["answer"].index("at home")
+    assert "Alex has 2 of your 3 units of Makita Heavy drill." in body["answer"]
+    assert "The other 1 is at home in Workshop → BOX-001 · Power tools." in body["answer"]
+    assert "On loan:" not in body["answer"]
+    assert "guarantee of return" not in body["answer"]
+    assert body["answer"].index("Alex has") < body["answer"].index("at home")
     assert body["items"][0]["on_loan_quantity"] == 2
     assert body["references"][0]["type"] == "item"
     assert any(reference["type"] == "loan" for reference in body["references"])
@@ -177,7 +178,9 @@ def test_exact_heavy_drill_whereabouts_is_loan_first_and_quantity_accurate(owner
     )
     assert followup.status_code == 200, followup.text
     assert followup.json()["tool"] == "locate_item"
-    assert loan["due_on"] in followup.json()["answer"]
+    due_date = date.fromisoformat(loan["due_on"])
+    due_human = f"{due_date.day} {due_date.strftime('%b %Y')}"
+    assert due_human in followup.json()["answer"]
 
     quick = owner_client.get("/api/v1/search/quick", params={"q": "where is my heavy drill"}).json()
     assert quick["question_like"] is True
@@ -194,6 +197,33 @@ def test_exact_heavy_drill_whereabouts_is_loan_first_and_quantity_accurate(owner
     )
 
 
+def test_multiple_borrowers_and_missing_location_are_phrased_accurately(owner_client):
+    tent = create_item(owner_client, "Tent", quantity=3)
+    create_loan(
+        owner_client,
+        tent["id"],
+        quantity=1,
+        borrower="Mohsen",
+        due_on="2026-11-20",
+    )
+    create_loan(
+        owner_client,
+        tent["id"],
+        quantity=1,
+        borrower="Alex",
+        due_on=None,
+    )
+    answer = ask(owner_client, "where is my tent?")
+    text = answer["answer"]
+    assert "2 of your 3 units of Tent are on loan" in text
+    assert "Mohsen has 1 (due 20 Nov 2026)" in text
+    assert "Alex has 1" in text
+    assert "No home location is recorded for the other 1." in text
+    assert "On loan:" not in text
+    assert "guarantee of return" not in text
+    assert answer["facts"]["whereabouts"]["at_home_quantity"] == 1
+
+
 def test_fully_loaned_returned_no_due_date_and_ambiguous_whereabouts(owner_client):
     room = create_room(owner_client, "Garage")
     fully_loaned = create_item(owner_client, "Heavy drill", quantity=2, room_id=room["id"])
@@ -206,9 +236,11 @@ def test_fully_loaned_returned_no_due_date_and_ambiguous_whereabouts(owner_clien
     )
     answer = ask(owner_client, "Where is my heavy drill?")
     assert answer["facts"]["whereabouts"]["at_home_quantity"] == 0
-    assert "fully on loan" in answer["answer"]
-    assert "no due date recorded" in answer["answer"]
-    assert "not recorded there" in answer["answer"]
+    assert "Sam has your Heavy drill." in answer["answer"]
+    assert "No return date is set." in answer["answer"]
+    assert "You normally keep it in Garage." in answer["answer"]
+    assert "fully on loan" not in answer["answer"]
+    assert "not recorded there" not in answer["answer"]
     assert "is at home in" not in answer["answer"]
 
     returned = create_item(owner_client, "Heavy drill spare", quantity=1, room_id=room["id"])
@@ -222,7 +254,7 @@ def test_fully_loaned_returned_no_due_date_and_ambiguous_whereabouts(owner_clien
     return_loan(owner_client, created["id"], 1)
     returned_answer = ask(owner_client, "Where is my heavy drill spare?")
     assert returned_answer["facts"]["whereabouts"]["on_loan_quantity"] == 0
-    assert "at home in Garage" in returned_answer["answer"]
+    assert "recorded at home in Garage" in returned_answer["answer"]
     assert "No open loan is recorded" in returned_answer["answer"]
 
     create_item(owner_client, "Cordless drill", quantity=1, room_id=room["id"])
@@ -230,9 +262,10 @@ def test_fully_loaned_returned_no_due_date_and_ambiguous_whereabouts(owner_clien
     ambiguous = ask(owner_client, "where is my drill?")
     assert ambiguous["tool"] == "locate_item"
     assert ambiguous["facts"]["ambiguous"] is True
-    assert "possible items" in ambiguous["answer"]
+    assert "could match" in ambiguous["answer"]
     assert "Cordless drill" in ambiguous["answer"]
     assert "Drill press" in ambiguous["answer"]
+    assert "Which one did you mean?" in ambiguous["answer"]
     assert ambiguous["facts"]["whereabouts"] is None
 
     missing = ask(owner_client, "where is my jetpack?")

@@ -68,6 +68,7 @@ test("unified search answers the heavy drill loan question without claiming it i
     storage_location_id: toolbox.id,
   });
   const dueOn = "2026-11-20";
+  const dueLabel = "20 Nov 2026";
   await createLoan(request, drill.item.id, {
     borrower_name: "Alex",
     quantity: 1,
@@ -85,23 +86,27 @@ test("unified search answers the heavy drill loan question without claiming it i
   await page.keyboard.press("Enter");
 
   await expect(page).toHaveURL(/\/search\?q=.*ask=1/);
-  await expect(page.getByText(/1 of 2 Heavy drill/).first()).toBeVisible();
+  await expect(
+    page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
+  ).toBeVisible();
   await expect(page.getByText(/at home in Workshop/).first()).toBeVisible();
-  await expect(page.getByText(/On loan: 1 with Alex/).first()).toBeVisible();
-  await expect(page.getByText(new RegExp(`recorded due ${dueOn}`)).first()).toBeVisible();
-  await expect(page.getByText(/Loaned units are not recorded at the usual home/).first()).toBeVisible();
+  await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
   await expect(page.getByText(/BOX-\d+ · Power tools/).first()).toBeVisible();
+  await expect(page.getByText(/On loan: 1 with Alex/)).toHaveCount(0);
+  await expect(page.getByText(/guarantee of return/)).toHaveCount(0);
 
   await page.getByRole("link", { name: /Continue in Assistant/ }).click();
   await expect(page).toHaveURL(/\/assistant\?q=/);
-  await expect(page.getByText(/1 of 2 Heavy drill/).first()).toBeVisible();
+  await expect(
+    page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
+  ).toBeVisible();
   await expect(page.getByText("Privacy & model details")).toBeVisible();
   const assistantInput = page.getByRole("textbox", {
     name: "Ask the Housetory assistant",
   });
   await assistantInput.fill("when is it due?");
   await page.getByRole("button", { name: "Send question" }).click();
-  await expect(page.getByText(new RegExp(`recorded due ${dueOn}|due on ${dueOn}`)).first()).toBeVisible();
+  await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
 });
 
 test("mobile keyword search stays local and missing-purchase filters match the answer", async ({

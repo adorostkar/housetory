@@ -81,7 +81,7 @@ const quickResponse: QuickSearchResponse = {
 
 const naturalResponse: NaturalSearchResponse = {
   question: "where is my heavy drill",
-  interpretation: "whereabouts of heavy drill",
+  interpretation: "item: heavy drill",
   filters: {
     q: "heavy drill",
     room_id: null,
@@ -109,7 +109,7 @@ const naturalResponse: NaturalSearchResponse = {
   mode: "deterministic",
   ai_available: false,
   answer:
-    "1 of 2 Heavy drill is at home in Workshop / BOX-006 · Power tools. On loan: 1 with Alex, recorded due 2026-11-15.",
+    "Alex has 1 of your 2 units of Makita Heavy drill. Due 15 Nov 2026. The other 1 is at home in Workshop → BOX-006 · Power tools.",
   answer_kind: "locate_item",
   tool: "locate_item",
   facts: {
@@ -120,7 +120,7 @@ const naturalResponse: NaturalSearchResponse = {
       at_home_quantity: 1,
     },
   },
-  notices: ["The item is not recorded at its normal home place while loaned out."],
+  notices: [],
   references: [
     {
       type: "item",
@@ -175,6 +175,7 @@ describe("SearchPage unified entry", () => {
       }),
     ).toHaveValue("PS5");
     expect(await screen.findByText("Heavy drill")).toBeVisible();
+    expect(screen.getByText("Search for an item or ask a question.")).toBeVisible();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -183,10 +184,13 @@ describe("SearchPage unified entry", () => {
       `/search?q=${encodeURIComponent("where is my heavy drill")}&ask=1`,
     );
     expect(
-      await screen.findByText(/1 of 2 Heavy drill is at home/),
+      await screen.findByText(/Alex has 1 of your 2 units/),
     ).toBeVisible();
-    expect(screen.getByText(/On loan: 1 with Alex/)).toBeVisible();
-    expect(screen.getByText(/The item is not recorded/)).toBeVisible();
+    expect(screen.getByText("Search for an item or ask a question.")).toBeVisible();
+    expect(screen.queryByText("Grounded answer")).not.toBeInTheDocument();
+    expect(screen.queryByText(/item: heavy drill/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Due 15 Nov 2026/)).toBeVisible();
+    expect(screen.getByText(/at home in Workshop/)).toBeVisible();
     expect(api.post).toHaveBeenCalledWith(
       "/search/natural",
       { question: "where is my heavy drill", limit: 40 },
@@ -208,7 +212,7 @@ describe("SearchPage unified entry", () => {
     await screen.findByText("Heavy drill");
     const askButtons = screen.getAllByRole("button", { name: "Ask Housetory" });
     await userEvent.click(askButtons[askButtons.length - 1]!);
-    expect(await screen.findByText(/1 of 2 Heavy drill/)).toBeVisible();
+    expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
     expect(api.post).toHaveBeenCalledTimes(1);
 
     const input = screen.getByRole("textbox", {
@@ -217,7 +221,7 @@ describe("SearchPage unified entry", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "PS5");
     await waitFor(() =>
-      expect(screen.queryByText(/1 of 2 Heavy drill/)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/Alex has 1 of your 2 units/)).not.toBeInTheDocument(),
     );
     expect(screen.getByTestId("location")).not.toHaveTextContent("ask=1");
     expect(api.post).toHaveBeenCalledTimes(1);

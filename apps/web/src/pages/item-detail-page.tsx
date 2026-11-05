@@ -311,7 +311,7 @@ export function ItemDetailPage() {
                 {onLoan > 0 && (
                   <span className="mt-1.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
                     {available > 0
-                      ? `This is the recorded home for the ${available} at-home ${available === 1 ? "unit" : "units"}. The ${onLoan} loaned ${onLoan === 1 ? "unit is" : "units are"} not recorded here.`
+                      ? `This home location covers only the ${available} at-home ${available === 1 ? "unit" : "units"}.`
                       : "All owned units are on loan. This is the recorded home, not a current physical location."}
                   </span>
                 )}

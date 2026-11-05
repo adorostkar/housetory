@@ -70,13 +70,20 @@ test("lends partially, records returns, shows it on the loans list and undoes a 
   await expect(page.getByText(borrower)).toBeVisible();
   await expect(page.getByText("Past due").first()).toBeVisible();
   await expect(page.getByRole("link", { name: `Projector ${suffix}` })).toBeVisible();
-  await page.getByRole("link", { name: borrower, exact: true }).click();
+  const loanRow = page
+    .locator('[data-testid="loan-row"]')
+    .filter({ hasText: borrower });
+  await expect(loanRow.getByRole("link", { name: "View details" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: borrower, exact: true }),
+  ).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Record return" }).click();
+  await loanRow.getByRole("button", { name: "Record return" }).click();
   await page.getByLabel("Quantity").fill("1");
   await page.getByRole("button", { name: /Record return/ }).click();
+  await expect(page.getByText("Partially returned").first()).toBeVisible();
+  await loanRow.getByRole("link", { name: "View details" }).click();
   await expect(page.getByRole("heading", { name: "1 of 2 still out" })).toBeVisible();
-  await expect(page.getByText("Partially returned")).toBeVisible();
 
   await page.goto(`/items/${item.item.id}`);
   await undoFirstMatching(
@@ -117,4 +124,68 @@ test("item and container move history can be undone from the UI", async ({
   await expect(page.getByText(/moved with it/i).first()).toBeVisible();
   await undoFirstMatching(page, "Moved container");
   await expect(page.getByRole("link", { name: office.name }).first()).toBeVisible();
+});
+
+
+test("creates a loan from the Loans page, blocks over-lending and reports stale stock", async ({
+  page,
+  request,
+}) => {
+  const suffix = Date.now().toString().slice(-6);
+  const office = await createRoom(request, `New loan office ${suffix}`);
+  const item = await createItem(
+    request,
+    `Tent ${suffix}`,
+    office.id,
+    null,
+    2,
+  );
+
+  await page.goto("/loans");
+  const newLoan = page.getByRole("button", { name: "New loan" }).first();
+  await newLoan.click();
+  await expect(page.getByRole("heading", { name: "New loan" })).toBeVisible();
+  const itemSearch = page.getByLabel("Search inventory for a loan");
+  await itemSearch.fill(`Missing ${suffix}`);
+  await expect(page.getByText("No active items match that search.")).toBeVisible();
+  await itemSearch.fill(`Tent ${suffix}`);
+  await expect(
+    page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();
+  await expect(page.getByRole("heading", { name: `Lend Tent ${suffix}` })).toBeVisible();
+
+  await page.getByLabel("Borrower").fill(`Mohsen ${suffix}`);
+  await page.getByRole("button", { name: /Record loan/ }).click();
+  const createdRow = page
+    .locator('[data-testid="loan-row"]')
+    .filter({ hasText: `Mohsen ${suffix}` });
+  await expect(createdRow).toBeVisible();
+  await createdRow.scrollIntoViewIfNeeded();
+  await expect(createdRow.getByText(/of 1 out/)).toBeVisible();
+
+  await newLoan.click();
+  await itemSearch.fill(`Tent ${suffix}`);
+  await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();
+  await page.getByLabel("Borrower").fill(`Alex ${suffix}`);
+  await page.getByLabel("Quantity").fill("2");
+  const record = page.getByRole("button", { name: /Record loan/ });
+  await expect(record).toBeDisabled();
+  await page.getByLabel("Quantity").fill("1");
+
+  const raced = await request.post("/api/v1/loans", {
+    data: {
+      item_id: item.item.id,
+      borrower_name: "Race borrower",
+      quantity: 1,
+      lent_on: "2026-01-01",
+      request_id: crypto.randomUUID(),
+    },
+  });
+  expect(raced.ok()).toBeTruthy();
+  await record.click();
+  await expect(page.getByText(/Only 0 unit\(s\) are available at home/i)).toBeVisible();
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(newLoan).toBeFocused();
 });

@@ -22,7 +22,13 @@ from ..schemas.ai import (
     NaturalSearchResponse,
 )
 from . import ai
-from .ai_tools import ToolResult, _summaries_with_paths, execute_tool, search_inventory
+from .ai_tools import (
+    ToolResult,
+    _human_date,
+    _summaries_with_paths,
+    execute_tool,
+    search_inventory,
+)
 from .import_matching import build_index
 from .query_text import clean_subject
 
@@ -370,13 +376,13 @@ def _deterministic_answer(result: ToolResult) -> str:
     if isinstance(loans, list):
         for loan in loans[:8]:
             due = (
-                f" · recorded due {loan['due_on']}"
+                f" · due {_human_date(loan['due_on'])}"
                 if loan.get("due_on")
-                else " · no due date recorded"
+                else " · no return date set"
             )
             lines.append(
-                f"• {loan.get('item_name') or 'Item'} — {loan.get('quantity')} on loan "
-                f"to {loan.get('borrower_name') or 'an unnamed borrower'}{due}"
+                f"• {loan.get('item_name') or 'Item'} — {loan.get('quantity')} with "
+                f"{loan.get('borrower_name') or 'an unnamed borrower'}{due}"
             )
     warranties = result.facts.get("warranties")
     if isinstance(warranties, list):
@@ -875,7 +881,7 @@ def _plan_filters(
 def _plan_interpretation(plan: AssistantPlan) -> str:
     args = plan.arguments
     if plan.tool == "locate_item":
-        return f"whereabouts of {args.get('q') or 'the item'}"
+        return f"item: {args.get('q') or 'the item'}"
     if plan.tool == "count_items":
         return f"count of {args.get('q') or 'matching items'}"
     if plan.tool == "list_outstanding_loans":

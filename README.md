@@ -93,14 +93,16 @@ Tailscale is optional.
 - **Lending with partial returns and safe undo**: lend quantity-bearing items to a
   borrower display name without moving them out of their room/container. Owned,
   at-home and on-loan quantities stay distinct; several open loans and partial
-  returns are supported. The item title area prominently states the borrower and
-  quantity truth, labels the stored room/container as the usual home while units
-  are out, and offers Record return directly (choosing the relevant loan when
-  several are open). The Loans list, loan detail and item page show borrower,
-  lent/due dates, outstanding quantities and history. No borrower accounts,
+  returns are supported. New loan can be started from the Loans page with an
+  inventory search and current available stock; every outstanding row has direct
+  Record return, separate View details and item navigation. The item title area
+  prominently states the borrower and quantity truth, labels the stored
+  room/container as the usual home while units are out, and offers Record return
+  directly (choosing the relevant loan when several are open). No borrower accounts,
   contact fields, automatic reminders or emails. See
-  [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md) and
-  [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md).
+  [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md),
+  [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md) and
+  [`docs/LOANS_USABILITY.md`](docs/LOANS_USABILITY.md).
 - **Household movement and lending history**: item/container moves, inherited
   container moves, loans, returns, corrections and cancellation are recorded with
   actor and preserved name snapshots. Supported moves and lending actions offer a
@@ -174,7 +176,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 267 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 268 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -198,10 +200,12 @@ stack, not just unit mocks:
   unified keyword/question search, exact loan whereabouts and quantities,
   purchase-information status/filter parity, ambiguous-item handling,
   view-scoped assistant access, title-level loan state and usual-home semantics,
+  natural loan-wording factual parity, Loans-page new-loan stock checks and
+  direct-return validation,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 114 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 30 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 117 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 31 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

@@ -109,18 +109,114 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
     )
 
 
-def _home_path(db: Session, household_id: uuid.UUID, item: Item) -> str:
-    parts = (
+def _home_path(db: Session, household_id: uuid.UUID, item: Item) -> str | None:
+    room_parts = (
         [room.name for room in room_ancestors(db, household_id, item.room_id)]
         if item.room_id
         else []
     )
-    if item.storage_location_id:
-        parts.extend(
+    location_parts = (
+        [
             _location_display(location)
             for location in location_ancestors(db, household_id, item.storage_location_id)
+        ]
+        if item.storage_location_id
+        else []
+    )
+    parts = [" → ".join(room_parts)] if room_parts else []
+    if location_parts:
+        parts.append(" → ".join(location_parts))
+    return " → ".join(parts) if parts else None
+
+
+def _human_date(value: Any) -> str:
+    if hasattr(value, "day") and hasattr(value, "strftime"):
+        return f"{value.day} {value.strftime('%b %Y')}"
+    return str(value)
+
+
+def _item_display_name(item: Item) -> str:
+    if item.brand and item.brand.lower() not in item.name.lower():
+        return f"{item.brand} {item.name}"
+    return item.name
+
+
+def _join_natural(parts: list[str]) -> str:
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return f"{', '.join(parts[:-1])}, and {parts[-1]}"
+
+
+def _borrower_breakdown(loans: list[Any]) -> str:
+    grouped: dict[str, list[Any]] = {}
+    for loan in loans:
+        grouped.setdefault(loan.borrower_name, []).append(loan)
+    pieces: list[str] = []
+    for borrower, borrower_loans in grouped.items():
+        quantity = sum(loan.outstanding_quantity for loan in borrower_loans)
+        due = ""
+        if len(borrower_loans) == 1 and borrower_loans[0].due_on is not None:
+            due = f" (due {_human_date(borrower_loans[0].due_on)})"
+        pieces.append(f"{borrower} has {quantity}{due}")
+    return _join_natural(pieces)
+
+
+def _whereabouts_summary(
+    *,
+    item: Item,
+    owned: int,
+    on_loan: int,
+    at_home: int,
+    home: str | None,
+    open_loans: list[Any],
+) -> str:
+    display = _item_display_name(item)
+    if on_loan <= 0:
+        if home:
+            return f"Your {display} is recorded at home in {home}. No open loan is recorded."
+        return f"Your {display} has no open loan. No home location is recorded."
+
+    if len(open_loans) == 1 and at_home == 0:
+        loan = open_loans[0]
+        date_sentence = (
+            f"Due {_human_date(loan.due_on)}."
+            if loan.due_on is not None
+            else "No return date is set."
         )
-    return " / ".join(parts) if parts else "no room or storage place recorded"
+        home_sentence = (
+            f"You normally keep it in {home}." if home else "No home location is recorded."
+        )
+        return f"{loan.borrower_name} has your {display}. {date_sentence} {home_sentence}"
+
+    if len(open_loans) == 1:
+        loan = open_loans[0]
+        first = f"{loan.borrower_name} has {on_loan} of your {owned} units of {display}."
+        if loan.due_on is not None:
+            first += f" Due {_human_date(loan.due_on)}."
+        else:
+            first += " No return date is set."
+        if home:
+            return (
+                f"{first} The other {at_home} {'is' if at_home == 1 else 'are'} at home in {home}."
+            )
+        return f"{first} No home location is recorded for the other {at_home}."
+
+    breakdown = _borrower_breakdown(open_loans)
+    if at_home == 0:
+        return f"All {owned} of your units of {display} are on loan: {breakdown}."
+    if home:
+        return (
+            f"{on_loan} of your {owned} units of {display} are on loan: {breakdown}. "
+            f"The other {at_home} {'is' if at_home == 1 else 'are'} at home in {home}."
+        )
+    return (
+        f"{on_loan} of your {owned} units of {display} are on loan: {breakdown}. "
+        f"No home location is recorded for the other {at_home}."
+    )
 
 
 def _resolve_room(
@@ -1155,8 +1251,8 @@ def tool_locate_item(
     if len(candidates) > 1:
         names = ", ".join(item.name for item in summaries[:6])
         summary = (
-            f"I found {len(candidates)} possible items matching “{query}”: {names}. "
-            "Tell me which one you mean; I won't guess between similar names."
+            f"I found {len(candidates)} items that could match “{query}”: {names}. "
+            "Which one did you mean?"
         )
         return ToolResult(
             tool="locate_item",
@@ -1164,7 +1260,6 @@ def tool_locate_item(
             filters={"q": query},
             items=summaries,
             references=[_item_reference(item) for item in summaries],
-            notices=["Similar item names are ambiguous. No single item was assumed."],
             facts={
                 "total": len(candidates),
                 "ambiguous": True,
@@ -1189,43 +1284,14 @@ def tool_locate_item(
         }
         for loan in open_loans
     ]
-    parts: list[str] = []
-    if on_loan > 0:
-        if at_home > 0:
-            parts.append(
-                f"{on_loan} of {owned} {item.name} "
-                f"{'is' if on_loan == 1 else 'are'} on loan; "
-                f"{at_home} {'is' if at_home == 1 else 'are'} at home in {home}."
-            )
-        else:
-            parts.append(
-                f"{item.name} is fully on loan: {on_loan} of {owned} "
-                f"{'unit is' if on_loan == 1 else 'units are'} out."
-            )
-        descriptors = []
-        for loan in open_loans[:4]:
-            descriptor = (
-                f"{loan.outstanding_quantity} with {loan.borrower_name}"
-                if loan.borrower_name
-                else f"{loan.outstanding_quantity} with an unnamed borrower"
-            )
-            if loan.due_on is not None:
-                descriptor += f", recorded due {loan.due_on.isoformat()}"
-            else:
-                descriptor += ", no due date recorded"
-            descriptors.append(descriptor)
-        if descriptors:
-            parts.append("On loan: " + "; ".join(descriptors) + ".")
-        if at_home == 0:
-            parts.append(f"The usual home is {home}, but the loaned units are not recorded there.")
-        else:
-            parts.append(
-                "Loaned units are not recorded at the usual home place; only at-home units are."
-            )
-        parts.append("A due date is a recorded fact, not a guarantee of return.")
-    else:
-        parts.append(f"{item.name} is at home in {home}. No open loan is recorded.")
-    summary = " ".join(parts)
+    summary = _whereabouts_summary(
+        item=item,
+        owned=owned,
+        on_loan=on_loan,
+        at_home=at_home,
+        home=home,
+        open_loans=open_loans,
+    )
     references = [_item_reference(item)]
     references.extend(
         AssistantReference(
