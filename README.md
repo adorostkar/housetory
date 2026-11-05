@@ -57,6 +57,16 @@ Tailscale is optional.
   manuals, specifications and other files, associated with one or many items.
 - PDF, JPEG, PNG, WebP, HEIC and text uploads; original uploads are preserved,
   safe downloads are normalized, and older documents remain readable.
+- **Item manuals and grounded product help**: attach an uploaded manual (no
+  make/model required) or reuse an existing Manual-library document across
+  compatible items. Compact item actions include Add manual, Attach existing,
+  Ask about this item and Find manual. Answers use the attached manuals' actual
+  text, cite real pages when page-level OCR exists and explicit sections/excerpts
+  otherwise, and fall back to extractive evidence without AI. Online search and
+  download require a deliberate, server-enforced manufacturer + complete model
+  confirmation, reviewed candidates and a configured search gateway; similar
+  products are never auto-accepted. See
+  [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - CPU-only local OCR through Tesseract and Poppler in the worker: merchant,
   purchase date, total, currency, invoice number, product names and serial
   numbers are proposed for explicit review before inventory changes.
@@ -248,7 +258,10 @@ bulk selection boundaries, batch semantics and compact-list behavior are in
 limits, original/derivative storage, cleanup and OCR artifact behavior are in
 [`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md), and reviewed line-item
 extraction, matching, AI fallback and apply semantics are in
-[`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md). The Phase 2 desktop/iPhone
+[`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md), and manual
+attachment, grounded citations, identity gates, reviewed online search/download,
+configuration and safety limits are in
+[`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md). The Phase 2 desktop/iPhone
 walkthrough, screenshots and remaining limitations are in
 [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
@@ -462,6 +475,17 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI providers |
 | `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
 | `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
+| `MANUAL_SEARCH_URL` | empty | Optional operator JSON gateway for reviewed online manual search; empty means unconfigured |
+| `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for that gateway; never sent to browser or any other host |
+| `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Provider label shown in the manual UI |
+| `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Online search/download timeout |
+
+Manual answers use the existing **assistant** AI task when configured and
+consented; they remain extractive without it. Online discovery uses only the
+operator-configured `MANUAL_SEARCH_URL` gateway and never pretends a chat model
+has live browsing. The gateway contract, candidate review, download safety and
+page-citation limits are documented in
+[`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 | `IMPORT_MAX_FILES` | `2000` | Maximum files accepted from one vault ZIP |
 | `IMPORT_MAX_TOTAL_MB` | `50` | Maximum decompressed vault size |
 | `IMPORT_MAX_FILE_MB` | `10` | Maximum single extracted vault file |
@@ -570,7 +594,10 @@ household membership with one of three roles:
 - **Viewer** — read-only browsing, search, assistant and exports. Mutations are
   rejected server-side and most mutation controls are hidden.
 
-The full matrix is in [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). The UI
+Viewers can read attached manuals, ask attached-manual questions and download
+documents, but cannot upload/attach manuals, save product identities, search
+online or download online candidates. The full matrix is in
+[`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). The UI
 continues to show one shared household; there is no household creation or
 switching flow yet. Cross-household isolation remains enforced on every
 household-scoped route.
@@ -878,7 +905,10 @@ docker compose down                   # stop, keep data
 - Uploaded files and preserved originals are only served through authenticated,
   no-store endpoints.
 - Documents support metadata/search/filtering, original downloads, OCR retry,
-  explicit review/apply and related-item suggestions.
+  explicit review/apply and related-item suggestions. Item manuals add
+  `GET/POST /items/{id}/manuals`, confirmed `manual-profile`, attach-existing,
+  grounded `manual-questions`, and reviewed `manual-search` candidate/download
+  endpoints; optional online questions use the same confirmed identity gate.
 - Purchases, warranties, ownership reports and CSV exports have dedicated
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit

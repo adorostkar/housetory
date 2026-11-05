@@ -6,7 +6,9 @@ membership again. A session stores the selected household id, not a global role.
 
 | Area | Owner | Member | Viewer |
 | --- | --- | --- | --- |
-| Read inventory, rooms, places, containers, photos, documents, purchases, warranties, search, assistant | Yes | Yes | Yes |
+| Read inventory, rooms, places, containers, photos, documents, manuals, purchases, warranties, search, assistant | Yes | Yes | Yes |
+| Ask attached-manual or read-only online product questions | Yes | Yes | Yes |
+| Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
 | Create imports, scans, recognition records, OCR and summary jobs | Yes | Yes | No |
@@ -21,8 +23,10 @@ membership again. A session stores the selected household id, not a global role.
 
 - `enforce_household_write_access` is attached at router level to all
   household-data routers. Unsafe HTTP methods are rejected for viewers before
-  endpoint code runs. The only read-only POST exceptions are assistant questions
-  and natural-language search.
+  endpoint code runs. The only read-only POST exceptions are assistant questions,
+  natural-language search and item manual questions. Manual upload/attachment,
+  identity confirmation, online search and online candidate download remain
+  writer-only.
 - Owner-only endpoints use `require_owner`. Account endpoints use the account
   session without requiring a household, so an invited existing account can sign
   in before accepting membership.
@@ -46,7 +50,8 @@ membership again. A session stores the selected household id, not a global role.
 ## UI behavior
 
 Viewers see a read-only banner. Add-items controls, scan/import routes, entity
-photo editing, item/document mutations, purchase/warranty edits and label
-generation are hidden or routed away. The server remains the authority; UI
+photo editing, item/document mutations, manual upload/attachment/identity/search
+controls, purchase/warranty edits and label generation are hidden or routed away.
+They retain manual reading, document downloads and attached-manual questions. The server remains the authority; UI
 hiding is only a usability layer. Account settings are separate from household
 and member administration.

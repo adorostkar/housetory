@@ -1153,12 +1153,110 @@ real loans were not used as fixtures.
       imports 5 files/75,620 bytes). The test-only PostgreSQL port is not
       published. Remote deployment remains untouched.
 
+## Staged milestone — item manuals and grounded product help
+
+This milestone reuses the existing Manual document type, document library,
+uploads, scan/OCR pipeline and authenticated file routes. It does not add a
+parallel manual library, a new top-level product section, or any properties,
+stocktake or evidence-export work. Full behavior, configuration, security and
+limitations are in `docs/ITEM_MANUALS.md`.
+
+### Stage A — manual attachment and reuse
+
+- [x] Compact `Manuals & help` card on item details with Add manual, Attach
+  existing, Ask about this item and Find manual actions; existing item photos,
+  lending, purchase, warranty, history and Documents behavior is preserved.
+- [x] Manual upload reuses `DocumentUploadDialog` in manual mode, hides
+  receipt/type fields, permits upload without make/model and links the current
+  item by default. Originals, normalization, size limits, scans and OCR remain
+  the existing pipeline.
+- [x] New append-only `item_manual_profiles` and `manual_search_candidates`
+  tables plus a `POST /documents/{id}/items` link route. One Manual can link to
+  several compatible items through the existing `item_documents` join table.
+- [x] Attach-existing lists only unlinked Manual-library documents, warns when a
+  document is already linked elsewhere and never infers compatibility.
+- [x] Duplicate file content is recorded in document metadata and warned about;
+  nothing is merged or deleted automatically.
+- [x] Viewers can read manuals and ask attached-manual questions but cannot
+  upload, attach, confirm identity, search online or download candidates.
+
+### Stage B — grounded manual questions
+
+- [x] OCR now stores bounded page-level text under
+  `extracted_metadata["ocr_pages"]` (40 pages, 20k chars/page, 180k total);
+  older documents use explicit excerpt/section citations when page mapping is
+  unavailable.
+- [x] `POST /items/{id}/manual-questions` retrieves at most four bounded chunks
+  (two per manual) from actual attached-manual text; no title/metadata-only or
+  general-model answers.
+- [x] Citations include document id/title, real page when present, explicit
+  section/excerpt otherwise, an excerpt and an authenticated document URL with
+  `#page=N` where known. No page number is fabricated.
+- [x] The existing assistant task/provider/consent is optional. AI receives only
+  the question, product context and numbered evidence; output is schema-checked
+  and citation IDs are limited to supplied evidence. Invalid output, unknown
+  IDs, unsupported page claims and provider errors fall back to extractive text.
+- [x] Manual text is treated as untrusted data; prompts grant no tools and cannot
+  choose arbitrary URLs/documents. Missing evidence, multiple manuals and
+  missing page mapping are reported honestly.
+
+### Stage C — reviewed online discovery and download
+
+- [x] Added an explicit confirmed `item_manual_profiles` identity (manufacturer,
+  complete model, optional variant, confirmer/time). Server validation rejects
+  generic/empty manufacturer/model values, model strings without identifying
+  digits and unconfirmed writes. Item fields are never auto-edited.
+- [x] Search, download and online questions recheck the complete identity gate
+  server-side on every request; upload and attached-manual questions remain
+  available without it.
+- [x] One optional generic JSON search gateway is configured through
+  `MANUAL_SEARCH_URL` (+ optional API key, label and 5–120s timeout). Empty
+  configuration returns an honest unconfigured state, not fabricated results.
+- [x] Candidate results must show the exact model and, when set, the variant;
+  similar-product/generic results are hidden. Candidates persist source/file URL,
+  publisher, language, source type, model coverage, snippet, retrieval date and
+  creator. Repeated searches update the same URL pair.
+- [x] Download requires explicit candidate review + `confirm_model: true` +
+  `request_id`; retries return the same document, identical bytes reuse the
+  existing private document/link and provenance includes source URL, final URL,
+  publisher/language/type/coverage, retrieval time and download time.
+- [x] Public-destination DNS pinning, redirect bounds/revalidation, HTTPS
+  downgrade refusal, HTTP(S)-only URLs, no credentials, byte/time limits, PDF
+  signature/content checks, filename sanitization, existing storage validation
+  and authenticated no-store downloads protect the fetch path. No embedded PDF
+  references are fetched and raw content/queries are not logged.
+
+### Stage D — optional online questions and delivery
+
+- [x] `POST /items/{id}/manual-questions/online` requires the same confirmed
+  identity and configured search gateway, is an explicit user action and sends
+  only manufacturer/model/variant/question. Borrower, loan and household data
+  are never included.
+- [x] Online answers cite source URLs and clearly label web evidence separately
+  from attached-manual evidence. Optional AI synthesis only uses supplied
+  excerpts/IDs; there is no autonomous tool loop or instruction-following from
+  retrieved content.
+- [x] Frontend types/query hooks, compact card, manual upload mode, attach
+  picker, Ask dialog with citations, Find dialog with identity confirmation,
+  candidate review/download and honest no-AI/unconfigured states are integrated
+  into the existing visual shell. Dialogs are bounded, keyboard accessible and
+  responsive.
+- [x] Backend tests cover upload without fields, reuse, household/viewer
+  boundaries, generic/partial/variant gates on search and online questions,
+  exact candidate filtering, persistence, idempotent/duplicate downloads,
+  provenance, malformed output, extractive/AI fallback, page fabrication,
+  OCR page storage and SSRF/redirect/size/type/timeout guards. Frontend tests
+  cover attach/ask/citation/no-AI/gated find/review/save/viewer states.
+- [x] Documentation records exact configuration, citation/search limits and the
+  live-provider steps that remain unverified. No live internet search, paid AI,
+  email, credential creation or real household mutation was used in tests.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4, 5 and 6 are
-implemented and locally verified; later milestones still require a separate
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6 and 7
+are implemented and locally verified; later milestones still require a separate
 instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
@@ -1250,8 +1348,8 @@ instruction.
    secondary. No paid model is used to paraphrase basic facts. The manuals
    milestone below remains queued and was not started.
 
-7. **Item manuals and grounded product help:** build on existing Manual document
-   type and item attachments rather than a parallel library. Deliver in stages:
+7. **Item manuals and grounded product help (implemented locally):** build on
+   existing Manual document type and item attachments rather than a parallel library. Deliver in stages:
    - Make Add manual/upload and existing-manual attachment easy to discover from
      item details. Permit manual upload even without make/model. Allow one manual
      to serve several compatible items, retaining authenticated access and source
