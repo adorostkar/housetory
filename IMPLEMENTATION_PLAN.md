@@ -818,15 +818,15 @@ purchase creation, PDF recombination, or later roadmap milestones.
       page-original access and cancel.
 - [x] Document supported formats/limits, original/derivative storage, cleanup,
       OCR behavior and limitations in `docs/DOCUMENT_SCANNING.md`.
-- [ ] Local deployment after backup; remote server remains untouched.
+- [x] Local deployment after backup; remote server remains untouched.
 
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestone 2 is implemented and
-locally verified, and milestone 3 is implemented and locally verified; later
-milestones still require a separate instruction.
+Voice notes are complete and locally verified. Milestones 2, 3 and 4 are
+implemented and locally verified; later milestones still require a separate
+instruction.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
@@ -846,10 +846,11 @@ milestones still require a separate instruction.
    affected items and destination, handle quantity/location ambiguity and partial
    failures clearly, preserve permissions and record changes in history. Reuse
    safe undo primitives.
-4. **Receipt and document scanning:** inspect existing Documents/OCR capabilities
-   first; add capture, crop, perspective correction, rotation, contrast cleanup
-   and multi-page PDFs while preserving originals. Accept files from dedicated
-   scanning apps. Basic cleanup must not require an LLM.
+4. **Receipt and document scanning (implemented locally):** inspect existing
+   Documents/OCR capabilities first; add capture, crop, perspective correction,
+   rotation, contrast cleanup and multi-page PDFs while preserving originals.
+   Accept files from dedicated scanning apps. Basic cleanup must not require an
+   LLM.
 5. **Intelligent extraction and matching:** propose receipt fields and line items,
    purchases, warranties and attachments. Use an available, consented LLM to
    interpret abbreviations and rank relevant inventory candidates with evidence;
