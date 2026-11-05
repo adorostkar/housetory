@@ -24,7 +24,8 @@ import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
 import { ItemDocuments } from "@/components/item-documents";
-import { LendLoanDialog } from "@/components/loan-dialogs";
+import { ItemLoanStatus } from "@/components/item-loan-status";
+import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { PhotoGallery } from "@/components/photo-gallery";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +48,7 @@ import {
   useLocations,
   useRooms,
 } from "@/lib/queries";
-import type { ItemDetail } from "@/lib/types";
+import type { ItemDetail, Loan } from "@/lib/types";
 import {
   WARRANTY_STATUS_LABELS,
   WARRANTY_STATUS_TONE,
@@ -77,6 +78,7 @@ export function ItemDetailPage() {
   const historyQuery = useItemHistory(itemId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [lendOpen, setLendOpen] = useState(false);
+  const [returnLoan, setReturnLoan] = useState<Loan | null>(null);
 
   const archive = useMutation({
     mutationFn: (item: ItemDetail) =>
@@ -132,6 +134,18 @@ export function ItemDetailPage() {
         }
         backTo="/items"
         backLabel="All items"
+        actionsPlacement="title"
+        titleAddon={
+          loanSummary ? (
+            <ItemLoanStatus
+              ownedQuantity={item.quantity}
+              atHomeQuantity={available}
+              loans={loanSummary.loans}
+              canWrite={canWrite}
+              onReturnLoan={setReturnLoan}
+            />
+          ) : undefined
+        }
         actions={
           <>
             {item.is_archived && <Badge variant="secondary">Archived</Badge>}
@@ -237,7 +251,10 @@ export function ItemDetailPage() {
               )}
             </div>
             <dl className="space-y-4">
-              <InfoRow icon={MapPin} label="Place">
+              <InfoRow
+                icon={MapPin}
+                label={onLoan > 0 ? "Usual home location" : "Place"}
+              >
                 {item.room ? (
                   <span className="flex flex-wrap items-center gap-1">
                     {roomTrail.length > 0 ? (
@@ -290,6 +307,13 @@ export function ItemDetailPage() {
                   </span>
                 ) : (
                   <span className="text-muted-foreground">Not assigned</span>
+                )}
+                {onLoan > 0 && (
+                  <span className="mt-1.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                    {available > 0
+                      ? `This is the recorded home for the ${available} at-home ${available === 1 ? "unit" : "units"}. The ${onLoan} loaned ${onLoan === 1 ? "unit is" : "units are"} not recorded here.`
+                      : "All owned units are on loan. This is the recorded home, not a current physical location."}
+                  </span>
                 )}
               </InfoRow>
 
@@ -705,6 +729,21 @@ export function ItemDetailPage() {
           void historyQuery.refetch();
         }}
       />
+
+      {returnLoan && (
+        <ReturnLoanDialog
+          open={Boolean(returnLoan)}
+          onOpenChange={(open) => {
+            if (!open) setReturnLoan(null);
+          }}
+          loan={returnLoan}
+          onReturned={() => {
+            setReturnLoan(null);
+            void loansQuery.refetch();
+            void historyQuery.refetch();
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={deleteOpen}

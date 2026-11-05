@@ -615,6 +615,15 @@ deployment.
 - Item cards resolve the nearest container from `location_path`; item detail
   links to container pages; room place menus link to container pages and show
   identifiers.
+- Item detail puts open-loan truth directly beneath the title: borrower or
+  multi-borrower summary, owned/at-home/on-loan quantities, optional recorded due
+  date, overdue text and per-loan Record return actions for writers. Viewers see
+  the same state without mutation controls. While units are loaned, the stored
+  room/container is labelled “Usual home location” and explained as the recorded
+  home for at-home stock only. The detailed lending card and history remain.
+- Empty item galleries use a compact single Take photo/Choose photo pair; actual
+  photography retains the full gallery, ordering, removal, lightbox and upload
+  controls.
 - The Documents page adds a multi-page scan dialog alongside the unchanged
   single-file upload. Draft pages have thumbnails, original/cleaned previews,
   keyboard-adjustable crop corners, rotation, color/document mode, contrast,
@@ -715,12 +724,14 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 26 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 30 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
   routing, quick search, exact loan whereabouts, mobile keyword search without
-  inference, missing-purchase filter parity, assistant continuation and the unified
-  Add items chooser with contextual destinations and import-history access.
+  inference, missing-purchase filter parity, assistant continuation, item title
+  loan truth, per-loan return/viewer rules, usual-home labels, compact/populated
+  photo galleries and the unified Add items chooser with contextual destinations
+  and import-history access.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.

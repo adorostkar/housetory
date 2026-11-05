@@ -114,7 +114,9 @@ adds the nullable column and leaves every existing item untouched.
   filter changes. The remembered card/compact-list view is unchanged.
 - **Item photos** use a compact empty state and one Take photo / Choose photo
   control pair; populated galleries keep their existing gallery, lightbox and
-  ordering controls.
+  ordering controls. The follow-up
+  [`ITEM_LOAN_STATUS.md`](ITEM_LOAN_STATUS.md) also surfaces open-loan truth under
+  the item title and labels stored places as the usual home while units are out.
 - **Documents** no longer offer an export action for an empty library; Scan pages
   and Add document remain primary, and export returns when documents exist.
 - **Assistant** leads with the question and grounded inventory content. Provider

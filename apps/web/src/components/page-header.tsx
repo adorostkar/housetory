@@ -6,19 +6,23 @@ import { cn } from "@/lib/utils";
 export function PageHeader({
   eyebrow,
   title,
+  titleAddon,
   description,
   actions,
   backTo,
   backLabel,
   className,
+  actionsPlacement = "bottom",
 }: {
   eyebrow?: string;
   title: string;
+  titleAddon?: React.ReactNode;
   description?: string;
   actions?: React.ReactNode;
   backTo?: string;
   backLabel?: string;
   className?: string;
+  actionsPlacement?: "bottom" | "title";
 }) {
   return (
     <header className={cn("mb-9", className)}>
@@ -31,17 +35,32 @@ export function PageHeader({
           {backLabel ?? "Back"}
         </Link>
       )}
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+      <div
+        className={cn(
+          "flex flex-col gap-5 sm:flex-row sm:justify-between",
+          actionsPlacement === "title" ? "sm:items-start" : "sm:items-end",
+        )}
+      >
         <div className="min-w-0">
           {eyebrow && <p className="eyebrow mb-2.5">{eyebrow}</p>}
           <h1 className="display-title">{title}</h1>
+          {titleAddon}
           {description && (
             <p className="mt-3 max-w-2xl text-pretty text-[0.95rem] leading-relaxed text-muted-foreground">
               {description}
             </p>
           )}
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2.5">{actions}</div>}
+        {actions && (
+          <div
+            className={cn(
+              "flex shrink-0 flex-wrap items-center gap-2.5",
+              actionsPlacement === "title" && "sm:mt-6",
+            )}
+          >
+            {actions}
+          </div>
+        )}
       </div>
     </header>
   );

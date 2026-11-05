@@ -1050,6 +1050,50 @@ the user's live Heavy drill loan as a fixture.
       1 loan, 0 purchases/documents/allocations; uploads 2 files/1,177,655 bytes;
       imports 5 files/75,620 bytes). Remote deployment remains untouched.
 
+## Item-detail loan-status and compact-photo follow-up
+
+This queued follow-up makes open-loan truth prominent at the item title and
+finishes the compact empty-gallery cleanup. It reuses the existing lending and
+return validation; no schema or quantity rules changed, and the user's real Heavy
+drill/Mohsen loan was not used as a fixture.
+
+### Stage A — title status and usual home
+
+- [x] Header-status panel beneath the item title: fully loaned single borrower
+      (“On loan to …”), partial quantity summaries, multi-borrower/loan rows,
+      owned/at-home/on-loan counts, recorded or absent due date, and text-backed
+      “Past due”. Private borrower notes are not shown.
+- [x] Record return reuses `ReturnLoanDialog`: direct action for one open loan;
+      one explicit per-loan return action when several are open. Partial returns,
+      server validation, idempotency, history and undo remain unchanged.
+- [x] Viewer users see the same loan state without return, lend or edit actions.
+      Returned/cancelled/no-open-loan items show no title banner and keep the
+      detailed lending card/history.
+- [x] While loaned, Details labels the stored place “Usual home location” and
+      explains that it applies to at-home units/recorded home, never to the
+      physical whereabouts of loaned units.
+
+### Stage B — compact empty photo
+
+- [x] Empty gallery reduced to a 150 px panel with one clear Take photo/Choose
+      photo pair; the extra compact toolbar no longer renders while empty.
+- [x] Populated galleries retain useful image space, cover/order/remove controls,
+      thumbnails, lightbox and upload controls.
+- [x] Light/dark desktop/mobile and fully/partially/multiple-loan screenshots
+      captured under `docs/walkthrough/item-status-followup/`.
+
+### Stage C — verification
+
+- [x] 267 PostgreSQL tests, 114 Vitest tests and 30 disposable-stack Playwright
+      workflows pass; Ruff, strict TypeScript typecheck, production build and
+      migration checks pass.
+- [x] New component/E2E coverage: title status, partial/multiple quantities,
+      borrower selection for returns, authorized return update, viewer restriction,
+      returned/no-due-date state, usual-home wording, note privacy and
+      empty/populated photo controls.
+- [ ] Local backup/deployment verification and served-asset/real-data count check.
+      Remote deployment remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
@@ -1119,24 +1163,35 @@ instruction.
      controls. Remove empty-library export calls to action while retaining normal
      export capability once useful. Lead assistant with the question and retain
      accurate provider/privacy information in compact expandable details.
-   **Immediate follow-up after current polish completes — item status prominence:**
-   user screenshot of Heavy drill shows loan status is too discreet and the empty
-   photo area dominates. Review the current milestone's actual result first and
-   implement only gaps that remain, before starting milestone 7. Do not interrupt
-   the running OpenCode work or send this follow-up until the user reports it done.
-   - Show a prominent, style-consistent “On loan to [borrower]” status beneath the
-     item title, with an accessible Record return action for permitted users.
-     Handle partial quantities and multiple borrowers honestly; do not present
-     one borrower as holding all stock or expose private notes.
-   - While stock is loaned, label its recorded room/container “Usual home location”
-     and distinguish available/on-loan quantities; do not imply loaned units are
-     physically at home. Retain the detailed lending card/history.
-   - Replace the oversized missing-photo panel with compact Add photo / Take photo
-     controls and remove redundant upload buttons. Give actual photos appropriate
-     gallery space once present, preserving existing gallery functionality.
-   - Preserve the current visual feel; verify light/dark and desktop/mobile views,
-     fully/partially loaned states, no due date, returned items and permissions.
-     Test on isolated fixtures without modifying the user's Heavy drill loan.
+   **Item-detail loan-status follow-up (implemented locally):** the item title now
+   carries a prominent text-backed loan panel with borrower summaries, accurate
+   owned/at-home/on-loan quantities, optional due date, overdue text and direct
+   per-loan Record return actions for permitted users. Viewers remain read-only.
+   While loaned, the stored place is labelled “Usual home location” with an
+   explanation that it covers at-home stock only. The empty gallery is compact with
+   one photo-control pair; populated galleries retain their full behaviour. See
+   `docs/ITEM_LOAN_STATUS.md`. The next lending-usability follow-up below remains
+   queued and has not been started.
+
+   **Next lending usability follow-up — actions at the point of use:** after the
+   item-status work, review what is already implemented and fill remaining gaps.
+   - On item details, Record return opens the existing return flow directly;
+     choose the relevant loan when multiple borrowers/loans are outstanding.
+   - Add New loan to the Loans page: search/select an authorised household item,
+     then record borrower, quantity and dates using the existing loan dialog and
+     server validation. Show available quantities; prevent over-lending and keep
+     the normal home location intact.
+   - Each outstanding loan row exposes Record return and View details separately;
+     the item name links to its item page. Borrower name is plain text unless an
+     explicit borrower filter is provided; do not disguise a loan-detail link as
+     a person page. No borrower accounts or new person-management subsystem.
+   - Return dialog defaults to the outstanding quantity, supports partial returns
+     and requires confirmation. Opening a row/action must never itself return
+     stock. Preserve validation, idempotency, history and safe undo.
+   - Closed loans have View details but no return action; viewer roles have no
+     mutation controls. Reuse compact existing UI and verify mobile/keyboard,
+     multiple/partial loans, no available stock, stale requests and error states
+     with isolated fixtures. Preserve the user's actual loans and visual style.
 
 7. **Item manuals and grounded product help:** build on existing Manual document
    type and item attachments rather than a parallel library. Deliver in stages:

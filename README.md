@@ -93,10 +93,14 @@ Tailscale is optional.
 - **Lending with partial returns and safe undo**: lend quantity-bearing items to a
   borrower display name without moving them out of their room/container. Owned,
   at-home and on-loan quantities stay distinct; several open loans and partial
-  returns are supported. The Loans list, loan detail and item page show borrower,
+  returns are supported. The item title area prominently states the borrower and
+  quantity truth, labels the stored room/container as the usual home while units
+  are out, and offers Record return directly (choosing the relevant loan when
+  several are open). The Loans list, loan detail and item page show borrower,
   lent/due dates, outstanding quantities and history. No borrower accounts,
   contact fields, automatic reminders or emails. See
-  [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md).
+  [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md) and
+  [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md).
 - **Household movement and lending history**: item/container moves, inherited
   container moves, loans, returns, corrections and cancellation are recorded with
   actor and preserved name snapshots. Supported moves and lending actions offer a
@@ -192,12 +196,12 @@ stack, not just unit mocks:
   AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   unified keyword/question search, exact loan whereabouts and quantities,
-  purchase-information status/filter parity, ambiguous-item handling and
-  view-scoped assistant access,
+  purchase-information status/filter parity, ambiguous-item handling,
+  view-scoped assistant access, title-level loan state and usual-home semantics,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 109 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 26 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 114 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 30 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -209,8 +213,10 @@ stack, not just unit mocks:
   purchase allocations, the actual Inventory.md hierarchy,
   duplicate prevention, PWA/service-worker/deep-link routing, quick search, the
   exact loaned Heavy drill question, mobile keyword search with no inference,
-  missing-purchase filter parity, assistant conversation handoff and the unified
-  Add items chooser with contextual destinations.
+  missing-purchase filter parity, assistant conversation handoff, item title /
+  usual-home loan state, authorized return, viewer restrictions, compact and
+  populated photo galleries and the unified Add items chooser with contextual
+  destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt

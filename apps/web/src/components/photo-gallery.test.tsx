@@ -77,6 +77,12 @@ describe("PhotoGallery", () => {
     expect(screen.getByText("No photograph yet")).toBeVisible();
     expect(screen.getAllByRole("button", { name: "Take photo" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Choose photo" })).toHaveLength(1);
+    expect(
+      screen.queryAllByRole("button", { name: "Take a photo" }),
+    ).toHaveLength(0);
+    expect(
+      screen.queryAllByRole("button", { name: "Choose a photo" }),
+    ).toHaveLength(0);
     expect(screen.queryByLabelText("Add photographs")).not.toBeInTheDocument();
   });
 
@@ -89,5 +95,11 @@ describe("PhotoGallery", () => {
     expect(screen.getByAltText("Heavy drill photograph")).toBeVisible();
     expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
+    expect(
+      screen.queryAllByRole("button", { name: "Take photo" }),
+    ).toHaveLength(0);
+    expect(
+      screen.queryAllByRole("button", { name: "Choose photo" }),
+    ).toHaveLength(0);
   });
 });

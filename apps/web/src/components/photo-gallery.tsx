@@ -130,7 +130,7 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
       <div
         className={cn(
           "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
-          active ? "aspect-[4/3]" : "min-h-[180px]",
+          active ? "aspect-[4/3]" : "min-h-[150px]",
         )}
       >
         {active ? (
@@ -147,15 +147,15 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
             />
           </button>
         ) : (
-          <div className="image-placeholder flex min-h-[180px] flex-col items-center justify-center px-5 py-6 text-center">
+          <div className="image-placeholder flex min-h-[150px] flex-col items-center justify-center px-5 py-5 text-center">
             <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/30 backdrop-blur-sm">
               <ImageOff className="size-4" strokeWidth={1.5} />
             </span>
             <p className="mt-3 text-[0.82rem] font-medium text-foreground/75">
               No photograph yet
             </p>
-            <p className="mt-1 max-w-xs text-[0.72rem] leading-relaxed text-muted-foreground">
-              Take a photo or choose one so this item is easy to recognise.
+            <p className="mt-1 text-[0.72rem] text-muted-foreground">
+              Take or choose a photo.
             </p>
             {canWrite && (
               <div className="mt-4">
@@ -267,7 +267,7 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
           </button>
         ))}
 
-        {canWrite && !atLimit && (
+        {active && canWrite && !atLimit && (
           <CameraUpload
             compact
             label="Add item photograph"
