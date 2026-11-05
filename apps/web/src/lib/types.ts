@@ -276,6 +276,154 @@ export interface DocumentRecord {
 
 export type ItemDocument = DocumentRecord;
 
+export type ExtractionLineKind =
+  | "product"
+  | "discount"
+  | "tax"
+  | "shipping"
+  | "payment"
+  | "change"
+  | "other";
+
+export type ExtractionMatchQuality =
+  | "exact_identifier"
+  | "strong"
+  | "possible"
+  | "none";
+
+export type ExtractionLineAction = "skip" | "link" | "update" | "create";
+
+export interface ExtractionSourceEvidence {
+  page: number | null;
+  line_number: number | null;
+  text: string;
+}
+
+export interface ExtractionFields {
+  merchant: string | null;
+  purchase_date: string | null;
+  document_date: string | null;
+  currency: string | null;
+  total_cents: number | null;
+  subtotal_cents: number | null;
+  tax_cents: number | null;
+  discount_cents: number | null;
+  shipping_cents: number | null;
+  order_number: string | null;
+  brand: string | null;
+  model: string | null;
+  serial_numbers: string[];
+  warranty_provider: string | null;
+  warranty_start: string | null;
+  warranty_end: string | null;
+  warranty_months: number | null;
+  field_sources: Record<string, string>;
+  uncertain_fields: string[];
+}
+
+export interface ExtractionLine {
+  id: string;
+  line_number: number;
+  kind: ExtractionLineKind;
+  description: string;
+  quantity: number | null;
+  unit_price_cents: number | null;
+  line_total_cents: number | null;
+  evidence: ExtractionSourceEvidence;
+  warnings: string[];
+  purchase_eligible: boolean;
+}
+
+export interface CandidatePurchase {
+  id: UUID;
+  merchant: string | null;
+  purchase_date: string | null;
+  price_cents: number | null;
+  currency: string;
+}
+
+export interface CandidateItem {
+  id: UUID;
+  name: string;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  quantity: number;
+  on_loan_quantity: number;
+  room_name: string | null;
+  location_name: string | null;
+  purchase: CandidatePurchase | null;
+  warranty: {
+    provider: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    duration_months: number | null;
+  } | null;
+  reasons: string[];
+  match_quality: ExtractionMatchQuality;
+  exact_identifier: boolean;
+}
+
+export interface ExtractionLineMatch {
+  line_id: string;
+  candidates: CandidateItem[];
+  quality: ExtractionMatchQuality;
+  reasons: string[];
+}
+
+export interface ExtractionDuplicateDocument extends DocumentBrief {
+  created_at: string;
+}
+
+export interface ExtractionApplySummary {
+  request_id: UUID;
+  applied_at: string;
+  created_item_ids: UUID[];
+  updated_item_ids: UUID[];
+  linked_item_ids: UUID[];
+  skipped_line_ids: string[];
+  purchase_id: UUID | null;
+}
+
+export interface ExtractionReview {
+  document_id: UUID;
+  version: string;
+  source_artifact: string;
+  document_type: DocumentType;
+  generated_at: string;
+  purchase_eligible: boolean;
+  fields: ExtractionFields;
+  lines: ExtractionLine[];
+  warnings: string[];
+  matches: ExtractionLineMatch[];
+  duplicate_documents: ExtractionDuplicateDocument[];
+  applied: ExtractionApplySummary[];
+  ai_status: AiStatus;
+}
+
+export interface ExtractionMatchResponse {
+  document_id: UUID;
+  version: string;
+  matches: ExtractionLineMatch[];
+  ai_status: AiStatus;
+  ai_used: boolean;
+  warnings: string[];
+}
+
+export interface ExtractionApplyResponse {
+  document: DocumentRecord;
+  request_id: UUID;
+  created_item_ids: UUID[];
+  updated_item_ids: UUID[];
+  linked_item_ids: UUID[];
+  skipped_line_ids: string[];
+  purchase_id: UUID | null;
+  warranty_item_ids: UUID[];
+  warnings: string[];
+  applied_at: string;
+  items: ItemReference[];
+}
+
 export interface Purchase {
   id: UUID;
   merchant: string | null;

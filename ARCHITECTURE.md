@@ -141,6 +141,7 @@ All application endpoints are versioned under `/api/v1`.
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Document scans | `POST/GET/DELETE /documents/scans`, add/update/delete/reorder pages, authenticated original/cleaned page files, idempotent `POST /documents/scans/{id}/commit` |
+| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
@@ -259,6 +260,7 @@ ai_providers (encrypted credentials, consent, provider endpoint)
 ai_task_settings (provider/model per task)
 document_scans >── documents (one committed document per scan)
 document_scan_pages >── document_scans (exact originals + cleaned derivatives)
+document_extraction_applies >── documents (request-id replay results)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -319,6 +321,22 @@ Key decisions:
   creates one document, and enqueues the existing OCR job. A required request id
   makes retries return the same document. Cleaned derivatives and source pages are
   bounded to 20 pages, 40 MP inputs, 100 MB draft files and 3500 px output edges.
+- **Intelligent extraction** keeps a deterministic, versioned proposal in
+  `documents.extracted_metadata["extraction"]`: document fields, product/charge
+  lines, source-line evidence, warnings and uncertainty. Receipt/invoice lines carry
+  integer-cent unit and line totals; tax/discount/shipping/payment/change lines stay
+  separate. Manuals and warranty documents are not purchase evidence. Candidate
+  matching is household-scoped, ranks exact serial/model/name/brand evidence first
+  and exposes deterministic reasons plus current location/purchase context; there is
+  no fabricated percentage confidence. If the existing `documents` AI task is
+  configured and consented, an explicit refinement request may only reorder supplied
+  candidate IDs; unknown IDs are discarded and exact identifiers stay pinned.
+  Apply is one transaction with a required request id, extraction-version check and
+  `document_extraction_applies` replay record. Linking purchase evidence does not
+  increase an existing item's stock unless the user explicitly requests new stock;
+  loans are preserved. Per-line amounts remain document evidence while the existing
+  purchase model stores one shared total. Exact duplicate content is warned about by
+  SHA-256; it is never auto-merged or deleted.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
 - **Purchases** are household-owned shared records. Items reference
@@ -416,7 +434,9 @@ voice indexes. The lending milestone adds append-only migration `c9e1f3a5b7d2`
 for loans, partial returns and activity events. The bulk-organisation milestone
 adds append-only migration `d4f6b8c0e2a1`, allowing `entity_type="batch"` on
 activity events. The document-scanning milestone adds append-only migration
-`e5a7c9d1f3b2` for temporary scan sessions and retained source pages. No earlier
+`e5a7c9d1f3b2` for temporary scan sessions and retained source pages. The
+intelligent-extraction milestone adds append-only migration `f6b8d0e2a4c3` for
+document content hashes and idempotent extraction-apply records. No earlier
 migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
@@ -522,8 +542,10 @@ deployment.
   bulk move/tag/category batches are likewise synchronous, bounded transactions
   with no background job and no borrower email or reminder job. Scan PDF assembly
   is a bounded synchronous request; OCR remains the existing background job and
-  reads the cleaned PDF for scanned documents. Abandoned scan drafts are pruned by
-  the API at startup and opportunistically when a new scan starts. Fixed
+  reads the cleaned PDF for scanned documents. Deterministic extraction is built in
+  the OCR job. Optional AI ranking is an explicit authenticated request and is never
+  a worker default. Abandoned scan drafts are pruned by the API at startup and
+  opportunistically when a new scan starts. Fixed
   fixtures are flagged for review and are excluded from default approval. The queue is
   deliberately general so future export/media jobs can reuse it.
 
@@ -566,6 +588,13 @@ deployment.
   reorder/remove controls and a persistent save/cancel footer. Saved scans show a
   page strip with exact original page downloads and identify the cleaned PDF as
   the default download/OCR artifact. Viewers see no write controls.
+- Document detail adds a progressive extraction review: editable document fields,
+  provenance/uncertainty, product/charge line cards, exact/approximate match
+  reasons, manual item search, create/link/update/skip choices, explicit new-stock,
+  warranty, purchase/attachment decisions and an itemised change preview. The
+  optional AI action is secondary and shows provider/consent state. The long review
+  uses cards and internal progressive disclosure rather than a wide table, so it
+  remains usable on mobile.
 - The Items page supports explicit loaded-record selection and a remembered
   card/compact-list toggle. Checkboxes sit outside item links; archived rows are
   disabled; viewers have no selection controls. Search/filter/sort changes clear

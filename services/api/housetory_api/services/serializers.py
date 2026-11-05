@@ -279,8 +279,13 @@ def item_detail(
     household_reminder_days: int | None = None,
     import_source: ImportSourceBrief | None = None,
     location_path: list[LocationBrief] | None = None,
+    on_loan_quantity: int = 0,
 ) -> ItemDetail:
-    summary = item_summary(item, household_reminder_days=household_reminder_days)
+    summary = item_summary(
+        item,
+        household_reminder_days=household_reminder_days,
+        on_loan_quantity=on_loan_quantity,
+    )
     return ItemDetail(
         **summary.model_dump(exclude={"location_path"}),
         location_path=location_path or [],

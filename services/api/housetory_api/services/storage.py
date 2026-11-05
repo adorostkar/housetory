@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import shutil
@@ -589,6 +590,14 @@ def write_document_pdf(
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+
+
+def file_sha256(storage_key: str) -> str:
+    digest = hashlib.sha256()
+    with resolve_key(storage_key).open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def resolve_import_key(storage_key: str) -> Path:

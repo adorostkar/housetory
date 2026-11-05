@@ -18,6 +18,7 @@ from ..jobs import enqueue
 from ..models import Document, DocumentScan
 from ..schemas.ai import AiDocumentMetadata
 from . import ai, storage
+from .document_extraction import build_extraction
 from .ocr import OcrError, extract_text, parse_receipt
 
 logger = logging.getLogger("housetory.ocr")
@@ -232,6 +233,16 @@ def run_document_ocr(
             metadata["confidence"] = extracted.confidence
             metadata["ocr_artifact"] = artifact
             metadata = _apply_ai_document_metadata(db, document, extracted.text, metadata)
+            try:
+                metadata["extraction"] = build_extraction(
+                    document,
+                    extracted.text,
+                    metadata,
+                    source_artifact=artifact,
+                )
+            except Exception as exc:  # noqa: BLE001 - keep OCR output usable for retry
+                logger.exception("Extraction proposal failed for document %s", document_id)
+                metadata["extraction_error"] = f"{type(exc).__name__}: {exc}"[:500]
             _apply_result(
                 document,
                 text=extracted.text,

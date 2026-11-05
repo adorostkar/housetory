@@ -8,6 +8,7 @@ rotation and conservative contrast/grayscale adjustments.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import math
@@ -560,6 +561,7 @@ def commit_scan(
             household_id=household_id,
             storage_key=cleaned_key,
             original_storage_key=original_key,
+            content_sha256=hashlib.sha256(cleaned_pdf).hexdigest(),
             original_filename=storage.safe_document_filename(title),
             content_type="application/pdf",
             original_content_type="application/pdf",

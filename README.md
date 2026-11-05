@@ -116,6 +116,15 @@ Tailscale is optional.
   download and OCR input, while original pages remain downloadable. PDFs from
   scanner apps still upload unchanged. See
   [`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md).
+- **Intelligent document extraction and matching**: review OCR-derived merchant
+  and date fields, product lines with quantities/unit prices/line totals, separate
+  tax/discount/shipping evidence and uncertain values. Likely existing items are
+  ranked by household-scoped serial/model/name/brand evidence, with manual search,
+  create/link/update/skip choices, optional consented AI re-ranking, and an itemised
+  change preview. Apply is reviewed, atomic and idempotent; linking a receipt does
+  not increase stock unless explicitly requested, and manuals are not treated as
+  proof of purchase. See
+  [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
   then review structured item groups. Repeated mentions such as “ethernet cable,
@@ -151,7 +160,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 251 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 256 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -164,20 +173,24 @@ stack, not just unit mocks:
   delete guards, atomic bulk move/tag/category batches, batch replay/idempotency,
   per-item bulk-move undo, private document scan crop/perspective/rotation/
   contrast, HEIC original preservation, ordered multi-page PDF assembly, scan
-  cleanup and cleaned-artifact OCR selection, the unchanged actual Inventory.md
-  upload/paste path, semantic AI-edit validation
+  cleanup and cleaned-artifact OCR selection, deterministic multi-line receipt/
+  invoice extraction, household candidate matching, mocked AI ranking/consent
+  fallback, duplicate-content warnings, reviewed atomic/idempotent extraction apply
+  and new-stock/loan preservation, the unchanged actual Inventory.md upload/paste
+  path, semantic AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 90 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 22 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 93 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 23 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
   lending/partial return/outstanding list/timeline undo and item/container move
   history, loaded-only bulk selection with move/tag/category dialogs and
   compact-list persistence, desktop/mobile multi-page scan editing, reorder,
-  save, page-original access and cancel, the actual Inventory.md hierarchy,
+  save, page-original access and cancel, OCR-to-line-item review with exact
+  household matching and reviewed apply, the actual Inventory.md hierarchy,
   duplicate prevention, PWA/service-worker/deep-link routing, quick search and the
   unified Add items chooser with contextual destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
@@ -205,7 +218,9 @@ undo rules are in [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md)
 bulk selection boundaries, batch semantics and compact-list behavior are in
 [`docs/BULK_ORGANISATION.md`](docs/BULK_ORGANISATION.md), and document scan
 limits, original/derivative storage, cleanup and OCR artifact behavior are in
-[`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md). The Phase 2 desktop/iPhone
+[`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md), and reviewed line-item
+extraction, matching, AI fallback and apply semantics are in
+[`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md). The Phase 2 desktop/iPhone
 walkthrough, screenshots and remaining limitations are in
 [`docs/PHASE_2_WALKTHROUGH.md`](docs/PHASE_2_WALKTHROUGH.md). The Phase 3
 documents, OCR, purchase, warranty and ownership walkthrough is in
@@ -231,7 +246,10 @@ configured OpenAI-compatible or Gemini provider; paid-provider and physical-
 microphone smoke tests still require the operator's credentials and hardware.
 Borrower reminders and borrower accounts are intentionally not implemented.
 Image-page scanning accepts up to 20 pages; existing PDFs are attached unchanged
-and are not recombined in the scan editor. See
+and are not recombined in the scan editor. Receipt line amounts are review evidence;
+Housetory stores one shared purchase total rather than inventing per-item purchase
+allocations, and there is no barcode field. Live paid-provider extraction/matching
+was not tested. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
 from remaining work and states the OCR, AI and multi-currency limitations
 honestly.

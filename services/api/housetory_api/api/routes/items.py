@@ -232,11 +232,13 @@ def get_item(
         if item.storage_location_id
         else []
     )
+    loan_quantities = lending.loan_quantities_for_items(db, auth.household.id, [item.id])
     return ItemDetailResponse(
         item=item_detail(
             item,
             import_source=_import_source(db, item.id),
             location_path=path,
+            on_loan_quantity=loan_quantities.get(item.id, 0),
         )
     )
 
@@ -267,7 +269,14 @@ def update_item(
         if item.storage_location_id
         else []
     )
-    return ItemDetailResponse(item=item_detail(item, location_path=path))
+    loan_quantities = lending.loan_quantities_for_items(db, auth.household.id, [item.id])
+    return ItemDetailResponse(
+        item=item_detail(
+            item,
+            location_path=path,
+            on_loan_quantity=loan_quantities.get(item.id, 0),
+        )
+    )
 
 
 @router.delete("/items/{item_id}", status_code=204)

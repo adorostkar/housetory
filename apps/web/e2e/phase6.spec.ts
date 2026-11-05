@@ -489,6 +489,9 @@ test("imports the actual Inventory.md, excludes indexes/templates and prevents d
   page,
   request,
 }) => {
+  const purchasesBefore = (await (await request.get("/api/v1/purchases")).json()) as {
+    total: number;
+  };
   const batch = await uploadFixture(request, `Actual hierarchy ${Date.now()}`);
   await waitForImport(request, batch.id);
   await page.goto(`/imports/${batch.id}`);
@@ -570,7 +573,7 @@ test("imports the actual Inventory.md, excludes indexes/templates and prevents d
   const purchases = (await (
     await request.get("/api/v1/purchases")
   ).json()) as { total: number };
-  expect(purchases.total).toBe(0);
+  expect(purchases.total).toBe(purchasesBefore.total);
 
   const duplicateBatch = await uploadFixture(request, `Actual duplicate ${Date.now()}`);
   await waitForImport(request, duplicateBatch.id);

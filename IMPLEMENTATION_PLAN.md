@@ -820,6 +820,86 @@ purchase creation, PDF recombination, or later roadmap milestones.
       OCR behavior and limitations in `docs/DOCUMENT_SCANNING.md`.
 - [x] Local deployment after backup; remote server remains untouched.
 
+## Staged milestone — intelligent extraction and inventory matching
+
+This milestone extends the existing Documents/OCR/scanning flow, purchase and
+warranty models, AI task settings and role rules. It adds reviewed line-item
+extraction, household-scoped matching and an itemised apply. It does not add a new
+provider, change existing task assignments, store per-item purchase allocations,
+start unified search/stocktake/property work or make automatic inventory changes.
+
+### Stage A — deterministic extraction proposal
+
+- [x] Versioned extraction metadata for merchant/date/currency/total/order,
+      brand/model/serial, warranty evidence and source-line citations.
+- [x] Product lines with quantity, optional unit price and line total in integer
+      cents; separate tax/discount/shipping/payment/change lines.
+- [x] Conservative discrepancy/ambiguity warnings for quantity arithmetic,
+      subtotal/total mismatch, missing totals, multiple dates and multiple currencies.
+- [x] Manuals/warranty/specification documents are marked as not purchase evidence;
+      they may contribute item/warranty evidence without purchase creation.
+- [x] No invented missing values, automatic product grouping or tax/discount
+      allocation.
+
+### Stage B — household-scoped matching and optional AI
+
+- [x] Exact serial/model/name/brand/description matching over non-archived
+      household inventory only; deterministic reasons and current location/purchase
+      context, without invented percentages.
+- [x] Manual item search and explicit create/link/update/skip choices; new items
+      require a room and optional container.
+- [x] Optional refinements reuse the existing consented `documents` AI task with
+      minimal candidate/line context. Unknown candidate IDs are discarded and exact
+      identifier candidates stay pinned; unavailable/denied AI falls back clearly.
+- [x] Prompt-injection text is treated as untrusted data and cannot select records
+      outside the supplied candidate set.
+
+### Stage C — review and reviewed apply
+
+- [x] Editable document fields, line descriptions/quantities/amounts, source
+      evidence, uncertainty and current-value conflict visibility.
+- [x] Explicit purchase decision (none/create/existing), one shared purchase total,
+      optional receipt and document attachment links.
+- [x] Existing-stock changes only with explicit new-stock choice; loans/on-loan
+      quantities are preserved and create-new quantity is reviewed.
+- [x] Warranty/provider/date evidence applied only when explicitly chosen; manual
+      documents never create purchases.
+- [x] Atomic apply with required request id, extraction-version stale check,
+      already-applied guard, conflict validation and useful failure messages.
+- [x] Stable proposal line IDs and `document_extraction_applies` replay records;
+      retries cannot double-create items, stock, purchases, links or warranties.
+
+### Stage D — duplicates, security and resource bounds
+
+- [x] SHA-256 content hash for exact duplicate warnings; no automatic merge/delete
+      and explicit re-apply acknowledgement for previously applied extraction.
+- [x] Explicit household scope for documents, OCR artifacts, candidates, apply
+      references, rooms/locations/categories/purchases/warranties and attachments.
+- [x] Viewer rejection for extraction writes/AI requests while preserving read-only
+      review access; cross-household records return 404.
+- [x] Bounded lines, match inputs, candidates, household item scans and apply
+      decisions; no network fetch of embedded content and no raw private payloads in
+      logs.
+- [x] Append-only migration `f6b8d0e2a4c3` for content hashes and apply records; no
+      earlier row is rewritten.
+
+### Stage E — verification, documentation and local delivery
+
+- [x] PostgreSQL coverage for multi-line amounts/quantities, charge separation,
+      date/currency ambiguity, exact/approximate/no matches, AI forbidden IDs,
+      consent/fallback, prompt injection, conflicts, duplicate content, manual gate,
+      stale/replayed/already-applied behavior, household/viewer rules, atomic
+      rollback, stock preservation with active loans, purchase/warranty/link
+      creation and no automatic items.
+- [x] Frontend component tests for fields, line cards, match choices, new-item
+      destination/warranty, manual/type choices, AI action and apply payloads.
+- [x] Disposable-stack browser workflow for upload/OCR, review, exact matching,
+      create-new-item selection, apply, purchase creation and quantity preservation.
+- [x] Documented extraction/matching limits, provider/fallback configuration,
+      money/quantity rules, review/idempotency/duplicate semantics and privacy in
+      `docs/INTELLIGENT_EXTRACTION.md`.
+- [ ] Local deployment after backup; remote server remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are

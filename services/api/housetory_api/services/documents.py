@@ -70,6 +70,7 @@ def create_document(
         household_id=household_id,
         storage_key=stored.storage_key,
         original_storage_key=stored.original_storage_key,
+        content_sha256=storage.file_sha256(stored.original_storage_key),
         original_filename=stored.original_filename,
         content_type=stored.content_type,
         original_content_type=stored.original_content_type,

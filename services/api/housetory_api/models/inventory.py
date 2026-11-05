@@ -478,6 +478,11 @@ class Document(UUIDPrimaryKeyMixin, Base):
         Index("ix_documents_household_type", "household_id", "document_type"),
         Index("ix_documents_household_created", "household_id", "created_at"),
         Index("ix_documents_ocr_status", "ocr_status"),
+        Index(
+            "ix_documents_household_content_sha256",
+            "household_id",
+            "content_sha256",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -485,6 +490,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     )
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     original_storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     original_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -584,6 +590,33 @@ class DocumentScanPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     scan: Mapped[DocumentScan] = relationship(back_populates="pages")
 
 
+class DocumentExtractionApply(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "document_extraction_applies"
+    __table_args__ = (
+        UniqueConstraint(
+            "household_id",
+            "request_id",
+            name="uq_document_extraction_applies_household_request_id",
+        ),
+        Index("ix_document_extraction_applies_document", "document_id"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class CustomFieldDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "custom_field_definitions"
     __table_args__ = (
@@ -631,6 +664,7 @@ __all__ = [
     "Category",
     "CustomFieldDefinition",
     "Document",
+    "DocumentExtractionApply",
     "DocumentScan",
     "DocumentScanPage",
     "Item",

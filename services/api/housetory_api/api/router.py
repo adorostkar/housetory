@@ -11,6 +11,7 @@ from .routes import (
     documents,
     entity_photos,
     exports,
+    extraction,
     health,
     household,
     imports,
@@ -47,6 +48,7 @@ api_router.include_router(items.router, dependencies=write_guard)
 api_router.include_router(bulk.router, dependencies=write_guard)
 api_router.include_router(loans.router, dependencies=write_guard)
 api_router.include_router(scans.router, dependencies=write_guard)
+api_router.include_router(extraction.router, dependencies=write_guard)
 api_router.include_router(documents.router, dependencies=write_guard)
 api_router.include_router(purchases.router, dependencies=write_guard)
 api_router.include_router(warranties.router, dependencies=write_guard)

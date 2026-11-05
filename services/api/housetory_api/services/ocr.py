@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 from ..config import get_settings
@@ -350,8 +351,8 @@ def _parse_amount(raw: str) -> int | None:
         whole, fraction = value.rsplit(",", 1)
         value = f"{whole.replace(',', '')}.{fraction}" if len(fraction) == 2 else whole
     try:
-        cents = round(float(value) * 100)
-    except ValueError:
+        cents = int((Decimal(value) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
         return None
     return cents if cents >= 0 else None
 
