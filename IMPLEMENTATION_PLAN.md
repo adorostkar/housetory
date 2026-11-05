@@ -1204,18 +1204,19 @@ limitations are in `docs/ITEM_MANUALS.md`.
 
 - [x] Added an explicit confirmed `item_manual_profiles` identity (manufacturer,
   complete model, optional variant, confirmer/time). Server validation rejects
-  generic/empty manufacturer/model values, model strings without identifying
-  digits and unconfirmed writes. Item fields are never auto-edited.
+  generic/empty manufacturer/model values and unconfirmed writes, while allowing
+  legitimate letter-only model identifiers. Item fields are never auto-edited.
 - [x] Search, download and online questions recheck the complete identity gate
   server-side on every request; upload and attached-manual questions remain
   available without it.
-- [x] One optional generic JSON search gateway is configured through
-  `MANUAL_SEARCH_URL` (+ optional API key, label and 5–120s timeout). Empty
-  configuration returns an honest unconfigured state, not fabricated results.
+- [x] The built-in Brave Search API adapter uses a server-side subscription
+  token, with the original generic JSON gateway retained as an advanced option
+  (`MANUAL_SEARCH_URL` + optional API key/label/timeout). Unconfigured state is
+  honest and never fabricates results.
 - [x] Candidate results must show the exact model and, when set, the variant;
   similar-product/generic results are hidden. Candidates persist source/file URL,
   publisher, language, source type, model coverage, snippet, retrieval date and
-  creator. Repeated searches update the same URL pair.
+  creator and direct-file state. Repeated searches update the same source URL.
 - [x] Download requires explicit candidate review + `confirm_model: true` +
   `request_id`; retries return the same document, identical bytes reuse the
   existing private document/link and provenance includes source URL, final URL,
@@ -1229,7 +1230,7 @@ limitations are in `docs/ITEM_MANUALS.md`.
 ### Stage D — optional online questions and delivery
 
 - [x] `POST /items/{id}/manual-questions/online` requires the same confirmed
-  identity and configured search gateway, is an explicit user action and sends
+  identity and configured search provider, is an explicit user action and sends
   only manufacturer/model/variant/question. Borrower, loan and household data
   are never included.
 - [x] Online answers cite source URLs and clearly label web evidence separately
@@ -1275,6 +1276,100 @@ limitations are in `docs/ITEM_MANUALS.md`.
   credential creation or real household mutation was used. `MANUAL_SEARCH_URL`
   remains unset; live gateway/provider verification steps are documented and
   explicitly unverified.
+
+## Manuals readiness gap — concrete search provider adapter
+
+The first manuals delivery could only use an unspecified custom JSON gateway,
+which made online discovery impractical without running another service. This
+follow-up adds one concrete, documented provider while preserving the existing
+upload/manual-QA pipeline, identity gates, candidate review, household scoping
+and SSRF-safe download path.
+
+### Stage A — Brave Search API adapter
+
+- [x] Added the official [Brave Search API](https://api.search.brave.com/) Web
+  Search adapter. Requests use the documented
+  `GET /res/v1/web/search` endpoint, `X-Subscription-Token` header,
+  `q`/`count`/`extra_snippets`/`text_decorations`/`safesearch` parameters and
+  optional `country`/`search_lang`.
+- [x] Added `MANUAL_SEARCH_PROVIDER=auto|brave|gateway|none`,
+  `BRAVE_SEARCH_API_KEY`, `BRAVE_SEARCH_BASE_URL`, `BRAVE_SEARCH_COUNTRY` and
+  `BRAVE_SEARCH_LANG`. `auto` keeps an explicitly configured gateway as the
+  advanced option and otherwise selects Brave when its key is present.
+- [x] The per-item manuals status now exposes `provider`, provider label,
+  configured/can-search state and an honest unconfigured reason. The Find dialog
+  shows the provider and explicitly states that no provider request is made until
+  the user presses Search. No automatic Brave probe is performed, so validating
+  configuration presence does not spend quota.
+- [x] The key remains server-side. Errors map 401/403, 429, 5xx, redirects,
+  timeouts and invalid JSON to safe messages without exposing the key or query.
+  The existing assistant task/provider remains independent and unchanged.
+
+### Stage B — normalize real results and discover PDFs without guessing
+
+- [x] Brave `web.results[]` fields (`title`, `url`, `description`,
+  `extra_snippets`, `profile`, `language`) are normalized into the existing
+  candidate contract. Similar-product results are hidden unless their actual
+  title/snippet/URL contains the confirmed model and variant.
+- [x] Manufacturer provenance is validated conservatively: `manufacturer`
+  requires both a registrable host-label match and a matching Brave profile
+  name; `official` requires one of those; everything else is `other`. Provider
+  claims are never treated as an official flag by themselves.
+- [x] Direct `.pdf` results are accepted as real PDF candidates. For at most two
+  manufacturer/official landing pages per search, Housetory may safely read the
+  page and inspect actual anchor links. It accepts only a real `.pdf` link whose
+  text/URL shows the model/variant or clear manual wording. It never guesses a
+  `.pdf` address, follows JavaScript/meta refresh/embedded references or treats
+  HTML as a manual.
+- [x] `direct_file` distinguishes a real direct PDF from a source page in the
+  API and UI. Source-page-only results show **Open source page** and **Upload
+  manual** instead of a download action. Discovered/direct PDF URLs are shown
+  for review when they differ from the source page URL.
+- [x] Landing-page fetches retain pinned public-IP DNS, redirect bounds,
+  HTTPS-downgrade refusal, 512 KB page cap, total wall-clock deadline and
+  content-type checks. Only actual linked PDFs are later downloaded after review.
+
+### Stage C — identity examples and model validation correction
+
+- [x] Removed the arbitrary “model must contain a digit” rule. Completion is now
+  the deliberately confirmed manufacturer-specific identity: at least two
+  characters, containing a letter/digit and not a generic label. Letter-only
+  models such as `Sonos One` are accepted; “Heavy drill”/“cordless drill”/“tool”
+  remain rejected.
+- [x] Corrected manual examples from the incorrect “Makita DCD791” pairing to
+  the real DeWalt DCD791/DCD791B family in docs, tests and regenerated
+  screenshots. Variant evidence still requires `B` for the concatenated
+  `DCD791B` form.
+- [x] The advanced JSON gateway remains documented and tested, but is no longer
+  the only way to use online discovery.
+
+### Stage D — verification and local delivery
+
+- [x] 286 PostgreSQL tests, 124 Vitest tests and 33 disposable-stack Playwright
+  workflows pass; Ruff, strict TypeScript typecheck, production build and Alembic
+  drift checks pass. The manuals browser workflow now uses a fixture
+  Brave-compatible service through the real adapter, validates the
+  `X-Subscription-Token`/query construction, discovers a source, reviews it,
+  saves/links a manual through the UI and asks a cited manual question.
+- [x] Backed up local data to `backups/housetory-20261105T125745Z` (checksums
+  valid), rebuilt and redeployed the local Compose stack. No schema migration was
+  needed; head remains `c4e6a8b0d2f4`. The test-only PostgreSQL port remains
+  unpublished.
+- [x] Verified healthy api/db/worker/web services, served the new web assets,
+  preserved real-data counts (51 items, 1 user, 1 member, 1 AI provider,
+  6 task settings, 5 import batches, 328 entries, 1 loan, 0
+  purchases/documents/returns; uploads 2 files/1,177,655 bytes; imports 5
+  files/75,620 bytes), and confirmed the local API reports online search
+  unconfigured without a Brave key rather than pretending it is ready.
+- [x] Regenerated the manual screenshots with the real DeWalt DCD791 · B example,
+  Brave provider status, exact-model candidate, manufacturer source, review
+  state and source-page-only handling. They remain linked from
+  `docs/ITEM_MANUALS.md`.
+- [x] No real Brave request, real vendor PDF download, paid AI, email,
+  credential creation, server deployment or real household mutation was used.
+  The exact remaining user step is to supply a Brave Search API subscription
+  token in `BRAVE_SEARCH_API_KEY` (or explicitly configure the advanced
+  gateway), restart the API and perform one deliberate live verification.
 
 ## Agreed product roadmap — updated 2026-11-05
 

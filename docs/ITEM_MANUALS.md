@@ -65,18 +65,23 @@ Online search, online download and online item questions use one server-side
 gate stored in `item_manual_profiles`:
 
 - a manufacturer with at least two characters and at least one letter;
-- a complete model identifier with at least three characters and identifying
-  digits;
+- a complete model identifier with at least two characters, containing a letter
+  or digit, and not a generic label;
 - an optional variant/revision string;
 - an explicit `confirmed: true` acknowledgement from a signed-in writer.
 
-Generic values such as “Unknown”, “Heavy drill” or “model” are rejected. A
-non-empty string alone is not proof of completeness. The UI pre-fills item brand
-and model only as suggestions; the user must check the physical label and
-confirm. Saving the profile never edits the item's brand, model or other fields.
-Regional, hardware or revision variants can be recorded; when a variant is
-present, candidate evidence must show the variant or the concatenated model
-form (for example `DCD791Z`).
+Completeness is the manufacturer-specific identity the user verified against the
+physical label, not an arbitrary regex. Housetory does **not** require every
+model to contain a digit: legitimate letter-only models such as `Sonos One` are
+accepted. Generic values such as “Unknown”, “Heavy drill”, “cordless drill”,
+“tool” or “manual” are rejected, as are empty/one-character fragments.
+
+The UI pre-fills item brand and model only as suggestions; the user must check
+the physical label and confirm. Saving the profile never edits the item's brand,
+model or other fields. Regional, hardware or revision variants can be recorded;
+when a variant is present, candidate evidence must show the variant or the
+concatenated model form (for example DeWalt `DCD791B` for model `DCD791` with
+variant `B`).
 
 The gate is rechecked on every automated search, download and online-question
 request. Missing or invalid profiles return `409 manual_identity_required` /
@@ -85,29 +90,138 @@ upload and attached-manual questions do not require the gate.
 
 ## Reviewed online discovery and download
 
-Online discovery is available only when an operator configures a real search
-gateway. Housetory does not bundle a search provider, fake web results, bypass
-paywalls/accounts, crawl sites in the background or turn an ordinary chat model
-into a browser.
+### Primary provider: Brave Search API
 
-Configuration:
+The primary supported adapter uses the official
+[Brave Search API](https://api.search.brave.com/) Web Search endpoint. It is a
+real search API, not an ordinary chat model and not a hosted Housetory gateway.
+
+Provider contract implemented by Housetory:
+
+```text
+GET https://api.search.brave.com/res/v1/web/search
+    ?q=<manufacturer, model, variant, manual terms or question>
+    &count=<5-10>
+    &extra_snippets=true
+    &text_decorations=false
+    &safesearch=moderate
+X-Subscription-Token: <BRAVE_SEARCH_API_KEY>
+Accept: application/json
+```
+
+Optional `country` and `search_lang` parameters are sent only when
+`BRAVE_SEARCH_COUNTRY` / `BRAVE_SEARCH_LANG` are configured. Housetory reads
+`web.results[]` and normalizes the documented result fields `title`, `url`,
+`description`, `extra_snippets`, `profile.name` / `profile.long_name` and
+`language`. It does not use a guessed endpoint or invent result fields.
+
+Registration/configuration:
+
+1. Create a Brave Search API account and subscription token in the
+   [Brave API dashboard](https://api-dashboard.search.brave.com/). Review
+   Brave's current plan, quota and terms; a paid tier may be required for the
+   volume you need.
+2. Set the server-side environment variable:
+
+   ```dotenv
+   MANUAL_SEARCH_PROVIDER=brave
+   BRAVE_SEARCH_API_KEY=<your Brave subscription token>
+   BRAVE_SEARCH_BASE_URL=https://api.search.brave.com
+   # Optional:
+   BRAVE_SEARCH_COUNTRY=US
+   BRAVE_SEARCH_LANG=en
+   ```
+
+3. Restart the API service. The key remains server-side and is sent only in the
+   `X-Subscription-Token` header to the configured Brave base URL. It is never
+   returned to the browser or written to logs.
+4. Do not press **Search** until you are ready for a real request. The manuals
+   status endpoint and UI report whether a provider/key is configured without
+   contacting Brave. The first actual Brave request happens only when a writer
+   confirms an item's exact identity and explicitly presses **Search for exact
+   model**.
+
+Connection validation without spending quota: after restart, open an item's
+Find manual dialog or read `GET /api/v1/items/{item_id}/manuals`. The nested
+`search` object reports the provider, configured/can-search state and a safe
+reason; it does not contact Brave. Housetory deliberately does not perform an
+automatic key handshake because that would consume provider quota.
+
+The default base URL is the official `https://api.search.brave.com`. The base URL
+override exists for a compatible proxy or isolated test fixture; production
+should leave it at the official HTTPS endpoint. Automated tests use a fixture
+and never call Brave.
+
+Provider selection is controlled by `MANUAL_SEARCH_PROVIDER`:
+
+- `auto` (default): use `MANUAL_SEARCH_URL` when set (advanced gateway), otherwise
+  use `BRAVE_SEARCH_API_KEY` when set, otherwise remain unconfigured.
+- `brave`: require `BRAVE_SEARCH_API_KEY`.
+- `gateway`: require `MANUAL_SEARCH_URL`.
+- `none`: disable online discovery while keeping upload and attached-manual Q&A.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MANUAL_SEARCH_URL` | empty | Absolute HTTP(S) URL of one JSON search gateway. Empty means unconfigured. |
-| `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token sent only to that gateway. |
-| `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Human-readable provider label shown in the UI. |
-| `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Gateway and manual download timeout in seconds. |
+| `MANUAL_SEARCH_PROVIDER` | `auto` | `auto`, `brave`, `gateway` or `none` |
+| `BRAVE_SEARCH_API_KEY` | empty | Brave Search API subscription token; server-side only |
+| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official endpoint or compatible test/proxy base |
+| `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
+| `BRAVE_SEARCH_LANG` | empty | Optional Brave search language code |
+| `MANUAL_SEARCH_URL` | empty | Advanced JSON gateway URL; only when provider is `gateway`/`auto` |
+| `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for the advanced gateway |
+| `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Gateway label shown in the UI |
+| `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Search, landing-page and manual-download timeout |
 
-The gateway contract is intentionally small:
+### Source evidence and PDF discovery
+
+Brave returns web pages, not a guaranteed manual file. Housetory handles two
+real outcomes:
+
+1. **Direct PDF result.** If the result URL path ends in `.pdf`, it is stored as
+   the candidate's file URL. The UI labels it as having a direct PDF.
+2. **Landing/support page.** The result is still shown with its actual source
+   URL and publisher, but no `.pdf` is guessed. For at most two
+   manufacturer/official results, Housetory may read that page with the same
+   safe public-IP/redirect/byte/deadline fetch path and inspect actual `<a
+   href>` links. A linked PDF is accepted only when it is a real anchor ending
+   in `.pdf` and its link text/URL shows the confirmed model/variant or clear
+   manual wording. No embedded PDF references, JavaScript links, meta refresh or
+   guessed paths are followed.
+
+If no real linked PDF is found, the candidate is marked **source page only**.
+The UI offers **Open source page** and **Upload manual** instead of a download
+button. Housetory never downloads an HTML page as if it were a PDF and never
+invents a PDF address.
+
+Brave does not supply an official/manufacturer flag. Housetory derives source
+type conservatively:
+
+- `manufacturer` only when the registrable host label matches the confirmed
+  manufacturer token and the Brave profile name also matches it (for example
+  `dewalt.com` + profile “DeWalt”);
+- `official` when a host/profile match exists but not both exact checks;
+- `other` otherwise.
+
+This is evidence for review, not a guarantee. The UI shows the real source URL,
+publisher, language, model coverage, retrieval date and direct-file state. A
+similar-product result is hidden unless its title/snippet/URL actually contains
+the confirmed model and variant.
+
+### Advanced gateway option
+
+The original generic JSON gateway remains available for an operator who already
+has a custom search service. It is not required and is not the only usable
+integration.
+
+Gateway request:
 
 ```json
 POST <MANUAL_SEARCH_URL>
 {
   "mode": "manual",
-  "manufacturer": "Makita",
+  "manufacturer": "DeWalt",
   "model": "DCD791",
-  "variant": "Z"
+  "variant": "B"
 }
 ```
 
@@ -116,26 +230,26 @@ For online questions the same endpoint receives:
 ```json
 {
   "mode": "question",
-  "manufacturer": "Makita",
+  "manufacturer": "DeWalt",
   "model": "DCD791",
-  "variant": "Z",
+  "variant": "B",
   "question": "What battery does it use?"
 }
 ```
 
-The response must be:
+Expected response:
 
 ```json
 {
   "results": [
     {
-      "title": "DCD791 instruction manual",
-      "source_url": "https://manufacturer.example/support/DCD791",
-      "file_url": "https://manufacturer.example/support/DCD791.pdf",
-      "publisher": "Makita",
+      "title": "DCD791B instruction manual",
+      "source_url": "https://www.dewalt.com/support/DCD791B",
+      "file_url": "https://www.dewalt.com/-/media/manuals/DCD791B.pdf",
+      "publisher": "DeWalt",
       "language": "en",
       "source_type": "manufacturer",
-      "model_coverage": ["DCD791", "DCD791Z"],
+      "model_coverage": ["DCD791", "DCD791B"],
       "snippet": "Optional short source excerpt"
     }
   ]
@@ -144,16 +258,16 @@ The response must be:
 
 `source_type` is one of `manufacturer`, `official` or `other`. Candidate titles,
 snippets, publishers and coverage must show the exact confirmed model (and
-variant, if set); results for similar products are hidden with a notice. At most
-30 gateway results are inspected and at most 10 exact-model candidates are kept.
-The gateway's redirects are refused so its credentials cannot be forwarded.
+variant, if set); similar products are hidden with a notice. At most 30 gateway
+results are inspected and at most 10 exact-model candidates are kept. Gateway
+redirects are refused so credentials cannot be forwarded.
 
 Search candidates are persisted in `manual_search_candidates` with source URL,
 file URL, publisher, language, source type, model coverage, snippet, retrieval
-time and creator. Repeated searches update the same URL pair instead of creating
-duplicates. Nothing is downloaded during search.
+time, direct-file state and creator. Repeated searches update the same source URL
+instead of creating duplicates. Nothing is downloaded during search.
 
-A download is accepted only for a specific reviewed candidate:
+A download is accepted only for a specific reviewed candidate with a direct PDF:
 
 - the candidate must belong to the same household and item;
 - `confirm_model: true` and a `request_id` are required;
@@ -161,8 +275,8 @@ A download is accepted only for a specific reviewed candidate:
 - a retry with the same request id does not create another candidate/document;
 - identical file bytes already in the household reuse that document and only add
   the item link, never a second copy;
-- the returned provenance includes the candidate/source URL, the final resolved
-  file URL, publisher/language/source type, model coverage, search retrieval time,
+- the returned provenance includes the candidate/source URL, final resolved file
+  URL, publisher/language/source type, model coverage, search retrieval time,
   download time and the resulting document.
 
 Only PDF downloads are accepted from online sources. The downloaded original is
@@ -182,28 +296,34 @@ not a PDF, the request fails clearly and the user can still upload a manual.
 - Redirects are bounded to three, revalidated at every hop, and HTTPS may not
   downgrade to plain HTTP. Credentials, invalid ports and unsupported schemes are
   rejected.
-- Response size is bounded by `MAX_UPLOAD_MB` and the socket timeout by
-  `MANUAL_SEARCH_TIMEOUT_SECONDS`. HTML responses and non-PDF bytes are rejected
+- Response size is bounded (`MAX_UPLOAD_MB` for downloads, 512 KB for landing
+  pages) and the total wall-clock time by `MANUAL_SEARCH_TIMEOUT_SECONDS`, not
+  only per-read socket timeouts. HTML responses and non-PDF bytes are rejected
   even if the declared content type claims otherwise.
+- Landing pages are read only from accepted manufacturer/official results, at
+  most two per search. Only actual anchor links are inspected; no embedded
+  references, linked PDF previews or arbitrary redirects are recursively
+  fetched.
 - Filenames are reduced to a basename and passed through the existing storage
   sanitizer. Embedded references inside a PDF are never fetched.
 - Search/download endpoints do not accept a URL from the browser as their
-  destination; the operator-configured gateway or a previously stored reviewed
-  candidate is the only source. Downloaded text is not logged.
+  destination; the operator-configured provider or a previously stored reviewed
+  candidate is the only source. Downloaded text, queries and keys are not logged.
 
 ## Optional online item questions
 
 After an attached-manual answer, a writer can explicitly choose to ask the
-configured online source. This requires:
+configured online provider. This requires:
 
 - the same confirmed manufacturer + complete model gate;
-- a configured search gateway;
+- a configured Brave adapter or advanced gateway;
 - an explicit user action in the UI.
 
-Only `mode`, manufacturer, model, optional variant and the question are sent to
-the gateway. Borrower names, loans, household name, item location, inventory
-counts and other household records are not included. The response is shown as
-web evidence with source URLs, publisher/language/source type and excerpts,
+For Brave, Housetory sends a search query containing only manufacturer, model,
+optional variant and the question (bounded to 300 characters in the provider
+query). Borrower names, loans, household name, item location, inventory counts
+and other household records are not included. The response is shown as web
+evidence with source URLs, publisher/language/source type and excerpts,
 separately labelled from attached-manual evidence. The optional assistant AI
 may synthesise the supplied excerpts with schema-validated citation IDs; it
 cannot add URLs or use unreviewed results. No autonomous tool loop, browsing
@@ -244,27 +364,39 @@ search results or require a paid provider.
 ## Verification and unverified live setup
 
 Automated backend tests cover upload without make/model, multi-item reuse,
-cross-household and viewer boundaries, generic/partial/variant gates on both
-search and online questions, exact-model candidate filtering, candidate
+cross-household and viewer boundaries, letter-only and variant model identities,
+both search and online-question gates, exact-model filtering, candidate
 persistence, reviewed download idempotency, duplicate reuse, provenance,
-malformed provider output, optional AI fallback, fabricated-page rejection,
-OCR page storage and SSRF/redirect/size/type/timeout guards. Frontend tests cover
-attach/ask/citations/no-AI/gated find/review/save and viewer controls. Playwright
-runs against a disposable stack with synthetic manuals and mocked search results.
+malformed provider output, optional AI fallback, fabricated-page rejection, OCR
+page storage and SSRF/redirect/size/type/timeout guards. Brave-specific tests
+use realistic vendor fixtures to verify request construction, the documented
+`X-Subscription-Token` header, query parameters, response normalization,
+manufacturer provenance validation, direct-PDF versus source-page discovery,
+401/403/429/500 parsing, timeouts, invalid JSON, rate limits, key non-disclosure
+and the complete API search/download path. Frontend tests cover
+attach/ask/citations/no-AI/gated find/review/save, source-page-only candidates and
+viewer controls. Playwright starts a fixture Brave service, configures the real
+adapter through the disposable API, discovers a candidate, reviews it, saves a
+manual through the UI and asks a cited manual question. The browser workflow
+fixtures the private PDF fetch response because the disposable mock service is
+not a public SSRF destination; real server-side PDF fetch, validation,
+idempotency and duplicate handling are covered by PostgreSQL backend tests.
 
-Not live-verified in this milestone: connecting to a real manufacturer or
-third-party search gateway, downloading a real vendor PDF, and calling a paid
-cloud model for manual synthesis. `MANUAL_SEARCH_URL` is empty by default. To
-verify live, configure the operator gateway described above, configure a real
-assistant task/provider with consent, then perform one deliberate search and one
-download while watching the API/worker logs. No live network, paid AI, email or
-remote deployment is performed by the automated tests.
+Not live-verified in this milestone: calling the real Brave Search API with a
+real subscription token, downloading a real vendor PDF, and calling a paid cloud
+model for manual synthesis. `BRAVE_SEARCH_API_KEY` is empty by default. To verify
+live, register a Brave Search API token, set `MANUAL_SEARCH_PROVIDER=brave` and
+`BRAVE_SEARCH_API_KEY`, restart the API, confirm the status shows **Brave Search
+API**, then perform one deliberate search and one download while watching the
+API/worker logs. Configure a consented assistant provider only if AI synthesis is
+wanted. No live network, paid AI, email or remote deployment is performed by the
+automated tests.
 
 ## Representative screenshots
 
 The walkthrough used a disposable Compose stack, a synthetic text manual and a
-mocked search candidate. No real household record or live search provider was
-used.
+fixture Brave-compatible search service through the real Brave adapter. No real
+household record, live Brave request or paid provider was used.
 
 ### Before and after on the item page
 
@@ -288,18 +420,18 @@ in the main column.
 
 ![Grounded answer with real page citation and source links, desktop](walkthrough/item-manuals/06-ask-citations-desktop.png)
 
-![Mobile answer scrolled to citations, sources and honest unconfigured online state](walkthrough/item-manuals/10-ask-citations-mobile.png)
+![Mobile answer scrolled to citations, sources and the explicit online-request review action](walkthrough/item-manuals/10-ask-citations-mobile.png)
 
-![Find manual with confirmed identity and honest unconfigured search state, desktop](walkthrough/item-manuals/07-find-manual-unconfigured-desktop.png)
+![Find manual with confirmed DeWalt DCD791 · B identity and the Brave Search API provider status, desktop](walkthrough/item-manuals/07-find-manual-brave-desktop.png)
 
-![Reviewed candidate with source evidence and explicit download confirmation, desktop](walkthrough/item-manuals/08-find-manual-review-desktop.png)
+![Brave candidates after exact-model filtering: a manufacturer PDF under review, plus a source-page-only result with no guessed PDF, desktop](walkthrough/item-manuals/08-find-manual-review-desktop.png)
 
 ## Verification
 
-- **280 PostgreSQL-backed backend tests** pass, including the new manual
+- **286 PostgreSQL-backed backend tests** pass, including the new manual
   attachment, identity-gate, citation, idempotency, duplicate, provider-output
   and SSRF tests.
-- **123 Vitest frontend tests** pass, including manual card/actions, Ask dialogs,
+- **124 Vitest frontend tests** pass, including manual card/actions, Ask dialogs,
   real-page citations, no-AI/unconfigured states, identity confirmation,
   candidate review/download and viewer controls.
 - **33 disposable-stack Playwright workflows** pass, including two named manual

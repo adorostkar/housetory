@@ -64,8 +64,9 @@ Tailscale is optional.
   text, cite real pages when page-level OCR exists and explicit sections/excerpts
   otherwise, and fall back to extractive evidence without AI. Online search and
   download require a deliberate, server-enforced manufacturer + complete model
-  confirmation, reviewed candidates and a configured search gateway; similar
-  products are never auto-accepted. See
+  confirmation, reviewed candidates and a configured search provider (built-in
+  Brave Search API adapter or an advanced gateway); similar products are never
+  auto-accepted. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - CPU-only local OCR through Tesseract and Poppler in the worker: merchant,
   purchase date, total, currency, invoice number, product names and serial
@@ -186,7 +187,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 280 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 286 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -213,11 +214,14 @@ stack, not just unit mocks:
   natural loan-wording factual parity, Loans-page new-loan stock checks and
   direct-return validation, manual upload/reuse, exact make/model and variant
   gates on search/download/online questions, grounded page citations and
-  extractive/AI fallback, idempotent duplicate-aware downloads with provenance,
+  extractive/AI fallback, the documented Brave Search API request/auth/response
+  adapter with realistic fixtures, conservative manufacturer provenance,
+  direct-PDF versus source-page discovery, 401/403/429/timeout/invalid-output
+  handling, idempotent duplicate-aware downloads with provenance,
   SSRF/redirect/size/type/timeout download guards,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 123 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 124 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 33 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
@@ -233,8 +237,9 @@ stack, not just unit mocks:
   missing-purchase filter parity, assistant conversation handoff, item title /
   usual-home loan state, authorized return, viewer restrictions, compact and
   populated photo galleries, the unified Add items chooser with contextual
-  destinations, manual upload/attach/answer citations and gated manual
-  search/review/save at desktop and mobile widths.
+  destinations, manual upload/attach/answer citations and a fixture Brave
+  provider exercised through the real adapter for gated search/review/save at
+  mobile width.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -479,16 +484,22 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI providers |
 | `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
 | `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
-| `MANUAL_SEARCH_URL` | empty | Optional operator JSON gateway for reviewed online manual search; empty means unconfigured |
-| `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for that gateway; never sent to browser or any other host |
-| `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Provider label shown in the manual UI |
-| `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Online search/download timeout |
+| `MANUAL_SEARCH_PROVIDER` | `auto` | `auto`, `brave`, `gateway` or `none` |
+| `BRAVE_SEARCH_API_KEY` | empty | Brave Search API subscription token; server-side only |
+| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible test/proxy base |
+| `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
+| `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
+| `MANUAL_SEARCH_URL` | empty | Advanced JSON gateway URL when explicitly selected |
+| `MANUAL_SEARCH_API_KEY` | empty | Optional bearer token for the advanced gateway |
+| `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Gateway label shown in the manual UI |
+| `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Online search/landing/download timeout |
 
 Manual answers use the existing **assistant** AI task when configured and
-consented; they remain extractive without it. Online discovery uses only the
-operator-configured `MANUAL_SEARCH_URL` gateway and never pretends a chat model
-has live browsing. The gateway contract, candidate review, download safety and
-page-citation limits are documented in
+consented; they remain extractive without it. Online discovery uses the official
+**Brave Search API** adapter with a user-supplied server-side key, or an advanced
+operator gateway, and never pretends a chat model has live browsing. The Brave
+setup, real API contract, source/PDF evidence rules, candidate review, download
+safety and page-citation limits are documented in
 [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 | `IMPORT_MAX_FILES` | `2000` | Maximum files accepted from one vault ZIP |
 | `IMPORT_MAX_TOTAL_MB` | `50` | Maximum decompressed vault size |
@@ -865,7 +876,16 @@ npx playwright test
 The Phase 6 provider test starts a local mock Ollama HTTP service in the
 Playwright process and configures the disposable API to call it through
 `host.docker.internal`. Override `E2E_AI_BASE_URL` if the API is not in Docker
-(for example `http://127.0.0.1:<port>`). The hierarchy test expects a fresh
+(for example `http://127.0.0.1:<port>`).
+
+The manuals Brave workflow starts a fixture Brave-compatible HTTP service on
+port `4789`. Start the disposable API with
+`BRAVE_SEARCH_PROVIDER=brave`,
+`BRAVE_SEARCH_API_KEY=e2e-fixture-key` and
+`BRAVE_SEARCH_BASE_URL=http://host.docker.internal:4789` so the real adapter
+is exercised; otherwise that workflow skips with a clear message. Its download
+step uses a browser fixture for the private PDF fetch because the disposable mock
+service is intentionally not a public SSRF destination. The hierarchy test expects a fresh
 disposable household because it applies fixed fixture identifiers; recreate the
 disposable volumes between full runs. The global setup signs in, or performs
 first-run setup when the stack is empty. Set `E2E_CHANNEL` if Chrome is not
