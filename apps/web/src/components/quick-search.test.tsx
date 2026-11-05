@@ -21,12 +21,18 @@ function result(overrides: Partial<QuickSearchResult>): QuickSearchResult {
     subtitle: "Acme · C-1",
     context: "Office · BOX-001",
     url: "/items/item-1",
+    loan: null,
     ...overrides,
   };
 }
 
 function response(query: string, results: QuickSearchResult[]): QuickSearchResponse {
-  return { query, results };
+  return {
+    query,
+    effective_query: null,
+    question_like: false,
+    results,
+  };
 }
 
 function LocationProbe() {
@@ -81,7 +87,7 @@ describe("QuickSearch", () => {
       ]);
     });
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Camera");
     const panel = await screen.findByRole("listbox", { name: "Quick search results" });
     expect(within(panel).getByText("Items")).toBeVisible();
@@ -103,7 +109,7 @@ describe("QuickSearch", () => {
       return response(query, [result({})]);
     });
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Camera");
     await screen.findByRole("option", { name: /Camera Body/ });
     await userEvent.keyboard("{ArrowDown}{Enter}");
@@ -118,7 +124,7 @@ describe("QuickSearch", () => {
       return response(query, [result({})]);
     });
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Camera");
     await screen.findByRole("option", { name: /Camera Body/ });
     await userEvent.click(screen.getByRole("button", { name: /View all results/ }));
@@ -127,11 +133,86 @@ describe("QuickSearch", () => {
     );
   });
 
+  it("does not call natural-language search while typing", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      const query = queryFromPath(path);
+      return response(query, [result({ title: "PS5" })]);
+    });
+    renderSearch();
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "PS5");
+    expect(await screen.findByRole("option", { name: /PS5/ })).toBeVisible();
+    expect(api.get).not.toHaveBeenCalledWith(
+      expect.stringContaining("/search/natural"),
+      expect.anything(),
+    );
+  });
+
+  it("routes a question to grounded answer results and offers the assistant", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      const query = queryFromPath(path);
+      return {
+        query,
+        effective_query: "heavy drill",
+        question_like: true,
+        results: [
+          result({
+            title: "Heavy drill",
+            loan: {
+              on_loan_quantity: 1,
+              borrower_names: ["Alex"],
+              next_due_on: "2026-11-15",
+            },
+          }),
+        ],
+      };
+    });
+    renderSearch();
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "where is my heavy drill");
+    const panel = await screen.findByRole("listbox", {
+      name: "Quick search results",
+    });
+    expect(within(panel).getByText(/On loan to Alex/)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Ask Housetory" }),
+    ).toBeVisible();
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        `/search?q=${encodeURIComponent("where is my heavy drill")}&ask=1`,
+      ),
+    );
+  });
+
+  it("keeps longer conversations on the assistant page from the quick panel", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      const query = queryFromPath(path);
+      return response(query, [result({ title: "Heavy drill" })]);
+    });
+    renderSearch();
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "where is my heavy drill");
+    const ask = await screen.findByRole("button", { name: "Ask Housetory" });
+    await userEvent.click(ask);
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
+      ),
+    );
+  });
+
   it("opens all results with Enter before selecting a result and preserves the query", async () => {
     const pending = new Promise<QuickSearchResponse>(() => undefined);
     vi.mocked(api.get).mockReturnValue(pending);
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Blue box");
     expect(await screen.findByText("Searching your home…")).toBeVisible();
     await userEvent.keyboard("{Enter}");
@@ -150,7 +231,7 @@ describe("QuickSearch", () => {
       return response(query, [result({})]);
     });
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Camera");
     await screen.findByRole("option", { name: /Camera Body/ });
     await userEvent.click(document.body);
@@ -167,7 +248,7 @@ describe("QuickSearch", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     await userEvent.type(input, "Nothing");
-    expect(await screen.findByText(/No matches for “Nothing”/)).toBeVisible();
+    expect(await screen.findByText(/No quick matches for “Nothing”/)).toBeVisible();
     await userEvent.clear(input);
     await userEvent.type(input, "Broken");
     expect(await screen.findByText("Search is unavailable just now.")).toBeVisible();
@@ -185,7 +266,7 @@ describe("QuickSearch", () => {
       });
     });
     renderSearch();
-    const input = screen.getByRole("combobox", { name: "Search your home" });
+    const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Cam");
     expect(await screen.findByRole("option", { name: /Old camera/ })).toBeVisible();
     await userEvent.type(input, "era");

@@ -94,7 +94,7 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
   await cameraCheckbox.check();
   await tentCheckbox.check();
   await expect(page.getByText(/2 items selected · 5 units/)).toBeVisible();
-  await page.getByRole("button", { name: "Move" }).click();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
   await expect(page.getByText(/2 selected item\(s\), 5 recorded unit\(s\)/)).toBeVisible();
   await expect(page.getByText(/does not return the loaned units/i)).toBeVisible();
   await page.getByLabel("Destination room").selectOption(garage.id);
@@ -107,14 +107,14 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
   await expect(page.getByText(`Camera ${suffix}`)).toBeVisible();
   await page.getByRole("checkbox", { name: `Select Camera ${suffix}` }).check();
   await page.getByRole("checkbox", { name: `Select Tent ${suffix}` }).check();
-  await page.getByRole("button", { name: "Tags" }).click();
+  await page.getByRole("button", { name: "Tags", exact: true }).click();
   await page.getByRole("button", { name: `Fragile ${suffix}` }).click();
   await page.getByRole("button", { name: "Add selected tags" }).click();
   await expect(page.getByText(/Added tags on 2 items/)).toBeVisible();
 
   await page.getByRole("checkbox", { name: `Select Camera ${suffix}` }).check();
   await page.getByRole("checkbox", { name: `Select Tent ${suffix}` }).check();
-  await page.getByRole("button", { name: "Category" }).click();
+  await page.getByRole("button", { name: "Category", exact: true }).click();
   await page.getByLabel("Category", { exact: true }).selectOption(category.id);
   await page.getByRole("button", { name: "Apply category" }).click();
   await expect(page.getByText(/Set category on 2 items/)).toBeVisible();

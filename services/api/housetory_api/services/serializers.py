@@ -29,6 +29,7 @@ from ..schemas.items import (
 )
 from ..schemas.purchases import PurchaseOut
 from ..schemas.warranties import WarrantyOut
+from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
 from .warranties import effective_reminder_days, warranty_status
 
 _settings = get_settings()
@@ -317,6 +318,8 @@ def item_summary(
         ],
         primary_photo=_primary_photo(item),
         purchase=purchase_out(purchase) if purchase else None,
+        purchase_info_status=effective_purchase_info_status(item).value,
+        purchase_info_missing_fields=missing_purchase_info_fields(item),
         warranty=(warranty_out(warranty, reminder_days) if warranty else None),
         current_value_cents=item.current_value_cents,
         current_value_currency=item.current_value_currency,

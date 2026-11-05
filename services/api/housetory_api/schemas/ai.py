@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..domain import PurchaseInfoFilter
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.items import ItemSummary
 
@@ -19,6 +20,8 @@ AssistantTool = Literal[
     "get_inventory_summary",
     "find_missing_information",
     "list_outstanding_loans",
+    "locate_item",
+    "count_items",
 ]
 
 
@@ -159,7 +162,7 @@ class AssistantPlan(BaseModel):
 
 
 class AssistantReference(BaseModel):
-    type: Literal["item", "document", "room", "location", "purchase", "warranty"]
+    type: Literal["item", "document", "room", "location", "purchase", "warranty", "loan"]
     id: uuid.UUID
     title: str
     subtitle: str | None = None
@@ -177,6 +180,9 @@ class NaturalSearchFilters(BaseModel):
     category_name: str | None = None
     tag: str | None = None
     missing_purchase: bool = False
+    missing_purchase_date: bool = False
+    missing_purchase_price: bool = False
+    purchase_info_status: PurchaseInfoFilter | None = None
     missing_serial: bool = False
     warranty_status: Literal["active", "expiring", "expired"] | None = None
     purchased_after: date | None = None
@@ -209,6 +215,9 @@ class AiSearchPlan(BaseModel):
     category_name: str | None = Field(default=None, max_length=120)
     tag: str | None = Field(default=None, max_length=80)
     missing_purchase: bool | None = None
+    missing_purchase_date: bool | None = None
+    missing_purchase_price: bool | None = None
+    purchase_info_status: PurchaseInfoFilter | None = None
     missing_serial: bool | None = None
     warranty_status: Literal["active", "expiring", "expired"] | None = None
     purchased_after: date | None = None
@@ -231,6 +240,14 @@ class NaturalSearchResponse(BaseModel):
     total: int
     mode: Literal["deterministic", "ai"]
     ai_available: bool
+    answer: str | None = None
+    answer_kind: str | None = None
+    tool: str | None = None
+    facts: dict[str, Any] = Field(default_factory=dict)
+    notices: list[str] = Field(default_factory=list)
+    references: list[AssistantReference] = Field(default_factory=list)
+    needs_assistant: bool = False
+    suggested_question: str | None = None
 
 
 class AssistantResponse(BaseModel):
@@ -243,6 +260,7 @@ class AssistantResponse(BaseModel):
     locations: list[dict[str, Any]] = Field(default_factory=list)
     references: list[AssistantReference] = Field(default_factory=list)
     notices: list[str] = Field(default_factory=list)
+    facts: dict[str, Any] = Field(default_factory=dict)
     ai_status: AiStatus
 
 

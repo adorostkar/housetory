@@ -206,6 +206,7 @@ def export_inventory(
         "purchase_allocated_cents",
         "current_value_cents",
         "current_value_currency",
+        "purchase_info_status",
         "missing_purchase_information",
     ]
     rows: list[list[object]] = [headers]

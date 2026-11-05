@@ -33,7 +33,6 @@ const primaryNav = [
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
   { to: "/containers", label: "Containers", icon: Boxes, end: false },
-  { to: "/search", label: "Search", icon: Search, end: false },
 ] as const;
 
 const mobileNav = [
@@ -63,7 +62,15 @@ function AppShellLayout() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        navigate("/search");
+        const input = document.querySelector<HTMLInputElement>(
+          '[data-quick-search-input="true"]',
+        );
+        if (input) {
+          input.focus();
+          input.select();
+        } else {
+          navigate("/search");
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -130,7 +137,7 @@ function AppShellLayout() {
                 asChild
                 variant="ghost"
                 size="icon"
-                aria-label="Search your home"
+                aria-label="Search or ask about your inventory"
               >
                 <Link to="/search">
                   <Search className="size-[1.1rem]" />

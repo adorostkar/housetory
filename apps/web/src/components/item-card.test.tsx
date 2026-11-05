@@ -69,6 +69,8 @@ const item: ItemSummary = {
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
+  purchase_info_status: "recorded",
+  purchase_info_missing_fields: [],
   warranty: null,
   current_value_cents: null,
   current_value_currency: "USD",
@@ -89,7 +91,7 @@ describe("ItemCard", () => {
     expect(screen.getByText("Espresso Machine")).toBeInTheDocument();
     expect(screen.getByText("La Marzocco · Linea Mini")).toBeInTheDocument();
     expect(screen.getByText("Kitchen")).toBeInTheDocument();
-    expect(screen.getByText("Coffee Shelf")).toBeInTheDocument();
+    expect(screen.getByText("SHELF-001 · Coffee Shelf")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Espresso Machine" })).toHaveAttribute(
       "src",
       item.primary_photo?.thumbnail_url,

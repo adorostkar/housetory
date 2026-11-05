@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..domain import PurchaseInfoStatus
 from ..models import Item, PurchaseAllocation
 from ..schemas.items import ItemSummary
 from ..schemas.ownership import (
@@ -24,6 +25,7 @@ from ..schemas.ownership import (
     ValuableItem,
     ValueBreakdownRow,
 )
+from .purchase_info import effective_purchase_info_status
 from .serializers import item_load_options, item_summary
 
 
@@ -87,10 +89,7 @@ def _purchase_shares(
 
 
 def _missing_purchase(item: Item) -> bool:
-    purchase = item.purchase
-    if purchase is None:
-        return True
-    return purchase.purchase_date is None and purchase.price_cents is None
+    return effective_purchase_info_status(item).value in {"unrecorded", "unknown"}
 
 
 def _add_breakdown(
@@ -132,12 +131,16 @@ def financial_overview(
     room_rows: dict[tuple[str, str], dict[str, Any]] = {}
     valuable: list[ValuableItem] = []
     missing: list[ItemSummary] = []
+    with_purchase_count = 0
 
     for item in items:
         category_name = item.category.name if item.category else "Uncategorised"
         room_name = item.room.name if item.room else "No room"
         purchase = item.purchase
         allocation = allocations.get(item.id)
+        status = effective_purchase_info_status(item)
+        if status == PurchaseInfoStatus.RECORDED:
+            with_purchase_count += 1
 
         if purchase is not None:
             purchase_item_counts[purchase.currency] += 1
@@ -199,7 +202,7 @@ def financial_overview(
                 )
             )
 
-        if _missing_purchase(item):
+        if status in {PurchaseInfoStatus.UNRECORDED, PurchaseInfoStatus.UNKNOWN}:
             missing.append(item_summary(item, household_reminder_days=household_reminder_days))
 
     currencies = sorted(set(purchase_totals) | set(current_totals))
@@ -237,7 +240,7 @@ def financial_overview(
     missing.sort(key=lambda entry: entry.name.lower())
     return FinancialOverview(
         item_count=len(items),
-        items_with_purchase_count=len(items) - len(missing),
+        items_with_purchase_count=with_purchase_count,
         items_missing_purchase_count=len(missing),
         currency_totals=currency_totals,
         value_by_category=breakdown(category_rows),
@@ -280,6 +283,7 @@ def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict
                 if item.current_value_cents is not None
                 else "",
                 "current_value_currency": item.current_value_currency,
+                "purchase_info_status": effective_purchase_info_status(item).value,
                 "missing_purchase_information": "yes" if _missing_purchase(item) else "no",
             }
         )

@@ -14,6 +14,7 @@ from ..api.errors import ApiError
 from ..models import Category, Item, Purchase, Room, StorageLocation, Tag, Warranty
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import history, lending
+from .purchase_info import explicit_status_value
 from .purchases import get_purchase, prune_orphan_purchases, validate_receipt
 from .serializers import item_load_options
 from .warranties import resolve_end_date
@@ -177,6 +178,7 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         category_id=category_record.id if category_record else None,
         current_value_cents=payload.current_value_cents,
         current_value_currency=payload.current_value_currency,
+        purchase_info_status=explicit_status_value(payload.purchase_info_status),
     )
     item.tags = tag_records
     if payload.purchase_id is not None:
@@ -271,6 +273,9 @@ def update_item_record(
         item.current_value_cents = payload.current_value_cents
     if "current_value_currency" in fields and payload.current_value_currency is not None:
         item.current_value_currency = payload.current_value_currency
+
+    if "purchase_info_status" in fields:
+        item.purchase_info_status = explicit_status_value(payload.purchase_info_status)
 
     if "purchase_id" in fields:
         previous_purchase_id = item.purchase_id

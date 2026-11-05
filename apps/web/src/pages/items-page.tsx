@@ -23,6 +23,7 @@ import {
 } from "@/components/bulk-organise-dialogs";
 import { ItemCard, ItemRow } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -40,6 +41,7 @@ import {
   cn,
   flattenLocations,
   flattenRoomTree,
+  locationLabel,
   locationPath,
   pluralize,
   roomPath,
@@ -67,6 +69,7 @@ export function ItemsPage() {
   const locationFilter = searchParams.get("location_id") ?? "";
   const categoryFilter = searchParams.get("category_id") ?? "";
   const tagFilter = searchParams.get("tag_id") ?? "";
+  const purchaseInfo = searchParams.get("purchase_info") ?? "";
   const archived = searchParams.get("archived") === "1";
   const sortParam = searchParams.get("sort");
   const sort: SortKey = isSortKey(sortParam) ? sortParam : "created_desc";
@@ -121,6 +124,7 @@ export function ItemsPage() {
     location_id: locationFilter || undefined,
     category_id: categoryFilter || undefined,
     tag_id: tagFilter || undefined,
+    purchase_info: purchaseInfo || undefined,
     include_archived: archived,
     include_descendants: true,
     sort,
@@ -134,6 +138,7 @@ export function ItemsPage() {
     locationFilter,
     categoryFilter,
     tagFilter,
+    purchaseInfo,
     archived,
     sort,
   ]);
@@ -151,7 +156,13 @@ export function ItemsPage() {
   );
   const hasArchivedSelection = selectedItems.some((item) => item.is_archived);
   const hasFilters = Boolean(
-    qParam || roomFilter || locationFilter || categoryFilter || tagFilter || archived,
+    qParam ||
+      roomFilter ||
+      locationFilter ||
+      categoryFilter ||
+      tagFilter ||
+      purchaseInfo ||
+      archived,
   );
 
   useEffect(() => {
@@ -206,6 +217,87 @@ export function ItemsPage() {
   };
   const roomOptions = flattenRoomTree(roomsQuery.data?.items ?? []);
   const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
+  const categoryOptions = (categoriesQuery.data?.items ?? []).filter(
+    (category) => category.item_count > 0 || category.id === categoryFilter,
+  );
+  const tagOptions = (tagsQuery.data?.items ?? []).filter(
+    (tag) => tag.item_count > 0 || tag.id === tagFilter,
+  );
+  const purchaseInfoLabels: Record<string, string> = {
+    missing: "Missing or unknown",
+    unknown: "Purchase info unknown",
+    not_applicable: "Not applicable",
+    recorded: "Recorded",
+    missing_date: "Missing purchase date",
+    missing_price: "Missing purchase price",
+  };
+  const activeFilterChips = [
+    qParam
+      ? {
+          key: "q",
+          label: `Search: ${qParam}`,
+          remove: () => {
+            setSearch("");
+            updateParam("q", "");
+          },
+        }
+      : null,
+    roomFilter
+      ? {
+          key: "room",
+          label: `Room: ${roomPath(roomsQuery.data?.items ?? [], roomFilter)
+            .map((entry) => entry.name)
+            .join(" / ")}`,
+          remove: () => updateRoomFilter(""),
+        }
+      : null,
+    locationFilter
+      ? {
+          key: "location",
+          label: `Place: ${locationPath(
+            locationsQuery.data?.items ?? [],
+            locationFilter,
+          )
+            .map((entry) => locationLabel(entry))
+            .join(" / ")}`,
+          remove: () => updateParam("location_id", ""),
+        }
+      : null,
+    categoryFilter
+      ? {
+          key: "category",
+          label: `Category: ${
+            categoriesQuery.data?.items.find((entry) => entry.id === categoryFilter)
+              ?.name ?? "Selected"
+          }`,
+          remove: () => updateParam("category_id", ""),
+        }
+      : null,
+    tagFilter
+      ? {
+          key: "tag",
+          label: `Tag: ${
+            tagsQuery.data?.items.find((entry) => entry.id === tagFilter)?.name ??
+            "Selected"
+          }`,
+          remove: () => updateParam("tag_id", ""),
+        }
+      : null,
+    purchaseInfo
+      ? {
+          key: "purchase",
+          label: `Purchase: ${purchaseInfoLabels[purchaseInfo] ?? purchaseInfo}`,
+          remove: () => updateParam("purchase_info", ""),
+        }
+      : null,
+    archived
+      ? {
+          key: "archived",
+          label: "Includes archived",
+          remove: () => updateParam("archived", ""),
+        }
+      : null,
+  ].filter((chip): chip is NonNullable<typeof chip> => chip !== null);
 
   useEffect(() => {
     if (!locationFilter) return;
@@ -327,42 +419,71 @@ export function ItemsPage() {
               {locationOptions.map(({ location }) => (
                 <option key={location.id} value={location.id}>
                   {locationPath(locationsQuery.data?.items ?? [], location.id)
-                    .map((entry) => entry.name)
+                    .map((entry) => locationLabel(entry))
                     .join(" / ")}
                 </option>
               ))}
             </Select>
           </div>
 
-          <div className="min-w-[145px] shrink-0 sm:min-w-0">
-            <Select
-              aria-label="Filter by category"
-              value={categoryFilter}
-              onChange={(event) => updateParam("category_id", event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
-            >
-              <option value="">All categories</option>
-              {(categoriesQuery.data?.items ?? []).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </Select>
-          </div>
+          {categoryOptions.length > 0 ? (
+            <div className="min-w-[145px] shrink-0 sm:min-w-0">
+              <Select
+                aria-label="Filter by category"
+                value={categoryFilter}
+                onChange={(event) => updateParam("category_id", event.target.value)}
+                className="h-9 rounded-lg text-[0.8rem]"
+              >
+                <option value="">All categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ) : (
+            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-[0.72rem] text-muted-foreground sm:min-w-0">
+              No categories yet
+            </div>
+          )}
 
-          <div className="min-w-[145px] shrink-0 sm:min-w-0">
+          {tagOptions.length > 0 ? (
+            <div className="min-w-[145px] shrink-0 sm:min-w-0">
+              <Select
+                aria-label="Filter by tag"
+                value={tagFilter}
+                onChange={(event) => updateParam("tag_id", event.target.value)}
+                className="h-9 rounded-lg text-[0.8rem]"
+              >
+                <option value="">All tags</option>
+                {tagOptions.map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ) : (
+            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-[0.72rem] text-muted-foreground sm:min-w-0">
+              No tags yet
+            </div>
+          )}
+
+          <div className="min-w-[165px] shrink-0 sm:min-w-0">
             <Select
-              aria-label="Filter by tag"
-              value={tagFilter}
-              onChange={(event) => updateParam("tag_id", event.target.value)}
+              aria-label="Filter by purchase information"
+              value={purchaseInfo}
+              onChange={(event) => updateParam("purchase_info", event.target.value)}
               className="h-9 rounded-lg text-[0.8rem]"
             >
-              <option value="">All tags</option>
-              {(tagsQuery.data?.items ?? []).map((tag) => (
-                <option key={tag.id} value={tag.id}>
-                  {tag.name}
-                </option>
-              ))}
+              <option value="">Any purchase info</option>
+              <option value="missing">Missing or unknown</option>
+              <option value="recorded">Recorded</option>
+              <option value="unknown">Unknown</option>
+              <option value="not_applicable">Not applicable</option>
+              <option value="missing_date">Missing purchase date</option>
+              <option value="missing_price">Missing purchase price</option>
             </Select>
           </div>
 
@@ -399,10 +520,39 @@ export function ItemsPage() {
               className="shrink-0 justify-start text-muted-foreground"
             >
               <X />
-              Clear
+              Clear all
             </Button>
           )}
         </div>
+
+        {activeFilterChips.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+            {activeFilterChips.map((chip) => (
+              <Badge
+                key={chip.key}
+                variant="secondary"
+                className="gap-1 py-1 pl-2.5 pr-1.5 text-[0.68rem]"
+              >
+                <span className="max-w-64 truncate">{chip.label}</span>
+                <button
+                  type="button"
+                  onClick={chip.remove}
+                  className="flex size-4 items-center justify-center rounded-full text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                  aria-label={`Remove ${chip.label}`}
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="ml-1 text-[0.68rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Reset all filters
+            </button>
+          </div>
+        )}
       </div>
 
       {selectionNotice && (

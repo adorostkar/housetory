@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...db import get_db
+from ...domain import PurchaseInfoFilter
 from ...models import (
     Category,
     ImportEntry,
@@ -31,6 +32,7 @@ from ...services import lending, storage
 from ...services.container_serializers import location_path_map
 from ...services.containers import location_breadcrumb
 from ...services.hierarchy import descendant_ids
+from ...services.purchase_info import purchase_info_filter_clause
 from ...services.serializers import (
     item_detail,
     item_load_options,
@@ -85,6 +87,7 @@ def list_items(
     location_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    purchase_info: PurchaseInfoFilter | None = None,
     include_descendants: bool = False,
     include_archived: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
@@ -123,6 +126,8 @@ def list_items(
         conditions.append(Item.category_id == category_id)
     if tag_id is not None:
         conditions.append(Item.tags.any(Tag.id == tag_id))
+    if purchase_info is not None:
+        conditions.append(purchase_info_filter_clause(purchase_info))
     term = (q or "").strip()
     if term:
         search = f"%{term}%"

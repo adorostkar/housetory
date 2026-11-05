@@ -961,6 +961,90 @@ not start single-home polish or add another AI provider/task framework.
       1 member, 1 AI provider, 6 task settings, 5 import batches, 328 entries,
       1 loan, 0 purchases/documents). Host PostgreSQL port exposure was removed.
 
+## Single-home polish milestone
+
+This milestone completes the unified everyday search/assistant experience and the
+approved low-risk single-home refinements. It does not start the later evidence
+package, stocktake, properties or multi-household milestones, and it does not use
+the user's live Heavy drill loan as a fixture.
+
+### Stage A — unified search entry and grounded questions
+
+- [x] Sidebar/mobile input labelled “Search or ask about your inventory…” with
+      immediate ordinary matches while typing. No AI call per keystroke.
+- [x] Enter submits the full query; question-like text opens `/search` in grounded
+      answer mode, while ordinary terms use keyword results. Removed the redundant
+      Search nav entry but retained `/search` and all deep links.
+- [x] Explicit Ask Housetory quick-panel action hands longer conversations to the
+      dedicated Assistant page with the query preserved.
+- [x] Deterministic structured intents for whereabouts, counts, open loans, missing
+      purchase/date/price/serial/location/warranty information, room/container
+      contents, documents, purchase history, warranties and inventory summary.
+- [x] Fixed read-only household-scoped tools; no generated SQL, arbitrary tools or
+      mutations. AI may refine intent/wording only on explicit submission, with
+      consent, context bounds and honest unavailable/malformed fallback.
+
+### Stage B — exact loan whereabouts
+
+- [x] “where is my heavy drill?” resolves the item and reports owned/on-loan/at-home
+      quantities first, then borrower, outstanding quantity, optional recorded due
+      date and the usual home room/container path.
+- [x] Fully loaned items are never asserted to be in their usual storage place;
+      partial loans distinguish at-home and loaned units. Returned items report no
+      open loan. Ambiguous names list matches instead of guessing; no match is
+      explicit.
+- [x] Same grounded answer and references work through search, the quick panel loan
+      context and the dedicated Assistant, including a “when is it due?” follow-up.
+- [x] Isolated regression tests and disposable-stack browser workflows cover partial,
+      full, returned, no-due-date, ambiguous, no-match, viewer and household-scoped
+      cases without mutating the real loan.
+
+### Stage C — purchase information states
+
+- [x] Append-only migration `e2f4a6c8b0d2` adds nullable
+      `items.purchase_info_status` (`unknown` or `not_applicable`) with a check
+      constraint; legacy and ordinary items remain null/automatic.
+- [x] Effective Recorded/Unrecorded/Unknown/Not applicable status is derived without
+      magic dates or zero prices. Existing purchase details survive status changes.
+- [x] Overview counts, Items filters and assistant/search missing-information
+      questions share one rule: unrecorded and explicitly Unknown are missing;
+      Not applicable is excluded. Date/price-only missing filters are explicit.
+- [x] Item form/detail and inventory export expose the status and missing fields.
+
+### Stage D — visual and everyday refinements
+
+- [x] Overview leads with finding/organising items, recently added records and rooms;
+      empty value/warranty panels collapse to compact summaries and outstanding loans
+      remain a small useful notice. No borrower notes are exposed.
+- [x] Human name plus permanent identifier and full room/location path in cards,
+      filters and details; stored names/IDs unchanged.
+- [x] Empty category/tag filters hidden or disabled with management paths retained;
+      removable active-filter chips, reset and selection-clearing feedback added.
+- [x] Compact empty item-photo state with one Take photo/Choose photo control pair;
+      populated galleries keep their existing controls. Empty Documents library no
+      longer shows an export CTA.
+- [x] Assistant leads with the question and grounded content; provider model IDs and
+      detailed consent copy moved into compact expandable details while active mode
+      and remote-transmission status stay visible.
+
+### Stage E — verification
+
+- [x] 267 PostgreSQL tests, 109 Vitest tests and 26 disposable-stack Playwright
+      workflows pass; Ruff, strict TypeScript typecheck, production build and
+      migration checks pass.
+- [x] Browser coverage includes the exact loaned Heavy drill query, PS5 keyword
+      search without inference, missing-purchase filter parity, mobile search,
+      assistant follow-up and unconfigured-AI fallback.
+- [x] Before/after desktop and mobile screenshots captured under
+      `docs/walkthrough/single-home-polish/`.
+
+### Stage F — backup and local deployment
+
+- [ ] Back up the real local database/uploads/imports, apply the append-only
+      migration, deploy locally, remove test-only PostgreSQL port exposure, and
+      verify healthy services, served assets and preserved real-data counts.
+      Remote deployment remains untouched.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
@@ -1030,7 +1114,63 @@ instruction.
      controls. Remove empty-library export calls to action while retaining normal
      export capability once useful. Lead assistant with the question and retain
      accurate provider/privacy information in compact expandable details.
-7. **Inventory evidence package:** export selected items, boxes, rooms or the
+   **Immediate follow-up after current polish completes — item status prominence:**
+   user screenshot of Heavy drill shows loan status is too discreet and the empty
+   photo area dominates. Review the current milestone's actual result first and
+   implement only gaps that remain, before starting milestone 7. Do not interrupt
+   the running OpenCode work or send this follow-up until the user reports it done.
+   - Show a prominent, style-consistent “On loan to [borrower]” status beneath the
+     item title, with an accessible Record return action for permitted users.
+     Handle partial quantities and multiple borrowers honestly; do not present
+     one borrower as holding all stock or expose private notes.
+   - While stock is loaned, label its recorded room/container “Usual home location”
+     and distinguish available/on-loan quantities; do not imply loaned units are
+     physically at home. Retain the detailed lending card/history.
+   - Replace the oversized missing-photo panel with compact Add photo / Take photo
+     controls and remove redundant upload buttons. Give actual photos appropriate
+     gallery space once present, preserving existing gallery functionality.
+   - Preserve the current visual feel; verify light/dark and desktop/mobile views,
+     fully/partially loaned states, no due date, returned items and permissions.
+     Test on isolated fixtures without modifying the user's Heavy drill loan.
+
+7. **Item manuals and grounded product help:** build on existing Manual document
+   type and item attachments rather than a parallel library. Deliver in stages:
+   - Make Add manual/upload and existing-manual attachment easy to discover from
+     item details. Permit manual upload even without make/model. Allow one manual
+     to serve several compatible items, retaining authenticated access and source
+     provenance. Preserve originals and current document safety/size limits.
+   - Add Ask about this item, using permitted attached manuals first. Retrieve
+     relevant passages and cite document/page (or clearly identified section when
+     page mapping is unavailable); do not fabricate page numbers. Distinguish
+     manual facts from general explanation and admit missing evidence. Require
+     a configured/consented suitable model; ordinary document access works without
+     AI. Treat manual text as untrusted data, never tool or system instructions.
+   - Offer explicit Find manual using online search only when BOTH manufacturer
+     and complete model identifier are recorded. Generic item names or inferred
+     guesses are insufficient. Enforce this gate server-side for automated online
+     search AND download, and explain missing fields in the UI. Confirm regional,
+     hardware or revision variants where compatibility remains ambiguous. An LLM
+     may identify/rank candidates, but exact compatibility needs source evidence.
+   - Prefer official manufacturer sources, show model coverage, language and
+     source link, and require review before downloading/saving a proposed manual.
+     Keep source URL/retrieval date and duplicate detection; no silent background
+     downloading, bulk crawler or manual-site account/paywall bypass. Verify
+     response type, size, file safety and compatibility; protect download workers
+     from SSRF, redirects to private networks and unbounded retrieval. Respect
+     current household roles and document access/retention behavior.
+   - Optionally research item-specific questions online only with complete make
+     and model, explicit user action and configured search/tool capability. A chat
+     model is not assumed to have live browsing. Prefer manufacturer information,
+     cite sources and clearly distinguish web evidence from the attached manual.
+     Send only required product identifiers/question, not borrower or household
+     data. Honor provider consent and configured limits; no autonomous tool loops
+     driven by untrusted retrieved content. If model/revision is uncertain, ask;
+     do not supply model-specific operating instructions from a similar product.
+   Preserve visual style and integrate compactly into item details/Assistant, not
+   a new top-level product section. Verify missing-make/model gates, mismatched
+   variants, unknown sources, citations, download safety, consent, permissions and
+   duplicate/manual reuse on isolated fixtures. No real online/paid calls in tests.
+8. **Inventory evidence package:** export selected items, boxes, rooms or the
    current home as a presentable itemised PDF, with an optional spreadsheet and
    bundle of original supporting attachments. Include recorded quantities,
    location paths, photos, serial/model identifiers, purchase details, receipts
@@ -1045,16 +1185,16 @@ instruction.
    and moving; do not claim insurer acceptance, coverage or professional appraisal.
    Reuse existing export infrastructure and avoid adding an insurance-management
    section or mandatory purchase data entry.
-8. **Stocktake / last verified here:** allow checking a room or box against its
+9. **Stocktake / last verified here:** allow checking a room or box against its
    recorded contents, explicitly marking present, missing, moved or quantity
    discrepancies. Record who verified what and when; distinguish a verification
    from an edit. Do not mark unchecked contents as present or overwrite quantities
    automatically. Preserve an interrupted stocktake for later completion.
-9. **Multiple properties in one household:** property → room → storage/box → item;
+10. **Multiple properties in one household:** property → room → storage/box → item;
    migrate existing inventory into an initial property without breaking IDs,
    attachments or QR links. Add property context/filters and clear location paths.
    Initially retain household-level permissions across all its properties.
-10. **Multiple households:** creation, switching, household-specific invitations,
+11. **Multiple households:** creation, switching, household-specific invitations,
    membership roles, settings and verified isolation in jobs, AI and documents.
    Search and assistant must support “All my places” across households/properties
    the account can access, with explicit filters and labelled result locations;

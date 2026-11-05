@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
@@ -25,6 +25,8 @@ const itemBase = {
   tags: [],
   primary_photo: null,
   purchase: null,
+  purchase_info_status: "unrecorded",
+  purchase_info_missing_fields: [],
   warranty: null,
   current_value_cents: null,
   current_value_currency: "USD",
@@ -136,15 +138,23 @@ const categoryResult: BulkCategoryResult = {
   updated_item_ids: ["item-1"],
 };
 
-function renderPage() {
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+  );
+}
+
+function renderPage(initialEntry = "/items") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/items"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <AddItemsProvider>
           <ItemsPage />
+          <LocationProbe />
         </AddItemsProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -235,5 +245,25 @@ describe("ItemsPage bulk organisation", () => {
     await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalledTimes(3));
     [, payload] = vi.mocked(api.post).mock.calls[2] as [string, Record<string, unknown>];
     expect(payload).toMatchObject({ mode: "clear", category_id: null });
+  });
+
+
+  it("shows active filter chips and clears bulk selection when a filter changes", async () => {
+    renderPage("/items?purchase_info=missing&room_id=room-1");
+    await screen.findByText("Camera");
+    expect(screen.getByText("Purchase: Missing or unknown")).toBeVisible();
+    expect(screen.getByText("Room: Office")).toBeVisible();
+    await userEvent.click(screen.getByLabelText("Select Camera"));
+    expect(screen.getByText(/1 item selected · 2 units/)).toBeVisible();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Purchase: Missing or unknown" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Purchase: Missing or unknown"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Selection cleared because the view changed.")).toBeVisible();
+    expect(screen.getByTestId("location")).not.toHaveTextContent("purchase_info=");
   });
 });

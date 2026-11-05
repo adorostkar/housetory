@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -64,6 +65,7 @@ class ItemCreate(BaseModel):
     tag_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
     purchase_id: uuid.UUID | None = None
     purchase: PurchaseIn | None = None
+    purchase_info_status: Literal["auto", "unknown", "not_applicable"] = "auto"
     warranty: WarrantyIn | None = None
     current_value_cents: int | None = Field(default=None, ge=0, le=10**12)
     current_value_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
@@ -89,6 +91,7 @@ class ItemUpdate(BaseModel):
     tag_ids: list[uuid.UUID] | None = Field(default=None, max_length=30)
     purchase_id: uuid.UUID | None = None
     purchase: PurchaseIn | None = None
+    purchase_info_status: Literal["auto", "unknown", "not_applicable"] | None = None
     warranty: WarrantyIn | None = None
     current_value_cents: int | None = Field(default=None, ge=0, le=10**12)
     current_value_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
@@ -118,6 +121,10 @@ class ItemSummary(ORMModel):
     tags: list[TagBrief]
     primary_photo: PhotoOut | None
     purchase: PurchaseOut | None
+    purchase_info_status: Literal["recorded", "unrecorded", "unknown", "not_applicable"] = (
+        "unrecorded"
+    )
+    purchase_info_missing_fields: list[Literal["date", "price"]] = Field(default_factory=list)
     warranty: WarrantyOut | None
     current_value_cents: int | None
     current_value_currency: str

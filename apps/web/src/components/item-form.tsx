@@ -41,7 +41,9 @@ import {
   flattenLocations,
   flattenRoomTree,
   LOCATION_KIND_LABELS,
+  locationLabel,
   locationPath,
+  roomPath,
 } from "@/lib/utils";
 const CONDITIONS: ItemCondition[] = ["new", "excellent", "good", "fair", "poor", "unknown"];
 
@@ -114,6 +116,15 @@ export function ItemForm({
   const [receiptDocumentId, setReceiptDocumentId] = React.useState(
     item?.purchase?.receipt_document_id ?? "",
   );
+  const initialPurchaseInfoStatus: "auto" | "unknown" | "not_applicable" =
+    item?.purchase_info_status === "not_applicable"
+      ? "not_applicable"
+      : item?.purchase_info_status === "unknown"
+        ? "unknown"
+        : "auto";
+  const [purchaseInfoStatus, setPurchaseInfoStatus] = React.useState<
+    "auto" | "unknown" | "not_applicable"
+  >(initialPurchaseInfoStatus);
   const [currentValue, setCurrentValue] = React.useState(
     item?.current_value_cents != null
       ? (item.current_value_cents / 100).toFixed(2)
@@ -254,6 +265,9 @@ export function ItemForm({
             receipt_document_id: receiptDocumentId || null,
           }
         : null,
+      ...(!item || purchaseInfoStatus !== initialPurchaseInfoStatus
+        ? { purchase_info_status: purchaseInfoStatus }
+        : {}),
       warranty: hasWarranty
         ? {
             provider: warrantyProvider.trim() || null,
@@ -393,6 +407,30 @@ export function ItemForm({
                   the amount or merchant here updates the single shared record.
                 </div>
               )}
+              <Field
+                label="Purchase information status"
+                htmlFor="purchase-info-status"
+                hint="Choose Unknown while details are unresolved. Not applicable removes this item from missing-purchase tasks without deleting any recorded details or amounts."
+              >
+                <Select
+                  id="purchase-info-status"
+                  value={purchaseInfoStatus}
+                  onChange={(event) =>
+                    setPurchaseInfoStatus(
+                      event.target.value as
+                        | "auto"
+                        | "unknown"
+                        | "not_applicable",
+                    )
+                  }
+                >
+                  <option value="auto">Use the purchase details above</option>
+                  <option value="unknown">Unknown — still unresolved</option>
+                  <option value="not_applicable">
+                    Not applicable — no purchase tracking needed
+                  </option>
+                </Select>
+              </Field>
               {priceInvalid && (
                 <FormError message="Enter a valid price, such as 129.00." />
               )}
@@ -633,10 +671,11 @@ export function ItemForm({
                   }}
                 >
                   <option value="">No room yet</option>
-                  {roomOptions.map(({ room, depth }) => (
+                  {roomOptions.map(({ room }) => (
                     <option key={room.id} value={room.id}>
-                      {depth > 0 ? `${"— ".repeat(depth)}` : ""}
-                      {room.name}
+                      {roomPath(roomsQuery.data?.items ?? [], room.id)
+                        .map((entry) => entry.name)
+                        .join(" / ")}
                     </option>
                   ))}
                 </Select>
@@ -667,7 +706,7 @@ export function ItemForm({
                 {selectedLocationPath.length > 1 && (
                   <p className="mt-2 text-[0.7rem] leading-relaxed text-muted-foreground">
                     {selectedLocationPath
-                      .map((location) => location.identifier ?? location.name)
+                      .map((location) => locationLabel(location))
                       .join(" / ")}
                   </p>
                 )}

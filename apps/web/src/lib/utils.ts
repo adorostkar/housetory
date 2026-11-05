@@ -270,6 +270,15 @@ export function addMonthsIso(start: string, months: number): string | null {
 }
 
 
+export function locationLabel(location: {
+  identifier?: string | null;
+  name: string;
+}): string {
+  return location.identifier && location.identifier !== location.name
+    ? `${location.identifier} · ${location.name}`
+    : location.identifier || location.name;
+}
+
 export function itemContainer(item: {
   location: LocationBrief | null;
   location_path?: LocationBrief[];

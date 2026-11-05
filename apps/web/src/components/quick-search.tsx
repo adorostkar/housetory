@@ -6,6 +6,7 @@ import {
   MapPin,
   Package,
   Search,
+  Sparkles,
   X,
 } from "lucide-react";
 import * as React from "react";
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useQuickSearch } from "@/lib/queries";
+import { looksLikeQuestion } from "@/lib/search";
 import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +40,16 @@ function resultLabel(kind: QuickSearchKind) {
 }
 
 function contextLine(result: QuickSearchResult) {
-  return [result.subtitle, result.context].filter(Boolean).join(" · ");
+  const base = [result.subtitle, result.context].filter(Boolean).join(" · ");
+  if (!result.loan) return base;
+  const borrower = result.loan.borrower_names.length
+    ? result.loan.borrower_names.slice(0, 2).join(", ")
+    : "unnamed borrower";
+  const due = result.loan.next_due_on
+    ? `recorded due ${result.loan.next_due_on}`
+    : "no due date recorded";
+  const loan = `On loan to ${borrower} · ${result.loan.on_loan_quantity} · ${due}`;
+  return [loan, base].filter(Boolean).join(" · ");
 }
 
 export function QuickSearch({
@@ -59,6 +70,7 @@ export function QuickSearch({
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
   const debounced = useDebouncedValue(query, 220);
   const term = query.trim();
+  const questionLike = looksLikeQuestion(term);
   const debouncedTerm = debounced.trim();
   const waiting = term.length >= 2 && term !== debouncedTerm;
   const search = useQuickSearch(debouncedTerm, 4, focused);
@@ -155,7 +167,14 @@ export function QuickSearch({
   const goToAllResults = () => {
     if (!term) return;
     setFocused(false);
-    navigate(`/search?q=${encodeURIComponent(term)}`);
+    const ask = questionLike ? "&ask=1" : "";
+    navigate(`/search?q=${encodeURIComponent(term)}${ask}`);
+  };
+
+  const askAssistant = () => {
+    if (!term) return;
+    setFocused(false);
+    navigate(`/assistant?q=${encodeURIComponent(term)}`);
   };
 
   const choose = (result: QuickSearchResult) => {
@@ -203,7 +222,7 @@ export function QuickSearch({
           >
             {term.length < 2 ? (
               <p className="px-4 py-3 text-[0.75rem] text-muted-foreground" role="status">
-                Keep typing to search items, boxes and places.
+                Keep typing to search items, boxes and places — or ask a question.
               </p>
             ) : error ? (
               <div className="flex items-start gap-2.5 px-4 py-4 text-[0.78rem]" role="alert">
@@ -235,12 +254,20 @@ export function QuickSearch({
               </div>
             ) : results.length === 0 ? (
               <div
-                className="flex items-center gap-2 px-4 py-4 text-[0.78rem] text-muted-foreground"
+                className="space-y-3 px-4 py-4 text-[0.78rem] text-muted-foreground"
                 role="status"
                 aria-live="polite"
               >
-                <Search className="size-4" />
-                No matches for “{term}”.
+                <p className="flex items-center gap-2">
+                  <Search className="size-4" />
+                  No quick matches for “{term}”.
+                </p>
+                {questionLike && (
+                  <Button size="sm" onClick={askAssistant}>
+                    <Sparkles />
+                    Ask Housetory about this
+                  </Button>
+                )}
               </div>
             ) : (
               <>
@@ -297,19 +324,35 @@ export function QuickSearch({
                     </section>
                   ))}
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
                   <span className="text-[0.65rem] text-muted-foreground">
                     {results.length} quick match{results.length === 1 ? "" : "es"}
+                    {questionLike ? " · question detected" : ""}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[0.68rem]"
-                    onClick={goToAllResults}
-                  >
-                    View all results <ArrowRight className="size-3" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    {questionLike && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-[0.68rem]"
+                        onClick={askAssistant}
+                      >
+                        <Sparkles className="size-3" />
+                        Ask Housetory
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[0.68rem]"
+                      onClick={goToAllResults}
+                    >
+                      {questionLike ? "Answer & results" : "View all results"}{" "}
+                      <ArrowRight className="size-3" />
+                    </Button>
+                  </div>
                 </div>
               </>
             )}
@@ -324,12 +367,13 @@ export function QuickSearch({
       <input
         ref={inputRef}
         type="search"
+        data-quick-search-input="true"
         value={query}
-        maxLength={120}
+        maxLength={200}
         autoComplete="off"
         spellCheck={false}
-        placeholder="Search your home"
-        aria-label="Search your home"
+        placeholder="Search or ask about your inventory…"
+        aria-label="Search or ask about your inventory"
         role="combobox"
         aria-expanded={showPanel}
         aria-controls={

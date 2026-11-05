@@ -265,6 +265,10 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "char_length(current_value_currency) = 3",
             name="current_value_currency_length",
         ),
+        CheckConstraint(
+            "purchase_info_status IS NULL OR purchase_info_status IN ('unknown', 'not_applicable')",
+            name="valid_purchase_info_status",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -296,6 +300,7 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_value_currency: Mapped[str] = mapped_column(
         String(3), nullable=False, server_default="USD"
     )
+    purchase_info_status: Mapped[str | None] = mapped_column(String(20))
 
     household: Mapped["Household"] = relationship(back_populates="items")
     room: Mapped[Room | None] = relationship(back_populates="items")

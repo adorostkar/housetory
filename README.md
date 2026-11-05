@@ -126,6 +126,15 @@ Tailscale is optional.
   a receipt does not increase stock unless explicitly requested, and manuals are not
   treated as proof of purchase. See
   [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md).
+- **Unified search and grounded assistant**: one sidebar/mobile input labelled
+  “Search or ask about your inventory…”. Typing shows ordinary item/box/place
+  matches without AI; Enter submits the full query. Questions such as “where is
+  my heavy drill?” resolve current loan records first and distinguish owned,
+  on-loan and at-home quantities, borrower, recorded due date and usual home
+  location. Structured questions use validated household-scoped database queries;
+  open-ended questions can continue on the Assistant page. Reviewed search and
+  assistant answers are read-only and never invent inventory facts. See
+  [`docs/SINGLE_HOME_POLISH.md`](docs/SINGLE_HOME_POLISH.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
   then review structured item groups. Repeated mentions such as “ethernet cable,
@@ -161,7 +170,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 262 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 267 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -182,10 +191,13 @@ stack, not just unit mocks:
   preservation, the unchanged actual Inventory.md upload/paste path, semantic
   AI-edit validation
   (ages, dimensions, model tokens, similar names and truncated identifiers),
+  unified keyword/question search, exact loan whereabouts and quantities,
+  purchase-information status/filter parity, ambiguous-item handling and
+  view-scoped assistant access,
   endpoint classification/redirect safety, hierarchical imports and exhaustive
   cross-household access checks.
-- 94 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 24 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 109 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 26 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -195,8 +207,10 @@ stack, not just unit mocks:
   save, page-original access and cancel, OCR-to-line-item review with exact
   household matching, optional AI-refined fields/lines, reviewed apply and persisted
   purchase allocations, the actual Inventory.md hierarchy,
-  duplicate prevention, PWA/service-worker/deep-link routing, quick search and the
-  unified Add items chooser with contextual destinations.
+  duplicate prevention, PWA/service-worker/deep-link routing, quick search, the
+  exact loaned Heavy drill question, mobile keyword search with no inference,
+  missing-purchase filter parity, assistant conversation handoff and the unified
+  Add items chooser with contextual destinations.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -253,8 +267,12 @@ Image-page scanning accepts up to 20 pages; existing PDFs are attached unchanged
 and are not recombined in the scan editor. Per-item product allocations persist
 under one shared purchase total; tax, discount and shipping amounts remain separate
 and unallocated by design, and there is no barcode field. Legacy purchases without
-allocation rows do not receive fabricated historical splits. Live paid-provider
-extraction/matching was not tested. See
+allocation rows do not receive fabricated historical splits. Purchase information
+can be explicitly Unknown or Not applicable; missing-information counts exclude
+items marked Not applicable and use the same rule across overview, search,
+assistant and filters. Search and assistant are single-household and use fixed,
+validated database queries rather than generated SQL. Live paid-provider
+extraction, search and assistant quality was not tested. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
 from remaining work and states the OCR, AI and multi-currency limitations
 honestly.

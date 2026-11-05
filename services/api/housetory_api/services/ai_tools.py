@@ -9,11 +9,12 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from ..domain import WarrantyStatus
+from ..domain import PurchaseInfoFilter, WarrantyStatus
 from ..models import (
     Category,
     Document,
     Item,
+    Loan,
     Purchase,
     Room,
     StorageLocation,
@@ -24,6 +25,11 @@ from ..schemas.ai import AssistantReference, NaturalSearchFilters
 from ..schemas.items import ItemSummary
 from ..services.hierarchy import descendant_ids
 from ..services.ownership import financial_overview
+from ..services.purchase_info import (
+    missing_purchase_info_clause,
+    purchase_info_filter_clause,
+)
+from ..services.query_text import clean_subject, search_term_variants
 from ..services.serializers import (
     item_detail,
     item_load_options,
@@ -79,6 +85,14 @@ def _summaries_with_paths(
     return summaries
 
 
+def _location_display(location: Any) -> str:
+    identifier = getattr(location, "identifier", None)
+    name = getattr(location, "name", "")
+    if identifier and identifier != name:
+        return f"{identifier} · {name}"
+    return identifier or name
+
+
 def _item_reference(item: ItemSummary | Item) -> AssistantReference:
     return AssistantReference(
         type="item",
@@ -93,6 +107,20 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
         ),
         url=f"/items/{item.id}",
     )
+
+
+def _home_path(db: Session, household_id: uuid.UUID, item: Item) -> str:
+    parts = (
+        [room.name for room in room_ancestors(db, household_id, item.room_id)]
+        if item.room_id
+        else []
+    )
+    if item.storage_location_id:
+        parts.extend(
+            _location_display(location)
+            for location in location_ancestors(db, household_id, item.storage_location_id)
+        )
+    return " / ".join(parts) if parts else "no room or storage place recorded"
 
 
 def _resolve_room(
@@ -273,18 +301,14 @@ def search_inventory(
                 ),
             )
         )
+    if filters.purchase_info_status:
+        conditions.append(purchase_info_filter_clause(filters.purchase_info_status))
     if filters.missing_purchase:
-        conditions.append(
-            or_(
-                Item.purchase_id.is_(None),
-                Item.purchase.has(
-                    and_(
-                        Purchase.purchase_date.is_(None),
-                        Purchase.price_cents.is_(None),
-                    )
-                ),
-            )
-        )
+        conditions.append(missing_purchase_info_clause())
+    if filters.missing_purchase_date:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.MISSING_DATE))
+    if filters.missing_purchase_price:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.MISSING_PRICE))
     if filters.missing_serial:
         conditions.append(or_(Item.serial_number.is_(None), Item.serial_number == ""))
     if filters.purchased_after or filters.purchased_before:
@@ -360,6 +384,9 @@ def tool_search_items(
         category_name=str(args.get("category_name") or "").strip() or None,
         tag=str(args.get("tag") or "").strip() or None,
         missing_purchase=bool(args.get("missing_purchase")),
+        missing_purchase_date=bool(args.get("missing_purchase_date")),
+        missing_purchase_price=bool(args.get("missing_purchase_price")),
+        purchase_info_status=args.get("purchase_info_status"),
         missing_serial=bool(args.get("missing_serial")),
         warranty_status=args.get("warranty_status"),
         purchased_after=args.get("purchased_after"),
@@ -374,19 +401,29 @@ def tool_search_items(
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days
     )
+    quantity_total = sum(item.quantity for item in summaries)
     if not summaries:
         summary = "No matching inventory items were found."
     elif len(summaries) == 1:
         item = summaries[0]
+        place = item.room.name if item.room else "no room recorded"
+        if item.location:
+            place += f" / {_location_display(item.location)}"
         summary = (
-            f"Found 1 item: {item.name}. "
-            f"Location: {item.room.name if item.room else 'unassigned'}"
-            f"{', ' + (item.location.identifier or item.location.name) if item.location else ''}. "
-            f"Purchase price: {item.purchase.price_cents if item.purchase else 'not recorded'}."
+            f"Found 1 item: {item.name} "
+            f"({item.quantity} {'unit' if item.quantity == 1 else 'units'}). "
+            f"Location: {place}. "
+            f"Purchase information: {item.purchase_info_status.replace('_', ' ')}."
         )
+        if item.on_loan_quantity:
+            summary += (
+                f" {item.on_loan_quantity} of {item.quantity} "
+                f"{'is' if item.on_loan_quantity == 1 else 'are'} currently on loan."
+            )
     else:
         summary = (
-            f"Found {total} matching items. The first {min(total, len(summaries))} are listed."
+            f"Found {total} matching items with {quantity_total} units recorded. "
+            f"The first {min(total, len(summaries))} are listed."
         )
     references = [_item_reference(item) for item in summaries]
     return ToolResult(
@@ -395,7 +432,11 @@ def tool_search_items(
         filters=filters.model_dump(mode="json", exclude_none=True),
         items=summaries,
         references=references,
-        facts={"total": total},
+        facts={
+            "total": total,
+            "quantity_total": quantity_total,
+            "on_loan_quantity": sum(item.on_loan_quantity for item in summaries),
+        },
     )
 
 
@@ -823,8 +864,28 @@ def tool_get_inventory_summary(
     warranties = build_dashboard(
         load_warranties(db, household_id), household_reminder_days, limit=5
     )
+    total_quantity = int(
+        db.scalar(
+            select(func.coalesce(func.sum(Item.quantity), 0)).where(
+                Item.household_id == household_id,
+                Item.is_archived.is_(False),
+            )
+        )
+        or 0
+    )
+    on_loan = int(
+        db.scalar(
+            select(func.coalesce(func.sum(Loan.quantity - Loan.returned_quantity), 0)).where(
+                Loan.household_id == household_id,
+                Loan.status.in_({"outstanding", "partially_returned"}),
+            )
+        )
+        or 0
+    )
     facts = {
         "item_count": financial.item_count,
+        "total_quantity": total_quantity,
+        "on_loan_quantity": on_loan,
         "currency_totals": [entry.model_dump(mode="json") for entry in financial.currency_totals],
         "items_missing_purchase_count": financial.items_missing_purchase_count,
         "warranties": {
@@ -834,8 +895,10 @@ def tool_get_inventory_summary(
         },
     }
     summary = (
-        f"There are {financial.item_count} active items. "
-        f"{financial.items_missing_purchase_count} items are missing purchase information. "
+        f"There are {financial.item_count} active item records with {total_quantity} units. "
+        f"{on_loan} units are currently on loan. "
+        f"{financial.items_missing_purchase_count} items have missing or unresolved "
+        f"purchase information. "
         f"Warranties: {warranties.active_count} active, {warranties.expiring_count} expiring soon, "
         f"{warranties.expired_count} expired."
     )
@@ -929,19 +992,30 @@ def tool_find_missing_information(
 ) -> ToolResult:
     field = str(args.get("field") or "purchase")
     conditions = [Item.household_id == household_id, Item.is_archived.is_(False)]
+    criterion = None
     if field in {"purchase", "purchase_info"}:
-        conditions.append(
-            or_(
-                Item.purchase_id.is_(None),
-                Item.purchase.has(
-                    and_(
-                        Purchase.purchase_date.is_(None),
-                        Purchase.price_cents.is_(None),
-                    )
-                ),
-            )
+        conditions.append(missing_purchase_info_clause())
+        label = (
+            "with missing or unresolved purchase information "
+            "(items marked not applicable are excluded)"
         )
-        label = "missing purchase information"
+        criterion = "missing_purchase"
+    elif field in {"purchase_date", "missing_purchase_date"}:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.MISSING_DATE))
+        label = "with a recorded purchase but no purchase date"
+        criterion = "missing_purchase_date"
+    elif field in {"purchase_price", "missing_purchase_price"}:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.MISSING_PRICE))
+        label = "with a recorded purchase but no purchase price"
+        criterion = "missing_purchase_price"
+    elif field in {"purchase_unknown", "unknown_purchase"}:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.UNKNOWN))
+        label = "explicitly marked purchase information unknown"
+        criterion = "purchase_unknown"
+    elif field in {"purchase_not_applicable", "not_applicable_purchase"}:
+        conditions.append(purchase_info_filter_clause(PurchaseInfoFilter.NOT_APPLICABLE))
+        label = "marked purchase information not applicable"
+        criterion = "purchase_not_applicable"
     elif field in {"serial", "serial_number"}:
         conditions.append(or_(Item.serial_number.is_(None), Item.serial_number == ""))
         label = "missing serial numbers"
@@ -972,7 +1046,274 @@ def tool_find_missing_information(
         items=summaries,
         filters={"field": field},
         references=[_item_reference(item) for item in summaries],
-        facts={"total": len(summaries), "field": field},
+        facts={
+            "total": len(summaries),
+            "field": field,
+            "criterion": criterion,
+        },
+    )
+
+
+def _locate_candidates(db: Session, household_id: uuid.UUID, subject: str) -> list[Item]:
+    cleaned = clean_subject(subject) or subject.strip()
+    if not cleaned:
+        return []
+    exact = list(
+        db.scalars(
+            select(Item)
+            .options(*item_load_options())
+            .where(
+                Item.household_id == household_id,
+                Item.is_archived.is_(False),
+                func.lower(Item.name) == cleaned.lower(),
+            )
+            .limit(12)
+        ).all()
+    )
+    if exact:
+        return exact
+    tokens: list[str] = []
+    for variant in search_term_variants(cleaned):
+        for token in re.findall(r"[a-z0-9]+", variant.lower()):
+            if len(token) < 2 or token in {
+                "my",
+                "our",
+                "the",
+                "a",
+                "an",
+                "is",
+                "are",
+                "where",
+                "what",
+                "which",
+                "of",
+                "in",
+                "on",
+                "for",
+                "to",
+                "item",
+                "items",
+            }:
+                continue
+            if token not in tokens:
+                tokens.append(token)
+    if not tokens:
+        return []
+    token_conditions = [
+        or_(
+            Item.name.ilike(f"%{token}%"),
+            Item.brand.ilike(f"%{token}%"),
+            Item.model.ilike(f"%{token}%"),
+        )
+        for token in tokens
+    ]
+    return list(
+        db.scalars(
+            select(Item)
+            .options(*item_load_options())
+            .where(
+                Item.household_id == household_id,
+                Item.is_archived.is_(False),
+                and_(*token_conditions),
+            )
+            .order_by(func.lower(Item.name))
+            .limit(12)
+        ).all()
+    )
+
+
+def tool_locate_item(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    query = str(args.get("q") or args.get("item_name") or "").strip()
+    item_id = args.get("item_id")
+    if item_id:
+        item = get_item(db, household_id, uuid.UUID(str(item_id)))
+        candidates = [item]
+    else:
+        candidates = _locate_candidates(db, household_id, query)
+    if not candidates:
+        return ToolResult(
+            tool="locate_item",
+            summary=(
+                f"I couldn't find an item matching “{query or 'that description'}” "
+                "in this household."
+                if query
+                else "Tell me the item name to look up its recorded whereabouts."
+            ),
+            filters={"q": query} if query else {},
+            facts={"total": 0, "ambiguous": False, "whereabouts": None},
+        )
+    candidates = sorted(candidates, key=lambda item: item.name.lower())
+    summaries = _summaries_with_paths(
+        db, household_id, candidates, household_reminder_days=household_reminder_days
+    )
+    if len(candidates) > 1:
+        names = ", ".join(item.name for item in summaries[:6])
+        summary = (
+            f"I found {len(candidates)} possible items matching “{query}”: {names}. "
+            "Tell me which one you mean; I won't guess between similar names."
+        )
+        return ToolResult(
+            tool="locate_item",
+            summary=summary,
+            filters={"q": query},
+            items=summaries,
+            references=[_item_reference(item) for item in summaries],
+            notices=["Similar item names are ambiguous. No single item was assumed."],
+            facts={
+                "total": len(candidates),
+                "ambiguous": True,
+                "whereabouts": None,
+            },
+        )
+
+    item = candidates[0]
+    loan_summary = item_loan_summary(db, household_id, item.id)
+    home = _home_path(db, household_id, item)
+    owned = loan_summary.owned_quantity
+    on_loan = loan_summary.on_loan_quantity
+    at_home = loan_summary.available_quantity
+    open_loans = [loan for loan in loan_summary.loans if loan.outstanding_quantity > 0]
+    loan_facts = [
+        {
+            "loan_id": str(loan.id),
+            "borrower_name": loan.borrower_name,
+            "outstanding_quantity": loan.outstanding_quantity,
+            "due_on": loan.due_on.isoformat() if loan.due_on else None,
+            "overdue": loan.overdue,
+        }
+        for loan in open_loans
+    ]
+    parts: list[str] = []
+    if on_loan > 0:
+        if at_home > 0:
+            parts.append(
+                f"{at_home} of {owned} {item.name} "
+                f"{'is' if at_home == 1 else 'are'} at home in {home}."
+            )
+        else:
+            parts.append(
+                f"{item.name} is fully on loan: {on_loan} of {owned} "
+                f"{'unit is' if on_loan == 1 else 'units are'} out."
+            )
+        descriptors = []
+        for loan in open_loans[:4]:
+            descriptor = (
+                f"{loan.outstanding_quantity} with {loan.borrower_name}"
+                if loan.borrower_name
+                else f"{loan.outstanding_quantity} with an unnamed borrower"
+            )
+            if loan.due_on is not None:
+                descriptor += f", recorded due {loan.due_on.isoformat()}"
+            else:
+                descriptor += ", no due date recorded"
+            descriptors.append(descriptor)
+        if descriptors:
+            parts.append("On loan: " + "; ".join(descriptors) + ".")
+        if at_home == 0:
+            parts.append(f"The usual home is {home}, but the loaned units are not recorded there.")
+        else:
+            parts.append(
+                f"The at-home units are recorded at {home}; loaned units are not recorded there."
+            )
+        parts.append("A due date is a recorded fact, not a guarantee of return.")
+    else:
+        parts.append(f"{item.name} is at home in {home}. No open loan is recorded.")
+    summary = " ".join(parts)
+    references = [_item_reference(item)]
+    references.extend(
+        AssistantReference(
+            type="loan",
+            id=loan.id,
+            title=f"{item.name} loan to {loan.borrower_name}",
+            subtitle=(
+                f"{loan.outstanding_quantity} on loan"
+                + (f" · due {loan.due_on.isoformat()}" if loan.due_on else "")
+            ),
+            url=f"/loans/{loan.id}",
+        )
+        for loan in open_loans
+    )
+    return ToolResult(
+        tool="locate_item",
+        summary=summary,
+        filters={"q": query} if query else {},
+        items=summaries,
+        references=references,
+        facts={
+            "total": 1,
+            "ambiguous": False,
+            "whereabouts": {
+                "item_id": str(item.id),
+                "item_name": item.name,
+                "owned_quantity": owned,
+                "on_loan_quantity": on_loan,
+                "at_home_quantity": at_home,
+                "home_path": home,
+                "loans": loan_facts,
+            },
+        },
+    )
+
+
+def tool_count_items(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    subject = clean_subject(str(args.get("q") or args.get("item_name") or ""))
+    if not subject:
+        return tool_get_inventory_summary(
+            db, household_id, args, household_reminder_days=household_reminder_days
+        )
+    filters = NaturalSearchFilters(q=subject, sort="name_asc")
+    items, total = search_inventory(
+        db,
+        household_id,
+        filters,
+        household_reminder_days=household_reminder_days,
+        limit=50,
+    )
+    summaries = _summaries_with_paths(
+        db, household_id, items, household_reminder_days=household_reminder_days
+    )
+    quantity_total = sum(item.quantity for item in summaries)
+    on_loan = sum(item.on_loan_quantity for item in summaries)
+    if total == 0:
+        summary = f"No items matching “{subject}” were found in this household."
+    elif total == 1:
+        item = summaries[0]
+        summary = (
+            f"You have {item.quantity} "
+            f"{'unit' if item.quantity == 1 else 'units'} of {item.name} recorded."
+        )
+        if item.on_loan_quantity:
+            summary += f" {item.on_loan_quantity} are currently on loan."
+    else:
+        summary = (
+            f"You have {quantity_total} units across {total} matching item records for “{subject}”."
+        )
+        if on_loan:
+            summary += f" {on_loan} units are currently on loan."
+    return ToolResult(
+        tool="count_items",
+        summary=summary,
+        filters=filters.model_dump(mode="json", exclude_none=True),
+        items=summaries,
+        references=[_item_reference(item) for item in summaries],
+        facts={
+            "total": total,
+            "quantity_total": quantity_total,
+            "on_loan_quantity": on_loan,
+            "subject": subject,
+        },
     )
 
 
@@ -1016,6 +1357,12 @@ def execute_tool(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "list_outstanding_loans": lambda: tool_list_outstanding_loans(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "locate_item": lambda: tool_locate_item(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "count_items": lambda: tool_count_items(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
     }

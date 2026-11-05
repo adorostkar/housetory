@@ -90,12 +90,14 @@ export function DocumentsPage() {
         description="Receipts, invoices, warranties, manuals and specifications — searchable and linked to the things they belong to."
         actions={
           <>
-            <Button variant="outline" asChild>
-              <a href="/api/v1/exports/documents.csv">
-                <Download />
-                Export
-              </a>
-            </Button>
+            {documentsQuery.data && documentsQuery.data.total > 0 && (
+              <Button variant="outline" asChild>
+                <a href="/api/v1/exports/documents.csv">
+                  <Download />
+                  Export
+                </a>
+              </Button>
+            )}
             {canWrite && (
               <>
                 <Button variant="outline" onClick={() => setScanOpen(true)}>

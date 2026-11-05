@@ -7,9 +7,12 @@ from datetime import date, timedelta
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..api.errors import ApiError
 from ..domain import AiTask
+from ..models import StorageLocation
 from ..schemas.ai import (
     AiSearchPlan,
     AssistantPlan,
@@ -19,9 +22,9 @@ from ..schemas.ai import (
     NaturalSearchResponse,
 )
 from . import ai
-from .ai_tools import ToolResult, execute_tool, search_inventory
+from .ai_tools import ToolResult, _summaries_with_paths, execute_tool, search_inventory
 from .import_matching import build_index
-from .serializers import item_summary
+from .query_text import clean_subject
 
 AI_PLAN_SYSTEM = """Choose one read-only inventory tool for the user's question.
 Return JSON: {"tool":"...","arguments":{...},"rationale":"..."}.
@@ -38,9 +41,13 @@ Allowed tools and arguments:
 - get_purchase_history: merchant, item_id, date_from, date_to
 - get_warranty_status: status(active|expiring|expired), category
 - get_inventory_summary: {}
-- find_missing_information: field(purchase|serial|room|location|warranty)
+- find_missing_information: field(purchase|purchase_date|purchase_price|serial|room|
+  location|warranty)
 - list_outstanding_loans: {}
-Never invent an item id. Never make up filters. Use search_items for unknown questions."""
+- locate_item: q (item name or description)
+- count_items: q (item name or description)
+Never invent an item id. Never make up filters. Use search_items for unknown questions.
+For whereabouts or loan status questions use locate_item. For counted ownership use count_items."""
 
 MISSING_PURCHASE_PHRASES = (
     "no purchase",
@@ -58,21 +65,7 @@ MISSING_SERIAL_PHRASES = (
 
 
 def _clean_subject(text: str) -> str:
-    cleaned = re.sub(
-        r"^(?:where\s+(?:is|are)|what\s+is|what's|show\s+me|find|list|tell\s+me\s+about|"
-        r"how\s+many|do\s+i\s+own|do\s+i\s+have|which\s+items?|what\s+items?)\s+",
-        "",
-        text.strip(),
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(
-        r"\s+(?:do\s+i\s+own|do\s+i\s+have|are\s+there|have\s+i\s+got)\s*[?.!]*$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(r"^(?:my|our|the|a|an)\s+", "", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip(" ?.!,")
+    return clean_subject(text)
 
 
 def _contains_phrase(question: str, phrases: tuple[str, ...]) -> bool:
@@ -134,7 +127,34 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
         r"outstanding loans?|overdue loans?)\b",
         lowered,
     ):
+        loan_subject = _clean_subject(question)
+        if loan_subject and loan_subject.lower() not in {
+            "items",
+            "item",
+            "everything",
+            "inventory",
+            "loans",
+        }:
+            return AssistantPlan(tool="locate_item", arguments={"q": loan_subject})
         return AssistantPlan(tool="list_outstanding_loans", arguments={})
+    if re.search(
+        r"\b(?:no|missing|without)\s+(?:purchase\s+)?(?:date|purchase date)\b",
+        lowered,
+    ):
+        return AssistantPlan(tool="find_missing_information", arguments={"field": "purchase_date"})
+    if re.search(
+        r"\b(?:no|missing|without)\s+(?:purchase\s+)?(?:price|cost|amount)\b",
+        lowered,
+    ):
+        return AssistantPlan(tool="find_missing_information", arguments={"field": "purchase_price"})
+    if re.search(r"\b(?:not applicable|n/a)\b", lowered) and "purchase" in lowered:
+        return AssistantPlan(
+            tool="find_missing_information", arguments={"field": "purchase_not_applicable"}
+        )
+    if "purchase" in lowered and re.search(r"\bunknown\b", lowered):
+        return AssistantPlan(
+            tool="find_missing_information", arguments={"field": "purchase_unknown"}
+        )
     if _contains_phrase(lowered, MISSING_PURCHASE_PHRASES):
         return AssistantPlan(tool="find_missing_information", arguments={"field": "purchase"})
     if _contains_phrase(lowered, MISSING_SERIAL_PHRASES):
@@ -147,7 +167,10 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
     if re.search(r"\b(?:summary|overview|total items|inventory count)\b", lowered):
         return AssistantPlan(tool="get_inventory_summary", arguments={})
     if re.search(r"\bhow many\b", lowered):
-        return AssistantPlan(tool="search_items", arguments={"q": _clean_subject(question)})
+        subject = _clean_subject(question)
+        if subject and subject.lower() not in {"items", "item", "things", "everything"}:
+            return AssistantPlan(tool="count_items", arguments={"q": subject})
+        return AssistantPlan(tool="get_inventory_summary", arguments={})
 
     if "warrant" in lowered:
         status = None
@@ -197,11 +220,9 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
             arguments["q"] = _clean_subject(subject)
         return AssistantPlan(tool="search_items", arguments=arguments)
 
-    if re.search(r"\b(?:where is|where are|locate)\b", lowered):
-        subject = _extract_after(question, ("where is", "where are"))
-        return AssistantPlan(
-            tool="search_items", arguments={"q": _clean_subject(subject or question)}
-        )
+    if re.search(r"\b(?:where is|where are|where's|locate|where can i find)\b", lowered):
+        subject = _clean_subject(question)
+        return AssistantPlan(tool="locate_item", arguments={"q": subject or question})
 
     if room and re.search(r"\b(?:what do i have|show|list|contents)\b", lowered):
         return AssistantPlan(tool="list_room_contents", arguments={"room_name": room.name})
@@ -224,6 +245,60 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
     if not arguments:
         arguments["q"] = _clean_subject(question)
     return AssistantPlan(tool="search_items", arguments=arguments)
+
+
+def structured_plan(db: Session, household_id: uuid.UUID, question: str) -> AssistantPlan | None:
+    """Return a deterministic plan for clear structured questions.
+
+    Filter-style shopping/list requests are deliberately excluded so they can
+    stay on the normal search-inventory path (and optionally use the configured
+    search model to refine filters).
+    """
+    lowered = question.lower()
+    if re.search(r"\b([A-Z]{2,12}-[0-9]{3,6})\b", question, re.IGNORECASE):
+        return deterministic_plan(db, household_id, question)
+    if re.search(
+        r"\b(?:on loan|loaned|lent out|lent to|borrowed|borrower|"
+        r"outstanding loans?|overdue loans?)\b",
+        lowered,
+    ):
+        return deterministic_plan(db, household_id, question)
+    if any(
+        phrase in lowered
+        for phrase in (
+            "where is",
+            "where are",
+            "where's",
+            "where can i find",
+            "locate ",
+            "missing purchase",
+            "no purchase",
+            "without purchase",
+            "missing serial",
+            "no serial",
+            "without serial",
+            "purchase information",
+            "purchase date",
+            "purchase price",
+            "not applicable",
+            "warranty",
+            "how many",
+            "summary",
+            "inventory count",
+            "total items",
+            "receipt",
+            "invoice",
+            "document",
+            "purchase history",
+            "bought",
+            "stored in",
+            "what is in",
+            "what's in",
+            "contents of",
+        )
+    ):
+        return deterministic_plan(db, household_id, question)
+    return None
 
 
 def _ai_plan(
@@ -250,14 +325,28 @@ def _ai_plan(
         return None, False
 
 
+def _summary_location(item) -> str:  # noqa: ANN001
+    parts = [item.room.name] if item.room else []
+    for entry in item.location_path or ([item.location] if item.location else []):
+        label = (
+            f"{entry.identifier} · {entry.name}"
+            if entry.identifier and entry.identifier != entry.name
+            else entry.identifier or entry.name
+        )
+        if label and label not in parts:
+            parts.append(label)
+    return " / ".join(parts) if parts else "No place recorded"
+
+
 def _deterministic_answer(result: ToolResult) -> str:
     lines = [result.summary]
-    if result.items:
+    compact_answer = result.tool in {"locate_item", "count_items"} and len(result.items) <= 1
+    if result.items and not compact_answer:
         for item in result.items[:6]:
-            place = item.room.name if item.room else "No room"
-            if item.location:
-                place += f" / {item.location.name}"
-            lines.append(f"• {item.name} — {place}")
+            place = _summary_location(item)
+            quantity = f" · {item.quantity} units" if item.quantity != 1 else ""
+            loaned = f" · {item.on_loan_quantity} on loan" if item.on_loan_quantity else ""
+            lines.append(f"• {item.name}{quantity} — {place}{loaned}")
     for document in result.documents[:5]:
         suffix = f" — {document['merchant']}" if document.get("merchant") else ""
         lines.append(f"• Document: {document['title']}{suffix}")
@@ -280,7 +369,11 @@ def _deterministic_answer(result: ToolResult) -> str:
     loans = result.facts.get("loans")
     if isinstance(loans, list):
         for loan in loans[:8]:
-            due = f" · due {loan['due_on']}" if loan.get("due_on") else ""
+            due = (
+                f" · recorded due {loan['due_on']}"
+                if loan.get("due_on")
+                else " · no due date recorded"
+            )
             lines.append(
                 f"• {loan.get('item_name') or 'Item'} — {loan.get('quantity')} on loan "
                 f"to {loan.get('borrower_name') or 'an unnamed borrower'}{due}"
@@ -335,6 +428,49 @@ item names, descriptions or documents. Do not include URLs in prose."""
         return None
 
 
+def _followup_plan(question: str, history: list[Any]) -> AssistantPlan | None:
+    """Resolve a small set of pronoun follow-ups from the previous user turn.
+
+    No model is required for the everyday "and when is it due?" case. The prior
+    question supplies the item subject, while all facts still come from current
+    loan records.
+    """
+    if not re.search(
+        r"\b(?:when(?:\s+is|\s+does)?\s+it\s+due|when\s+due|is\s+it\s+due|"
+        r"who\s+has\s+it|where\s+is\s+it)\b",
+        question.lower(),
+    ):
+        return None
+    previous = next(
+        (
+            message.content
+            for message in reversed(history)
+            if getattr(message, "role", None) == "user"
+        ),
+        None,
+    )
+    subject = clean_subject(previous or "")
+    if not subject:
+        return None
+    return AssistantPlan(tool="locate_item", arguments={"q": subject})
+
+
+def _execute_plan(
+    db: Session,
+    household_id: uuid.UUID,
+    plan: AssistantPlan,
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    return execute_tool(
+        db,
+        household_id,
+        plan.tool,
+        plan.arguments,
+        household_reminder_days=household_reminder_days,
+    )
+
+
 def answer_question(
     db: Session,
     household_id: uuid.UUID,
@@ -342,25 +478,60 @@ def answer_question(
     *,
     household_reminder_days: int,
 ) -> AssistantResponse:
+    status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
+
+    # Clear structured questions are answered deterministically from household
+    # records. This avoids spending a model call merely to look up a loan or a
+    # missing-information count, and keeps the factual wording stable.
+    structured = _followup_plan(request.question, request.history) or structured_plan(
+        db, household_id, request.question
+    )
+    if structured is not None:
+        try:
+            result = _execute_plan(
+                db,
+                household_id,
+                structured,
+                household_reminder_days=household_reminder_days,
+            )
+        except (ValueError, TypeError, ValidationError, ApiError):
+            result = _execute_plan(
+                db,
+                household_id,
+                deterministic_plan(db, household_id, request.question),
+                household_reminder_days=household_reminder_days,
+            )
+        return AssistantResponse(
+            answer=_deterministic_answer(result),
+            mode="deterministic",
+            tool=result.tool,
+            filters=result.filters,
+            items=result.items,
+            documents=result.documents,
+            locations=result.locations,
+            references=result.references,
+            notices=result.notices,
+            facts=result.facts,
+            ai_status=status,
+        )
+
     plan, plan_used_ai = _ai_plan(db, household_id, request.question, request.history)
     if plan is None:
         plan = deterministic_plan(db, household_id, request.question)
         plan_used_ai = False
     try:
-        result = execute_tool(
+        result = _execute_plan(
             db,
             household_id,
-            plan.tool,
-            plan.arguments,
+            plan,
             household_reminder_days=household_reminder_days,
         )
-    except (ValueError, TypeError, ValidationError):
+    except (ValueError, TypeError, ValidationError, ApiError):
         plan = deterministic_plan(db, household_id, request.question)
-        result = execute_tool(
+        result = _execute_plan(
             db,
             household_id,
-            plan.tool,
-            plan.arguments,
+            plan,
             household_reminder_days=household_reminder_days,
         )
         plan_used_ai = False
@@ -368,7 +539,6 @@ def answer_question(
     answer_used_ai = answer is not None
     if not answer:
         answer = _deterministic_answer(result)
-    status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
     if plan_used_ai or answer_used_ai:
         status = status.model_copy(update={"available": True})
     return AssistantResponse(
@@ -381,6 +551,7 @@ def answer_question(
         locations=result.locations,
         references=result.references,
         notices=result.notices,
+        facts=result.facts,
         ai_status=status,
     )
 
@@ -438,9 +609,29 @@ def interpret_search(
             filters.room_id = None
             filters.room_name = None
             interpretations.append(f"outside: {outside_room.name}")
-    if _contains_phrase(lowered, MISSING_PURCHASE_PHRASES):
+    if re.search(
+        r"\b(?:no|missing|without)\s+(?:purchase\s+)?(?:date|purchase date)\b",
+        lowered,
+    ):
+        filters.missing_purchase_date = True
+        interpretations.append("recorded purchase without a purchase date")
+    if re.search(
+        r"\b(?:no|missing|without)\s+(?:purchase\s+)?(?:price|cost|amount)\b",
+        lowered,
+    ):
+        filters.missing_purchase_price = True
+        interpretations.append("recorded purchase without a purchase price")
+    if re.search(r"\b(?:not applicable|n/a)\b", lowered) and "purchase" in lowered:
+        filters.purchase_info_status = "not_applicable"
+        interpretations.append("purchase information marked not applicable")
+    elif "purchase" in lowered and re.search(r"\bunknown\b", lowered):
+        filters.purchase_info_status = "unknown"
+        interpretations.append("purchase information explicitly unknown")
+    elif _contains_phrase(lowered, MISSING_PURCHASE_PHRASES):
         filters.missing_purchase = True
-        interpretations.append("missing purchase information")
+        interpretations.append(
+            "missing or unresolved purchase information (not-applicable items excluded)"
+        )
     if _contains_phrase(lowered, MISSING_SERIAL_PHRASES):
         filters.missing_serial = True
         interpretations.append("missing serial numbers")
@@ -482,6 +673,9 @@ def interpret_search(
             filters.location_id,
             filters.category_id,
             filters.missing_purchase,
+            filters.missing_purchase_date,
+            filters.missing_purchase_price,
+            filters.purchase_info_status,
             filters.missing_serial,
             filters.warranty_status,
             filters.purchased_after,
@@ -511,7 +705,8 @@ def interpret_search(
 AI_SEARCH_SYSTEM = """Convert the user's inventory search question into deterministic filters.
 Return JSON exactly shaped as:
 {"q":null,"room_name":null,"location_name":null,"category_name":null,"tag":null,
-"missing_purchase":false,"missing_serial":false,
+"missing_purchase":false,"missing_purchase_date":false,"missing_purchase_price":false,
+"purchase_info_status":null,"missing_serial":false,
 "warranty_status":null,"purchased_after":null,"purchased_before":null,
 "min_purchase_cents":null,"max_purchase_cents":null,"sort":null}
 Use only the supplied room, location and category names; never invent names.
@@ -532,17 +727,17 @@ def _ai_search_plan(
     if not status.configured:
         return filters, interpretation, False, False
     allowed = {
-        "rooms": sorted({room.name for room in index.rooms}),
+        "rooms": sorted({room.name for room in index.rooms})[:300],
         "locations": sorted(
             {
                 f"{location.name} ({location.identifier})" if location.identifier else location.name
                 for location in index.locations
             }
-        ),
-        "categories": sorted({category.name for category in index.categories}),
-        "tags": sorted({tag.name for tag in index.tags}),
+        )[:300],
+        "categories": sorted({category.name for category in index.categories})[:200],
+        "tags": sorted({tag.name for tag in index.tags})[:200],
         "deterministic_filters": filters.model_dump(mode="json"),
-        "deterministic_interpretation": interpretation,
+        "deterministic_interpretation": interpretation[:1000],
     }
     try:
         raw = ai.complete_json(
@@ -589,6 +784,15 @@ def _ai_search_plan(
     if plan.missing_purchase:
         updated.missing_purchase = True
         notes.append("missing purchase information")
+    if plan.missing_purchase_date:
+        updated.missing_purchase_date = True
+        notes.append("recorded purchase without a purchase date")
+    if plan.missing_purchase_price:
+        updated.missing_purchase_price = True
+        notes.append("recorded purchase without a purchase price")
+    if plan.purchase_info_status:
+        updated.purchase_info_status = plan.purchase_info_status
+        notes.append(f"purchase information status: {plan.purchase_info_status}")
     if plan.missing_serial:
         updated.missing_serial = True
         notes.append("missing serial numbers")
@@ -615,6 +819,109 @@ def _ai_search_plan(
     return updated, "; ".join(dict.fromkeys([*notes, interpretation])), True, True
 
 
+def _plan_filters(
+    db: Session, household_id: uuid.UUID, plan: AssistantPlan
+) -> NaturalSearchFilters:
+    args = plan.arguments
+    filters = NaturalSearchFilters(
+        q=str(args.get("q") or "").strip() or None,
+        room_name=str(args.get("room_name") or "").strip() or None,
+        location_name=str(args.get("location_name") or "").strip() or None,
+        category_name=str(args.get("category_name") or "").strip() or None,
+        tag=str(args.get("tag") or "").strip() or None,
+        missing_purchase=bool(args.get("missing_purchase")),
+        missing_purchase_date=bool(args.get("missing_purchase_date")),
+        missing_purchase_price=bool(args.get("missing_purchase_price")),
+        purchase_info_status=args.get("purchase_info_status"),
+        missing_serial=bool(args.get("missing_serial")),
+        warranty_status=args.get("warranty_status"),
+        purchased_after=args.get("purchased_after"),
+        purchased_before=args.get("purchased_before"),
+        min_purchase_cents=args.get("min_purchase_cents"),
+        max_purchase_cents=args.get("max_purchase_cents"),
+        sort=args.get("sort") or "relevance",
+    )
+    if plan.tool == "get_container_contents":
+        identifier = str(args.get("identifier") or "").strip()
+        if identifier:
+            location = db.scalar(
+                select(StorageLocation).where(
+                    StorageLocation.household_id == household_id,
+                    func.upper(StorageLocation.identifier) == identifier.upper(),
+                )
+            )
+            if location is not None:
+                filters.location_id = location.id
+                filters.location_name = location.identifier or location.name
+    if plan.tool == "get_warranty_status":
+        status_value = args.get("status")
+        if status_value in {"active", "expiring", "expired"}:
+            filters.warranty_status = status_value
+    if plan.tool == "find_missing_information":
+        field = str(args.get("field") or "purchase")
+        if field in {"purchase", "purchase_info"}:
+            filters.missing_purchase = True
+        elif field in {"purchase_date", "missing_purchase_date"}:
+            filters.missing_purchase_date = True
+        elif field in {"purchase_price", "missing_purchase_price"}:
+            filters.missing_purchase_price = True
+        elif field in {"purchase_unknown", "unknown_purchase"}:
+            filters.purchase_info_status = "unknown"
+        elif field in {"purchase_not_applicable", "not_applicable_purchase"}:
+            filters.purchase_info_status = "not_applicable"
+    return filters
+
+
+def _plan_interpretation(plan: AssistantPlan) -> str:
+    args = plan.arguments
+    if plan.tool == "locate_item":
+        return f"whereabouts of {args.get('q') or 'the item'}"
+    if plan.tool == "count_items":
+        return f"count of {args.get('q') or 'matching items'}"
+    if plan.tool == "list_outstanding_loans":
+        return "currently open loans"
+    if plan.tool == "find_missing_information":
+        return f"missing-information field: {args.get('field') or 'purchase'}"
+    if plan.tool == "get_container_contents":
+        label = args.get("identifier") or args.get("container_name") or "requested place"
+        return f"container: {label}"
+    if plan.tool == "list_room_contents":
+        return f"room contents: {args.get('room_name') or 'requested room'}"
+    if plan.tool == "get_warranty_status":
+        return f"warranty status: {args.get('status') or 'all'}"
+    if plan.tool == "search_documents":
+        return f"documents matching: {args.get('q') or 'all'}"
+    if plan.tool == "get_purchase_history":
+        return f"purchase history: {args.get('merchant') or 'all'}"
+    if plan.tool == "get_inventory_summary":
+        return "inventory summary"
+    return f"tool: {plan.tool}"
+
+
+def _search_answer(
+    total: int,
+    interpretation: str,
+    filters: NaturalSearchFilters,
+    summaries,
+) -> str:
+    if total == 0:
+        return (
+            f"No inventory records matched the filters I applied ({interpretation}). "
+            "Adjust the query or ask the assistant to rephrase it."
+        )
+    if total == 1 and summaries:
+        item = summaries[0]
+        place = _summary_location(item)
+        return (
+            f"Found 1 item matching the filters I applied ({interpretation}): "
+            f"{item.name} — {place}."
+        )
+    return (
+        f"Found {total} items matching the filters I applied ({interpretation}). "
+        "The results below are the current household records."
+    )
+
+
 def natural_search(
     db: Session,
     household_id: uuid.UUID,
@@ -623,6 +930,33 @@ def natural_search(
     household_reminder_days: int,
     limit: int = 30,
 ) -> NaturalSearchResponse:
+    status = ai.status_for(db, household_id, AiTask.SEARCH.value, probe=False)
+    plan = structured_plan(db, household_id, question)
+    if plan is not None:
+        result = _execute_plan(
+            db,
+            household_id,
+            plan,
+            household_reminder_days=household_reminder_days,
+        )
+        return NaturalSearchResponse(
+            question=question,
+            interpretation=_plan_interpretation(plan),
+            filters=_plan_filters(db, household_id, plan),
+            items=result.items,
+            total=int(result.facts.get("total", len(result.items))),
+            mode="deterministic",
+            ai_available=status.configured,
+            answer=_deterministic_answer(result),
+            answer_kind=result.tool,
+            tool=result.tool,
+            facts=result.facts,
+            notices=result.notices,
+            references=result.references,
+            needs_assistant=False,
+            suggested_question=question,
+        )
+
     index = build_index(db, household_id)
     filters, interpretation = interpret_search(db, household_id, question)
     filters, interpretation, ai_used, ai_available = _ai_search_plan(
@@ -635,9 +969,12 @@ def natural_search(
         household_reminder_days=household_reminder_days,
         limit=limit,
     )
-    summaries = [
-        item_summary(item, household_reminder_days=household_reminder_days) for item in items
-    ]
+    summaries = _summaries_with_paths(
+        db,
+        household_id,
+        items,
+        household_reminder_days=household_reminder_days,
+    )
     return NaturalSearchResponse(
         question=question,
         interpretation=interpretation,
@@ -646,4 +983,10 @@ def natural_search(
         total=total,
         mode="ai" if ai_used else "deterministic",
         ai_available=ai_available,
+        answer=_search_answer(total, interpretation, filters, summaries),
+        answer_kind="list",
+        tool="search_items",
+        facts={"total": total},
+        needs_assistant=total == 0,
+        suggested_question=question,
     )

@@ -1,5 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowRight,
   Boxes,
   ListFilter,
   MapPin,
@@ -22,43 +23,55 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useItems, useQuickSearch } from "@/lib/queries";
+import { looksLikeQuestion } from "@/lib/search";
 import { pluralize } from "@/lib/utils";
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const qParam = searchParams.get("q") ?? "";
+  const askMode =
+    searchParams.get("ask") === "1" || searchParams.get("mode") === "smart";
   const [query, setQuery] = useState(qParam);
-  const [mode, setMode] = useState<"keyword" | "smart">(
-    searchParams.get("mode") === "smart" ? "smart" : "keyword",
-  );
   const debounced = useDebouncedValue(query, 350);
   const trimmed = debounced.trim();
   const hasQuery = qParam.trim().length > 0;
   const placesQuery = useQuickSearch(
     qParam,
     8,
-    hasQuery && mode === "keyword",
+    hasQuery && !askMode,
   );
   const searchQuery = useItems(
     { q: qParam || undefined },
     30,
-    qParam.trim().length > 0 && mode === "keyword",
+    qParam.trim().length > 0 && !askMode,
   );
-  const naturalSearch = useMutation({
-    mutationFn: (value: string) =>
-      api.post<NaturalSearchResponse>("/search/natural", {
-        question: value,
-        limit: 40,
-      }),
+  const naturalQuery = useQuery({
+    queryKey: ["search", "natural", qParam, 40],
+    queryFn: ({ signal }) =>
+      api.post<NaturalSearchResponse>(
+        "/search/natural",
+        { question: qParam, limit: 40 },
+        { signal },
+      ),
+    enabled: askMode && qParam.trim().length >= 2,
+    staleTime: 30_000,
+    retry: false,
   });
-  const results =
-    mode === "smart"
-      ? naturalSearch.data?.items ?? []
-      : searchQuery.data?.pages.flatMap((page) => page.items) ?? [];
-  const total =
-    mode === "smart"
-      ? naturalSearch.data?.total ?? 0
-      : searchQuery.data?.pages[0]?.total ?? 0;
+  const results = searchQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = searchQuery.data?.pages[0]?.total ?? 0;
+  const answer = naturalQuery.data;
+  const placeResults = (placesQuery.data?.results ?? []).filter(
+    (result) => result.kind !== "item",
+  );
+  const placesPending = !askMode && hasQuery && placesQuery.isPending;
+  const pending = askMode ? naturalQuery.isPending : searchQuery.isPending;
+  const isError = askMode ? naturalQuery.isError : searchQuery.isError;
+  const error = askMode ? naturalQuery.error : searchQuery.error;
+  const interpretedQuery = placesQuery.data?.effective_query ?? null;
+
+  useEffect(() => {
+    setQuery(qParam);
+  }, [qParam]);
 
   useEffect(() => {
     if (trimmed === qParam) return;
@@ -73,73 +86,87 @@ export function SearchPage() {
     );
   }, [trimmed, qParam, setSearchParams]);
 
-  useEffect(() => {
-    if (mode !== "smart") return;
-    if (trimmed.length < 2) {
-      naturalSearch.reset();
-      return;
-    }
-    naturalSearch.mutate(trimmed);
-    // The debounced query is the only trigger; mutate is intentionally excluded.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, mode]);
-
-  const switchMode = (next: "keyword" | "smart") => {
-    setMode(next);
+  const setAskMode = (next: boolean) => {
     setSearchParams(
       (previous) => {
         const params = new URLSearchParams(previous);
-        if (next === "smart") params.set("mode", "smart");
-        else params.delete("mode");
+        params.delete("mode");
+        if (next) params.set("ask", "1");
+        else params.delete("ask");
         return params;
       },
       { replace: true },
     );
   };
 
-  const placeResults =
-    mode === "keyword"
-      ? (placesQuery.data?.results ?? []).filter((result) => result.kind !== "item")
-      : [];
-  const placesPending = mode === "keyword" && hasQuery && placesQuery.isPending;
-  const pending =
-    mode === "smart" ? naturalSearch.isPending : searchQuery.isPending;
-  const isError =
-    mode === "smart" ? naturalSearch.isError : searchQuery.isError;
+  const submit = (ask?: boolean) => {
+    const value = query.trim();
+    if (value.length < 2) return;
+    const shouldAsk = ask ?? looksLikeQuestion(value);
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous);
+        params.set("q", value);
+        params.delete("mode");
+        if (shouldAsk) params.set("ask", "1");
+        else params.delete("ask");
+        return params;
+      },
+      { replace: true },
+    );
+  };
+
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    if (!askMode) return;
+    // Typing a new query drops the previous answer and returns to ordinary
+    // keyword results; no inference is triggered until the user submits again.
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous);
+        params.delete("ask");
+        params.delete("mode");
+        return params;
+      },
+      { replace: true },
+    );
+  };
+
+  const naturalErrorRetry = () => void naturalQuery.refetch();
 
   return (
     <div className="animate-fade-up">
       <PageHeader
         eyebrow="Search"
         title="Find anything"
-        description="Search names, brands, serial numbers, tags, rooms and storage places."
+        description="Search names, brands, serial numbers, tags, rooms and storage places — or ask a question about your inventory."
       />
 
-      <div className="mx-auto mb-4 flex max-w-3xl justify-center">
+      <div className="mx-auto mb-3 flex max-w-3xl justify-center">
         <div className="inline-flex rounded-full border border-border/70 bg-card/60 p-1">
           <button
             type="button"
-            onClick={() => switchMode("keyword")}
-            aria-pressed={mode === "keyword"}
+            onClick={() => setAskMode(false)}
+            aria-pressed={!askMode}
             className={
-              mode === "keyword"
+              !askMode
                 ? "inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[0.72rem] font-medium text-primary-foreground"
                 : "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[0.72rem] text-muted-foreground"
             }
           >
-            <ListFilter className="size-3.5" /> Keyword
+            <ListFilter className="size-3.5" /> Keyword results
           </button>
           <button
             type="button"
-            onClick={() => switchMode("smart")}
-            aria-pressed={mode === "smart"}
+            onClick={() => (query.trim() ? submit(true) : setAskMode(true))}
+            aria-pressed={askMode}
             className={
-              mode === "smart"
+              askMode
                 ? "inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[0.72rem] font-medium text-primary-foreground"
                 : "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[0.72rem] text-muted-foreground"
             }
           >
-            <Sparkles className="size-3.5" /> Smart search
+            <Sparkles className="size-3.5" /> Ask Housetory
           </button>
         </div>
       </div>
@@ -149,18 +176,35 @@ export function SearchPage() {
         <Input
           autoFocus
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={
-            mode === "smart"
-              ? "Find electronics in the attic without purchase records…"
-              : "What are you looking for?"
-          }
-          aria-label="Search inventory"
+          onChange={(event) => updateQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submit();
+          }}
+          placeholder="Search or ask about your inventory…"
+          aria-label="Search or ask about your inventory"
+          maxLength={1000}
           className="h-16 rounded-2xl border-border/80 bg-card/80 pl-14 pr-16 text-lg shadow-soft"
         />
         <kbd className="pointer-events-none absolute right-4 top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-2 py-1 text-[0.65rem] font-medium text-muted-foreground sm:block">
           ⌘K
         </kbd>
+      </div>
+
+      <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[0.72rem] text-muted-foreground">
+        <p>
+          Type for ordinary matches. Press Enter to search; question-like text
+          opens a grounded answer.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => submit(false)}>
+            <SearchIcon /> Search
+          </Button>
+          <Button size="sm" onClick={() => submit(true)}>
+            <Sparkles /> Ask Housetory
+          </Button>
+        </div>
       </div>
 
       <div className="mx-auto mt-10 max-w-5xl">
@@ -172,9 +216,10 @@ export function SearchPage() {
             <h2 className="mt-5 font-display text-2xl tracking-[-0.02em]">
               Look for something specific
             </h2>
-            <p className="mt-2 max-w-sm text-pretty text-[0.85rem] leading-relaxed text-muted-foreground">
-              Try a brand, a model, a serial number, a room, a storage place, or a tag.
-              Results appear as you type.
+            <p className="mt-2 max-w-md text-pretty text-[0.85rem] leading-relaxed text-muted-foreground">
+              Try a brand, model, serial number, room, storage place or tag. For
+              questions such as “Where is my heavy drill?” or “Which items have no
+              purchase information?”, press Enter or choose Ask Housetory.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Button variant="outline" size="sm" asChild>
@@ -187,19 +232,54 @@ export function SearchPage() {
                 <Link to="/rooms">Browse by room</Link>
               </Button>
             </div>
+            <div className="mt-6 flex max-w-xl flex-wrap justify-center gap-2">
+              {[
+                "Where is my heavy drill?",
+                "Which items have no purchase information?",
+                "What is on loan?",
+              ].map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => {
+                    setQuery(example);
+                    setSearchParams(
+                      { q: example, ask: "1" },
+                      { replace: true },
+                    );
+                  }}
+                  className="rounded-full border border-border/70 bg-background/50 px-3 py-1.5 text-[0.72rem] text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
+        ) : askMode ? (
+          naturalQuery.isPending ? (
+            <AnswerSkeleton />
+          ) : naturalQuery.isError ? (
+            <ErrorState
+              title="The assistant could not answer just now"
+              message={getApiErrorMessage(error)}
+              onRetry={naturalErrorRetry}
+            />
+          ) : answer ? (
+            <AnswerResults
+              answer={answer}
+              onAskAgain={() => void naturalQuery.refetch()}
+              onKeyword={() => setAskMode(false)}
+            />
+          ) : (
+            <AnswerSkeleton />
+          )
         ) : pending || (results.length === 0 && placesPending) ? (
           <SearchSkeleton />
         ) : isError ? (
           <ErrorState
             title="Search is out of reach"
-            message={getApiErrorMessage(
-              mode === "smart" ? naturalSearch.error : searchQuery.error,
-            )}
-            onRetry={() => {
-              if (mode === "smart") naturalSearch.mutate(trimmed);
-              else void searchQuery.refetch();
-            }}
+            message={getApiErrorMessage(error)}
+            onRetry={() => void searchQuery.refetch()}
           />
         ) : results.length === 0 && placeResults.length === 0 ? (
           <div className="surface flex flex-col items-center px-6 py-16 text-center">
@@ -210,16 +290,13 @@ export function SearchPage() {
               Nothing found for “{qParam}”
             </h2>
             <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              {mode === "smart"
-                ? "The smart interpretation found no matches. Try keyword search or rephrase the request."
-                : "Check the spelling, try a shorter phrase, or search by another detail."}
+              Check the spelling, try a shorter phrase, or ask the assistant to
+              interpret the question against your records.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-2">
-              {mode === "smart" && (
-                <Button variant="outline" onClick={() => switchMode("keyword")}>
-                  <ListFilter /> Try keyword search
-                </Button>
-              )}
+              <Button variant="outline" onClick={() => submit(true)}>
+                <Sparkles /> Ask Housetory
+              </Button>
               <Button
                 variant="ghost"
                 onClick={() => {
@@ -240,20 +317,10 @@ export function SearchPage() {
                   : pluralize(placeResults.length, "matching place")}{" "}
                 for “{qParam}”
               </p>
-              {mode === "smart" && naturalSearch.data && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant={naturalSearch.data.mode === "ai" ? "brass" : "outline"}>
-                    {naturalSearch.data.mode === "ai" ? (
-                      <Sparkles className="size-3" />
-                    ) : null}
-                    {naturalSearch.data.mode === "ai"
-                      ? "AI interpretation"
-                      : "Deterministic interpretation"}
-                  </Badge>
-                  <span className="text-[0.7rem] text-muted-foreground">
-                    {naturalSearch.data.interpretation}
-                  </span>
-                </div>
+              {interpretedQuery && (
+                <p className="text-[0.7rem] text-muted-foreground">
+                  Matched the item words “{interpretedQuery}” from your question.
+                </p>
               )}
             </div>
             {results.length > 0 && (
@@ -278,7 +345,7 @@ export function SearchPage() {
                 </div>
               </section>
             )}
-            {mode === "keyword" && searchQuery.hasNextPage && (
+            {searchQuery.hasNextPage && (
               <div className="mt-8 flex justify-center">
                 <Button
                   variant="outline"
@@ -296,6 +363,146 @@ export function SearchPage() {
   );
 }
 
+function AnswerResults({
+  answer,
+  onAskAgain,
+  onKeyword,
+}: {
+  answer: NaturalSearchResponse;
+  onAskAgain: () => void;
+  onKeyword: () => void;
+}) {
+  const filterLink = contextualFilterLink(answer);
+  const filterLabel =
+    answer.tool === "locate_item"
+      ? "Open item"
+      : answer.tool === "find_missing_information"
+        ? "Open matching filters"
+        : "Open matching records";
+  const answerItems = answer.items;
+  return (
+    <div className="space-y-5">
+      <section className="surface p-5 sm:p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={answer.mode === "ai" ? "brass" : "outline"}>
+            {answer.mode === "ai" ? (
+              <Sparkles className="size-3" />
+            ) : null}
+            {answer.mode === "ai" ? "AI interpretation" : "Grounded answer"}
+          </Badge>
+          <span className="text-[0.7rem] text-muted-foreground">
+            {answer.interpretation}
+          </span>
+        </div>
+        <p className="mt-3 whitespace-pre-line text-[0.9rem] leading-[1.75] text-foreground/90">
+          {answer.answer ||
+            "Housetory found matching records below and did not invent an answer."}
+        </p>
+        {answer.notices.length > 0 && (
+          <ul className="mt-3 space-y-1 text-[0.74rem] leading-relaxed text-muted-foreground">
+            {answer.notices.map((notice) => (
+              <li key={notice}>• {notice}</li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-3">
+          <Button size="sm" variant="outline" asChild>
+            <Link
+              to={`/assistant?q=${encodeURIComponent(answer.question)}`}
+            >
+              Continue in Assistant <ArrowRight />
+            </Link>
+          </Button>
+          {filterLink && (
+            <Button size="sm" variant="ghost" asChild>
+              <Link to={filterLink}>{filterLabel}</Link>
+            </Button>
+          )}
+          {answer.needs_assistant && (
+            <Button size="sm" asChild>
+              <Link to={`/assistant?q=${encodeURIComponent(answer.question)}`}>
+                Ask Housetory
+              </Link>
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onKeyword}>
+            Keyword results
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onAskAgain}>
+            Ask again
+          </Button>
+        </div>
+      </section>
+
+      {answer.references.length > 0 && (
+        <section aria-label="Sources" className="flex flex-wrap gap-1.5">
+          {answer.references.slice(0, 12).map((reference) => (
+            <Link key={`${reference.type}-${reference.id}`} to={reference.url}>
+              <Badge variant="outline" className="hover:bg-secondary">
+                {reference.title}
+              </Badge>
+            </Link>
+          ))}
+        </section>
+      )}
+
+      {answerItems.length > 0 ? (
+        <section aria-label="Matching items">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+              {pluralize(answer.total, "matching item")}
+            </h2>
+            <p className="text-[0.7rem] text-muted-foreground">
+              Current household records only.
+            </p>
+          </div>
+          <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
+            {answerItems.map((item) => (
+              <ItemCard key={item.id} item={item} />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="surface px-5 py-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+          No matching item records were returned. The answer above is based on the
+          recorded filters and loan state, not on a model's memory.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function contextualFilterLink(answer: NaturalSearchResponse): string | null {
+  if (answer.tool === "find_missing_information") {
+    const criterion = String(answer.facts.criterion ?? "");
+    if (criterion === "missing_purchase") {
+      return "/items?purchase_info=missing";
+    }
+    if (criterion === "missing_purchase_date") {
+      return "/items?purchase_info=missing_date";
+    }
+    if (criterion === "missing_purchase_price") {
+      return "/items?purchase_info=missing_price";
+    }
+    if (criterion === "purchase_unknown") {
+      return "/items?purchase_info=unknown";
+    }
+    if (criterion === "purchase_not_applicable") {
+      return "/items?purchase_info=not_applicable";
+    }
+    return "/items";
+  }
+  if (answer.tool === "list_outstanding_loans") return "/loans";
+  if (answer.tool === "locate_item" && answer.facts.whereabouts) {
+    const whereabouts = answer.facts.whereabouts as { item_id?: string };
+    if (whereabouts.item_id) return `/items/${whereabouts.item_id}`;
+  }
+  if (answer.tool === "get_warranty_status") return "/warranties";
+  if (answer.tool === "search_documents") return "/documents";
+  if (answer.tool === "get_purchase_history") return "/purchases";
+  return null;
+}
+
 function PlaceResult({ result }: { result: QuickSearchResult }) {
   const Icon = result.kind === "container" ? Boxes : MapPin;
   const label = result.kind === "container" ? "Container" : "Location";
@@ -310,7 +517,10 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
           <span className="truncate text-[0.84rem] font-medium">{result.title}</span>
-          <Badge variant={result.kind === "container" ? "brass" : "outline"} className="text-[0.6rem]">
+          <Badge
+            variant={result.kind === "container" ? "brass" : "outline"}
+            className="text-[0.6rem]"
+          >
             {label}
           </Badge>
         </span>
@@ -319,6 +529,20 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
         </span>
       </span>
     </Link>
+  );
+}
+
+function AnswerSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="surface space-y-3 p-6">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-5 w-full" />
+        <Skeleton className="h-5 w-4/5" />
+        <Skeleton className="h-9 w-44" />
+      </div>
+      <SearchSkeleton />
+    </div>
   );
 }
 

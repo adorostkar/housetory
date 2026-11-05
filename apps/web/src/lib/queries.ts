@@ -204,6 +204,7 @@ export interface ItemFilters {
   location_id?: string;
   category_id?: string;
   tag_id?: string;
+  purchase_info?: string;
   include_archived?: boolean;
   include_descendants?: boolean;
   sort?: "created_desc" | "created_asc" | "name_asc" | "name_desc" | "updated_desc";

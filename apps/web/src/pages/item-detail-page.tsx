@@ -45,6 +45,7 @@ import {
   useItemHistory,
   useItemLoans,
   useLocations,
+  useRooms,
 } from "@/lib/queries";
 import type { ItemDetail } from "@/lib/types";
 import {
@@ -58,13 +59,16 @@ import {
   formatCurrency,
   formatDate,
   formatRelativeDate,
+  locationLabel,
   locationPath,
+  roomPath,
 } from "@/lib/utils";
 import { useState } from "react";
 
 export function ItemDetailPage() {
   const { itemId = "" } = useParams();
   const itemQuery = useItem(itemId);
+  const roomsQuery = useRooms();
   const locationsQuery = useLocations(itemQuery.data?.item.room?.id);
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
@@ -111,6 +115,9 @@ export function ItemDetailPage() {
   const warrantyStatus = item.warranty?.status ?? "unknown";
   const locationTrail = item.location
     ? locationPath(locationsQuery.data?.items ?? [], item.location.id)
+    : [];
+  const roomTrail = item.room
+    ? roomPath(roomsQuery.data?.items ?? [], item.room.id)
     : [];
 
   return (
@@ -233,12 +240,28 @@ export function ItemDetailPage() {
               <InfoRow icon={MapPin} label="Place">
                 {item.room ? (
                   <span className="flex flex-wrap items-center gap-1">
-                    <Link
-                      to={`/rooms/${item.room.id}`}
-                      className="underline-offset-4 hover:underline"
-                    >
-                      {item.room.name}
-                    </Link>
+                    {roomTrail.length > 0 ? (
+                      roomTrail.map((room, index) => (
+                        <span key={room.id} className="inline-flex items-center gap-1">
+                          {index > 0 && (
+                            <ChevronRight className="size-3 text-muted-foreground/50" />
+                          )}
+                          <Link
+                            to={`/rooms/${room.id}`}
+                            className="underline-offset-4 hover:underline"
+                          >
+                            {room.name}
+                          </Link>
+                        </span>
+                      ))
+                    ) : (
+                      <Link
+                        to={`/rooms/${item.room.id}`}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {item.room.name}
+                      </Link>
+                    )}
                     {locationTrail.length > 0
                       ? locationTrail.map((location) => (
                           <span
@@ -254,14 +277,14 @@ export function ItemDetailPage() {
                               }
                               className="underline-offset-4 hover:underline"
                             >
-                              {location.identifier ?? location.name}
+                              {locationLabel(location)}
                             </Link>
                           </span>
                         ))
                       : item.location && (
                           <>
                             <ChevronRight className="size-3 text-muted-foreground/50" />
-                            <span>{item.location.identifier ?? item.location.name}</span>
+                            <span>{locationLabel(item.location)}</span>
                           </>
                         )}
                   </span>
@@ -405,9 +428,17 @@ export function ItemDetailPage() {
                   Purchase
                 </h2>
               </div>
-              {item.purchase?.is_shared && (
-                <Badge variant="brass">Shared · {item.purchase.item_count}</Badge>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {item.purchase?.is_shared && (
+                  <Badge variant="brass">Shared · {item.purchase.item_count}</Badge>
+                )}
+                {item.purchase_info_status === "not_applicable" && (
+                  <Badge variant="outline">Not applicable</Badge>
+                )}
+                {item.purchase_info_status === "unknown" && (
+                  <Badge variant="outline">Unknown</Badge>
+                )}
+              </div>
             </div>
             {item.purchase ? (
               <>
@@ -471,6 +502,16 @@ export function ItemDetailPage() {
                     </div>
                   )}
                 </dl>
+                {item.purchase_info_missing_fields.length > 0 && (
+                  <p className="mt-3 rounded-lg border border-brass/20 bg-brass-soft/40 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+                    Missing from this recorded purchase:{" "}
+                    {item.purchase_info_missing_fields
+                      .map((field) => (field === "date" ? "purchase date" : "price"))
+                      .join(" and ")}
+                    . It remains in the missing-information review until completed or
+                    explicitly marked unknown/not applicable.
+                  </p>
+                )}
                 {item.purchase.notes && (
                   <p className="mt-3 whitespace-pre-line border-t border-border/60 pt-3 text-[0.75rem] leading-relaxed text-muted-foreground">
                     {item.purchase.notes}
@@ -504,15 +545,25 @@ export function ItemDetailPage() {
                 </div>
               </>
             ) : (
-              <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
-                No purchase information recorded.{" "}
-                <Link
-                  to={`/items/${item.id}/edit`}
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  Add details
-                </Link>
-              </p>
+              <div className="space-y-2 text-[0.8rem] leading-relaxed text-muted-foreground">
+                <p>
+                  {item.purchase_info_status === "not_applicable"
+                    ? "Purchase information is marked not applicable for this item."
+                    : item.purchase_info_status === "unknown"
+                      ? "Purchase information is explicitly marked unknown and still unresolved."
+                      : "No purchase information recorded."}
+                </p>
+                <p className="text-[0.72rem]">
+                  <Link
+                    to={`/items/${item.id}/edit`}
+                    className="underline underline-offset-4 hover:text-foreground"
+                  >
+                    {item.purchase_info_status === "not_applicable"
+                      ? "Change this status or add details"
+                      : "Add details or change the status"}
+                  </Link>
+                </p>
+              </div>
             )}
           </section>
 

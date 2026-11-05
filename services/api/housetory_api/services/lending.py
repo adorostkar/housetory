@@ -107,6 +107,45 @@ def loan_quantities_for_items(
     return {row[0]: int(row[1]) for row in rows if row[0] is not None}
 
 
+def loan_overview_for_items(
+    db: Session, household_id: uuid.UUID, item_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, Any]]:
+    """Borrower names and the earliest recorded due date for result cards.
+
+    This is deliberately limited to open loans in the current household. Due
+    dates are recorded facts, not promises that the item will return on time.
+    """
+    if not item_ids:
+        return {}
+    loans = db.scalars(
+        select(Loan)
+        .where(
+            Loan.household_id == household_id,
+            Loan.item_id.in_(item_ids),
+            Loan.status.in_(OPEN_STATUSES),
+        )
+        .order_by(Loan.due_on.asc().nullslast(), Loan.created_at.asc())
+    ).all()
+    overview: dict[uuid.UUID, dict[str, Any]] = {}
+    for loan in loans:
+        if loan.item_id is None:
+            continue
+        entry = overview.setdefault(
+            loan.item_id,
+            {
+                "on_loan_quantity": 0,
+                "borrower_names": [],
+                "next_due_on": None,
+            },
+        )
+        entry["on_loan_quantity"] += max(0, loan.quantity - loan.returned_quantity)
+        if loan.borrower_name not in entry["borrower_names"]:
+            entry["borrower_names"].append(loan.borrower_name)
+        if entry["next_due_on"] is None and loan.due_on is not None:
+            entry["next_due_on"] = loan.due_on
+    return overview
+
+
 def ensure_quantity_allowed(
     db: Session,
     household_id: uuid.UUID,

@@ -108,6 +108,22 @@ class WarrantyStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class PurchaseInfoStatus(StrEnum):
+    RECORDED = "recorded"
+    UNRECORDED = "unrecorded"
+    UNKNOWN = "unknown"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class PurchaseInfoFilter(StrEnum):
+    MISSING = "missing"
+    UNKNOWN = "unknown"
+    NOT_APPLICABLE = "not_applicable"
+    RECORDED = "recorded"
+    MISSING_DATE = "missing_date"
+    MISSING_PRICE = "missing_price"
+
+
 class ImportSourceType(StrEnum):
     TEXT = "text"
     FILE = "file"

@@ -527,6 +527,12 @@ export interface ItemSummary {
   tags: TagBrief[];
   primary_photo: Photo | null;
   purchase: Purchase | null;
+  purchase_info_status:
+    | "recorded"
+    | "unrecorded"
+    | "unknown"
+    | "not_applicable";
+  purchase_info_missing_fields: Array<"date" | "price">;
   warranty: Warranty | null;
   current_value_cents: number | null;
   current_value_currency: string;
@@ -699,6 +705,7 @@ export interface ItemInput {
   tag_ids: UUID[];
   purchase_id?: UUID | null;
   purchase?: PurchaseInput | null;
+  purchase_info_status?: "auto" | "unknown" | "not_applicable" | null;
   warranty?: WarrantyInput | null;
   current_value_cents?: number | null;
   current_value_currency?: string;
@@ -1070,7 +1077,14 @@ export interface AiRecognitionList {
 }
 
 export interface AssistantReference {
-  type: "item" | "document" | "room" | "location" | "purchase" | "warranty";
+  type:
+    | "item"
+    | "document"
+    | "room"
+    | "location"
+    | "purchase"
+    | "warranty"
+    | "loan";
   id: UUID;
   title: string;
   subtitle: string | null;
@@ -1102,6 +1116,7 @@ export interface AssistantResponse {
   }>;
   references: AssistantReference[];
   notices: string[];
+  facts: Record<string, unknown>;
   ai_status: AiStatus;
 }
 
@@ -1116,6 +1131,16 @@ export interface NaturalSearchFilters {
   category_name: string | null;
   tag: string | null;
   missing_purchase: boolean;
+  missing_purchase_date: boolean;
+  missing_purchase_price: boolean;
+  purchase_info_status:
+    | "missing"
+    | "unknown"
+    | "not_applicable"
+    | "recorded"
+    | "missing_date"
+    | "missing_price"
+    | null;
   missing_serial: boolean;
   warranty_status: "active" | "expiring" | "expired" | null;
   purchased_after: string | null;
@@ -1133,9 +1158,23 @@ export interface NaturalSearchResponse {
   total: number;
   mode: "deterministic" | "ai";
   ai_available: boolean;
+  answer: string | null;
+  answer_kind: string | null;
+  tool: string | null;
+  facts: Record<string, unknown>;
+  notices: string[];
+  references: AssistantReference[];
+  needs_assistant: boolean;
+  suggested_question: string | null;
 }
 
 export type QuickSearchKind = "item" | "container" | "location";
+
+export interface QuickSearchLoan {
+  on_loan_quantity: number;
+  borrower_names: string[];
+  next_due_on: string | null;
+}
 
 export interface QuickSearchResult {
   id: UUID;
@@ -1144,10 +1183,13 @@ export interface QuickSearchResult {
   subtitle: string | null;
   context: string | null;
   url: string;
+  loan: QuickSearchLoan | null;
 }
 
 export interface QuickSearchResponse {
   query: string;
+  effective_query: string | null;
+  question_like: boolean;
   results: QuickSearchResult[];
 }
 

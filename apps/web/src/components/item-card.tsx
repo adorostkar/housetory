@@ -3,7 +3,14 @@ import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import type { ItemSummary } from "@/lib/types";
-import { cn, CONDITION_LABELS, formatCurrency, formatDate, itemContainer } from "@/lib/utils";
+import {
+  cn,
+  CONDITION_LABELS,
+  formatCurrency,
+  formatDate,
+  itemContainer,
+  locationLabel,
+} from "@/lib/utils";
 
 interface ItemSelection {
   selected: boolean;
@@ -126,10 +133,12 @@ export function ItemCard({
             )}
             {container ? (
               <span className="truncate font-medium text-foreground/75">
-                {container.identifier ?? container.name}
+                {locationLabel(container)}
               </span>
             ) : (
-              item.location && <span className="truncate">{item.location.name}</span>
+              item.location && (
+                <span className="truncate">{locationLabel(item.location)}</span>
+              )
             )}
             {!item.room && !item.location && (
               <span className="italic opacity-80">No place assigned</span>
@@ -196,10 +205,12 @@ export function ItemRow({
   const onLoan = item.on_loan_quantity ?? 0;
   const path =
     item.location_path.length > 0
-      ? [item.room?.name, ...item.location_path.map((entry) => entry.identifier ?? entry.name)]
+      ? [item.room?.name, ...item.location_path.map((entry) => locationLabel(entry))]
           .filter(Boolean)
           .join(" / ")
-      : [item.room?.name, item.location?.name].filter(Boolean).join(" / ");
+      : [item.room?.name, item.location ? locationLabel(item.location) : null]
+          .filter(Boolean)
+          .join(" / ");
   const row = (
     <Link
       to={`/items/${item.id}`}

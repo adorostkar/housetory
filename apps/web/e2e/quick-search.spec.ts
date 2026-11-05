@@ -99,7 +99,7 @@ async function createLegacyContainer(
 }
 
 async function focusQuickSearch(page: Page) {
-  const input = page.getByRole("combobox", { name: "Search your home" }).first();
+  const input = page.getByRole("combobox", { name: "Search or ask about your inventory" }).first();
   await expect(input).toBeVisible();
   await input.click();
   return input;
@@ -138,7 +138,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   const addItem = page.locator("aside").getByRole("button", { name: "Add items" });
   const sidebarInput = page
     .locator("aside")
-    .getByRole("combobox", { name: "Search your home" });
+    .getByRole("combobox", { name: "Search or ask about your inventory" });
   await expect(addItem).toBeVisible();
   await expect(sidebarInput).toBeVisible();
   const addBox = await addItem.boundingBox();
@@ -181,10 +181,11 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   await page.goto("/");
   const legacyInput = await focusQuickSearch(page);
   await legacyInput.fill(legacyId);
-  await expect(
-    page.getByRole("option", { name: new RegExp(legacyId) }),
-  ).toBeVisible();
-  await page.getByRole("option", { name: new RegExp(legacyId) }).click();
+  const legacyOption = page.getByRole("option", {
+    name: new RegExp(`^${legacyContainer.identifier}`),
+  });
+  await expect(legacyOption).toBeVisible();
+  await legacyOption.click();
   await expect(page).toHaveURL(new RegExp(`/containers/${legacyContainer.id}`));
 
   await page.goto("/");
@@ -197,7 +198,9 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   await expect(page).toHaveURL(
     new RegExp(`/search\\?q=${encodeURIComponent(`Camera ${suffix}`)}`),
   );
-  await expect(page.getByLabel("Search inventory")).toHaveValue(`Camera ${suffix}`);
+  await expect(
+    page.getByRole("textbox", { name: "Search or ask about your inventory" }),
+  ).toHaveValue(`Camera ${suffix}`);
 
   await page.goto(`/search?q=${encodeURIComponent(shelf.name)}`);
   await expect(
@@ -222,7 +225,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   });
   const mobilePage = await mobile.newPage();
   await mobilePage.goto("/");
-  const mobileInput = mobilePage.getByRole("combobox", { name: "Search your home" });
+  const mobileInput = mobilePage.getByRole("combobox", { name: "Search or ask about your inventory" });
   await expect(mobileInput).toBeVisible();
   const purchaseSummary = mobilePage.getByText("Purchase value", { exact: true });
   const mobileInputBox = await mobileInput.boundingBox();
@@ -236,7 +239,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   ).toBeVisible();
   await mobilePage.goto("/items");
   await expect(
-    mobilePage.getByRole("link", { name: "Search your home" }),
+    mobilePage.getByRole("link", { name: "Search or ask about your inventory" }),
   ).toBeVisible();
   await mobile.close();
 });

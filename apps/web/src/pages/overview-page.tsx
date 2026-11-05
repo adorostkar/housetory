@@ -93,6 +93,16 @@ export function OverviewPage() {
       warrantyCounts.expired_count +
       warrantyCounts.unknown_count >
     0;
+  const hasPurchaseValues = data.value_by_currency.length > 0;
+  const hasCurrentValues = data.current_value_by_currency.length > 0;
+  const statCount =
+    2 + (hasPurchaseValues ? 1 : 0) + (hasCurrentValues ? 1 : 0) + (hasWarranties ? 1 : 0);
+  const statGridClass =
+    statCount >= 5
+      ? "xl:grid-cols-5"
+      : statCount === 4
+        ? "xl:grid-cols-4"
+        : "xl:grid-cols-3";
 
   return (
     <div className="animate-fade-up">
@@ -121,7 +131,9 @@ export function OverviewPage() {
         <QuickSearch variant="mobile" />
       </div>
 
-      <div className="grid grid-cols-2 gap-3.5 sm:gap-4 xl:grid-cols-5">
+      <div
+        className={`grid grid-cols-2 gap-3.5 sm:gap-4 ${statGridClass}`}
+      >
         <StatCard
           label="Items"
           value={data.item_count}
@@ -137,53 +149,57 @@ export function OverviewPage() {
           icon={DoorOpen}
           to="/rooms"
         />
-        <StatCard
-          label="Purchase value"
-          value={
-            <span>
-              {purchaseLabel}
-              {data.value_by_currency.length > 1 && (
-                <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
-                  +{data.value_by_currency.length - 1}
-                </span>
-              )}
-            </span>
-          }
-          detail={
-            data.value_by_currency.length > 1
-              ? `${data.value_by_currency.length} currencies, reported separately`
-              : purchaseValue
-                ? "Recorded purchase value"
-                : "No purchase prices yet"
-          }
-          icon={Wallet}
-          to="/purchases"
-        />
-        <StatCard
-          label="Current value"
-          value={
-            <span>
-              {currentLabel}
-              {data.current_value_by_currency.length > 1 && (
-                <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
-                  +{data.current_value_by_currency.length - 1}
-                </span>
-              )}
-            </span>
-          }
-          detail={
-            currentValue ? "Your estimates, kept separate" : "No current values yet"
-          }
-          icon={TrendingUp}
-          to="/items"
-        />
-        <StatCard
-          label="Warranties"
-          value={warrantyCounts.expiring_count}
-          detail={`${warrantyCounts.active_count} active · ${warrantyCounts.expired_count} expired`}
-          icon={ShieldCheck}
-          to="/warranties"
-        />
+        {hasPurchaseValues && (
+          <StatCard
+            label="Purchase value"
+            value={
+              <span>
+                {purchaseLabel}
+                {data.value_by_currency.length > 1 && (
+                  <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
+                    +{data.value_by_currency.length - 1}
+                  </span>
+                )}
+              </span>
+            }
+            detail={
+              data.value_by_currency.length > 1
+                ? `${data.value_by_currency.length} currencies, reported separately`
+                : "Recorded purchase value"
+            }
+            icon={Wallet}
+            to="/purchases"
+          />
+        )}
+        {hasCurrentValues && (
+          <StatCard
+            label="Current value"
+            value={
+              <span>
+                {currentLabel}
+                {data.current_value_by_currency.length > 1 && (
+                  <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
+                    +{data.current_value_by_currency.length - 1}
+                  </span>
+                )}
+              </span>
+            }
+            detail={
+              currentValue ? "Your estimates, kept separate" : "No current values yet"
+            }
+            icon={TrendingUp}
+            to="/items"
+          />
+        )}
+        {hasWarranties && (
+          <StatCard
+            label="Warranties"
+            value={warrantyCounts.expiring_count}
+            detail={`${warrantyCounts.active_count} active · ${warrantyCounts.expired_count} expired`}
+            icon={ShieldCheck}
+            to="/warranties"
+          />
+        )}
       </div>
 
       {data.outstanding_loan_count > 0 && (
@@ -209,41 +225,6 @@ export function OverviewPage() {
           </span>
         </Link>
       )}
-
-      <OwnershipSection financial={financialQuery.data} loading={financialQuery.isPending} />
-
-      <section className="mt-10">
-        <SectionHeading
-          title="Warranty watch"
-          description={
-            hasWarranties
-              ? `Expiring-soon reminders use a ${pluralize(warrantyCounts.reminder_days, "day")} window.`
-              : "Add a warranty to an item to see expirations here."
-          }
-          actionLabel={hasWarranties ? "All warranties" : undefined}
-          actionTo={hasWarranties ? "/warranties" : undefined}
-        />
-        <div className="grid gap-4 lg:grid-cols-3">
-          <WarrantyGroup
-            title="Expiring soon"
-            status="expiring"
-            warranties={warrantyCounts.expiring_soon}
-            total={warrantyCounts.expiring_count}
-          />
-          <WarrantyGroup
-            title="Active"
-            status="active"
-            warranties={warrantyCounts.active}
-            total={warrantyCounts.active_count}
-          />
-          <WarrantyGroup
-            title="Expired"
-            status="expired"
-            warranties={warrantyCounts.expired}
-            total={warrantyCounts.expired_count}
-          />
-        </div>
-      </section>
 
       {data.item_count === 0 ? (
         <div className="mt-9">
@@ -345,6 +326,55 @@ export function OverviewPage() {
         </div>
       )}
 
+      {data.item_count > 0 && (
+        <>
+          <OwnershipSection
+            financial={financialQuery.data}
+            loading={financialQuery.isPending}
+          />
+
+          <section className="mt-8">
+            <SectionHeading
+              title="Warranty watch"
+              description={
+                hasWarranties
+                  ? `Expiring-soon reminders use a ${pluralize(warrantyCounts.reminder_days, "day")} window.`
+                  : "No warranties recorded. Add one while editing an item."
+              }
+              actionLabel={hasWarranties ? "All warranties" : undefined}
+              actionTo={hasWarranties ? "/warranties" : undefined}
+            />
+            {hasWarranties ? (
+              <div className="grid gap-4 lg:grid-cols-3">
+                <WarrantyGroup
+                  title="Expiring soon"
+                  status="expiring"
+                  warranties={warrantyCounts.expiring_soon}
+                  total={warrantyCounts.expiring_count}
+                />
+                <WarrantyGroup
+                  title="Active"
+                  status="active"
+                  warranties={warrantyCounts.active}
+                  total={warrantyCounts.active_count}
+                />
+                <WarrantyGroup
+                  title="Expired"
+                  status="expired"
+                  warranties={warrantyCounts.expired}
+                  total={warrantyCounts.expired_count}
+                />
+              </div>
+            ) : (
+              <div className="surface px-5 py-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+                Warranty dates and documents stay with each item when you add them.
+                Nothing is tracked as expiring yet.
+              </div>
+            )}
+          </section>
+        </>
+      )}
+
       <RoomDialog
         open={roomDialogOpen}
         onOpenChange={setRoomDialogOpen}
@@ -361,71 +391,86 @@ function OwnershipSection({
   financial: FinancialOverview | undefined;
   loading: boolean;
 }) {
+  const hasValues = Boolean(
+    financial &&
+      (financial.currency_totals.length > 0 ||
+        financial.value_by_category.length > 0 ||
+        financial.value_by_room.length > 0),
+  );
+
   return (
     <section className="mt-10">
       <SectionHeading
-        title="Ownership value"
+        title="Purchase & value"
         description="Purchase totals and current estimates are reported side by side, never added across currencies."
         actionLabel="Purchases"
         actionTo="/purchases"
       />
       {loading || !financial ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Skeleton className="h-44 rounded-2xl" />
-          <Skeleton className="h-44 rounded-2xl" />
-          <Skeleton className="h-44 rounded-2xl" />
-        </div>
-      ) : financial.item_count === 0 ? (
-        <div className="surface p-6 text-[0.82rem] text-muted-foreground">
-          Add items and purchase details to see ownership value here.
+        <Skeleton className="h-24 rounded-2xl" />
+      ) : !hasValues ? (
+        <div className="surface flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-[0.8rem] leading-relaxed text-muted-foreground">
+            <p className="font-medium text-foreground/85">No purchase or current values yet.</p>
+            <p className="mt-1">
+              {financial.items_missing_purchase_count > 0
+                ? `${financial.items_missing_purchase_count} items have missing or unresolved purchase information. Items marked not applicable are excluded.`
+                : "Purchase details and current estimates appear here when recorded."}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {financial.items_missing_purchase_count > 0 && (
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/items?purchase_info=missing">Review missing</Link>
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/purchases">Purchases</Link>
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-3">
-            {financial.currency_totals.length === 0 ? (
-              <div className="surface p-6 text-[0.82rem] leading-relaxed text-muted-foreground lg:col-span-2">
-                No purchase or current values recorded yet. Add them while editing an
-                item, or import a receipt through Documents.
-              </div>
-            ) : (
-              financial.currency_totals.slice(0, 2).map((entry) => (
-                <div key={entry.currency} className="surface p-5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                      {entry.currency}
-                    </p>
-                    <Badge variant="outline">{pluralize(entry.purchase_item_count, "priced item")}</Badge>
-                  </div>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                        Purchase
-                      </p>
-                      <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                        {formatCurrency(entry.purchase_total_cents, entry.currency, {
-                          compact: true,
-                        })}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                        Current estimate
-                      </p>
-                      <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                        {formatCurrency(entry.current_value_cents, entry.currency, {
-                          compact: true,
-                        })}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-4 text-[0.68rem] leading-relaxed text-muted-foreground">
-                    {entry.purchase_item_count} items with purchase data ·{" "}
-                    {entry.current_value_item_count} items with estimates. Values are not
-                    converted between currencies.
+            {financial.currency_totals.slice(0, 2).map((entry) => (
+              <div key={entry.currency} className="surface p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                    {entry.currency}
                   </p>
+                  <Badge variant="outline">
+                    {pluralize(entry.purchase_item_count, "priced item")}
+                  </Badge>
                 </div>
-              ))
-            )}
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+                      Purchase
+                    </p>
+                    <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
+                      {formatCurrency(entry.purchase_total_cents, entry.currency, {
+                        compact: true,
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+                      Current estimate
+                    </p>
+                    <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
+                      {formatCurrency(entry.current_value_cents, entry.currency, {
+                        compact: true,
+                      })}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-4 text-[0.68rem] leading-relaxed text-muted-foreground">
+                  {entry.purchase_item_count} items with purchase data ·{" "}
+                  {entry.current_value_item_count} items with estimates. Values are not
+                  converted between currencies.
+                </p>
+              </div>
+            ))}
             <div className="surface p-5">
               <div className="flex items-center gap-2">
                 <FileText className="size-4 text-muted-foreground" strokeWidth={1.7} />
@@ -437,35 +482,33 @@ function OwnershipSection({
                 {financial.items_missing_purchase_count}
               </p>
               <p className="mt-2 text-[0.72rem] leading-relaxed text-muted-foreground">
-                Items without both a purchase date and a price.{" "}
-                {financial.missing_purchase_items.length > 0
-                  ? "Start with the list below."
-                  : "Everything has a basic purchase record."}
+                Items without recorded purchase details and not marked not applicable.
+                Explicitly Unknown remains unresolved.
               </p>
-              {financial.missing_purchase_items.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {financial.missing_purchase_items.slice(0, 3).map((item) => (
-                    <Link key={item.id} to={`/items/${item.id}/edit`}>
-                      <Badge variant="secondary" className="hover:bg-secondary/70">
-                        {item.name}
-                      </Badge>
-                    </Link>
-                  ))}
-                </div>
-              )}
               <Button variant="outline" size="sm" className="mt-4" asChild>
-                <a href="/api/v1/exports/inventory.csv">
-                  <Download />
-                  Inventory CSV
-                </a>
+                <Link to="/items?purchase_info=missing">Review missing</Link>
               </Button>
+              <a
+                href="/api/v1/exports/inventory.csv"
+                className="mt-3 inline-flex items-center gap-1.5 text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                <Download className="size-3.5" />
+                Inventory CSV
+              </a>
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <BreakdownTable title="Value by category" rows={financial.value_by_category} />
-            <BreakdownTable title="Value by room" rows={financial.value_by_room} />
-          </div>
+          {(financial.value_by_category.length > 0 ||
+            financial.value_by_room.length > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {financial.value_by_category.length > 0 && (
+                <BreakdownTable title="Value by category" rows={financial.value_by_category} />
+              )}
+              {financial.value_by_room.length > 0 && (
+                <BreakdownTable title="Value by room" rows={financial.value_by_room} />
+              )}
+            </div>
+          )}
 
           {financial.most_valuable_items.length > 0 && (
             <div className="surface p-5">

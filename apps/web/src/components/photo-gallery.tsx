@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ImageOff, Plus, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageOff, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -7,7 +7,6 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CameraUpload } from "@/components/camera-upload";
 import { PhotoLightbox } from "@/components/photo-lightbox";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
@@ -126,15 +125,14 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
   const activeIsCover = Boolean(active && cover && active.id === cover.id);
   const atLimit = item.photos.length >= 20;
 
-  const onFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    if (files.length) upload.mutate(files);
-  };
-
   return (
     <section aria-label="Photographs">
-      <div className="group relative aspect-[4/3] overflow-hidden rounded-2xl border border-border/75 bg-secondary/50">
+      <div
+        className={cn(
+          "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
+          active ? "aspect-[4/3]" : "min-h-[180px]",
+        )}
+      >
         {active ? (
           <button
             type="button"
@@ -149,28 +147,19 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
             />
           </button>
         ) : (
-          <div className="image-placeholder flex size-full flex-col items-center justify-center px-6 text-center">
-            <span className="flex size-14 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/30 backdrop-blur-sm">
-              <ImageOff className="size-5" strokeWidth={1.5} />
+          <div className="image-placeholder flex min-h-[180px] flex-col items-center justify-center px-5 py-6 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/30 backdrop-blur-sm">
+              <ImageOff className="size-4" strokeWidth={1.5} />
             </span>
-            <p className="mt-4 font-display text-xl tracking-[-0.02em] text-foreground/70">
-              A photograph tells the story
+            <p className="mt-3 text-[0.82rem] font-medium text-foreground/75">
+              No photograph yet
             </p>
-            <p className="mt-1 max-w-xs text-[0.78rem] leading-relaxed text-muted-foreground">
-              Add one or more images so this item is easy to recognise at a glance.
+            <p className="mt-1 max-w-xs text-[0.72rem] leading-relaxed text-muted-foreground">
+              Take a photo or choose one so this item is easy to recognise.
             </p>
             {canWrite && (
-              <div className="mt-5 flex items-center gap-2">
-                <label
-                  htmlFor="photo-upload-empty"
-                className={cn(buttonVariants({ size: "sm" }), "cursor-pointer")}
-              >
-                <Plus />
-                Add photographs
-              </label>
+              <div className="mt-4">
                 <CameraUpload
-                  compact
-                  showLibrary={false}
                   label="Add item photograph"
                   busy={upload.isPending}
                   onUpload={async (file) => {
@@ -179,14 +168,6 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
                 />
               </div>
             )}
-            <input
-              id="photo-upload-empty"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-              multiple
-              className="sr-only"
-              onChange={onFilesSelected}
-            />
           </div>
         )}
 
@@ -287,37 +268,15 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
         ))}
 
         {canWrite && !atLimit && (
-          <>
-            <label
-              htmlFor="photo-upload"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "icon" }),
-                "shrink-0 cursor-pointer border-dashed text-muted-foreground hover:text-foreground",
-              )}
-              aria-label="Add photographs"
-            >
-              {upload.isPending ? <Spinner /> : <Plus />}
-            </label>
-            <CameraUpload
-              compact
-              showLibrary={false}
-              label="Add item photograph"
-              busy={upload.isPending}
-              onUpload={async (file) => {
-                await upload.mutateAsync([file]);
-              }}
-            />
-          </>
+          <CameraUpload
+            compact
+            label="Add item photograph"
+            busy={upload.isPending}
+            onUpload={async (file) => {
+              await upload.mutateAsync([file]);
+            }}
+          />
         )}
-        <input
-          id="photo-upload"
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-          multiple
-          className="sr-only"
-          disabled={upload.isPending || atLimit}
-          onChange={onFilesSelected}
-        />
       </div>
 
       <PhotoLightbox

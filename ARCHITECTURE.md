@@ -136,7 +136,7 @@ All application endpoints are versioned under `/api/v1`.
 | Labels | `GET /labels/templates`, `POST /labels/pdf`, `GET/POST /labels/calibration.pdf` |
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
-| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag filters, `include_descendants` and sorting |
+| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag/purchase-information filters, `include_descendants` and sorting |
 | Bulk organisation | `POST /items/bulk/move`, `POST /items/bulk/tags`, `POST /items/bulk/category`; bounded atomic batches with required request-id replay safety |
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
@@ -146,7 +146,7 @@ All application endpoints are versioned under `/api/v1`.
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
-| Search | `GET /search/quick` bounded item/container/location results; `POST /search/natural` remains the explicit AI/deterministic full-search flow |
+| Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/natural` is the explicit answer/filter flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}`, `POST /voice/{id}/interpret`, transcription retry, explicit confirm and cancel |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
@@ -262,6 +262,7 @@ document_scans >── documents (one committed document per scan)
 document_scan_pages >── document_scans (exact originals + cleaned derivatives)
 document_extraction_applies >── documents (request-id replay results)
 purchase_allocations >── purchases/items/documents (reviewed per-line amounts)
+items.purchase_info_status (nullable explicit Unknown / Not applicable override)
 jobs (PostgreSQL-backed queue)
 ```
 
@@ -329,7 +330,19 @@ Key decisions:
   separate. Manuals and warranty documents are not purchase evidence. Candidate
   matching is household-scoped, ranks exact serial/model/name/brand evidence first
   and exposes deterministic reasons plus current location/purchase context; there is
-  no fabricated percentage confidence. When the existing `documents` AI task is
+  no fabricated percentage confidence. Unified search/assistant share one
+  deterministic query layer: item whereabouts, loan state, counts, missing
+  purchase/date/price/serial/location/warranty, room/container contents, documents,
+  purchases, warranties and summaries are resolved by fixed household-scoped
+  tools. “Where is …?” answers report owned/on-loan/at-home quantities, borrower
+  names, optional recorded due dates and the usual home path; loaned units are
+  never asserted to be physically in that storage place. Explicit Unknown and Not
+  applicable purchase states are stored as an override on `items`, while
+  recorded/unrecorded is derived from real purchase details. Missing-information
+  counts and filters use the same helper, and Not applicable is excluded. The
+  `search`/`assistant` tasks may only refine interpretation or wording on explicit
+  submission; SQL is never generated or executed, candidate/label/context limits
+  are bounded, and provider consent is required. When the existing `documents` AI task is
   configured and consented, explicit actions can either (a) refine document fields
   and product/charge lines into a stored, separately versioned `extraction_refinements`
   proposal with exact OCR evidence validation, or (b) re-rank supplied candidate IDs
@@ -447,7 +460,8 @@ activity events. The document-scanning milestone adds append-only migration
 intelligent-extraction milestone adds append-only migration `f6b8d0e2a4c3` for
 document content hashes and idempotent extraction-apply records. The extraction gap
 fix adds append-only migration `a7c9e1f3b5d4` for persistent purchase allocations.
-No earlier migration or record is rewritten.
+Single-home polish adds append-only migration `e2f4a6c8b0d2` for the nullable
+explicit purchase-information status. No earlier migration or record is rewritten.
 
 The Phase 3 migration is append-only (`7c9a2e4f1b6d`). It backfills household
 ownership of existing purchases, moves one-to-one item purchase references to
@@ -583,8 +597,17 @@ deployment.
 - Import review preserves per-field provenance, source excerpts and vault context;
   missing locations can be created inline but only by explicit user action.
   Assistant answers render grounded references and cannot mutate data.
-- Smart search translates deterministic intent into safe filters and retains the
-  ordinary keyword mode as a fallback.
+- Unified search/assistant: typing performs bounded keyword matching; Enter submits
+  the query. Clear structured intents use deterministic fixed-tool answers with
+  item/loan/document references. Question-like quick results offer an explicit
+  assistant handoff. The dedicated Assistant keeps the conversation, shows
+  provider/privacy details in a secondary disclosure and passes the prior turns for
+  context. Filters and result counts remain server-derived and household-scoped.
+- Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
+  missing date/price with the same semantics as overview, search and assistant.
+- Sparse overviews collapse empty value/warranty sections while recent items, rooms
+  and outstanding loans lead. Active filter chips and empty category/tag filtering
+  keep bulk selection safe.
 - Container list/detail, bulk creation, explicit fixed-place conversion,
   cross-room move, deterministic/AI/manual summaries, QR dialog and label
   builder/preview/calibration use the same typed client and query invalidation
@@ -692,11 +715,12 @@ development and nginx proxies in production. No CORS allowlist is needed.
   document cards, warranty labels/status text, container dialogs and
   nested-container resolution. TypeScript is checked in strict mode; the
   production build is part of verification.
-- Browser: 16 checked-in Playwright workflows cover the Phase 5 container flows
+- Browser: 26 checked-in Playwright workflows cover the Phase 5 container flows
   plus mocked-Ollama provider configuration, camera upload, multi-object approval,
   the actual Inventory.md hierarchy import/duplicate prevention, PWA/deep-link
-  routing, quick search and the unified Add items chooser with contextual
-  destinations and import-history access.
+  routing, quick search, exact loan whereabouts, mobile keyword search without
+  inference, missing-purchase filter parity, assistant continuation and the unified
+  Add items chooser with contextual destinations and import-history access.
 - Docker Compose: health checks for PostgreSQL, API readiness, worker heartbeat
   and nginx; exercised locally, plus non-root/capability/port inspection.
 - Dependency scanning: `pip-audit` (production), `npm audit`, Trivy image scans.
@@ -747,7 +771,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   variables and are visible to the Docker host/root. Protect host access.
 - PostgreSQL connections inside the private Compose bridge are not TLS-encrypted.
 - Search uses household-scoped `ILIKE` matching, including ancestor room/place
-  names; PostgreSQL full-text/trigram search is a future optimization.
+  names; PostgreSQL full-text/trigram search is a future optimization. Unified
+  search is single-household, structured result lists are bounded, and live paid
+  provider search/assistant quality was not validated.
 - Photos cannot be drag-reordered and have no captions; a cover can be chosen.
 - Mixed currencies are reported per currency, not converted.
 - Offline mode caches only the app shell; inventory data requires the server.
