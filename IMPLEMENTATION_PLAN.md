@@ -2486,3 +2486,28 @@ backups and migrations that preserve server secrets/data and existing nginx.
 Keep future household/property boundaries explicit during earlier milestones,
 without exposing unfinished multi-home UI. No additional work is queued merely
 by adding it to this roadmap.
+
+### Post-roadmap delivery ledger — 2026-11-06
+
+Implemented and locally verified since the original roadmap:
+
+- photo-preview sizing and origin-aware place bulk management;
+- owner-managed encrypted Online search settings;
+- confirmed bulk AI task tests and a dedicated System status page;
+- on-demand Inventory review and persistent suggestion queue.
+
+Inventory review is deliberately rule-first. Supported automatic actions are
+category/name apply with stale checks, history and undo. Possible duplicates,
+missing purchase details and location wording remain advisory. Optional AI review
+uses only the existing consented Assistant task, requires a separate owner action
+and confirmation, and is limited to bounded category suggestions.
+
+Still separately queued and not implemented:
+
+- scheduled inventory reviews with explicit opt-in, scope/frequency/usage limits,
+  last/next run and suppression of repeated dismissed findings (scheduling remains
+  OFF by default);
+- physical duplicate merge/compare mutation machinery;
+- related-items/kit grouping;
+- server rollout. The server remains on its previously accepted commit and requires
+  a separate reviewed deployment.

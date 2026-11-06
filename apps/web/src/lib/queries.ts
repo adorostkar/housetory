@@ -43,7 +43,10 @@ import type {
   SearchItemList,
   SearchScopeList,
   OnlineSearchSettings,
+  ItemSummary,
   PlaceTransferPreview,
+  ReviewSummary,
+  ReviewSuggestionList,
   SessionState,
   SystemStatus,
   SystemStatusSummary,
@@ -94,6 +97,11 @@ export const queryKeys = {
     roomId: string,
     locationId: string,
   ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
+  reviewSummary: ["inventory-review", "summary"] as const,
+  reviewSuggestions: (filters: Record<string, string>) =>
+    ["inventory-review", "suggestions", filters] as const,
+  reviewScopeItems: (itemIds: string[]) =>
+    ["inventory-review", "scope-items", itemIds] as const,
   systemStatusSummary: ["system", "status-summary"] as const,
   systemStatus: ["system", "status"] as const,
   householdMembers: ["household", "members"] as const,
@@ -852,6 +860,61 @@ export function useOnlineSearchSettings(enabled = true) {
     queryFn: () => api.get<OnlineSearchSettings>("/settings/online-search"),
     enabled,
     staleTime: 10_000,
+  });
+}
+
+export function useReviewSummary(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reviewSummary,
+    queryFn: () => api.get<ReviewSummary>("/inventory-review/summary"),
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useReviewSuggestions(
+  filters: {
+    status?: string;
+    suggestion_type?: string;
+    q?: string;
+    limit?: number;
+  },
+  enabled = true,
+) {
+  const params = {
+    status: filters.status ?? "",
+    suggestion_type: filters.suggestion_type ?? "",
+    q: filters.q ?? "",
+    limit: String(filters.limit ?? 50),
+  };
+  return useQuery({
+    queryKey: queryKeys.reviewSuggestions(params),
+    queryFn: () =>
+      api.get<ReviewSuggestionList>(
+        `/inventory-review/suggestions${buildQuery({
+          status: filters.status || undefined,
+          suggestion_type: filters.suggestion_type || undefined,
+          q: filters.q || undefined,
+          limit: filters.limit ?? 50,
+        })}`,
+      ),
+    enabled,
+    staleTime: 5_000,
+  });
+}
+
+export function useReviewScopeItems(itemIds: string[], enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reviewScopeItems(itemIds),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      for (const itemId of itemIds) params.append("item_ids", itemId);
+      return api.get<{ items: ItemSummary[] }>(
+        `/inventory-review/scope-items?${params.toString()}`,
+      );
+    },
+    enabled: enabled && itemIds.length > 0,
+    staleTime: 30_000,
   });
 }
 

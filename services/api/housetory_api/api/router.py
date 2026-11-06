@@ -18,6 +18,7 @@ from .routes import (
     household,
     households,
     imports,
+    inventory_review,
     item_images,
     items,
     labels,
@@ -51,6 +52,7 @@ api_router.include_router(accounts.router)
 api_router.include_router(households.router)
 api_router.include_router(online_search.router, dependencies=write_guard)
 api_router.include_router(place_management.router, dependencies=write_guard)
+api_router.include_router(inventory_review.router, dependencies=write_guard)
 api_router.include_router(household.router, dependencies=write_guard)
 api_router.include_router(overview.router)
 api_router.include_router(ownership.router)

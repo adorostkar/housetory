@@ -53,6 +53,12 @@ ACTION_LABELS = {
     ActivityAction.PLACE_CONTENTS_MOVED_AND_DELETED.value: "Place emptied and deleted",
     ActivityAction.ROOM_CONTENTS_MOVED.value: "Room contents moved",
     ActivityAction.ROOM_CONTENTS_MOVED_AND_DELETED.value: "Room emptied and deleted",
+    ActivityAction.INVENTORY_REVIEW_COMPLETED.value: "Inventory review completed",
+    ActivityAction.INVENTORY_REVIEW_CATEGORY_APPLIED.value: "Review category applied",
+    ActivityAction.INVENTORY_REVIEW_NAME_APPLIED.value: "Review name applied",
+    ActivityAction.INVENTORY_REVIEW_DISMISSED.value: "Review suggestion dismissed",
+    ActivityAction.INVENTORY_REVIEW_CATEGORY_REVERTED.value: "Review category reverted",
+    ActivityAction.INVENTORY_REVIEW_NAME_REVERTED.value: "Review name reverted",
 }
 
 

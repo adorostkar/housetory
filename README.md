@@ -117,6 +117,16 @@ Tailscale is optional.
   excluded from evidence packages, photo recognition and physical stocktake
   evidence; no generated/reference detail changes item facts. See
   [`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md).
+- **On-demand inventory review**: one persistent `/review` destination for scoped,
+  rule-first inventory suggestions across the household, property, room, container
+  or selected items. Offline checks propose evidence-backed categories, conservative
+  naming consistency, advisory possible duplicates with comparison-only handling,
+  missing purchase details and description/location wording conflicts. Suggestions
+  persist, deduplicate unchanged findings, support applied category/name changes
+  with stale checks and real undo, and keep duplicates/missing details advisory.
+  Optional owner-triggered AI review reuses the existing consented Assistant task
+  with a bounded one-request data disclosure; no schedule, silent AI call or merge
+  is introduced. See [`docs/INVENTORY_REVIEW.md`](docs/INVENTORY_REVIEW.md).
 - **Stocktake / last verified here**: start a bounded check from a room or
   container, including descendants. The expected snapshot keeps owned, at-home
   and on-loan quantities separate; loaned units are never marked missing.

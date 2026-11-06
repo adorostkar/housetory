@@ -112,6 +112,11 @@ const ContainersPage = React.lazy(() =>
     default: module.ContainersPage,
   })),
 );
+const ReviewPage = React.lazy(() =>
+  import("@/pages/review-page").then((module) => ({
+    default: module.ReviewPage,
+  })),
+);
 const ContainerDetailPage = React.lazy(() =>
   import("@/pages/container-detail-page").then((module) => ({
     default: module.ContainerDetailPage,
@@ -293,6 +298,7 @@ export default function App() {
               <Route path="items/:itemId/edit" element={<ItemEditPage />} />
             </Route>
             <Route path="items/:itemId" element={<ItemDetailPage />} />
+            <Route path="review" element={<ReviewPage />} />
             <Route path="loans" element={<LoansPage />} />
             <Route path="loans/:loanId" element={<LoanDetailPage />} />
             <Route path="borrowed/:borrowedId" element={<BorrowedDetailPage />} />

@@ -243,6 +243,12 @@ class ActivityAction(StrEnum):
     PLACE_CONTENTS_MOVED_AND_DELETED = "place.contents_moved_and_deleted"
     ROOM_CONTENTS_MOVED = "room.contents_moved"
     ROOM_CONTENTS_MOVED_AND_DELETED = "room.contents_moved_and_deleted"
+    INVENTORY_REVIEW_COMPLETED = "inventory_review.completed"
+    INVENTORY_REVIEW_CATEGORY_APPLIED = "inventory_review.category_applied"
+    INVENTORY_REVIEW_NAME_APPLIED = "inventory_review.name_applied"
+    INVENTORY_REVIEW_DISMISSED = "inventory_review.dismissed"
+    INVENTORY_REVIEW_CATEGORY_REVERTED = "inventory_review.category_reverted"
+    INVENTORY_REVIEW_NAME_REVERTED = "inventory_review.name_reverted"
 
 
 class ImportEntityType(StrEnum):

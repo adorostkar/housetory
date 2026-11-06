@@ -1,4 +1,5 @@
 import {
+  ClipboardCheck,
   Download,
   FolderTree,
   ImagePlus,
@@ -7,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import * as React from "react";
+import { Link } from "react-router-dom";
 
 import {
   BulkCategoryDialog,
@@ -262,6 +264,16 @@ export function BulkItemActionBar({
           >
             <ImagePlus />
             Images
+          </Button>
+          <Button size="sm" variant="outline" asChild>
+            <Link
+              to={`/review?scope_type=items&item_ids=${items
+                .map((item) => item.id)
+                .join(",")}`}
+            >
+              <ClipboardCheck />
+              Review
+            </Link>
           </Button>
           <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)}>
             <Download />

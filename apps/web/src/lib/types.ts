@@ -1835,6 +1835,110 @@ export interface SystemExternalService {
   settings_path?: string | null;
 }
 
+export type ReviewScopeType =
+  | "items"
+  | "room"
+  | "container"
+  | "property"
+  | "household";
+export type ReviewSuggestionType =
+  | "category"
+  | "name"
+  | "possible_duplicate"
+  | "missing_detail"
+  | "location_conflict";
+export type ReviewSuggestionStatus =
+  | "pending"
+  | "accepted"
+  | "dismissed"
+  | "stale"
+  | "reverted";
+export type ReviewActionKind = "apply_category" | "apply_name" | "advisory";
+
+export interface ReviewRun {
+  id: UUID;
+  request_id: UUID;
+  scope_type: ReviewScopeType;
+  scope_id: UUID | null;
+  scope_label: string;
+  include_ai: boolean;
+  status: "completed" | "partial" | "failed";
+  total_item_count: number;
+  item_count_scanned: number;
+  created_suggestion_count: number;
+  existing_suggestion_count: number;
+  stale_suggestion_count: number;
+  suppressed_suggestion_count: number;
+  ai_used: boolean;
+  ai_provider_label: string | null;
+  ai_model: string | null;
+  ai_error: string | null;
+  partial_reason: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ReviewSuggestion {
+  id: UUID;
+  run_id: UUID | null;
+  type: ReviewSuggestionType;
+  action_kind: ReviewActionKind;
+  status: ReviewSuggestionStatus;
+  source: string;
+  priority: number;
+  title: string;
+  explanation: string;
+  scope_type: ReviewScopeType;
+  scope_id: UUID | null;
+  item_id: UUID | null;
+  secondary_item_id: UUID | null;
+  category_id: UUID | null;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  fingerprint: string;
+  created_at: string;
+  updated_at: string;
+  accepted_at: string | null;
+  applied_at: string | null;
+  dismissed_at: string | null;
+  reverted_at: string | null;
+  can_undo: boolean;
+  undo_blocked_reason: string | null;
+  item: ItemSummary | null;
+  secondary_item: ItemSummary | null;
+}
+
+export interface ReviewSuggestionList {
+  items: ReviewSuggestion[];
+  total: number;
+  pending_count: number;
+  status_counts: Record<string, number>;
+  type_counts: Record<string, number>;
+}
+
+export interface ReviewSummary {
+  pending_count: number;
+  status_counts: Record<string, number>;
+  type_counts: Record<string, number>;
+  last_run: ReviewRun | null;
+}
+
+export interface ReviewDecision {
+  suggestion_id: UUID;
+  status: "applied" | "stale" | "skipped" | "unsupported";
+  message: string;
+  suggestion: ReviewSuggestion | null;
+}
+
+export interface ReviewBulkAcceptResult {
+  applied_count: number;
+  skipped_count: number;
+  stale_count: number;
+  unsupported_count: number;
+  results: ReviewDecision[];
+}
+
 export interface SystemStatusIssue {
   kind: "core" | "configured_feature";
   label: string;

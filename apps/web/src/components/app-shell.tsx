@@ -1,5 +1,6 @@
 import {
   Boxes,
+  ClipboardCheck,
   DoorOpen,
   FileText,
   HandCoins,
@@ -28,6 +29,7 @@ const primaryNav = [
   { to: "/", label: "Overview", icon: House, end: true },
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
+  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
   { to: "/loans", label: "Loans", icon: HandCoins, end: false },
   { to: "/documents", label: "Documents", icon: FileText, end: false },
   { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
@@ -40,6 +42,7 @@ const mobileNav = [
   { to: "/", label: "Home", icon: House, end: true },
   { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
+  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
   { to: "/loans", label: "Loans", icon: HandCoins, end: false },
   { to: "/documents", label: "Docs", icon: FileText, end: false },
   { to: "/containers", label: "Boxes", icon: Boxes, end: false },
