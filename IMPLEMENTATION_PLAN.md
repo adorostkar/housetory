@@ -1752,7 +1752,7 @@ rules are in `docs/ITEM_IMAGES.md`.
   relaxation applies; manuals/model-specific instructions retain the full model
   gate.
 - [x] Explicit Find image and the default-off new-item setting automatically
-  select and display a suitable lawful candidate without a candidate-approval
+  select and display a suitable permitted candidate without a candidate-approval
   dialog. No candidate falls back to the built-in/category illustration. Source
   page/retrieval/provenance is stored; reuse/licensing is not assumed or verified.
 - [x] Added safe image download: public DNS/pinned address, redirect/byte/time
@@ -1788,14 +1788,14 @@ rules are in `docs/ITEM_IMAGES.md`.
   acceptance. Disposable Playwright covers built-in → mocked automatic reference →
   actual-photo priority, manual AI preview/accept, no-provider states, settings and
   batch cancellation with screenshots.
-- [x] 326 PostgreSQL backend tests, 143 Vitest tests and 44 disposable-stack
+- [x] 333 PostgreSQL backend tests, 143 Vitest tests and 44 disposable-stack
   Playwright workflows pass. Ruff, strict TypeScript typecheck, production build
   and Alembic drift checks pass. Item-image screenshots are under
   `docs/walkthrough/item-images/`.
 - [x] Backed up all local persistent volumes (database, uploads, imports and the
   separate evidence exports volume) to `backups/housetory-20261106T031456Z` with
-  valid checksums, applied append-only migration `a8c0e2f4b6d8`, and rebuilt the
-  local Compose stack.
+  valid checksums, applied append-only migrations `a8c0e2f4b6d8` and
+  `b2d4f6a8c0e1`, and rebuilt the local Compose stack.
 - [x] Verified existing data/settings: 1 household, 1 property, 8 rooms, 10
   storage locations, 51 items, 1 user, 1 membership, 1 loan, 0 evidence exports,
   0 actual item photos and 0 item-image rows; unchanged room/item ID and item
@@ -1810,6 +1810,33 @@ rules are in `docs/ITEM_IMAGES.md`.
   remote deployment, email, credential changes or arbitrary Docker cleanup were
   performed. Real external provider image quality/availability remains for live
   validation.
+
+### Review correction — matching and permitted-source policy
+
+- [x] Replaced the structured-brand-only matcher with a bounded, query-only
+  product profile. A name-only brand such as `LG TV` and a description such as
+  `OLED77inch` can select a compatible representative image without writing the
+  inferred brand, size, technology, variant or model back to item records.
+- [x] Added screen-size, display-family and explicit-variant conflict rejection,
+  unknown-attribute representative handling, safe vague/brandless fallback and
+  whole-token exact-model matching (for example `A1` does not match `A10` or
+  `A1X`). Exact labels still require the structured model and matching variant
+  set; manual/model-specific instruction gates are unchanged.
+- [x] Manufacturer preference now requires a verified official registrable domain.
+  Arbitrary or deceptive brand-bearing hosts (`lg.com.evil.example`,
+  `lg-deals.example`) are not manufacturer provenance and are rejected.
+- [x] Automatic reference downloads are now default-deny. Operators must set
+  `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` or supply explicit provider license
+  evidence accepted by `ITEM_IMAGE_PERMITTED_LICENSES`. Unknown reuse rights
+  return `no_permitted_image_candidate` with built-in fallback; no permission is
+  inferred from manufacturer hosting or brand text, and notes explicitly avoid a
+  legal/permission guarantee.
+- [x] Added permission/license provenance columns (`license_name`, `license_url`,
+  `permission_basis`), detailed source-policy documentation, backend regressions
+  for the reviewed scenarios, and a UI license/provenance line. Relevant suites,
+  typecheck, build and Alembic drift checks pass; migration `b2d4f6a8c0e1` and
+  backup `backups/housetory-20261106T041557Z` were applied locally without
+  mutating the real household.
 
 ## Agreed product roadmap — updated 2026-11-05
 

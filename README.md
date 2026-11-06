@@ -91,9 +91,14 @@ Tailscale is optional.
   priority, followed by labelled reference images, accepted AI illustrations,
   built-in line art and category icons. A small offline built-in library covers
   common item types. Optional Brave Image Search automatically selects a
-  suitable manufacturer-hosted reference without a candidate-approval dialog,
-  records source/provenance and honestly labels representative images as “exact
-  model not confirmed.” Optional OpenAI Images task generation is manual
+  compatible permitted-source reference without a candidate-approval dialog,
+  using conservative query-only brand/type/size/technology inference when the
+  structured brand is blank, whole-token exact-model matching and verified
+  manufacturer registrable domains. It records source/provenance and honestly
+  labels representative images as “exact model not confirmed.” Automatic
+  downloads are default-deny until an operator sets
+  `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` or provider license evidence. Optional
+  OpenAI Images task generation is manual
   preview/accept/reject by default, with a separate default-off new-item setting,
   hard daily count caps and an explicit batch action. Non-photographic imagery is
   excluded from evidence packages, photo recognition and physical stocktake
@@ -241,7 +246,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 326 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 333 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -288,8 +293,11 @@ stack, not just unit mocks:
   context, revoked-membership fallback, all-places search counts/paths/loans,
   cross-household ambiguity/property isolation and per-household AI provider
   selection, item-image built-ins/reference ranking/actual-photo priority,
-  evidence exclusion, AI preview/accept/reject, caps/batch cancellation and the
-  OpenAI Images adapter contract with fixture responses.
+  query-only attribute inference, size/technology/variant conflicts, exact-model
+  token boundaries, manufacturer/deceptive-host provenance, default-deny source
+  permission and license evidence, evidence exclusion, AI preview/accept/reject,
+  caps/batch cancellation and the OpenAI Images adapter contract with fixture
+  responses.
 - 143 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 44 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
@@ -569,6 +577,11 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
+| `ITEM_IMAGE_SEARCH_PROVIDER` | `auto` | `auto`, `brave` or `none` for automatic reference-image lookup |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Default-deny registrable domains permitted for automatic reference downloads; empty keeps built-in fallback |
+| `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider license identifiers accepted as explicit download evidence |
+| `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` manufacturer provenance additions/overrides |
+| `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for query-only matching |
 | `EVIDENCE_EXPORT_MAX_ITEMS` | `300` | Maximum items in one evidence package |
 | `EVIDENCE_EXPORT_MAX_DOCUMENTS` | `300` | Maximum candidate evidence documents |
 | `EVIDENCE_EXPORT_MAX_PHOTOS` | `500` | Maximum selected photos |

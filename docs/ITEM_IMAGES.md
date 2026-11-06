@@ -47,7 +47,11 @@ timeout settings. No custom gateway is required for images. Manual document
 search remains a separate feature.
 
 `ITEM_IMAGE_SEARCH_PROVIDER` can be `auto`, `brave` or `none`; `auto` uses the
-Brave key when present.
+Brave key when present. Parsing uses the documented Brave Image Search response
+fields (`results[].title`, `url`, `source`, `thumbnail.src`,
+`properties.url/width/height`). The current response has no documented license
+field, so Housetory does not invent one; provider license evidence is only used
+when an adapter actually supplies it.
 
 ### Automatic selection, not candidate approval
 
@@ -56,36 +60,72 @@ An explicit **Find image** action, or the household's opt-in
 and selects a suitable image automatically. The user does not approve a
 candidate list in the normal flow.
 
-Ranking is deterministic and conservative:
+Selection is deterministic and conservative:
 
 - only results with a recorded public page/image URL are considered;
 - well-known stock/watermark domains are rejected;
-- the known brand must appear in the title, source domain, page host or image
-  host;
-- obvious conflicting product types are rejected;
-- manufacturer-hosted pages/images are preferred;
-- exact-model confirmation is set only when the known model identifier is
-  present in the candidate evidence;
+- brand and type can come from structured item fields or, when the structured
+  brand is blank, from a bounded local lexicon plus the item name/description;
+  this inference is query-only and is never written back to the item;
+- screen size, display family (OLED vs LCD/LED/QLED), explicit variants and
+  structured model identifiers are compared as product evidence;
+- mutually contradictory known attributes are rejected; unknown candidate
+  attributes are allowed only as an explicitly representative image;
+- manufacturer provenance is verified against a registrable official-domain
+  registry, not by finding brand letters anywhere in a hostname;
+- exact-model confirmation requires whole model tokens and the same known
+  variant set. `A1` never matches `A10` or `A1X`; a guessed model is never
+  stored or labelled as exact;
 - otherwise a representative image may be accepted but is labelled
   **“exact model not confirmed”**.
 
-The user specifically approved relaxing the full-model gate for images. A
-description such as “LG TV” plus “OLED, 77-inch” can be enough for a
-representative image. **Manual and model-specific instructions still require the
-complete confirmed manufacturer/model gate**; that relaxation applies only to
-images.
+The user specifically approved relaxing the full-model gate for images. A name
+such as “LG TV” plus a description such as “OLED77inch” is enough to build a
+query-only profile and select a compatible representative image even when the
+structured brand field is blank. **Manual and model-specific instructions still
+require the complete confirmed manufacturer/model gate**; that relaxation
+applies only to images.
 
-If no suitable candidate is found, the built-in/category fallback remains. A
-search hit is never treated as proof of licensing. The current automated policy
-is deliberately conservative: only manufacturer-hosted candidates are eligible
-for download, and the source page, retrieval time, model-confirmation state and a
-“reuse rights not independently verified” note are stored. Hotlink restrictions,
-watermarks and paywalls are not bypassed; the app does not remove watermarks.
+### Manufacturer provenance
 
+An official manufacturer is recognised only when the page host is the brand's
+verified registrable domain (for example `lg.com` or `media.lg.com` for `lg`).
+Brand text in an arbitrary hostname is not manufacturer provenance. Deceptive
+hosts such as `lg.com.evil.example` or `lg-deals.example` are rejected. A
+retailer candidate can still rank, but is marked non-manufacturer and must pass
+the source-permission policy. Administrators can add or override
+`brand=domain|domain` entries with `ITEM_IMAGE_MANUFACTURER_DOMAINS`.
+
+### Source permission policy
+
+A search hit is not permission to download or reuse an image. Automatic local
+saves are **default deny**:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Comma-separated registrable source domains whose terms the operator has reviewed and permits for automatic reference downloads. Subdomains are included. Empty disables automatic downloads and keeps built-in illustrations. |
+| `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence. The current documented Brave Image Search response does not include license metadata, so a domain policy is normally required. |
+| `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` additions or overrides for provenance checks. |
+| `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for conservative query-only inference. |
+
+Before a candidate can be downloaded, its source page and asset host must match a
+permitted domain, or it must carry explicit provider license metadata with an
+allowed license identifier and evidence URL. If a compatible image has unknown
+reuse rights, the app returns a `no_permitted_image_candidate` state and shows
+the built-in/category fallback; it does not invent a license note or silently
+download. The stored note records the policy basis or provider license plus the
+evidence URL and says explicitly that this is not a legal determination or
+permission guarantee. Housetory does not provide legal advice, does not claim
+vendor terms are satisfied, and does not bypass hotlink restrictions, watermarks
+or paywalls.
+
+If no suitable candidate is found, the built-in/category fallback remains.
 The result is downloaded through the same public-DNS/private-address/redirect/
 byte/time limits as manual retrieval, then decoded and re-encoded into a private
 derivative. Original EXIF/metadata is not copied into the derivative. Source URLs
-are kept only as provenance.
+are kept only as provenance. Redirected asset URLs are rechecked against the
+same permitted-domain policy as the original asset; a thumbnail from an
+unpermitted host is never downloaded as a fallback.
 
 ### Reuse and deduplication
 
@@ -192,14 +232,17 @@ state, purchase data and room/container placement are unchanged.
   (`pending`, `active`, `superseded`, `rejected`);
 - private storage keys, dimensions, MIME type and size;
 - illustration key for built-ins;
-- source URL/page/publisher, license note, retrieval time;
+- source URL/page/publisher, retrieval time;
+- permission basis (`configured_source_policy` or `provider_license`), provider
+  license name/URL when supplied, and an honest policy/license note;
 - exact-model confirmation, model label, search fingerprint and generation
   prompt/error.
 
 A partial unique index ensures only one active non-photo image per item. The
-append-only migration also adds the three household image settings and a durable
-job result JSON field. It does not create image rows for existing items, change
-item/photo IDs, or alter existing provider/task choices.
+append-only migrations add the three household image settings, a durable job
+result JSON field, and the permission/license provenance columns. They do not
+create image rows for existing items, change item/photo IDs, or alter existing
+provider/task choices.
 
 ## API summary
 
@@ -219,9 +262,13 @@ item/photo IDs, or alter existing provider/task choices.
 ## Verification and limits
 
 Backend tests cover built-in selection, override/remove, actual-photo priority,
-Brave image response parsing/ranking, brand/type conflict rejection, stock-host
-rejection, exact vs representative labels, source/license provenance, lookup
-reuse, evidence exclusion, AI preview/accept/reject, hard caps, batch
+Brave image response parsing/ranking, name-only brand and description-attribute
+inference without persisted item facts, screen-size/technology/variant conflict
+rejection, vague/brandless fallback, unknown-attribute representative labels,
+exact-model token boundaries (`A1` vs `A10`/`A1X`), manufacturer registrable-domain
+provenance, deceptive brand hosts, stock-host rejection, configured permitted
+source policy vs unknown rights, provider license evidence, lookup reuse,
+evidence exclusion, AI preview/accept/reject, hard caps, batch
 preview/dedupe/cancel, permission/IDOR and the OpenAI Images adapter contract.
 They use fixture responses and never make live search/generation calls.
 
@@ -232,13 +279,15 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **326 PostgreSQL backend tests**, **143 Vitest tests**
+Final local verification: **333 PostgreSQL backend tests**, **143 Vitest tests**
 and **44 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
 typecheck, production build and Alembic drift checks pass. Backup
-`backups/housetory-20261106T031456Z` includes the database, uploads, imports and
-exports volume; migration `a8c0e2f4b6d8` preserved the existing 51 items, 1 loan,
-1 household/property, IDs, files and existing AI task choices. The real household
-has no item-image rows and both automation settings remain off by default.
+`backups/housetory-20261106T041557Z` includes the database, uploads, imports and
+exports volume; migrations `a8c0e2f4b6d8` and `b2d4f6a8c0e1` preserved the
+existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task
+choices. The real household has no item-image rows and both automation settings
+remain off by default. No permitted source domain is configured, so automatic
+downloads remain disabled until the operator reviews and sets a policy.
 
 Remaining live validation (not performed here): a real Brave Image Search
 subscription/key and a real OpenAI Images key/model with consent and billing.
