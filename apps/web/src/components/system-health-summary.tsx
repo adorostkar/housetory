@@ -150,6 +150,13 @@ export function SystemHealthSummary({ isOwner }: { isOwner: boolean }) {
                   and {data.issues.length - 3} more in System status.
                 </p>
               ) : null}
+              {data.optional_not_configured.length > 0 ? (
+                <p className="mt-1">
+                  Optional, not configured:{" "}
+                  {data.optional_not_configured.join(", ")}. These are not core
+                  outages.
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

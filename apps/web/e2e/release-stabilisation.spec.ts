@@ -149,7 +149,7 @@ test("status screen shows real readiness and task states; optional features are 
   ).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/settings");
+  await page.goto("/settings/system-status");
   await status.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await page.screenshot({

@@ -86,6 +86,10 @@ API keys, job payloads, prompts, borrower notes or inventory details. A catalog
 listing is not a successful inference test; only an explicit task test marks a task
 live-tested.
 
+The compact Settings summary and dedicated detailed page are captured in
+[`01-settings-summary-light.png`](walkthrough/system-status-page/01-settings-summary-light.png)
+and [`02-detailed-status-light.png`](walkthrough/system-status-page/02-detailed-status-light.png).
+
 Walkthrough screenshots of the separate passive and live actions:
 [`01-status-actions.png`](walkthrough/test-all-ai-tasks/01-status-actions.png),
 [`02-confirmation.png`](walkthrough/test-all-ai-tasks/02-confirmation.png),
