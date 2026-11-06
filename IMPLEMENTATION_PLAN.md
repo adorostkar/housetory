@@ -2301,10 +2301,10 @@ branch. Main was not merged or pushed and no server release was performed.
   return/correction/cancel/history/replay/concurrency, role/IDOR/stale context,
   private photos, owned-vs-borrowed reports/search/evidence/stocktake and the
   existing lending/search regressions. Ruff and Alembic drift checks pass.
-- [x] **157** Vitest tests pass; strict TypeScript typecheck and production build
+- [x] **160** Vitest tests pass; strict TypeScript typecheck and production build
   pass. New tests cover mixed direction badges/filters, borrowed create/return
-  dialogs, exact owned/borrowed search counts, quick-search grouping and viewer
-  restrictions.
+  dialogs, exact owned/borrowed search counts, quick-search grouping, viewer
+  restrictions and historical location wording after return/cancellation.
 - [x] **51** normal Playwright workflows pass on a clean disposable stack, including
   borrowed create → partial return → refresh → private photo → remaining return →
   returned filter, mixed filters/direct actions, mobile and viewer behavior.

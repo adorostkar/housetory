@@ -24,6 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { queryKeys, useBorrowedRecord, useCanWrite } from "@/lib/queries";
+import {
+  borrowedLocationHeading,
+  borrowedPlaceLabel,
+  borrowedWhereLabel,
+} from "@/lib/borrowed";
 import { formatDate } from "@/lib/utils";
 
 export function BorrowedDetailPage() {
@@ -55,10 +60,7 @@ export function BorrowedDetailPage() {
   const record = recordQuery.data;
   const open =
     record.status === "outstanding" || record.status === "partially_returned";
-  const place =
-    [record.property_name, record.room_name, record.storage_location_name]
-      .filter(Boolean)
-      .join(" / ") || "Keeping place not recorded";
+  const place = borrowedPlaceLabel(record);
   const canCancel = canWrite && open && record.returned_quantity === 0;
 
   return (
@@ -66,7 +68,7 @@ export function BorrowedDetailPage() {
       <PageHeader
         eyebrow="Loans · Borrowed"
         title={record.item_name}
-        description={`Belongs to ${record.owner_name} · kept at ${place}`}
+        description={`Belongs to ${record.owner_name} · ${borrowedWhereLabel(record)}`}
         backTo="/loans"
         backLabel="All loans"
         actions={
@@ -136,7 +138,7 @@ export function BorrowedDetailPage() {
               <Detail icon={CalendarDays} label="Due back">
                 {record.due_on ? formatDate(record.due_on) : "No due date"}
               </Detail>
-              <Detail icon={MapPin} label="Kept at">
+              <Detail icon={MapPin} label={borrowedLocationHeading(record)}>
                 {place}
               </Detail>
               <Detail icon={CalendarDays} label="Last return">

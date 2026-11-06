@@ -325,7 +325,7 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 157 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 160 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 51 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and

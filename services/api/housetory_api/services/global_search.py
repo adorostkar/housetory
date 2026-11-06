@@ -247,7 +247,10 @@ def _borrowed_context(record) -> str | None:  # noqa: ANN001
             else record.storage_location_identifier or record.storage_location_name
         ),
     ]
-    labels = [part for part in parts if part]
+    place = " / ".join(part for part in parts if part) or None
+    labels = []
+    if place:
+        labels.append(f"{borrowed_service.location_prefix(record)} {place}")
     if record.due_on is not None:
         labels.append(f"due {record.due_on.isoformat()}")
     return " · ".join(labels) if labels else None

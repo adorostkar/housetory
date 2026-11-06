@@ -25,6 +25,10 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useSession } from "@/lib/queries";
 import type { AssistantResponse } from "@/lib/types";
+import {
+  borrowedLocationPrefix,
+  borrowedPlaceLabel,
+} from "@/lib/borrowed";
 import { itemContainer, locationLabel } from "@/lib/utils";
 
 const SUGGESTIONS = [
@@ -372,10 +376,7 @@ function AssistantAnswer({
       {response && response.borrowed.length > 0 && (
         <div className="mt-4 space-y-2" aria-label="Borrowed records">
           {response.borrowed.slice(0, 8).map((record) => {
-            const place =
-              [record.property_name, record.room_name, record.storage_location_name]
-                .filter(Boolean)
-                .join(" / ") || "No keeping place recorded";
+            const place = borrowedPlaceLabel(record);
             return (
               <Link
                 key={record.id}
@@ -391,7 +392,8 @@ function AssistantAnswer({
                     </Badge>
                   </span>
                   <span className="block truncate text-[0.66rem] text-muted-foreground">
-                    Belongs to {record.owner_name} · kept at {place} ·{" "}
+                    Belongs to {record.owner_name} ·{" "}
+                    {borrowedLocationPrefix(record)} {place} ·{" "}
                     {record.outstanding_quantity} outstanding
                     {record.due_on ? ` · due ${record.due_on}` : ""}
                   </span>

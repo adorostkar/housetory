@@ -740,6 +740,26 @@ def create_record(
     return record_detail(db, household_id, record.id, on_date=on_date)
 
 
+def has_held_stock(record) -> bool:  # noqa: ANN001
+    if getattr(record, "status", "") not in OPEN_STATUSES:
+        return False
+    held = getattr(record, "physically_held_quantity", None)
+    if held is None:
+        held = max(
+            0,
+            int(getattr(record, "quantity", 0)) - int(getattr(record, "returned_quantity", 0)),
+        )
+    return int(held) > 0
+
+
+def location_prefix(record) -> str:  # noqa: ANN001
+    if has_held_stock(record):
+        return "kept at"
+    if getattr(record, "status", "") == LoanStatus.RETURNED.value:
+        return "previously kept at"
+    return "last recorded location"
+
+
 def _place_label(record: BorrowedRecord) -> str | None:
     parts = [
         record.property_name_snapshot,
@@ -1193,6 +1213,8 @@ __all__ = [
     "create_return",
     "find_owned_items_matching",
     "get_photo",
+    "has_held_stock",
+    "location_prefix",
     "get_record",
     "history_for_record",
     "list_records",

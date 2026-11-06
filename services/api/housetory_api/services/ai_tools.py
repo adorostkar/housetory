@@ -123,9 +123,15 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
 
 def _borrowed_reference(record: BorrowedOut) -> AssistantReference:
     place = _borrowed_place(record)
-    subtitle = f"{record.outstanding_quantity} held"
+    subtitle = (
+        f"{record.physically_held_quantity} held"
+        if borrowed_service.has_held_stock(record)
+        else "returned"
+        if record.status == "returned"
+        else "cancelled"
+    )
     if place:
-        subtitle += f" · kept at {place}"
+        subtitle += f" · {borrowed_service.location_prefix(record)} {place}"
     if record.due_on:
         subtitle += f" · due {_human_date(record.due_on)}"
     return AssistantReference(
@@ -158,7 +164,8 @@ def _borrowed_label(record: BorrowedOut) -> str:
     due = f", due {_human_date(record.due_on)}" if record.due_on else ""
     return (
         f"{record.item_name} — belongs to {record.owner_name}, "
-        f"kept at {place or 'no place recorded'}{due} · "
+        f"{borrowed_service.location_prefix(record)} "
+        f"{place or 'no place recorded'}{due} · "
         f"{record.outstanding_quantity} outstanding"
     )
 

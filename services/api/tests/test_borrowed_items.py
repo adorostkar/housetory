@@ -224,6 +224,21 @@ def test_borrowed_record_is_not_owned_stock_and_partial_returns_are_append_only(
     assert [event["action"] for event in history].count("borrowed.created") == 1
     assert [event["action"] for event in history].count("borrowed.returned") == 2
 
+    # A fully returned record keeps a historical location, not a phantom current
+    # physical whereabouts, in search and deterministic assistant output.
+    returned_quick = owner_client.get("/api/v1/search/quick", params={"q": "Borrowed drill"}).json()
+    returned_result = next(
+        result for result in returned_quick["results"] if result["kind"] == "borrowed"
+    )
+    assert "previously kept at" in (returned_result["context"] or "")
+    assert "kept at" not in (returned_result["context"] or "").replace("previously kept at", "")
+    returned_owner = owner_client.post(
+        "/api/v1/assistant/query", json={"question": "Who owns the Borrowed drill?"}
+    ).json()
+    assert returned_owner["tool"] == "find_borrowed_owner"
+    assert "previously kept at" in returned_owner["answer"]
+    assert " · kept at " not in returned_owner["answer"]
+
     # Owned records and reports still contain only the owned item.
     assert owner_client.get("/api/v1/items").json()["total"] == 1
     assert owner_client.get("/api/v1/overview").json()["total_quantity"] == 2

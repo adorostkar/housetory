@@ -49,6 +49,13 @@ insurance totals, evidence packages or owned stocktake quantities.
 
 ## Keeping location
 
+Location wording follows physical held stock. While any borrowed quantity is
+outstanding the UI says **Kept at** / "kept at". After full return it says
+**Previously kept at** / "previously kept at"; cancelled or otherwise no-held
+records say **Last recorded location** / "last recorded location". The same rule is
+used in the detail page, mixed Loans rows, search results and deterministic
+assistant labels, so a returned record never implies a current physical whereabouts.
+
 Household-owned room/container/property ids are validated against the current
 household on every create/correct/filter request. Cross-household ids are rejected
 with `404`, and mismatches between property, room and container are rejected with

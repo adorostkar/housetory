@@ -32,6 +32,10 @@ import { useSearchScope } from "@/hooks/use-search-scope";
 import { useAllPlacesItems, useQuickSearch } from "@/lib/queries";
 import { withHousehold } from "@/lib/household-links";
 import { looksLikeQuestion } from "@/lib/search";
+import {
+  borrowedLocationPrefix,
+  borrowedPlaceLabel,
+} from "@/lib/borrowed";
 import { formatDate, pluralize } from "@/lib/utils";
 
 export function SearchPage() {
@@ -624,10 +628,7 @@ function contextualFilterLink(answer: NaturalSearchResponse): string | null {
 }
 
 function BorrowedSearchResult({ record }: { record: BorrowedRecord }) {
-  const place =
-    [record.property_name, record.room_name, record.storage_location_name]
-      .filter(Boolean)
-      .join(" / ") || "keeping place not recorded";
+  const place = borrowedPlaceLabel(record);
   return (
     <Link
       to={`/borrowed/${record.id}`}
@@ -645,7 +646,7 @@ function BorrowedSearchResult({ record }: { record: BorrowedRecord }) {
           )}
         </span>
         <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
-          belongs to {record.owner_name} · kept at {place} ·{" "}
+          belongs to {record.owner_name} · {borrowedLocationPrefix(record)} {place} ·{" "}
           {record.outstanding_quantity} outstanding
         </span>
       </span>

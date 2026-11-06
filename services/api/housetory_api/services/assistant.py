@@ -411,7 +411,8 @@ def _deterministic_answer(result: ToolResult) -> str:
         place_parts = [part for part in (place, location) if part]
         due = f", due {_human_date(record.due_on)}" if record.due_on else ""
         lines.append(
-            f"• {record.item_name} — belongs to {record.owner_name}, kept at "
+            f"• {record.item_name} — belongs to {record.owner_name}, "
+            f"{borrowed_service.location_prefix(record)} "
             f"{' / '.join(place_parts) or 'no place recorded'}{due} · "
             f"{record.outstanding_quantity} outstanding"
         )

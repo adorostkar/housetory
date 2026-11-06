@@ -316,6 +316,8 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
   await expect(
     page.getByRole("heading", { name: `0 of 3 held from ${owner}` }),
   ).toBeVisible();
+  await expect(page.getByText("Previously kept at", { exact: true })).toBeVisible();
+  await expect(page.getByText("Kept at", { exact: true })).toHaveCount(0);
 
   await page.goto("/loans");
   await page
@@ -331,6 +333,7 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
     .filter({ hasText: owner });
   await expect(returnedRow).toBeVisible();
   await expect(returnedRow).toContainText("3 returned to owner");
+  await expect(returnedRow).toContainText("previously kept at");
 });
 
 test("viewers can read borrowed records but cannot mutate them", async ({

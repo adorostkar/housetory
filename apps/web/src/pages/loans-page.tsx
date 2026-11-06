@@ -31,6 +31,7 @@ import type {
   Loan,
   LoanFilterStatus,
 } from "@/lib/types";
+import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
 import { cn, formatDate, pluralize } from "@/lib/utils";
 
 const FILTERS: Array<{ value: LoanFilterStatus; label: string }> = [
@@ -570,10 +571,7 @@ export function BorrowedRow({
   canWrite: boolean;
   onReturn: (record: BorrowedRecord) => void;
 }) {
-  const place =
-    [record.property_name, record.room_name, record.storage_location_name]
-      .filter(Boolean)
-      .join(" / ") || "Keeping place not recorded";
+  const place = borrowedPlaceLabel(record);
   const open =
     record.status === "outstanding" || record.status === "partially_returned";
   return (
@@ -603,7 +601,10 @@ export function BorrowedRow({
               · {[record.brand, record.model].filter(Boolean).join(" ")}
             </span>
           ) : null}
-          <span className="text-muted-foreground"> · kept at {place}</span>
+          <span className="text-muted-foreground">
+            {" "}
+            · {borrowedLocationPrefix(record)} {place}
+          </span>
         </p>
         <p className="mt-1 text-[0.67rem] text-muted-foreground">
           Borrowed {formatDate(record.borrowed_on)}
