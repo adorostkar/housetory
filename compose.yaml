@@ -241,7 +241,9 @@ services:
       STOCKTAKE_MAX_NOTES_CHARS: ${STOCKTAKE_MAX_NOTES_CHARS:-2000}
       STOCKTAKE_MAX_OBSERVATIONS_PER_SESSION: ${STOCKTAKE_MAX_OBSERVATIONS_PER_SESSION:-2000}
     volumes:
-      - housetory_uploads:/data/uploads:ro
+      # Writable only for legitimate item-image maintenance/generation. The
+      # worker still has a read-only root filesystem and no added capabilities.
+      - housetory_uploads:/data/uploads
       - housetory_imports:/data/imports
       - housetory_exports:/data/exports
     extra_hosts:
