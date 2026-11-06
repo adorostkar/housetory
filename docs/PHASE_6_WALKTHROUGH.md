@@ -216,12 +216,14 @@ No earlier migration was rewritten and no live data was reset.
 | Anthropic Claude | Messages API | Yes (`x-api-key`) | `GET /models` |
 | Google Gemini | `generateContent` | Yes (query key) | `GET /models` |
 | xAI Grok | OpenAI-compatible | Yes | `GET /models` |
-| OpenRouter | OpenAI-compatible | Yes | `GET /models` |
+| OpenRouter | Chat/responses, STT and Image APIs by model capability | Yes | `GET /models` with text/image/transcription modality filters |
 | Ollama | Native `/api/chat` and `/api/tags` | Optional | `GET /api/tags` |
 
 No model catalog is hardcoded as the only option; users can enter an exact
 model name. Vision formats are provider-specific (OpenAI image URL, Anthropic
-base64 image blocks, Gemini inline data, Ollama images array).
+base64 image blocks, Gemini inline data, Ollama images array). OpenRouter audio
+and image tasks require the model metadata to advertise STT/audio input or image
+output respectively; see [`docs/AI_PROVIDERS.md`](AI_PROVIDERS.md).
 
 ## 5. Credential storage and security
 

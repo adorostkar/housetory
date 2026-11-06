@@ -140,14 +140,24 @@ unpermitted host is never downloaded as a fallback.
 
 ## AI item illustrations
 
-AI generation is optional and disabled by default. It uses an authenticated
-**OpenAI Images API** task (`item_images`), not a chat/completions model. The
-adapter calls `POST /images/generations` with the configured image model and
-accepts only an inline `b64_json` image response; a URL-only or malformed response
-is an explicit failure, never a fake success. The encrypted provider key,
-provider enablement and cloud/private consent rules are the same as other AI
-tasks. Other providers currently show an unsupported-task state rather than
-being treated as image generators.
+AI generation is optional and disabled by default. It supports two authenticated
+image-generation adapters; neither is a chat-completions substitute:
+
+- **OpenAI Images API:** `POST /images/generations`, accepting inline `b64_json`.
+- **OpenRouter Image API:** `POST /api/v1/images`, accepting the documented
+  `data[].b64_json` response and optional `media_type`.
+
+URL-only responses are rejected rather than fetched. OpenRouter SVG/GIF or
+unknown media types are rejected explicitly; accepted raster data is decoded,
+size-bounded and normalized through the same private derivative path as other
+item images. The encrypted provider key, provider enablement and cloud/private
+consent rules are the same as other AI tasks. Anthropic, xAI, direct Gemini and
+Ollama are not offered as item-image generators and are rejected at task save.
+
+OpenRouter image models are discovered from the documented Models API with
+`output_modalities=image`; the picker exposes only models advertising image
+output, and manual IDs are validated when saved. See
+[`docs/AI_PROVIDERS.md`](AI_PROVIDERS.md).
 
 The prompt contains only minimized product text: item name, brand, model,
 description and category. It never includes borrowers, room contents, receipts,
@@ -269,7 +279,8 @@ exact-model token boundaries (`A1` vs `A10`/`A1X`), manufacturer registrable-dom
 provenance, deceptive brand hosts, stock-host rejection, configured permitted
 source policy vs unknown rights, provider license evidence, lookup reuse,
 evidence exclusion, AI preview/accept/reject, hard caps, batch
-preview/dedupe/cancel, permission/IDOR and the OpenAI Images adapter contract.
+preview/dedupe/cancel, permission/IDOR, the OpenAI Images adapter contract and
+the OpenRouter Image API contract including URL-only/SVG/invalid-data rejection.
 They use fixture responses and never make live search/generation calls.
 
 Vitest covers category-icon/reference/actual card priority, source controls and
@@ -279,10 +290,10 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **334 PostgreSQL backend tests**, **144 Vitest tests**
-and **45 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
+Final local verification: **338 PostgreSQL backend tests**, **146 Vitest tests**
+and **46 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
 typecheck, production build and Alembic drift checks pass. Backup
-`backups/housetory-20261106T064635Z` includes the database, uploads, imports and
+`backups/housetory-20261106T081932Z` includes the database, uploads, imports and
 exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
 existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task
 choices. The real household has no item-image rows and both automation settings
@@ -290,7 +301,8 @@ remain off by default. No permitted source domain is configured, so automatic
 downloads remain disabled until the operator reviews and sets a policy.
 
 Remaining live validation (not performed here): a real Brave Image Search
-subscription/key and a real OpenAI Images key/model with consent and billing.
+subscription/key, a real OpenAI Images key/model, and a real OpenRouter
+image-output key/model with consent, credit and billing.
 Tests verify the documented request/response contract and safety/error paths but
 cannot certify external provider image quality, availability, pricing or source
 licensing for every result.

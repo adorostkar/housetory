@@ -23,7 +23,7 @@ The transcript and the inventory interpretation are separate AI tasks:
 
 | Stage | Task setting | Supported provider path |
 | --- | --- | --- |
-| Transcription | **Voice transcription** | OpenAI `/audio/transcriptions` (`whisper-1` or another compatible transcription model) or Google Gemini `generateContent` with inline audio |
+| Transcription | **Voice transcription** | OpenAI `/audio/transcriptions` (`whisper-1` or another compatible transcription model), Google Gemini `generateContent` with inline audio, or OpenRouter STT/audio-input models through the documented transcription or chat audio contract |
 | Inventory interpretation | **Smart imports** | Any configured chat model that supports structured JSON |
 
 The selected vision or assistant model is never assumed to transcribe audio.
@@ -38,11 +38,21 @@ transcription model (for example `whisper-1` or `faster-whisper`). Housetory doe
 not bundle or download a speech model, and local transcription is not claimed as
 universally available.
 
+OpenRouter transcription is capability-gated. Discovery merges the documented
+Models API filters for text/image/transcription output and reads each model's
+input/output modalities plus endpoint list. A model with
+`/api/v1/audio/transcriptions` output uses OpenRouter's dedicated JSON endpoint
+with raw base64 `input_audio.data` and `format`. An audio-input chat model uses
+`/api/v1/chat/completions` with an `input_audio` content part and a constrained
+transcript-only instruction. Models without STT or audio input are rejected;
+manual IDs are validated when saved. See
+[`docs/AI_PROVIDERS.md`](AI_PROVIDERS.md) for the full matrix.
+
 ### Configuration steps
 
 1. Open **Settings → AI providers** as the household owner.
-2. Add OpenAI with base URL `https://api.openai.com/v1`, or Google Gemini with
-   its normal API base URL.
+2. Add OpenAI with base URL `https://api.openai.com/v1`, Google Gemini with its
+   normal API base URL, or OpenRouter with `https://openrouter.ai/api/v1`.
 3. Enter the API key. Keys remain encrypted server-side and are never returned
    to the browser.
 4. Enable the provider's remote-processing consent if the endpoint is not on the
@@ -50,7 +60,10 @@ universally available.
    server.
 5. Under **Task defaults → Voice transcription**, choose the provider and a
    transcription model. For OpenAI use `whisper-1`; for Gemini use a model that
-   accepts audio input.
+   accepts audio input. For OpenRouter, discover models and choose one whose
+   catalog metadata advertises STT output or audio input (for example an
+   `openai/whisper-*` slug or an audio-input chat model). The picker excludes
+   image/text-only models; a manual ID is validated on save.
 6. Under **Task defaults → Smart imports**, choose the chat model that should
    interpret the edited transcript.
 7. Open **Add items → Record a voice note**.
@@ -166,11 +179,12 @@ multiple locations, ambiguity, moves, duplicate resolution, add-quantity,
 splitting, no-write-before-confirmation, idempotent confirmation, invalid AI
 output, audio validation, cancellation/cleanup, viewer permissions and
 cross-household isolation. The adapters are tested against captured-shaped
-responses for the OpenAI multipart endpoint and Gemini inline-audio endpoint.
+responses for the OpenAI multipart endpoint, Gemini inline-audio endpoint, and
+OpenRouter's dedicated STT and audio-input chat contracts.
 
 Not verified automatically in this environment:
 
-- a real OpenAI or Gemini transcription request with paid credentials;
+- a real OpenAI, Gemini or OpenRouter transcription request with paid credentials;
 - a physical microphone/browser permission prompt;
 - real speech accuracy or model quality;
 - local/self-hosted speech-endpoint conformance.

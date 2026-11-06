@@ -228,10 +228,14 @@ Tailscale is optional.
   **Settings → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
 - Separate task models for assistant, imports, documents, search, vision,
-  voice transcription and label headlines, with capability warnings and explicit
-  remote-processing consent. Local, private-network and remote endpoints are
-  labelled separately. Voice transcription is opt-in and uses OpenAI audio
-  transcriptions or Gemini audio input; it never reuses a chat model by accident.
+  voice transcription, item illustrations and label headlines, with capability
+  warnings and explicit remote-processing consent. Local, private-network and
+  remote endpoints are labelled separately. Voice transcription is opt-in and
+  supports OpenAI/Gemini audio plus OpenRouter STT or audio-input models; item
+  illustrations support the OpenAI Images API and OpenRouter Image API. Models are
+  filtered by discovered input/output modalities, and a chat model is never
+  silently reused for audio or image generation. See
+  [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
 - Optional direct HTTPS with nginx, or Tailscale Serve as an optional private
   access layer. PWA and camera features work in secure contexts.
 - Document-to-item relationship suggestions that require explicit linking.
@@ -247,15 +251,16 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 334 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 338 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
   import/duplicate/location review, encrypted provider credentials and rotation,
   provider adapters, task capabilities, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, voice-note grouping/corrections/
-  duplicate resolution/split/idempotent confirmation, OpenAI/Gemini transcription
-  adapters, audio validation and cleanup, lending quantities/concurrency/returns/
+  duplicate resolution/split/idempotent confirmation, OpenAI/Gemini/OpenRouter
+  transcription adapters, OpenRouter image-output adapter, audio validation and
+  cleanup, lending quantities/concurrency/returns/
   retries, item and container history snapshots, safe undo and quantity/archive/
   delete guards, atomic bulk move/tag/category batches, batch replay/idempotency,
   per-item bulk-move undo, private document scan crop/perspective/rotation/
@@ -299,8 +304,8 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 144 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 45 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 146 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 46 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -323,8 +328,11 @@ stack, not just unit mocks:
   partial completion, keyboard close, failed-save recovery, abandonment,
   light/dark desktop/mobile screenshots, and two-household creation, switching,
   property-filter reset, all-places search and loan answers, remembered scope and
-  a cross-household result link opening in its own household, and item-image
-  built-in/reference/AI/actual-photo workflows with batch cancellation.
+  a cross-household result link opening in its own household, item-image
+  category-icon/reference/AI/actual-photo workflows with batch cancellation, and
+  a disposable OpenRouter fixture covering capability-filtered voice/image task
+  configuration, mocked STT transcription, image preview/accept and provider
+  error handling.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -666,8 +674,10 @@ household owner and open **Settings → AI providers**.
    interpretation, natural-language search, image recognition and optional label
    headlines. Each task uses the searchable discovered catalog and switches
    catalogs when its provider changes. Known non-chat models are excluded, vision
-   tasks flag incompatible models, and unknown capability metadata is marked for
-   verification. Existing task assignments are preserved if discovery fails.
+   tasks require image input, voice transcription requires STT/audio input, and
+   item illustrations require image output. Unknown capability metadata is marked
+   for verification, and manual IDs are validated on save. Existing task
+   assignments are preserved if discovery fails.
    General Settings verifies whether a saved task model appears in the provider
    catalog. A catalog listing is not an inference, billing or quality check, and
    Housetory does not send a test prompt to validate a model.

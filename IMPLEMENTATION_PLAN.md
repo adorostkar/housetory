@@ -1788,7 +1788,7 @@ rules are in `docs/ITEM_IMAGES.md`.
   acceptance. Disposable Playwright covers category-icon fallback → mocked
   automatic reference → actual-photo priority, manual AI preview/accept, no-provider states, settings and
   batch cancellation with screenshots.
-- [x] 334 PostgreSQL backend tests, 144 Vitest tests and 45 disposable-stack
+- [x] 338 PostgreSQL backend tests, 146 Vitest tests and 46 disposable-stack
   Playwright workflows pass. Ruff, strict TypeScript typecheck, production build
   and Alembic drift checks pass. Item-image screenshots are under
   `docs/walkthrough/item-images/`.
@@ -1858,6 +1858,49 @@ rules are in `docs/ITEM_IMAGES.md`.
   fallback, legacy-row ignoring, actual-photo priority and reference/AI flows are
   covered. Relevant suites, typecheck, build and Alembic drift checks pass before
   local backup/migration/deployment.
+
+### Focused provider compatibility — OpenRouter audio and image
+
+- [x] Verified the current official OpenRouter contracts for STT and image
+  generation. Voice uses `/api/v1/audio/transcriptions` with raw base64
+  `input_audio.data` plus `format`, or a documented audio-input chat model with an
+  `input_audio` content part and transcript-only instruction. Images use
+  `/api/v1/images` with `data[].b64_json` and optional `media_type`; URL-only,
+  SVG/GIF and malformed output are rejected.
+- [x] OpenRouter discovery now merges the documented Models API
+  `output_modalities=text|image|transcription` results and records input/output
+  modalities plus endpoint paths. Capabilities drive server-side task validation
+  and the model picker: voice accepts STT/audio-input models, item illustrations
+  accept image-output models, and vision requires image input.
+- [x] Manual OpenRouter model IDs are validated on save rather than blindly
+  accepted. Incompatible provider/task combinations return explicit errors; no
+  blanket "all models/providers supported" claim. Existing direct OpenAI and
+  Gemini transcription paths remain unchanged.
+- [x] Added typed OpenRouter STT, audio-input chat and image adapters with response
+  schema validation, base64/size bounds, raster media-type checks, provider error
+  mapping, X-Title attribution and capability metadata requests that send no
+  household audio/product data. Existing preview/accept, provenance, caps,
+  idempotency, stale-photo races and consent/household isolation are preserved.
+- [x] Fixed the worker voice-job payload wiring so transcription/interpretation
+  handlers receive `voice_note_id` instead of the raw payload dictionary.
+- [x] Added mocked official-shape backend fixtures for OpenRouter discovery,
+  dedicated STT, audio-input chat, image output, refusal/empty/invalid/SVG/
+  URL-only failures, task compatibility, direct OpenAI/Gemini regressions and
+  cross-provider capability filtering. Added a disposable Playwright fixture that
+  configures OpenRouter voice/image tasks through the UI, transcribes synthetic
+  audio through the worker, previews/accepts an image and exercises a provider
+  error. Screenshots are under `docs/walkthrough/openrouter-media/`.
+- [x] Provider/task matrix, model discovery, formats, limits, consent and exact
+  setup are documented in `docs/AI_PROVIDERS.md`; voice and item-image docs were
+  updated.
+- [x] Backed up all local volumes to `backups/housetory-20261106T081932Z` with
+  valid checksums and deployed locally. The real household still has 51 items, 1
+  loan, 0 photos and 0 item images; its existing two encrypted providers (OpenAI
+  and OpenRouter) and six task assignments are byte-for-byte unchanged. **No
+  user-saved provider credentials or task assignments were read into reports,
+  changed or replaced.** No paid/live provider calls, remote deployment, email or
+  credential creation were performed. Remaining live validation requires real
+  OpenRouter STT/image model access, credit and operator terms review.
 
 ## Agreed product roadmap — updated 2026-11-05
 
@@ -2101,6 +2144,108 @@ complete and awaits final user review.
      and current lending/history behavior must remain intact.
    - Preserve visual feel; verify mixed list readability, ownership distinctions,
      filters and partial returns using isolated local fixtures before acceptance.
+
+### Release direction and offline requirement — 2026-11-06
+
+User accepts stabilisation/provider fixes, small live acceptance tests, borrowed
+items, maintenance/service history/reminders and a system-status screen. Prefer
+these to expanding unrelated AI breadth. Sequence: finish current compatibility
+work; fix reproduced search query loss and validate model IDs; independent local
+acceptance; status screen; server release when requested; borrowed items and
+maintenance improvements. Status may ship with stabilisation. New live cloud tests
+must remain bounded, explicit and use minimal disclosed data; no surprise batch
+generation or borrower emails.
+
+For THIS server release only, user explicitly says existing server data is minimal,
+disposable and re-importable: no backup, backwards-data compatibility or migration
+rehearsal is required. A fresh server database/install is acceptable when executing
+the authorized release. This is not a standing permission to wipe future data, Mac
+inventory, nginx, unrelated services or credentials. Preserve the local household
+and operational server settings/secrets unless a specific replacement is needed.
+Do not impose backup/legacy-data work solely for this disposable server dataset.
+
+Core Housetory must work without any AI provider AND without outbound Internet,
+when browser can reach the self-hosted server over LAN/local network. Inventory,
+rooms/properties/households, keyword/structured deterministic search, quantities,
+lending/borrowed records, history, stocktake, direct document/manual uploads,
+local scanning/cleanup/OCR, label/QR generation, reports and evidence exports must
+not depend on cloud API/catalog/auth/CDN/font services. Serve required app assets
+locally; bundle/install OCR and other required runtime resources in deployment,
+not first-use Internet downloads. Existing LAN session/login works without SMTP;
+cloud password recovery/invitations cannot claim email delivery when network or
+mail service is unavailable. Distinguish unconfigured vs temporary offline state.
+
+Internet-dependent manual/image discovery, cloud AI answers/transcription/image
+generation and external SMTP are optional enhancements. Fail with honest usable
+fallbacks, preserve originals/drafts, bounded timeouts and manual alternatives;
+never block startup/login/core inventory because a provider or Internet is absent.
+Actual AI features need configured compatible local models to run offline; don't
+pretend transcription/generation works without a model. Local inference optional,
+not required for ordinary operation. Internet-free server operation is distinct
+from browser-with-no-network offline editing; do not claim service-worker cache
+provides sync/offline write support. A public domain alone may not route during
+an Internet outage; document a trusted LAN access/HTTPS arrangement, stable QR
+base URL and mobile camera constraints without bypassing certificate checks.
+
+Verification uses an isolated stack with outbound Internet blocked (browser still
+has LAN/server access) and no AI providers. Exercise core flows including local
+OCR, PDF/QR exports, restart/login and safe states for external enhancements.
+Report tested boundaries, not merely 'self hosted' as evidence of offline support.
+
+System status: concise release/build commit and local/server identity, database/
+storage/worker readiness, job failures/retry, per-task provider configured vs
+compatible vs live-tested, and relevant external-service reachability/errors.
+No keys or private prompt content. Backup status only if backups configured;
+don't require backups for this explicitly disposable server release. Keep operator
+details out of ordinary item flows; use existing Settings shell and role controls.
+
+Maintenance follow-up after borrowed records: dated service/repair records linked
+to items with optional receipt/photo/cost and next due date; optional recurrence
+and explicitly configured reminders. In-app due lists work locally; external
+email delivery optional and honest while offline. No automatic repair advice,
+unsolicited borrower mail or sprawling renovation/budget-management subsystem.
+
+### AI provider and model parity — agreed selection rules
+
+Apply across General assistant, Document interpretation, Smart imports, Item
+illustrations, Label summaries, Natural-language search, Voice transcription and
+Image recognition. Follow the current OpenRouter media integration with a parity
+audit of discovery, selection, execution and errors for every task.
+
+- Hide providers/models for a task only when its required API/input/output is
+  CONFIRMED incompatible. Determine this using documented implemented provider
+  adapters and model capability metadata (input/output modalities, endpoints and
+  supported parameters), not provider reputation, model-name guesses or quality.
+  A missing Housetory adapter is an integration gap, not proof the provider cannot
+  do the task; disclose that distinction and implement supported adapters.
+- Unknown/incomplete capability metadata is not confirmed incompatibility. Offer
+  an advanced exact-model-ID path with a clear unverified-support warning and a
+  bounded explicit test; don't silently enable unsupported execution or pretend
+  it works. Confirmed incompatible IDs cannot bypass server validation.
+- Compatible models remain selectable even if less accurate, slower or lacking
+  native structured/tool features that can safely be handled by an implemented
+  validated fallback. Never equate inferior quality with technical impossibility.
+  Maintain schema validation and safe read-only behavior for all models.
+- Define minimum capabilities per actual task, not one blanket text/structured/
+  tools requirement for every row. For example label summaries do not inherently
+  need native tool calling. Only demand it when the implemented workflow truly
+  requires it and no safe supported fallback exists.
+- Show recommended models first where there is a defensible task-specific basis,
+  then all other compatible models; recommendations are optional, not an allowlist.
+  Clearly separate recommended, compatible, unverified and unavailable states.
+  Don't invent benchmark scores, prices or access/billing guarantees.
+  Prefer “Suggested” over “Best” when guidance is heuristic rather than supported
+  by credible comparative testing. Preserve the user's explicit model choice.
+- One API key/provider is a valid user preference. Never require several direct
+  provider accounts because of arbitrary UI restrictions. Actual API capabilities,
+  consent and permissions still apply; no silent alternate-provider fallback.
+- Explicit test explains any potential provider usage/cost and uses minimal test
+  data. Don't auto-run paid requests during discovery, typing or recommendation.
+  Return useful errors distinguishing unsupported API/model, bad credentials,
+  access/quota, malformed output and uncertain quality. Provider dropdown/model
+  discovery/runtime checks must share the same capability contract.
+- Preserve saved keys/task selections; test with mocked provider contracts and
+  independently inspect local selection/test workflows before accepting parity.
 
 ### Mandatory independent local acceptance review
 
