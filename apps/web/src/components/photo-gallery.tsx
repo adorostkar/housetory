@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ImageOff, Star, Trash2 } from "lucide-react"
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { BuiltinIllustration } from "@/components/builtin-illustration";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CameraUpload } from "@/components/camera-upload";
 import { PhotoLightbox } from "@/components/photo-lightbox";
@@ -10,11 +11,23 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
-import type { ItemDetail, ItemDetailResponse, Photo, PhotoList } from "@/lib/types";
+import type {
+  ItemDetail,
+  ItemDetailResponse,
+  ItemImage,
+  Photo,
+  PhotoList,
+} from "@/lib/types";
 import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
-export function PhotoGallery({ item }: { item: ItemDetail }) {
+export function PhotoGallery({
+  item,
+  representative,
+}: {
+  item: ItemDetail;
+  representative?: ItemImage | null;
+}) {
   const canWrite = useCanWrite();
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
@@ -146,6 +159,33 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
               className="size-full object-cover"
             />
           </button>
+        ) : representative ? (
+          <>
+            {representative.source_type === "builtin" &&
+            representative.illustration_key ? (
+              <BuiltinIllustration
+                illustrationKey={representative.illustration_key}
+                label={representative.label}
+                className="size-full"
+              />
+            ) : representative.url ? (
+              <img
+                src={representative.thumbnail_url ?? representative.url}
+                alt={`${item.name} ${representative.label.toLowerCase()}`}
+                className="size-full object-cover"
+              />
+            ) : (
+              <div className="image-placeholder flex size-full items-center justify-center">
+                <ImageOff className="size-5" />
+              </div>
+            )}
+            <Badge
+              variant="secondary"
+              className="absolute left-3 top-3 z-10 gap-1 bg-background/85 backdrop-blur-md"
+            >
+              {representative.label}
+            </Badge>
+          </>
         ) : (
           <div className="image-placeholder flex min-h-[150px] flex-col items-center justify-center px-5 py-5 text-center">
             <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/30 backdrop-blur-sm">
@@ -237,6 +277,18 @@ export function PhotoGallery({ item }: { item: ItemDetail }) {
           </div>
         )}
       </div>
+
+      {!active && representative && canWrite && (
+        <div className="mt-2 flex justify-end">
+          <CameraUpload
+            label="Add actual photo"
+            busy={upload.isPending}
+            onUpload={async (file) => {
+              await upload.mutateAsync([file]);
+            }}
+          />
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
         {item.photos.map((photo, index) => (

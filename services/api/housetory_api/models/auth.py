@@ -51,11 +51,24 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "warranty_reminder_days between 1 and 3650",
             name="warranty_reminder_days",
         ),
+        CheckConstraint(
+            "item_image_daily_generation_cap between 1 and 100",
+            name="item_image_generation_cap",
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     warranty_reminder_days: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="30"
+    )
+    item_image_auto_reference: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    item_image_auto_generate: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    item_image_daily_generation_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="10"
     )
 
     members: Mapped[list["HouseholdMember"]] = relationship(

@@ -30,7 +30,7 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
     body = settings.json()
     assert body["credential_key_configured"] is True
     assert body["providers"] == []
-    assert len(body["tasks"]) == 7
+    assert len(body["tasks"]) == 8
     assert {task["task"] for task in body["tasks"]} == {
         "assistant",
         "imports",
@@ -39,6 +39,7 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
         "vision",
         "labels",
         "transcription",
+        "item_images",
     }
 
     response = owner_client.post("/api/v1/ai/providers", json=provider_payload())

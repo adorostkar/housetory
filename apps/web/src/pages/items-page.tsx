@@ -1,6 +1,7 @@
 import {
   Download,
   FolderTree,
+  ImagePlus,
   LayoutGrid,
   List,
   MoveRight,
@@ -24,6 +25,7 @@ import {
   BulkMoveDialog,
   BulkTagDialog,
 } from "@/components/bulk-organise-dialogs";
+import { BulkImagesDialog } from "@/components/bulk-images-dialog";
 import { ItemCard, ItemRow } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -89,9 +91,9 @@ export function ItemsPage() {
   });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
-  const [bulkDialog, setBulkDialog] = useState<"move" | "tags" | "category" | null>(
-    null,
-  );
+  const [bulkDialog, setBulkDialog] = useState<
+    "move" | "tags" | "category" | "images" | null
+  >(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef(selected);
@@ -728,6 +730,15 @@ export function ItemsPage() {
               <FolderTree />
               Category
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={hasArchivedSelection}
+              onClick={() => setBulkDialog("images")}
+            >
+              <ImagePlus />
+              Images
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)}>
               <Download />
               Export evidence
@@ -859,6 +870,11 @@ export function ItemsPage() {
         onOpenChange={setEvidenceOpen}
         scope={{ item_ids: selectedItems.map((item) => item.id) }}
         title={`Export ${pluralize(selectedItems.length, "selected item")} with evidence`}
+      />
+      <BulkImagesDialog
+        open={bulkDialog === "images"}
+        onOpenChange={(open) => setBulkDialog(open ? "images" : null)}
+        items={selectedItems}
       />
       <BulkCategoryDialog
         open={bulkDialog === "category"}

@@ -12,8 +12,6 @@ import time
 import uuid
 from pathlib import Path
 
-from sqlalchemy import delete, func, select
-
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.domain import JobStatus
@@ -38,6 +36,21 @@ from housetory_api.services.import_pipeline import (
     IMPORT_TASK,
     run_import_job,
 )
+from housetory_api.services.item_image_generation import (
+    BATCH_TASK as ITEM_IMAGE_BATCH_TASK,
+)
+from housetory_api.services.item_image_generation import (
+    NEW_ITEM_TASK as ITEM_IMAGE_NEW_ITEM_TASK,
+)
+from housetory_api.services.item_image_generation import (
+    expire_pending_illustrations,
+)
+from housetory_api.services.item_image_generation import (
+    run_batch_job as run_item_image_batch,
+)
+from housetory_api.services.item_image_generation import (
+    run_new_item_job as run_item_image_new_item,
+)
 from housetory_api.services.recognition import (
     RECOGNITION_TASK,
 )
@@ -56,6 +69,7 @@ from housetory_api.services.voice import (
 from housetory_api.services.voice import (
     process_transcription as run_voice_transcription,
 )
+from sqlalchemy import delete, func, select
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +79,10 @@ logger = logging.getLogger("housetory.worker")
 
 PRUNE_TASK = "maintenance.prune_expired_sessions"
 PRUNE_FINISHED_TASK = "maintenance.prune_finished_jobs"
-HEARTBEAT_FILE = Path(os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat"))
+PRUNE_ITEM_IMAGES_TASK = "maintenance.prune_item_images"
+HEARTBEAT_FILE = Path(
+    os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
+)
 POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
 MAINTENANCE_INTERVAL_HOURS = 6
 
@@ -80,7 +97,9 @@ def _heartbeat() -> None:
 def prune_expired_sessions(payload: dict) -> dict:
     del payload
     with SessionLocal() as db:
-        result = db.execute(delete(AuthSession).where(AuthSession.expires_at < func.now()))
+        result = db.execute(
+            delete(AuthSession).where(AuthSession.expires_at < func.now())
+        )
         db.commit()
         return {"deleted": int(result.rowcount or 0)}
 
@@ -93,7 +112,8 @@ def prune_finished_jobs(payload: dict) -> dict:
             delete(Job).where(
                 Job.status.in_([JobStatus.SUCCEEDED.value, JobStatus.FAILED.value]),
                 Job.finished_at.is_not(None),
-                Job.finished_at < func.now() - func.make_interval(0, 0, 0, interval_days),
+                Job.finished_at
+                < func.now() - func.make_interval(0, 0, 0, interval_days),
             )
         )
         db.commit()
@@ -115,6 +135,11 @@ HANDLERS = {
     RECOGNITION_TASK: run_recognition_job,
     VOICE_TRANSCRIBE_TASK: run_voice_transcription,
     VOICE_INTERPRET_TASK: run_voice_interpretation,
+    ITEM_IMAGE_NEW_ITEM_TASK: run_item_image_new_item,
+    ITEM_IMAGE_BATCH_TASK: lambda payload: run_item_image_batch(
+        payload, uuid.UUID(str(payload["job_id"]))
+    ),
+    PRUNE_ITEM_IMAGES_TASK: lambda payload: {"expired": expire_pending_illustrations()},
 }
 
 
@@ -129,15 +154,19 @@ def process_job(job: Job) -> None:
     logger.info("Running job %s (%s), attempt %s", job.id, job.task, job.attempts)
     try:
         result = handler(job.payload or {})
-    except Exception as exc:  # noqa: BLE001 - a failing job must not kill the worker
+    except Exception as exc:
         logger.exception("Job %s failed", job.id)
         with SessionLocal() as db:
             mark_failed(db, job.id, f"{type(exc).__name__}: {exc}")
         return
 
     with SessionLocal() as db:
-        mark_succeeded(db, job.id)
-    logger.info("Job %s succeeded: %s", job.id, result)
+        mark_succeeded(
+            db,
+            job.id,
+            result=result if isinstance(result, dict) else {"result": result},
+        )
+    logger.info("Job %s succeeded: status recorded", job.id)
 
 
 def schedule_maintenance() -> None:
@@ -146,7 +175,10 @@ def schedule_maintenance() -> None:
         if has_active_job(db, PRUNE_TASK):
             return
         last = db.scalar(
-            select(Job).where(Job.task == PRUNE_TASK).order_by(Job.created_at.desc()).limit(1)
+            select(Job)
+            .where(Job.task == PRUNE_TASK)
+            .order_by(Job.created_at.desc())
+            .limit(1)
         )
         if last is not None:
             reference = last.finished_at or last.created_at
@@ -170,6 +202,9 @@ def schedule_maintenance() -> None:
 
         if not has_active_job(db, EVIDENCE_PRUNE_TASK):
             enqueue(db, EVIDENCE_PRUNE_TASK)
+
+        if not has_active_job(db, PRUNE_ITEM_IMAGES_TASK):
+            enqueue(db, PRUNE_ITEM_IMAGES_TASK)
 
 
 def run() -> None:
@@ -204,7 +239,7 @@ def run() -> None:
         except KeyboardInterrupt:
             logger.info("Worker interrupted, shutting down")
             break
-        except Exception:  # noqa: BLE001 - keep the worker alive across transient errors
+        except Exception:
             logger.exception("Worker loop error")
             time.sleep(min(POLL_SECONDS * 2, 30))
 

@@ -69,11 +69,18 @@ def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | N
     return job
 
 
-def mark_succeeded(db: Session, job_id: uuid.UUID) -> None:
+def mark_succeeded(
+    db: Session,
+    job_id: uuid.UUID,
+    *,
+    result: dict[str, Any] | None = None,
+) -> None:
     job = db.get(Job, job_id)
     if job is None:
         return
     now = datetime.now(UTC)
+    if result is not None:
+        job.result = result
     job.status = JobStatus.SUCCEEDED.value
     job.finished_at = now
     job.locked_by = None
@@ -123,6 +130,19 @@ def requeue_stale_jobs(db: Session, *, older_than_minutes: int = 15) -> int:
             job.last_error = "Worker did not finish this job and attempts were exhausted."
     db.commit()
     return len(jobs)
+
+
+def update_result(db: Session, job_id: uuid.UUID, result: dict[str, Any]) -> None:
+    job = db.get(Job, job_id)
+    if job is None:
+        return
+    job.result = {**(job.result or {}), **result}
+    db.commit()
+
+
+def is_cancelled(db: Session, job_id: uuid.UUID) -> bool:
+    status = db.scalar(select(Job.status).where(Job.id == job_id))
+    return status == JobStatus.CANCELLED.value
 
 
 def has_active_job(db: Session, task: str) -> bool:

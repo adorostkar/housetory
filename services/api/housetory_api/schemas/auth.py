@@ -47,11 +47,17 @@ class HouseholdOut(ORMModel):
     id: uuid.UUID
     name: str
     warranty_reminder_days: int = 30
+    item_image_auto_reference: bool = False
+    item_image_auto_generate: bool = False
+    item_image_daily_generation_cap: int = 10
 
 
 class HouseholdUpdate(BaseModel):
     name: Name | None = None
     warranty_reminder_days: int | None = Field(default=None, ge=1, le=3650)
+    item_image_auto_reference: bool | None = None
+    item_image_auto_generate: bool | None = None
+    item_image_daily_generation_cap: int | None = Field(default=None, ge=1, le=100)
 
 
 class SessionState(BaseModel):

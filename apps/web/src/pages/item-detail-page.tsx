@@ -29,6 +29,7 @@ import { ItemLoanStatus } from "@/components/item-loan-status";
 import { ItemManuals } from "@/components/item-manuals";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
+import { ItemImageControls } from "@/components/item-image-controls";
 import { PhotoGallery } from "@/components/photo-gallery";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -207,7 +208,8 @@ export function ItemDetailPage() {
 
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(330px,1fr)]">
         <div className="min-w-0 space-y-6">
-          <PhotoGallery item={item} />
+          <PhotoGallery item={item} representative={item.representative_image} />
+          <ItemImageControls itemId={item.id} />
 
           <section className="surface p-5 sm:p-6">
             <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">

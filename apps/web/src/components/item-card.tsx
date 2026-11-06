@@ -1,6 +1,22 @@
-import { ClipboardCheck, HandCoins, ImageOff, ShieldCheck } from "lucide-react";
+import {
+  Armchair,
+  Bike,
+  BookOpen,
+  BriefcaseBusiness,
+  Camera,
+  ClipboardCheck,
+  Drill,
+  HandCoins,
+  Laptop,
+  Package,
+  ShieldCheck,
+  Tv,
+  Utensils,
+  Wifi,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { BuiltinIllustration } from "@/components/builtin-illustration";
 import { Badge } from "@/components/ui/badge";
 import { withHousehold } from "@/lib/household-links";
 import type { ItemSummary } from "@/lib/types";
@@ -12,6 +28,21 @@ import {
   itemContainer,
   locationLabel,
 } from "@/lib/utils";
+
+function categoryIcon(name: string | null | undefined) {
+  const value = (name ?? "").toLowerCase();
+  if (value.includes("drill") || value.includes("tool")) return Drill;
+  if (value.includes("tv") || value.includes("television")) return Tv;
+  if (value.includes("cable") || value.includes("network")) return Wifi;
+  if (value.includes("bag") || value.includes("luggage")) return BriefcaseBusiness;
+  if (value.includes("chair") || value.includes("furniture")) return Armchair;
+  if (value.includes("camera") || value.includes("photo")) return Camera;
+  if (value.includes("laptop") || value.includes("computer")) return Laptop;
+  if (value.includes("kitchen") || value.includes("utensil")) return Utensils;
+  if (value.includes("book")) return BookOpen;
+  if (value.includes("bike") || value.includes("bicycle")) return Bike;
+  return Package;
+}
 
 interface ItemSelection {
   selected: boolean;
@@ -29,6 +60,8 @@ export function ItemCard({
   selection?: ItemSelection;
 }) {
   const photo = item.primary_photo;
+  const representative = item.representative_image ?? null;
+  const FallbackIcon = categoryIcon(item.category?.name);
   const container = itemContainer(item);
   const price = item.purchase?.price_cents;
   const warrantyActive =
@@ -51,12 +84,38 @@ export function ItemCard({
             loading="lazy"
             className="size-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-[1.025]"
           />
+        ) : representative?.source_type === "builtin" && representative.illustration_key ? (
+          <BuiltinIllustration
+            illustrationKey={representative.illustration_key}
+            label={representative.label}
+            className="size-full"
+          />
+        ) : representative?.thumbnail_url || representative?.url ? (
+          <img
+            src={representative.thumbnail_url ?? representative.url ?? ""}
+            alt={`${item.name} ${representative.label.toLowerCase()}`}
+            loading="lazy"
+            className="size-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-[1.025]"
+          />
         ) : (
           <div className="image-placeholder flex size-full items-center justify-center">
             <span className="flex size-14 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/25 backdrop-blur-sm">
-              <ImageOff className="size-5" strokeWidth={1.5} />
+              <FallbackIcon className="size-5" strokeWidth={1.5} />
             </span>
           </div>
+        )}
+
+        {!photo && representative && (
+          <Badge
+            variant="secondary"
+            className="absolute bottom-3 left-3 z-10 gap-1 bg-background/85 text-[0.58rem] backdrop-blur-md"
+          >
+            {representative.source_type === "reference"
+              ? "Reference"
+              : representative.source_type === "ai"
+                ? "AI illustration"
+                : "Illustration"}
+          </Badge>
         )}
 
         <div
@@ -227,6 +286,8 @@ export function ItemRow({
   selection?: ItemSelection;
 }) {
   const photo = item.primary_photo;
+  const representative = item.representative_image ?? null;
+  const FallbackIcon = categoryIcon(item.category?.name);
   const onLoan = item.on_loan_quantity ?? 0;
   const path =
     item.location_path.length > 0
@@ -262,9 +323,23 @@ export function ItemRow({
             loading="lazy"
             className="size-full object-cover"
           />
+        ) : representative?.source_type === "builtin" &&
+          representative.illustration_key ? (
+          <BuiltinIllustration
+            illustrationKey={representative.illustration_key}
+            label={representative.label}
+            className="size-full"
+          />
+        ) : representative?.thumbnail_url || representative?.url ? (
+          <img
+            src={representative.thumbnail_url ?? representative.url ?? ""}
+            alt=""
+            loading="lazy"
+            className="size-full object-cover"
+          />
         ) : (
           <div className="image-placeholder flex size-full items-center justify-center">
-            <ImageOff className="size-4 text-foreground/25" />
+            <FallbackIcon className="size-4 text-foreground/25" />
           </div>
         )}
       </div>

@@ -27,6 +27,7 @@ import type {
   ImportBatchDetail,
   ImportBatchList,
   ItemDetailResponse,
+  ItemImageState,
   ItemList,
   LabelTemplateList,
   Overview,
@@ -100,6 +101,7 @@ export const queryKeys = {
   itemLoans: (itemId: string) => ["items", itemId, "loans"] as const,
   itemHistory: (itemId: string) => ["items", itemId, "history"] as const,
   itemManuals: (itemId: string) => ["items", itemId, "manuals"] as const,
+  itemImage: (itemId: string) => ["items", itemId, "image"] as const,
   itemManualCandidates: (itemId: string) =>
     ["items", itemId, "manual-search"] as const,
   evidenceExports: ["evidence-exports"] as const,
@@ -461,6 +463,15 @@ export function useItem(itemId: string | undefined) {
   });
 }
 
+export function useItemImage(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.itemImage(itemId ?? ""),
+    queryFn: () => api.get<ItemImageState>(`/items/${itemId}/image`),
+    enabled: Boolean(itemId),
+    staleTime: 10_000,
+  });
+}
+
 export interface DocumentFilters {
   q?: string;
   type?: string;
@@ -619,6 +630,7 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: ["locations"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.items });
     void queryClient.invalidateQueries({ queryKey: ["item"] });
+    void queryClient.invalidateQueries({ queryKey: ["items"] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.categories });
     void queryClient.invalidateQueries({ queryKey: queryKeys.tags });
     void queryClient.invalidateQueries({ queryKey: queryKeys.documents });

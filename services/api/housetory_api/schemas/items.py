@@ -9,6 +9,7 @@ from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.documents import DocumentList, DocumentOut
 from ..schemas.households import HouseholdBrief
 from ..schemas.imports import ImportSourceBrief
+from ..schemas.item_images import ItemImageOut
 from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseIn, PurchaseOut
 from ..schemas.warranties import WarrantyIn, WarrantyOut
@@ -138,6 +139,7 @@ class ItemSummary(ORMModel):
     category: CategoryBrief | None
     tags: list[TagBrief]
     primary_photo: PhotoOut | None
+    representative_image: ItemImageOut | None = None
     purchase: PurchaseOut | None
     purchase_info_status: Literal["recorded", "unrecorded", "unknown", "not_applicable"] = (
         "unrecorded"

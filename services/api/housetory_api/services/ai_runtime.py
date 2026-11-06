@@ -391,6 +391,25 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 "model under Settings → AI providers → Task defaults."
             ),
         )
+    if task == AiTask.ITEM_IMAGES.value:
+        return AiRuntimeConfig(
+            provider="disabled",
+            base_url="",
+            api_key=None,
+            model=None,
+            task=task,
+            provider_id=None,
+            display_name=None,
+            mode="disabled",
+            source="database",
+            enabled=False,
+            cloud_consent=False,
+            configured=False,
+            error=(
+                "No item illustration task is configured. Choose an OpenAI image "
+                "model under Settings → AI providers → Task defaults."
+            ),
+        )
     if task == AiTask.TRANSCRIPTION.value:
         # Audio transcription is opt-in and provider-specific. Never reuse a chat
         # or vision default silently.
@@ -468,6 +487,20 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
         token in lowered for token in ("whisper", "transcribe")
     ):
         capabilities.append("audio")
+    if any(
+        token in lowered
+        for token in (
+            "dall-e",
+            "gpt-image",
+            "image-generation",
+            "stable-diffusion",
+            "flux-",
+            "imagen",
+            "gemini-2.5-flash-image",
+            "gemini-3-pro-image",
+        )
+    ):
+        capabilities.append("image")
     if any(
         token in lowered
         for token in (

@@ -10,6 +10,7 @@ from ..models import (
     DocumentScan,
     DocumentScanPage,
     Item,
+    ItemImage,
     ItemPhoto,
     Purchase,
     PurchaseAllocation,
@@ -34,6 +35,7 @@ from ..schemas.items import (
 from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseOut
 from ..schemas.warranties import WarrantyOut
+from .item_images import representative_image_out
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
 from .warranties import effective_reminder_days, warranty_status
 
@@ -57,6 +59,7 @@ def item_load_options() -> list:
         joinedload(Item.last_verification),
         selectinload(Item.tags),
         selectinload(Item.photos),
+        selectinload(Item.images).joinedload(ItemImage.provider),
         selectinload(Item.documents).selectinload(Document.items),
         selectinload(Item.documents).selectinload(Document.scan).selectinload(DocumentScan.pages),
     ]
@@ -376,6 +379,7 @@ def item_summary(
             for tag in sorted(item.tags, key=lambda t: t.name.lower())
         ],
         primary_photo=_primary_photo(item),
+        representative_image=representative_image_out(item),
         purchase=purchase_out(purchase) if purchase else None,
         purchase_info_status=effective_purchase_info_status(item).value,
         purchase_info_missing_fields=missing_purchase_info_fields(item),

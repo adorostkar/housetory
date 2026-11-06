@@ -17,6 +17,7 @@ from .routes import (
     household,
     households,
     imports,
+    item_images,
     items,
     labels,
     loans,
@@ -55,6 +56,7 @@ api_router.include_router(containers.router, dependencies=write_guard)
 api_router.include_router(labels.router, dependencies=write_guard)
 api_router.include_router(taxonomy.router, dependencies=write_guard)
 api_router.include_router(items.router, dependencies=write_guard)
+api_router.include_router(item_images.router, dependencies=write_guard)
 api_router.include_router(bulk.router, dependencies=write_guard)
 api_router.include_router(loans.router, dependencies=write_guard)
 api_router.include_router(manuals.router, dependencies=write_guard)

@@ -195,6 +195,7 @@ class AiTask(StrEnum):
     VISION = "vision"
     LABELS = "labels"
     TRANSCRIPTION = "transcription"
+    ITEM_IMAGES = "item_images"
 
 
 class VoiceNoteStatus(StrEnum):

@@ -6,6 +6,7 @@ import tempfile
 import uuid
 import warnings
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -97,6 +98,17 @@ class StoredImportFile:
     original_filename: str
     content_type: str
     byte_size: int
+
+
+@dataclass(frozen=True)
+class StoredItemImage:
+    storage_key: str
+    thumbnail_key: str
+    original_filename: str
+    content_type: str
+    byte_size: int
+    width: int
+    height: int
 
 
 @dataclass(frozen=True)
@@ -624,6 +636,105 @@ def delete_import_key(storage_key: str | None) -> None:
                 parent.rmdir()
         except OSError:
             break
+
+
+def store_item_image_bytes(
+    household_id: uuid.UUID,
+    item_id: uuid.UUID,
+    content: bytes,
+    *,
+    source_type: Literal["reference", "ai"],
+    filename: str | None = None,
+) -> StoredItemImage:
+    """Normalize an untrusted downloaded/generated image into a private derivative.
+
+    Only a re-encoded image is stored; source metadata and volatile EXIF are not
+    copied into the derivative. Actual user photos use a separate table and path.
+    """
+    settings = get_settings()
+    max_bytes = settings.item_image_max_download_bytes
+    if not content:
+        raise ApiError(422, "empty_image", "The image response was empty.")
+    if len(content) > max_bytes:
+        raise ApiError(
+            413,
+            "image_too_large",
+            f"Item images must be smaller than {settings.item_image_max_download_mb} MB.",
+        )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as probe:
+                image_format = probe.format
+                probe.verify()
+            with Image.open(BytesIO(content)) as probe:
+                oriented = ImageOps.exif_transpose(probe)
+                width, height = oriented.size
+                has_alpha = "A" in oriented.getbands() or oriented.mode == "P"
+                oriented.load()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, ValueError) as exc:
+        raise ApiError(
+            422,
+            "invalid_image",
+            "The downloaded or generated file is not a readable image.",
+        ) from exc
+    if image_format not in PHOTO_FORMATS:
+        raise ApiError(
+            422,
+            "unsupported_image_type",
+            "Item images must be JPEG, PNG, WebP, or HEIC.",
+        )
+    if width < 1 or height < 1 or width * height > 40_000_000:
+        raise ApiError(422, "image_dimensions", "The image dimensions are not supported.")
+
+    base_dir = _root() / "households" / str(household_id) / "items" / str(item_id) / "images"
+    image_id = uuid.uuid4()
+    if has_alpha:
+        content_type, extension, output_format = "image/png", "png", "PNG"
+    else:
+        content_type, extension, output_format = "image/jpeg", "jpg", "JPEG"
+    original_path = base_dir / f"{image_id}.{extension}"
+    thumbnail_path = base_dir / f"{image_id}.webp"
+    try:
+        _mkdir_private(base_dir)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as opened:
+                normalized = ImageOps.exif_transpose(opened)
+                normalized.load()
+                if output_format == "PNG":
+                    if normalized.mode not in ("RGB", "RGBA", "L", "LA"):
+                        normalized = normalized.convert("RGBA")
+                    normalized.save(original_path, format="PNG", optimize=True)
+                else:
+                    if normalized.mode not in ("RGB", "L", "CMYK"):
+                        normalized = normalized.convert("RGB")
+                    normalized.save(original_path, format="JPEG", quality=90, optimize=True)
+                thumbnail = normalized.copy()
+                thumbnail.thumbnail((640, 640))
+                if thumbnail.mode not in ("RGB", "RGBA"):
+                    thumbnail = thumbnail.convert("RGB")
+                thumbnail.save(thumbnail_path, format="WEBP", quality=82, method=6)
+        _chmod_file(original_path)
+        _chmod_file(thumbnail_path)
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, ValueError) as exc:
+        original_path.unlink(missing_ok=True)
+        thumbnail_path.unlink(missing_ok=True)
+        raise ApiError(422, "invalid_image", "The image could not be normalized.") from exc
+    except Exception:
+        original_path.unlink(missing_ok=True)
+        thumbnail_path.unlink(missing_ok=True)
+        raise
+    safe_name = _safe_filename(filename) if filename else f"{source_type}-image.{extension}"
+    return StoredItemImage(
+        storage_key=original_path.relative_to(_root()).as_posix(),
+        thumbnail_key=thumbnail_path.relative_to(_root()).as_posix(),
+        original_filename=safe_name,
+        content_type=content_type,
+        byte_size=len(content),
+        width=width,
+        height=height,
+    )
 
 
 def delete_key(storage_key: str | None) -> None:

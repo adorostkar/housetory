@@ -158,6 +158,9 @@ def build_session_state(
                 id=chosen[0].id,
                 name=chosen[0].name,
                 warranty_reminder_days=chosen[0].warranty_reminder_days,
+                item_image_auto_reference=chosen[0].item_image_auto_reference,
+                item_image_auto_generate=chosen[0].item_image_auto_generate,
+                item_image_daily_generation_cap=chosen[0].item_image_daily_generation_cap,
             )
             if chosen is not None
             else None

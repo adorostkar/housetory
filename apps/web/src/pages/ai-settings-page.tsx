@@ -65,6 +65,7 @@ const TASK_LABELS: Record<string, string> = {
   vision: "Image recognition",
   labels: "Label summary headlines",
   transcription: "Voice transcription",
+  item_images: "Item illustrations",
 };
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -73,6 +74,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   structured: "Structured JSON",
   tools: "Tool calling",
   audio: "Audio input",
+  image: "Image generation",
 };
 
 interface ProviderDraft {
@@ -629,7 +631,9 @@ export function AiSettingsPage() {
                           ? "vision"
                           : task.task === "transcription"
                             ? "audio"
-                            : undefined
+                            : task.task === "item_images"
+                              ? "image"
+                              : undefined
                       }
                       loading={providerModelStatus?.loading}
                       error={providerModelStatus?.error}

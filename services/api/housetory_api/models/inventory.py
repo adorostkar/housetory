@@ -33,6 +33,7 @@ from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from .auth import Household
+    from .item_images import ItemImage
     from .property import Property
     from .stocktake import StocktakeItemState
 
@@ -337,6 +338,9 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     photos: Mapped[list["ItemPhoto"]] = relationship(
         back_populates="item", cascade="all, delete-orphan", order_by="ItemPhoto.sort_order"
+    )
+    images: Mapped[list["ItemImage"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan"
     )
     documents: Mapped[list["Document"]] = relationship(
         secondary=item_documents, back_populates="items"

@@ -98,11 +98,25 @@ export function SettingsPage() {
   const [reminderDays, setReminderDays] = React.useState(
     String(session.data?.household?.warranty_reminder_days ?? 30),
   );
+  const [autoReference, setAutoReference] = React.useState(
+    session.data?.household?.item_image_auto_reference ?? false,
+  );
+  const [autoGenerate, setAutoGenerate] = React.useState(
+    session.data?.household?.item_image_auto_generate ?? false,
+  );
+  const [imageGenerationCap, setImageGenerationCap] = React.useState(
+    String(session.data?.household?.item_image_daily_generation_cap ?? 10),
+  );
 
   React.useEffect(() => {
     if (session.data?.household) {
       setHouseholdName(session.data.household.name);
       setReminderDays(String(session.data.household.warranty_reminder_days));
+      setAutoReference(session.data.household.item_image_auto_reference ?? false);
+      setAutoGenerate(session.data.household.item_image_auto_generate ?? false);
+      setImageGenerationCap(
+        String(session.data.household.item_image_daily_generation_cap ?? 10),
+      );
     }
   }, [session.data?.household]);
 
@@ -110,12 +124,19 @@ export function SettingsPage() {
     !/^\d+$/.test(reminderDays) ||
     Number(reminderDays) < 1 ||
     Number(reminderDays) > 3650;
+  const imageCapInvalid =
+    !/^\d+$/.test(imageGenerationCap) ||
+    Number(imageGenerationCap) < 1 ||
+    Number(imageGenerationCap) > 100;
 
   const saveHousehold = useMutation({
     mutationFn: () =>
       api.patch<Household>("/household", {
         name: householdName.trim(),
         warranty_reminder_days: Number(reminderDays),
+        item_image_auto_reference: autoReference,
+        item_image_auto_generate: autoGenerate,
+        item_image_daily_generation_cap: Number(imageGenerationCap),
       }),
     onSuccess: (household) => {
       queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
@@ -171,7 +192,9 @@ export function SettingsPage() {
             className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end"
             onSubmit={(event) => {
               event.preventDefault();
-              if (householdName.trim() && !reminderInvalid) saveHousehold.mutate();
+              if (householdName.trim() && !reminderInvalid && !imageCapInvalid) {
+                saveHousehold.mutate();
+              }
             }}
           >
             <Field
@@ -213,14 +236,78 @@ export function SettingsPage() {
                 saveHousehold.isPending ||
                 !householdName.trim() ||
                 reminderInvalid ||
+                imageCapInvalid ||
                 (householdName.trim() === household?.name &&
-                  Number(reminderDays) === household?.warranty_reminder_days)
+                  Number(reminderDays) === household?.warranty_reminder_days &&
+                  autoReference === (household?.item_image_auto_reference ?? false) &&
+                  autoGenerate === (household?.item_image_auto_generate ?? false) &&
+                  Number(imageGenerationCap) ===
+                    (household?.item_image_daily_generation_cap ?? 10))
               }
             >
               {saveHousehold.isPending && <Spinner />}
               Save
             </Button>
           </form>
+          <div className="mt-5 rounded-xl border border-border/60 bg-background/35 p-3.5">
+            <p className="text-[0.76rem] font-medium">Item images</p>
+            <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+              Manual Find image and Generate actions remain available in item details.
+              Automatic actions run only after a new item is saved, never on every
+              keystroke. Reference images are tried before AI illustrations.
+            </p>
+            <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded border-border"
+                checked={autoReference}
+                disabled={!isOwner || saveHousehold.isPending}
+                onChange={(event) => setAutoReference(event.target.checked)}
+              />
+              <span>
+                Automatically find a reference image for new items
+                <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+                  Off by default. Requires a configured Brave Image Search key and a
+                  saved item with a useful product description.
+                </span>
+              </span>
+            </label>
+            <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded border-border"
+                checked={autoGenerate}
+                disabled={!isOwner || saveHousehold.isPending}
+                onChange={(event) => setAutoGenerate(event.target.checked)}
+              />
+              <span>
+                Fall back to an AI illustration when no reference is selected
+                <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+                  Off by default. Requires the household Item illustrations task and
+                  provider consent. A hard daily generation count cap applies; provider
+                  billing cannot be estimated reliably.
+                </span>
+              </span>
+            </label>
+            <div className="mt-3 max-w-[220px]">
+              <Field
+                label="Daily AI illustration cap"
+                htmlFor="item-image-generation-cap"
+                hint="Hard count, 1–100"
+                error={imageCapInvalid ? "Enter 1–100." : undefined}
+              >
+                <Input
+                  id="item-image-generation-cap"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={imageGenerationCap}
+                  disabled={!isOwner || saveHousehold.isPending}
+                  onChange={(event) => setImageGenerationCap(event.target.value)}
+                />
+              </Field>
+            </div>
+          </div>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
           <div className="max-w-sm">
             <HouseholdSwitcher />

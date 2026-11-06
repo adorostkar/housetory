@@ -47,6 +47,9 @@ export interface Household {
   id: UUID;
   name: string;
   warranty_reminder_days: number;
+  item_image_auto_reference?: boolean;
+  item_image_auto_generate?: boolean;
+  item_image_daily_generation_cap?: number;
 }
 
 export interface HouseholdMembership extends Household {
@@ -679,6 +682,85 @@ export interface Warranty {
   updated_at: string | null;
 }
 
+export type ItemImageSource = "reference" | "ai" | "builtin";
+
+export interface BuiltinIllustrationOption {
+  key: string;
+  label: string;
+}
+
+export interface ItemImage {
+  id: UUID | null;
+  source_type: ItemImageSource;
+  label: string;
+  status: string;
+  illustration_key: string | null;
+  url: string | null;
+  thumbnail_url: string | null;
+  width: number | null;
+  height: number | null;
+  source_name: string | null;
+  source_url: string | null;
+  source_page_url: string | null;
+  license_note: string | null;
+  retrieved_at: string | null;
+  exact_model_confirmed: boolean;
+  model_label: string | null;
+  provider_label: string | null;
+  automatic: boolean;
+  created_at: string | null;
+}
+
+export interface ItemImageSettings {
+  auto_reference: boolean;
+  auto_generate: boolean;
+  daily_generation_cap: number;
+  daily_generations_used: number;
+  daily_generations_remaining: number;
+}
+
+export interface ItemImageState {
+  item_id: UUID;
+  actual_photo_count: number;
+  image: ItemImage | null;
+  selected: ItemImage | null;
+  automatic_builtin: ItemImage | null;
+  pending: ItemImage[];
+  builtin_options: BuiltinIllustrationOption[];
+  settings: ItemImageSettings;
+  search_configured: boolean;
+  search_provider_label: string | null;
+  search_reason: string | null;
+  generation_configured: boolean;
+  generation_provider_label: string | null;
+  generation_reason: string | null;
+}
+
+export interface ItemImageBatchPreview {
+  action: "reference" | "illustration";
+  selected_count: number;
+  eligible_count: number;
+  skipped_has_photo: number;
+  skipped_unavailable: number;
+  estimated_generations: number;
+  daily_generation_remaining: number;
+  hard_cap: number;
+  notices: string[];
+}
+
+export interface ItemImageBatchJob {
+  job_id: UUID;
+  status: string;
+  action: string;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  error: string | null;
+  created_at: string | null;
+  finished_at: string | null;
+}
+
 export interface Photo {
   id: UUID;
   original_filename: string;
@@ -712,6 +794,7 @@ export interface ItemSummary {
   category: CategoryBrief | null;
   tags: TagBrief[];
   primary_photo: Photo | null;
+  representative_image?: ItemImage | null;
   purchase: Purchase | null;
   purchase_info_status:
     | "recorded"

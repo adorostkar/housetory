@@ -59,7 +59,7 @@ def _get_recognition(
 def ai_status(
     task: str = Query(
         default="assistant",
-        pattern=(r"^(assistant|imports|documents|search|vision|labels|transcription)$"),
+        pattern=(r"^(assistant|imports|documents|search|vision|labels|transcription|item_images)$"),
     ),
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),

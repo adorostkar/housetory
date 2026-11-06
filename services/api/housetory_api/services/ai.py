@@ -818,6 +818,57 @@ def complete_text(
     ).strip()
 
 
+def generate_image(
+    prompt: str,
+    *,
+    config: AiRuntimeConfig,
+    size: str = "1024x1024",
+) -> bytes:
+    """Generate one image through the OpenAI Images API.
+
+    This is deliberately not routed through a chat/completions endpoint. Other
+    providers are rejected until a real image-generation adapter exists for them.
+    """
+    if config.provider != AiProviderType.OPENAI.value:
+        raise AiUnavailable(
+            "Item illustration generation currently supports the OpenAI Images API."
+        )
+    if not config.configured or not config.model:
+        raise AiUnavailable(config.error or "Item illustration generation is not configured.")
+    payload: dict[str, Any] = {
+        "model": config.model,
+        "prompt": prompt[:4000],
+        "n": 1,
+        "size": size,
+    }
+    # GPT Image models return b64_json by default; older DALL-E models require the
+    # explicit response format. A URL-only response is not accepted as success.
+    if "gpt-image" not in config.model.lower():
+        payload["response_format"] = "b64_json"
+    response = _request_json(
+        _url(config, "/images/generations"),
+        payload,
+        headers=_headers(config),
+        timeout=get_settings().ai_timeout_seconds,
+    )
+    data = response.get("data")
+    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        raise AiInvalidOutput("Image provider returned no generated image.")
+    encoded = data[0].get("b64_json")
+    if not isinstance(encoded, str) or not encoded.strip():
+        raise AiInvalidOutput(
+            "Image provider did not return inline image data. A URL-only response "
+            "is not treated as a successful generation."
+        )
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise AiInvalidOutput("Image provider returned invalid base64 image data.") from exc
+    if not image or len(image) > get_settings().item_image_max_download_bytes:
+        raise AiInvalidOutput("Image provider returned an empty or oversized image.")
+    return image
+
+
 def ollama_hint() -> dict[str, str]:
     return {
         "macos": "brew install ollama && ollama serve && ollama pull <model>",

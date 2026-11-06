@@ -15,6 +15,7 @@ AiTaskName = Literal[
     "vision",
     "labels",
     "transcription",
+    "item_images",
 ]
 
 

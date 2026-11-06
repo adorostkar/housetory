@@ -57,6 +57,7 @@ TASK_LABELS = {
     AiTask.VISION.value: "Image recognition",
     AiTask.LABELS.value: "Label summary headlines",
     AiTask.TRANSCRIPTION.value: "Voice transcription",
+    AiTask.ITEM_IMAGES.value: "Item illustrations",
 }
 
 MODEL_CACHE_TTL_SECONDS = 300
@@ -106,6 +107,7 @@ TASK_CAPABILITY = {
     AiTask.VISION.value: "vision",
     AiTask.LABELS.value: "text",
     AiTask.TRANSCRIPTION.value: "audio",
+    AiTask.ITEM_IMAGES.value: "image",
 }
 
 
@@ -369,6 +371,20 @@ def update_task(
                     422,
                     "transcription_model_unsupported",
                     "Choose an OpenAI whisper/transcription model or a Gemini audio model.",
+                )
+        elif task == AiTask.ITEM_IMAGES.value:
+            if provider.provider != AiProviderType.OPENAI.value:
+                raise ApiError(
+                    422,
+                    "illustration_provider_unsupported",
+                    "Item illustration generation currently supports the OpenAI Images API.",
+                )
+            capabilities = _capabilities_for(provider, selected_model)
+            if "image" not in capabilities:
+                raise ApiError(
+                    422,
+                    "model_capability_mismatch",
+                    "The selected OpenAI model does not advertise image generation.",
                 )
         else:
             cached_model = _cached_model(provider, selected_model)

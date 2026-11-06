@@ -31,6 +31,7 @@ class Job(UUIDPrimaryKeyMixin, Base):
     queue: Mapped[str] = mapped_column(String(40), nullable=False, server_default="default")
     task: Mapped[str] = mapped_column(String(120), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=JobStatus.QUEUED.value
     )

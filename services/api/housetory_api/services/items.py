@@ -189,6 +189,11 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         apply_warranty(db, item, payload.warranty, replace=True)
     db.add(item)
     db.flush()
+    # Auto image lookup/generation is strictly opt-in per household and only
+    # runs after the item is saved. The default is off.
+    from .item_image_generation import maybe_enqueue_new_item_image
+
+    maybe_enqueue_new_item_image(db, item)
     return item
 
 

@@ -307,6 +307,8 @@ def delete_item(
     item = _get_item(db, auth.household.id, item_id)
     keys = [photo.storage_key for photo in item.photos]
     keys += [photo.thumbnail_key for photo in item.photos if photo.thumbnail_key]
+    keys += [image.storage_key for image in item.images if image.storage_key]
+    keys += [image.thumbnail_key for image in item.images if image.thumbnail_key]
 
     # Documents linked only to this item would otherwise become unreachable
     # orphans. Shared documents remain in the household library.

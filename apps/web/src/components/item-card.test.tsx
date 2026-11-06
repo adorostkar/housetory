@@ -108,3 +108,118 @@ describe("ItemCard", () => {
     expect(screen.getByText("Kitchenware")).toBeInTheDocument();
   });
 });
+
+describe("ItemCard image sources", () => {
+  it("shows a reference image and source label when no actual photo exists", () => {
+    render(
+      <MemoryRouter>
+        <ItemCard
+          item={{
+            ...item,
+            primary_photo: null,
+            representative_image: {
+              id: "image-ref",
+              source_type: "reference",
+              label: "Reference image",
+              status: "active",
+              illustration_key: null,
+              url: "/api/v1/item-images/image-ref/file",
+              thumbnail_url: "/api/v1/item-images/image-ref/thumbnail",
+              width: 1200,
+              height: 800,
+              source_name: "lg.com",
+              source_url: "https://media.lg.com/tv.png",
+              source_page_url: "https://www.lg.com/tv",
+              license_note: "Source page recorded.",
+              retrieved_at: "2026-01-01T00:00:00Z",
+              exact_model_confirmed: false,
+              model_label: null,
+              provider_label: null,
+              automatic: false,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("img", { name: /Reference image/i })).toHaveAttribute(
+      "src",
+      "/api/v1/item-images/image-ref/thumbnail",
+    );
+    expect(screen.getByText("Reference")).toBeVisible();
+  });
+
+  it("shows a built-in illustration instead of an empty placeholder", () => {
+    render(
+      <MemoryRouter>
+        <ItemCard
+          item={{
+            ...item,
+            primary_photo: null,
+            representative_image: {
+              id: null,
+              source_type: "builtin",
+              label: "Generic illustration",
+              status: "active",
+              illustration_key: "drill",
+              url: null,
+              thumbnail_url: null,
+              width: null,
+              height: null,
+              source_name: null,
+              source_url: null,
+              source_page_url: null,
+              license_note: null,
+              retrieved_at: null,
+              exact_model_confirmed: false,
+              model_label: null,
+              provider_label: null,
+              automatic: true,
+              created_at: null,
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("img", { name: "Generic illustration" })).toBeVisible();
+    expect(screen.getByText("Illustration")).toBeVisible();
+  });
+
+  it("keeps the actual photo ahead of a stored reference image", () => {
+    render(
+      <MemoryRouter>
+        <ItemCard
+          item={{
+            ...item,
+            representative_image: {
+              id: "image-ai",
+              source_type: "ai",
+              label: "AI illustration",
+              status: "active",
+              illustration_key: null,
+              url: "/api/v1/item-images/ai/file",
+              thumbnail_url: "/api/v1/item-images/ai/thumbnail",
+              width: 800,
+              height: 600,
+              source_name: "OpenAI",
+              source_url: null,
+              source_page_url: null,
+              license_note: null,
+              retrieved_at: null,
+              exact_model_confirmed: false,
+              model_label: null,
+              provider_label: "OpenAI",
+              automatic: false,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("img", { name: "Espresso Machine" })).toHaveAttribute(
+      "src",
+      item.primary_photo?.thumbnail_url,
+    );
+    expect(screen.queryByText("AI illustration")).not.toBeInTheDocument();
+  });
+});

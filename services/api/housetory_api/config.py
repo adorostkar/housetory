@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     brave_search_base_url: str = "https://api.search.brave.com"
     brave_search_country: str = ""
     brave_search_lang: str = ""
+    item_image_search_provider: Literal["auto", "brave", "none"] = "auto"
+    item_image_max_download_mb: int = Field(default=15, ge=1, le=50)
+    item_image_batch_max: int = Field(default=50, ge=1, le=100)
+    item_image_search_count: int = Field(default=12, ge=1, le=30)
     evidence_export_max_items: int = Field(default=300, ge=1, le=2000)
     evidence_export_max_documents: int = Field(default=300, ge=1, le=2000)
     evidence_export_max_photos: int = Field(default=500, ge=1, le=2000)
@@ -216,6 +220,10 @@ class Settings(BaseSettings):
     @property
     def voice_max_upload_bytes(self) -> int:
         return self.voice_max_upload_mb * 1024 * 1024
+
+    @property
+    def item_image_max_download_bytes(self) -> int:
+        return self.item_image_max_download_mb * 1024 * 1024
 
     @property
     def is_production(self) -> bool:
