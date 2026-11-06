@@ -83,34 +83,58 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
   });
 
   const taskCalls: string[] = [];
+  const liveStates = new Map<
+    string,
+    { status: "passed" | "failed"; message: string; tested_at: string }
+  >();
   await page.route(/\/api\/v1\/system\/status$/, async (route) => {
-    await route.fulfill({ status: 200, json: statusFixture });
+    await route.fulfill({
+      status: 200,
+      json: {
+        ...statusFixture,
+        tasks: statusFixture.tasks.map((task) => {
+          const live = liveStates.get(task.task);
+          if (!live) return task;
+          return {
+            ...task,
+            live_tested: live.status === "passed",
+            last_test_status: live.status,
+            last_test_at: live.tested_at,
+            last_test_error: live.status === "failed" ? live.message : null,
+          };
+        }),
+      },
+    });
   });
   await page.route(/\/api\/v1\/ai\/tasks\/([^/]+)\/test$/, async (route) => {
     const name = new URL(route.request().url()).pathname.split("/").at(-2) ?? "";
     taskCalls.push(name);
     await new Promise((resolve) => setTimeout(resolve, 450));
-    if (name === "assistant") {
-      await route.fulfill({
-        status: 200,
-        json: result(name, "passed", "The model returned structured test JSON."),
-      });
-    } else if (name === "transcription") {
-      await route.fulfill({
-        status: 200,
-        json: result(name, "failed", "The transcription provider rejected the request."),
-      });
-    } else if (name === "vision") {
-      await route.fulfill({
-        status: 200,
-        json: result(name, "passed", "The model accepted a synthetic image."),
-      });
-    } else {
+    const payload =
+      name === "assistant"
+        ? result(name, "passed", "The model returned structured test JSON.")
+        : name === "transcription"
+          ? result(
+              name,
+              "failed",
+              "The transcription provider rejected the request.",
+            )
+          : name === "vision"
+            ? result(name, "passed", "The model accepted a synthetic image.")
+            : null;
+    if (!payload) {
       await route.fulfill({
         status: 500,
         json: { detail: { code: "unexpected_test", message: "Unexpected task test." } },
       });
+      return;
     }
+    liveStates.set(name, {
+      status: payload.status,
+      message: payload.message,
+      tested_at: payload.tested_at,
+    });
+    await route.fulfill({ status: 200, json: payload });
   });
 
   await page.goto("/settings");
@@ -137,6 +161,7 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
   await expect(dialog.getByText(/may incur usage or credits/)).toBeVisible();
   await expect(dialog.getByText(/no inventory, photos, real documents/)).toBeVisible();
   expect(taskCalls).toEqual([]);
+  await page.waitForTimeout(400);
   await page.screenshot({
     path: "../../docs/walkthrough/test-all-ai-tasks/02-confirmation.png",
     fullPage: false,

@@ -271,7 +271,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 349 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 360 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -280,7 +280,9 @@ stack, not just unit mocks:
   multi-object recognition/apply/idempotency, voice-note grouping/corrections/
   duplicate resolution/split/idempotent confirmation, OpenAI/Gemini/OpenRouter
   transcription adapters, OpenRouter image-output adapter, task-specific
-  capability contracts, unverified exact-ID paths, bounded task tests, worker
+  capability contracts, unverified exact-ID paths, bounded task tests and the
+  confirmed bulk AI-task test workflow, household online-search credential
+  lifecycle/fallback/domain validation and worker resolution, worker
   heartbeat/status scoping, borrowed-record quantities/partial returns/corrections/
   cancellation/idempotency/concurrency/history, private borrowed photos, role and
   cross-household IDOR checks, search/assistant borrowed totals and owned-vs-borrowed
@@ -328,8 +330,8 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 160 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 51 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 179 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 56 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

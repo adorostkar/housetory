@@ -143,6 +143,10 @@ sends one fixed neutral query (`Housetory connectivity test`) to the Brave
 endpoints and reports the result. It sends no inventory, manual, borrower or
 household content, does not download anything and may use subscription quota. The
 manuals status endpoint still reports configuration without contacting Brave.
+Walkthrough screenshots: [not configured](walkthrough/online-search/01-not-configured.png),
+[saved write-only key](walkthrough/online-search/02-saved-write-only-key.png),
+[test confirmation](walkthrough/online-search/03-test-confirmation.png) and
+[bounded test result](walkthrough/online-search/04-test-result.png).
 
 Installation fallback (operator-only): if a household has no saved online-search
 row, the installation environment can provide `BRAVE_SEARCH_API_KEY` and the
@@ -438,15 +442,18 @@ in the main column.
 
 ## Verification
 
-- **286 PostgreSQL-backed backend tests** pass, including the new manual
-  attachment, identity-gate, citation, idempotency, duplicate, provider-output
-  and SSRF tests.
-- **124 Vitest frontend tests** pass, including manual card/actions, Ask dialogs,
-  real-page citations, no-AI/unconfigured states, identity confirmation,
-  candidate review/download and viewer controls.
-- **33 disposable-stack Playwright workflows** pass, including two named manual
-  workflows: a real synthetic upload/attach/answer flow and a mocked
-  gated search/review/save flow at mobile width.
+- **360 PostgreSQL-backed backend tests** pass, including household online-search
+  credential lifecycle/fallback/domain tests plus manual attachment,
+  identity-gate, citation, idempotency, duplicate, provider-output and SSRF tests.
+- **179 Vitest frontend tests** pass, including the write-only online-search
+  Settings card, bulk AI-task progress/skips/confirmation, manual card/actions,
+  Ask dialogs, real-page citations, no-AI/unconfigured states, identity
+  confirmation, candidate review/download and viewer controls.
+- **56 disposable-stack Playwright workflows** pass (55 passed, 1
+  fixture-dependent skip), including online-search Settings, bulk AI-task
+  confirmation/results and two named manual workflows: a real synthetic
+  upload/attach/answer flow and a mocked gated search/review/save flow at mobile
+  width.
 - Ruff, strict TypeScript typecheck, production build and Alembic migration drift
   check pass. The new migration is append-only.
 - The local Compose deployment was backed up first, migrated to

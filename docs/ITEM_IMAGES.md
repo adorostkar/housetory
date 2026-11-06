@@ -126,6 +126,12 @@ permission guarantee. Housetory does not provide legal advice, does not claim
 vendor terms are satisfied, and does not bypass hotlink restrictions, watermarks
 or paywalls.
 
+Online search Settings walkthrough:
+[not configured](walkthrough/online-search/01-not-configured.png),
+[saved write-only key](walkthrough/online-search/02-saved-write-only-key.png),
+[test confirmation](walkthrough/online-search/03-test-confirmation.png) and
+[bounded test result](walkthrough/online-search/04-test-result.png).
+
 If no suitable candidate is found, the category icon fallback remains.
 The result is downloaded through the same public-DNS/private-address/redirect/
 byte/time limits as manual retrieval, then decoded and re-encoded into a private
@@ -297,9 +303,10 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **338 PostgreSQL backend tests**, **146 Vitest tests**
-and **46 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
-typecheck, production build and Alembic drift checks pass. Backup
+Final local verification: **360 PostgreSQL backend tests**, **179 Vitest tests**
+and **56 disposable-stack Playwright workflows** (55 passed, 1 fixture-dependent
+skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
+checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and
 exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
 existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task

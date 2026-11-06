@@ -355,7 +355,7 @@ test("household image settings and explicit batch cancellation", async ({ page, 
   if (!(await autoGenerate.isChecked())) await autoGenerate.check();
   const cap = String(3 + (Date.now() % 80));
   await page.getByLabel(/Daily AI illustration cap/).fill(cap);
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Household settings updated")).toBeVisible();
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/10-household-settings-light.png",

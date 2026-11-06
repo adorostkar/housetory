@@ -120,8 +120,8 @@ test("status screen shows real readiness and task states; optional features are 
     page.getByText("Online image lookup setup required"),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Open image settings" }),
-  ).toHaveAttribute("href", "/settings#item-images");
+    page.getByRole("link", { name: "Open online search settings" }),
+  ).toHaveAttribute("href", "/settings#online-search");
   await page.screenshot({
     path: "../../docs/walkthrough/local-polish/04-image-lookup-setup-light.png",
     fullPage: false,
