@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
-import { ItemCard } from "@/components/item-card";
+import { ItemCard, ItemRow } from "@/components/item-card";
 import type { ItemSummary } from "@/lib/types";
 
 const item: ItemSummary = {
@@ -92,10 +92,10 @@ describe("ItemCard", () => {
     expect(screen.getByText("La Marzocco · Linea Mini")).toBeInTheDocument();
     expect(screen.getByText("Kitchen")).toBeInTheDocument();
     expect(screen.getByText("SHELF-001 · Coffee Shelf")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Espresso Machine" })).toHaveAttribute(
-      "src",
-      item.primary_photo?.thumbnail_url,
-    );
+    const photo = screen.getByRole("img", { name: "Espresso Machine" });
+    expect(photo).toHaveAttribute("src", item.primary_photo?.thumbnail_url);
+    expect(photo).toHaveClass("object-cover");
+    expect(photo).not.toHaveClass("object-contain");
   });
 
   it("shows a simple category icon when no photograph exists", () => {
@@ -140,11 +140,46 @@ describe("ItemCard image sources", () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("img", { name: /Reference image/i })).toHaveAttribute(
-      "src",
-      "/api/v1/item-images/image-ref/thumbnail",
-    );
+    const image = screen.getByRole("img", { name: /Reference image/i });
+    expect(image).toHaveAttribute("src", "/api/v1/item-images/image-ref/thumbnail");
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
     expect(screen.getByText("Reference")).toBeVisible();
+  });
+
+  it("fits representative images inside compact list thumbnails without cropping", () => {
+    render(
+      <MemoryRouter>
+        <ItemRow
+          item={{
+            ...item,
+            primary_photo: null,
+            representative_image: {
+              id: "image-list",
+              source_type: "reference",
+              label: "Reference image",
+              status: "active",
+              url: "/api/v1/item-images/image-list/file",
+              thumbnail_url: "/api/v1/item-images/image-list/thumbnail",
+              width: 1600,
+              height: 900,
+              source_name: "Example",
+              source_url: null,
+              source_page_url: null,
+              license_note: null,
+              retrieved_at: null,
+              exact_model_confirmed: false,
+              model_label: null,
+              provider_label: null,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    const image = screen.getByRole("link").querySelector("img");
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
   });
 
   it("uses the category icon instead of any built-in artwork", () => {

@@ -203,11 +203,16 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  await page.getByRole("button", { name: "Find image" }).click();
+  await page.getByRole("button", { name: "Find online image" }).click();
   await expect(page.getByText("Reference image").first()).toBeVisible();
   await expect(page.getByText(/exact model not confirmed/i).first()).toBeVisible();
   await expect(page.getByText(/lg\.com/).first()).toBeVisible();
-  await expect(page.getByRole("img", { name: /reference image/i }).first()).toBeVisible();
+  const referenceImage = page
+    .getByRole("img", { name: /reference image/i })
+    .first();
+  await expect(referenceImage).toBeVisible();
+  await expect(referenceImage).toHaveClass(/object-contain/);
+  await expect(referenceImage).not.toHaveClass(/object-cover/);
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/04-reference-light.png",
     fullPage: false,
@@ -245,7 +250,8 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   await page.reload();
   await expect(page.getByRole("img", { name: item.item.name as string })).toBeVisible();
   await expect(page.getByText("Actual photo is used")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Find image" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Find online image" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate illustration" })).toHaveCount(0);
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/07-actual-photo-priority.png",
     fullPage: false,
@@ -305,11 +311,25 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
   );
 
   await page.goto(`/items/${item.item.id}`);
+  await page.getByRole("button", { name: "Find online image" }).click();
+  await expect(page.getByText("Online image lookup setup required")).toBeVisible();
   await expect(
-    page.getByText("Reference-image lookup is not configured."),
+    page.getByText(/Set BRAVE_SEARCH_API_KEY to use reference-image search/i),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Generate" }).click();
+  await expect(
+    page.getByRole("link", { name: "Open image settings" }),
+  ).toHaveAttribute("href", "/settings#item-images");
+  await expect(
+    page.getByRole("button", { name: "Find online image" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Generate illustration" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Generate illustration" }).click();
   await expect(page.getByText("AI illustration preview")).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: "Pending AI illustration preview" }),
+  ).toHaveClass(/object-contain/);
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/08-ai-preview-light.png",
     fullPage: false,

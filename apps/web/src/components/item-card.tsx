@@ -54,12 +54,14 @@ export function ItemCard({
             className="size-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-[1.025]"
           />
         ) : representative?.thumbnail_url || representative?.url ? (
-          <img
-            src={representative.thumbnail_url ?? representative.url ?? ""}
-            alt={`${item.name} ${representative.label.toLowerCase()}`}
-            loading="lazy"
-            className="size-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-[1.025]"
-          />
+          <div className="flex size-full items-center justify-center bg-secondary/30 p-4">
+            <img
+              src={representative.thumbnail_url ?? representative.url ?? ""}
+              alt={`${item.name} ${representative.label.toLowerCase()}`}
+              loading="lazy"
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
         ) : (
           <div className="image-placeholder flex size-full items-center justify-center">
             <span className="flex size-14 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/25 backdrop-blur-sm">
@@ -291,7 +293,7 @@ export function ItemRow({
             src={representative.thumbnail_url ?? representative.url ?? ""}
             alt=""
             loading="lazy"
-            className="size-full object-cover"
+            className="size-full bg-secondary/30 object-contain p-1.5"
           />
         ) : (
           <div className="image-placeholder flex size-full items-center justify-center">

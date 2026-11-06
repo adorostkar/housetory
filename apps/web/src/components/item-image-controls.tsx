@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  Globe2,
   ImageOff,
   Info,
-  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -34,11 +34,13 @@ function sourceNote(image: ItemImage) {
 function PendingPreview({
   image,
   busy,
+  canWrite,
   onAccept,
   onReject,
 }: {
   image: ItemImage;
   busy: boolean;
+  canWrite: boolean;
   onAccept: () => void;
   onReject: () => void;
 }) {
@@ -48,7 +50,7 @@ function PendingPreview({
         <img
           src={image.thumbnail_url}
           alt="Pending AI illustration preview"
-          className="size-16 rounded-lg border border-border/60 object-cover"
+          className="size-16 rounded-lg border border-border/60 bg-secondary/30 object-contain p-1"
         />
       ) : null}
       <div className="min-w-0 flex-1">
@@ -57,15 +59,25 @@ function PendingPreview({
           Generated from product text only. Review before using it on cards.
         </p>
       </div>
-      <div className="flex gap-1.5">
-        <Button type="button" size="sm" disabled={busy} onClick={onAccept}>
-          {busy ? <Spinner /> : <Check />}
-          Use
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onReject}>
-          Reject
-        </Button>
-      </div>
+      {canWrite ? (
+        <div className="flex gap-1.5">
+          <Button type="button" size="sm" disabled={busy} onClick={onAccept}>
+            {busy ? <Spinner /> : <Check />}
+            Use
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={onReject}
+          >
+            Reject
+          </Button>
+        </div>
+      ) : (
+        <Badge variant="outline">Awaiting review</Badge>
+      )}
     </div>
   );
 }
@@ -76,6 +88,9 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
   const imageQuery = useItemImage(itemId);
   const state = imageQuery.data;
   const [busyAction, setBusyAction] = React.useState<string | null>(null);
+  const [setupAction, setSetupAction] = React.useState<
+    "search" | "generation" | null
+  >(null);
 
   const setState = (next: ItemImageState) => {
     queryClient.setQueryData(queryKeys.itemImage(itemId), next);
@@ -149,12 +164,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       : null;
   const searchReady = state.search_configured;
   const generationReady = state.generation_configured;
-  const nothingConfigured = !searchReady && !generationReady;
-  const configureHref = nothingConfigured
-    ? "/settings#item-images"
-    : !generationReady
-      ? "/settings/ai"
-      : "/settings#item-images";
 
   return (
     <section
@@ -238,6 +247,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
               key={pending.id ?? pending.created_at ?? "pending"}
               image={pending}
               busy={busy}
+              canWrite={canWrite}
               onAccept={() => pending.id && accept(pending.id)}
               onReject={() => pending.id && reject(pending.id)}
             />
@@ -247,71 +257,132 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
 
       {canWrite && !actual && (
         <>
-          {nothingConfigured ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-background/35 px-3 py-2 text-[0.7rem] text-muted-foreground">
-              <span>Reference lookup and AI illustrations are not configured.</span>
-              <Button size="sm" variant="outline" asChild>
-                <Link to={configureHref}>Configure item images</Link>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                title={searchReady ? undefined : state.search_reason ?? undefined}
+                onClick={() => {
+                  if (!searchReady) {
+                    setSetupAction((current) =>
+                      current === "search" ? null : "search",
+                    );
+                    return;
+                  }
+                  setSetupAction(null);
+                  void findImage();
+                }}
+              >
+                {busyAction === "find" ? <Spinner /> : <Globe2 />}
+                {state.selected?.source_type === "reference"
+                  ? "Change online image"
+                  : "Find online image"}
               </Button>
-            </div>
-          ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              {searchReady ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  title={state.search_reason ?? undefined}
-                  onClick={findImage}
-                >
-                  {busyAction === "find" ? <Spinner /> : <RefreshCw />}
-                  {state.selected?.source_type === "reference"
-                    ? "Change image"
-                    : "Find image"}
-                </Button>
-              ) : null}
-              {generationReady ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  title={state.generation_reason ?? undefined}
-                  onClick={generate}
-                >
-                  {busyAction === "generate" ? <Spinner /> : <Sparkles />}
-                  Generate
-                </Button>
-              ) : null}
-              {state.selected && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={remove}
-                >
-                  {busyAction === "remove" ? <Spinner /> : <ImageOff />}
-                  Use icon
-                </Button>
+              {!searchReady && (
+                <Badge variant="brass" className="text-[0.58rem]">
+                  Setup required
+                </Badge>
               )}
             </div>
-          )}
-          {!nothingConfigured && (!searchReady || !generationReady) ? (
-            <p className="mt-2 flex items-center gap-1.5 text-[0.64rem] text-muted-foreground">
-              <Info className="size-3 shrink-0" />
-              {!searchReady
-                ? "Reference-image lookup is not configured."
-                : "AI illustration generation is not configured."}{" "}
-              <Link
-                to={configureHref}
-                className="underline underline-offset-4 hover:text-foreground"
+            <div className="inline-flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                title={generationReady ? undefined : state.generation_reason ?? undefined}
+                onClick={() => {
+                  if (!generationReady) {
+                    setSetupAction((current) =>
+                      current === "generation" ? null : "generation",
+                    );
+                    return;
+                  }
+                  setSetupAction(null);
+                  void generate();
+                }}
               >
-                Configure
-              </Link>
-            </p>
-          ) : null}
+                {busyAction === "generate" ? <Spinner /> : <Sparkles />}
+                {state.pending.length > 0
+                  ? "Generate another"
+                  : "Generate illustration"}
+              </Button>
+              {!generationReady && (
+                <Badge variant="brass" className="text-[0.58rem]">
+                  Setup required
+                </Badge>
+              )}
+            </div>
+            {state.selected && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={remove}
+              >
+                {busyAction === "remove" ? <Spinner /> : <ImageOff />}
+                Use icon
+              </Button>
+            )}
+          </div>
+
+          {setupAction === "search" && !searchReady && (
+            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-[0.7rem] leading-relaxed">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium text-foreground/85">
+                  Online image lookup setup required
+                </p>
+                <Badge variant="brass">Server configuration</Badge>
+              </div>
+              <p className="mt-1 break-words text-muted-foreground">
+                {state.search_reason ??
+                  "Online reference-image lookup is not configured on this server."}
+              </p>
+              <p className="mt-1.5 text-muted-foreground">
+                This is separate from AI generation. Housetory needs a server-side
+                image-search provider{" "}
+                <code className="break-all rounded bg-background/60 px-1 py-0.5">
+                  BRAVE_SEARCH_API_KEY
+                </code>{" "}
+                and a reviewed permitted-source allowlist{" "}
+                <code className="break-all rounded bg-background/60 px-1 py-0.5">
+                  ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
+                </code>. An AI provider key does not enable online lookup, and downloads
+                remain limited to permitted sources.
+              </p>
+              <Button className="mt-2" size="sm" variant="outline" asChild>
+                <Link to="/settings#item-images">Open image settings</Link>
+              </Button>
+            </div>
+          )}
+
+          {setupAction === "generation" && !generationReady && (
+            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-[0.7rem] leading-relaxed">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium text-foreground/85">
+                  AI illustration setup required
+                </p>
+                <Badge variant="brass">AI task configuration</Badge>
+              </div>
+              <p className="mt-1 break-words text-muted-foreground">
+                {state.generation_reason ??
+                  "AI illustration generation is not configured for this household."}
+              </p>
+              <p className="mt-1.5 text-muted-foreground">
+                This is separate from online image lookup. Configure the household
+                Item illustrations task with an image-output model and provider
+                consent. An online image-search key does not enable AI generation.
+                Generated previews stay pending until you explicitly accept one.
+              </p>
+              <Button className="mt-2" size="sm" variant="outline" asChild>
+                <Link to="/settings/ai">Open AI provider settings</Link>
+              </Button>
+            </div>
+          )}
         </>
       )}
 

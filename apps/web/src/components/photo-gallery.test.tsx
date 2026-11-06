@@ -58,14 +58,17 @@ const photo = {
   thumbnail_url: "/api/v1/photos/photo-1/thumbnail",
 };
 
-function renderGallery(item: ItemDetail) {
+function renderGallery(
+  item: ItemDetail,
+  representative: ItemDetail["representative_image"] = null,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PhotoGallery item={item} />
+        <PhotoGallery item={item} representative={representative} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -84,6 +87,33 @@ describe("PhotoGallery", () => {
       screen.queryAllByRole("button", { name: "Choose a photo" }),
     ).toHaveLength(0);
     expect(screen.queryByLabelText("Add photographs")).not.toBeInTheDocument();
+  });
+
+  it("fits a representative image inside a padded frame without cropping", () => {
+    renderGallery(baseItem, {
+      id: "image-ref",
+      source_type: "reference",
+      label: "Reference image",
+      status: "active",
+      url: "/api/v1/item-images/image-ref/file",
+      thumbnail_url: "/api/v1/item-images/image-ref/thumbnail",
+      width: 1600,
+      height: 900,
+      source_name: "Example",
+      source_url: null,
+      source_page_url: null,
+      license_note: null,
+      retrieved_at: "2026-01-01T00:00:00Z",
+      exact_model_confirmed: false,
+      model_label: null,
+      provider_label: null,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+    const image = screen.getByRole("img", { name: /Reference image/i });
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
+    expect(image.parentElement).toHaveClass("bg-secondary/30", "p-6");
+    expect(screen.queryByText("No photograph yet")).not.toBeInTheDocument();
   });
 
   it("keeps one upload control pair for populated galleries", () => {

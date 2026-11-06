@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ItemImageControls } from "@/components/item-image-controls";
@@ -31,7 +32,7 @@ const baseImage: ItemImage = {
   created_at: "2026-01-01T00:00:00Z",
 };
 
-const state: ItemImageState = {
+const baseState: ItemImageState = {
   item_id: "item-1",
   actual_photo_count: 0,
   image: baseImage,
@@ -52,6 +53,10 @@ const state: ItemImageState = {
   generation_reason: null,
 };
 
+let state = baseState;
+
+const permissions = vi.hoisted(() => ({ canWrite: true }));
+
 const aiPending: ItemImage = {
   ...baseImage,
   id: "image-ai",
@@ -68,7 +73,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
   return {
     ...actual,
-    useCanWrite: () => true,
+    useCanWrite: () => permissions.canWrite,
     useItemImage: (itemId: string) =>
       useQuery({
         queryKey: actual.queryKeys.itemImage(itemId),
@@ -97,19 +102,23 @@ function renderControls() {
   client.setQueryData(["items", "item-1", "image"], state);
   const result = render(
     <QueryClientProvider client={client}>
-      <ItemImageControls itemId="item-1" />
+      <MemoryRouter>
+        <ItemImageControls itemId="item-1" />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return { ...result, client };
 }
 
 beforeEach(() => {
+  state = baseState;
+  permissions.canWrite = true;
   vi.mocked(api.post).mockReset();
   vi.mocked(api.delete).mockReset();
 });
 
 describe("ItemImageControls", () => {
-  it("shows reference provenance and automatically calls Find image", async () => {
+  it("shows reference provenance and automatically calls Find online image", async () => {
     vi.mocked(api.post).mockResolvedValue(state);
     renderControls();
     expect(screen.getAllByText(/Reference image/).length).toBeGreaterThan(0);
@@ -117,7 +126,7 @@ describe("ItemImageControls", () => {
     expect(
       screen.getByRole("link", { name: "cc-by" }),
     ).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/");
-    await userEvent.click(screen.getByRole("button", { name: /Change image/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Change online image/ }));
     expect(api.post).toHaveBeenCalledWith("/items/item-1/image/find", { force: true });
   });
 
@@ -130,6 +139,90 @@ describe("ItemImageControls", () => {
     renderControls();
     await userEvent.click(screen.getByRole("button", { name: /Use icon/ }));
     expect(api.delete).toHaveBeenCalledWith("/items/item-1/image");
+  });
+
+  it("keeps Find online image and Generate visible with clear setup states", async () => {
+    state = {
+      ...baseState,
+      image: null,
+      selected: null,
+      search_configured: false,
+      search_provider_label: null,
+      search_reason:
+        "Reference-image search is not configured. Set BRAVE_SEARCH_API_KEY and ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS.",
+      generation_configured: false,
+      generation_provider_label: null,
+      generation_reason:
+        "Item illustration generation is not configured. Choose an image-output model.",
+    };
+    renderControls();
+    expect(
+      screen.getByRole("button", { name: /Find online image/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Generate illustration/ }),
+    ).toBeVisible();
+    expect(screen.getAllByText("Setup required")).toHaveLength(2);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Find online image/ }),
+    );
+    expect(
+      screen.getByText("Online image lookup setup required"),
+    ).toBeVisible();
+    expect(screen.getAllByText(/BRAVE_SEARCH_API_KEY/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/AI provider key does not enable online lookup/)).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Open image settings" }),
+    ).toHaveAttribute("href", "/settings#item-images");
+    expect(api.post).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Generate illustration/ }),
+    );
+    const generationPanel = screen
+      .getByText("AI illustration setup required")
+      .closest("div.mt-3");
+    expect(generationPanel).toHaveTextContent(
+      /An online image-search key does not enable AI generation/,
+    );
+    expect(
+      screen.getByRole("link", { name: "Open AI provider settings" }),
+    ).toHaveAttribute("href", "/settings/ai");
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("does not expose review or image actions to viewers", () => {
+    permissions.canWrite = false;
+    state = { ...baseState, image: null, selected: null, pending: [aiPending] };
+    renderControls();
+    expect(screen.getByText("AI illustration preview")).toBeVisible();
+    expect(screen.getByText("Awaiting review")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Use" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Find online image/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Generate illustration/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps controls hidden when an actual photo takes priority", () => {
+    state = {
+      ...baseState,
+      actual_photo_count: 1,
+      image: null,
+      selected: null,
+    };
+    renderControls();
+    expect(screen.getByText("Actual photo is used")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /Find online image/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Generate illustration/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("generates a pending AI preview and accepts it explicitly", async () => {
@@ -145,6 +238,9 @@ describe("ItemImageControls", () => {
       });
     });
     expect(await screen.findByText("AI illustration preview")).toBeVisible();
+    expect(
+      screen.getByRole("img", { name: "Pending AI illustration preview" }),
+    ).toHaveClass("object-contain");
     await userEvent.click(screen.getByRole("button", { name: "Use" }));
     expect(api.post).toHaveBeenCalledWith("/items/item-1/images/image-ai/accept");
   });

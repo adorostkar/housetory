@@ -1054,3 +1054,20 @@ def test_openrouter_image_adapter_contract_and_output_validation(monkeypatch):
         assert "invalid base64" in str(exc).lower()
     else:  # pragma: no cover
         raise AssertionError("Invalid OpenRouter base64 was accepted")
+
+
+def test_representative_thumbnail_preserves_aspect_without_cropping(upload_root):
+    from housetory_api.services import storage
+
+    stored = storage.store_item_image_bytes(
+        uuid.uuid4(),
+        uuid.uuid4(),
+        png_bytes(size=(1200, 400)),
+        source_type="reference",
+        filename="wide-product.png",
+    )
+    thumbnail_path = storage.resolve_key(stored.thumbnail_key)
+    with Image.open(thumbnail_path) as thumbnail:
+        assert thumbnail.size[0] == 640
+        assert abs((thumbnail.width / thumbnail.height) - 3.0) < 0.02
+    assert (upload_root / stored.storage_key).is_file()

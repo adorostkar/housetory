@@ -162,11 +162,13 @@ export function PhotoGallery({
         ) : representative ? (
           <>
             {representative.url ? (
-              <img
-                src={representative.thumbnail_url ?? representative.url}
-                alt={`${item.name} ${representative.label.toLowerCase()}`}
-                className="size-full object-cover"
-              />
+              <div className="flex size-full min-h-[150px] items-center justify-center bg-secondary/30 p-6">
+                <img
+                  src={representative.thumbnail_url ?? representative.url}
+                  alt={`${item.name} ${representative.label.toLowerCase()}`}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
             ) : (
               <div className="image-placeholder flex size-full min-h-[150px] items-center justify-center">
                 <CategoryIcon

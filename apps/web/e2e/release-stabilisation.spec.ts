@@ -109,14 +109,32 @@ test("status screen shows real readiness and task states; optional features are 
   const item = await createItem(request, `Release item ${suffix()}`, room.id);
   await page.goto(`/items/${item.item.id}`);
   await expect(
-    page.getByRole("link", { name: "Configure item images" }),
+    page.getByRole("button", { name: "Find online image" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Find image" }),
-  ).toHaveCount(0);
+    page.getByRole("button", { name: "Generate illustration" }),
+  ).toBeVisible();
+  await expect(page.getByText("Setup required").first()).toBeVisible();
+  await page.getByRole("button", { name: "Find online image" }).click();
   await expect(
-    page.getByRole("button", { name: "Generate" }),
-  ).toHaveCount(0);
+    page.getByText("Online image lookup setup required"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open image settings" }),
+  ).toHaveAttribute("href", "/settings#item-images");
+  await page.screenshot({
+    path: "../../docs/walkthrough/local-polish/04-image-lookup-setup-light.png",
+    fullPage: false,
+  });
+  await page.getByRole("button", { name: "Generate illustration" }).click();
+  await expect(page.getByText("AI illustration setup required")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Open AI provider settings" }),
+  ).toHaveAttribute("href", "/settings/ai");
+  await page.screenshot({
+    path: "../../docs/walkthrough/local-polish/05-image-generation-setup-light.png",
+    fullPage: false,
+  });
 
   await page.goto("/voice");
   await expect(

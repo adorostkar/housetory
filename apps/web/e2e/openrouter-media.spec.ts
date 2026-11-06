@@ -392,8 +392,8 @@ test("OpenRouter audio and image models configure, transcribe and generate local
   });
 
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByRole("button", { name: "Generate" })).toBeEnabled();
-  await page.getByRole("button", { name: "Generate" }).click();
+  await expect(page.getByRole("button", { name: "Generate illustration" })).toBeEnabled();
+  await page.getByRole("button", { name: "Generate illustration" }).click();
   await expect(page.getByText("AI illustration preview")).toBeVisible();
   await page.screenshot({
     path: "../../docs/walkthrough/openrouter-media/03-image-preview-light.png",
@@ -422,7 +422,7 @@ test("OpenRouter audio and image models configure, transcribe and generate local
   });
   expect(errorTask.ok()).toBeTruthy();
   await page.reload();
-  await page.getByRole("button", { name: "Generate" }).click();
+  await page.getByRole("button", { name: "Generate illustration" }).click();
   await expect(
     page.getByText(/did not return a usable image|HTTP 400/).first(),
   ).toBeVisible();

@@ -241,7 +241,7 @@ export function PurchasesPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate font-display text-[1.3rem] tracking-[-0.02em]">
+                      <h2 className="min-w-0 break-words font-display text-[1.12rem] font-medium leading-snug tracking-[-0.01em] text-foreground/90">
                         {purchase.merchant || purchase.vendor || "Unnamed purchase"}
                       </h2>
                       {purchase.is_shared && (
@@ -260,7 +260,7 @@ export function PurchasesPage() {
                   </div>
                   <div className="shrink-0 text-right">
                     {purchase.price_cents != null ? (
-                      <p className="font-display text-[1.5rem] leading-none tracking-[-0.03em] tabular-nums">
+                      <p className="font-display text-[1.2rem] font-medium leading-none tracking-[-0.02em] tabular-nums text-foreground/85">
                         {formatCurrency(purchase.price_cents, purchase.currency)}
                       </p>
                     ) : (
@@ -293,15 +293,22 @@ export function PurchasesPage() {
                 </div>
 
                 {purchase.items.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {purchase.items.map((item) => (
-                      <Link key={item.id} to={`/items/${item.id}`}>
-                        <Badge variant="secondary" className="hover:bg-secondary/70">
-                          <Package className="size-3" />
-                          {item.name}
-                        </Badge>
-                      </Link>
-                    ))}
+                  <div className="mt-3.5">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                      Items in this purchase
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
+                      {purchase.items.map((item) => (
+                        <Link
+                          key={item.id}
+                          to={`/items/${item.id}`}
+                          className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-[0.8rem] font-medium leading-snug text-foreground/85 transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                        >
+                          <Package className="size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
+                          <span className="min-w-0 break-words text-left">{item.name}</span>
+                        </Link>
+                      ))}
+                    </div>
                   </div>
                 )}
 

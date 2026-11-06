@@ -256,25 +256,41 @@ export function SettingsPage() {
           >
             <p className="text-[0.76rem] font-medium">Item images</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
-              Manual Find image and Generate actions remain available in item details.
+              Item pages always expose both online image lookup and AI illustration
+              actions. They use different services and are configured separately.
               Automatic actions run only after a new item is saved, never on every
               keystroke. Reference images are tried before AI illustrations.
             </p>
-            <p className="mt-2 break-words text-[0.66rem] leading-relaxed text-muted-foreground">
-              Server-side reference search requires{" "}
-              <code className="break-all rounded bg-secondary px-1 py-0.5">
-                BRAVE_SEARCH_API_KEY
-              </code>{" "}
-              and a reviewed{" "}
-              <code className="break-all rounded bg-secondary px-1 py-0.5">
-                ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
-              </code>{" "}
-              allowlist. AI illustrations are configured in{" "}
-              <Link to="/settings/ai" className="underline underline-offset-4 hover:text-foreground">
-                AI providers
+            <div className="mt-3 rounded-lg border border-border/60 bg-background/30 p-3">
+              <p className="text-[0.72rem] font-medium">Online reference-image lookup</p>
+              <p className="mt-1 break-words text-[0.66rem] leading-relaxed text-muted-foreground">
+                Requires a server-side{" "}
+                <code className="break-all rounded bg-secondary px-1 py-0.5">
+                  BRAVE_SEARCH_API_KEY
+                </code>{" "}
+                and a reviewed{" "}
+                <code className="break-all rounded bg-secondary px-1 py-0.5">
+                  ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
+                </code>{" "}
+                allowlist. AI provider credentials do not enable online lookup, and
+                Housetory only downloads from the permitted sources.
+              </p>
+            </div>
+            <div className="mt-2 rounded-lg border border-border/60 bg-background/30 p-3">
+              <p className="text-[0.72rem] font-medium">AI illustrations</p>
+              <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                Requires the household Item illustrations task with an image-output
+                model and provider consent. Online-search credentials do not enable AI
+                generation. Generated previews remain pending until you explicitly
+                accept one.
+              </p>
+              <Link
+                to="/settings/ai"
+                className="mt-1.5 inline-block text-[0.66rem] underline underline-offset-4 hover:text-foreground"
+              >
+                Configure AI providers
               </Link>
-              .
-            </p>
+            </div>
             <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
               <input
                 type="checkbox"
