@@ -57,15 +57,34 @@ that the provider may incur usage/cost and that no inventory, borrower, document
 private note data is used. Results and bounded errors are stored for the status
 screen. No test runs on typing, discovery, page load or model recommendation.
 
+System status also offers **Test all AI tasks**. One confirmation explains the
+count and names of enabled/configured tasks, external provider calls and possible
+credits/cost. It then calls the same owner-only task-test endpoint sequentially for
+each enabled/configured task using that task's saved provider and model; tasks that
+share a model are still tested separately because their probes differ. Disabled and
+unconfigured tasks are shown as skipped with a reason. Progress moves through
+queued/running/passed/failed/unsupported/skipped, failures do not stop later tasks,
+client timeouts are reported honestly, and duplicate runs are blocked while one is
+in progress. The action never enables tasks, changes assignments, discovers models
+or falls back to another provider. Individual Test buttons remain available.
+
 ## System status
 
 Settings → System status shows the deployed release commit/build/channel/identity,
 database/storage/worker readiness, job counts and recent failures with explicit
 retry, per-task configured/compatible/live-tested state and last error/time, plus
-configured/not-configured optional external services. It never returns API keys,
-job payloads, prompts, borrower notes or inventory details. A catalog listing is
-not a successful inference test; only an explicit task test marks a task
+configured/not-configured optional external services. **Refresh status** is passive:
+it only rereads stored/runtime evidence and never calls a provider. **Test all AI
+tasks** is a separate, explicitly confirmed live action. The screen never returns
+API keys, job payloads, prompts, borrower notes or inventory details. A catalog
+listing is not a successful inference test; only an explicit task test marks a task
 live-tested.
+
+Walkthrough screenshots of the separate passive and live actions:
+[`01-status-actions.png`](walkthrough/test-all-ai-tasks/01-status-actions.png),
+[`02-confirmation.png`](walkthrough/test-all-ai-tasks/02-confirmation.png),
+[`03-running.png`](walkthrough/test-all-ai-tasks/03-running.png) and
+[`04-mixed-results.png`](walkthrough/test-all-ai-tasks/04-mixed-results.png).
 
 Unsupported provider/task combinations are rejected with an explicit API error;
 they are not sent to a guessed endpoint and do not produce fake previews or

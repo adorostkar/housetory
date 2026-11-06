@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 *.local
+compose.*.local.yaml
 
 # JavaScript
 node_modules/

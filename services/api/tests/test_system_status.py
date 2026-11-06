@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import HouseholdMember, Job, User, WorkerHeartbeat
 from housetory_api.security import hash_password
@@ -129,6 +130,51 @@ def test_explicit_task_test_requires_confirmation_and_records_live_result(
     assert assistant["live_tested"] is False
     assert assistant["last_test_status"] == "failed"
     assert "malformed" in (assistant["last_test_error"] or "").lower()
+
+
+def test_bulk_live_task_test_endpoint_remains_owner_only(owner_client):
+    from housetory_api.services.auth import create_session
+
+    state = owner_client.get("/api/v1/auth/session").json()
+    household_id = uuid.UUID(state["household"]["id"])
+    with SessionLocal() as db:
+        user = User(
+            name="Task Test Member",
+            email="task-test-member@example.com",
+            password_hash=hash_password("task-test-member-password-2026"),
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            HouseholdMember(
+                household_id=household_id,
+                user_id=user.id,
+                role="member",
+            )
+        )
+        token = create_session(
+            db,
+            user=user,
+            settings=get_settings(),
+            user_agent="task-test-boundary",
+            ip_address="127.0.0.1",
+            household_id=household_id,
+        )
+        db.commit()
+    denied = owner_client.post(
+        "/api/v1/ai/tasks/assistant/test",
+        json={"confirm": True},
+        headers={"Cookie": f"housetory_session={token}"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "owner_required"
+    assert (
+        owner_client.post(
+            "/api/v1/ai/tasks/assistant/test",
+            json={"confirm": False},
+        ).status_code
+        == 422
+    )
 
 
 def test_system_status_release_readiness_jobs_retry_and_scoping(

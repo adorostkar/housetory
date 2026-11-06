@@ -1,12 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SystemStatusPanel } from "@/components/system-status-panel";
+import {
+  buildTaskTestPlan,
+  SystemStatusPanel,
+} from "@/components/system-status-panel";
 import { api } from "@/lib/api";
-import type { SystemStatus } from "@/lib/types";
+import { queryKeys } from "@/lib/queries";
+import type { AiTaskTestResult, SystemStatus } from "@/lib/types";
 
 const status: SystemStatus = {
   release: {
@@ -41,7 +46,7 @@ const status: SystemStatus = {
       task: "assistant",
       label: "General assistant",
       provider_label: "OpenAI household",
-      model: "GPT-6 Luna",
+      model: "shared-model",
       model_label: null,
       model_listed: false,
       enabled: true,
@@ -58,8 +63,8 @@ const status: SystemStatus = {
       task: "transcription",
       label: "Voice transcription",
       provider_label: "OpenRouter media",
-      model: "openai/whisper-test",
-      model_label: "Whisper Test",
+      model: "shared-model",
+      model_label: "Shared Model",
       model_listed: true,
       enabled: true,
       configured: true,
@@ -70,6 +75,57 @@ const status: SystemStatus = {
       last_test_at: null,
       last_test_error: null,
       error: null,
+    },
+    {
+      task: "vision",
+      label: "Photo recognition",
+      provider_label: "Vision provider",
+      model: "vision-model",
+      model_label: "Vision Model",
+      model_listed: true,
+      enabled: true,
+      configured: true,
+      compatibility: "compatible",
+      capabilities: ["vision"],
+      live_tested: false,
+      last_test_status: null,
+      last_test_at: null,
+      last_test_error: null,
+      error: null,
+    },
+    {
+      task: "labels",
+      label: "Label suggestions",
+      provider_label: "OpenAI household",
+      model: "shared-model",
+      model_label: "Shared Model",
+      model_listed: true,
+      enabled: false,
+      configured: true,
+      compatibility: "compatible",
+      capabilities: ["text"],
+      live_tested: false,
+      last_test_status: null,
+      last_test_at: null,
+      last_test_error: null,
+      error: null,
+    },
+    {
+      task: "search",
+      label: "Search summaries",
+      provider_label: null,
+      model: null,
+      model_label: null,
+      model_listed: false,
+      enabled: true,
+      configured: false,
+      compatibility: "not_configured",
+      capabilities: [],
+      live_tested: false,
+      last_test_status: null,
+      last_test_at: null,
+      last_test_error: null,
+      error: "No search provider is configured.",
     },
   ],
   external_services: [
@@ -133,17 +189,20 @@ function renderPanel(isOwner = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <MemoryRouter>
       <QueryClientProvider client={client}>
         <SystemStatusPanel isOwner={isOwner} />
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  return { ...view, client };
 }
 
 beforeEach(() => {
   vi.mocked(api.post).mockReset();
+  vi.mocked(toast.success).mockReset();
+  vi.mocked(toast.error).mockReset();
 });
 
 describe("SystemStatusPanel", () => {
@@ -156,7 +215,7 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText("fixture.failed")).toBeVisible();
     expect(screen.getByText("fixture failure")).toBeVisible();
     expect(screen.getByText(/saved ID not in catalog/)).toBeVisible();
-    expect(screen.getByText("Compatible")).toBeVisible();
+    expect(screen.getAllByText("Compatible").length).toBeGreaterThan(0);
     expect(screen.getByText(/Live-tested/)).toBeVisible();
     expect(screen.getByText("Email delivery")).toBeVisible();
     expect(screen.getByText("not configured")).toBeVisible();
@@ -165,6 +224,9 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText("Source: Household settings")).toBeVisible();
     expect(screen.getByText("Source: Installation fallback")).toBeVisible();
     expect(screen.getAllByRole("link", { name: "Open settings" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Test all AI tasks" })).toBeEnabled();
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it("retries a failed job through the owner endpoint", async () => {
@@ -183,5 +245,139 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText(/Owner access is required/)).toBeVisible();
     expect(screen.queryByText("abc123release")).not.toBeInTheDocument();
     expect(screen.queryByText("fixture.failed")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Test all AI tasks" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selects exactly the enabled and configured tasks and explains skips", () => {
+    const plan = buildTaskTestPlan(status.tasks);
+    expect(
+      plan.map((entry) => ({
+        task: entry.task.task,
+        state: entry.state,
+        reason: entry.reason,
+      })),
+    ).toEqual([
+      { task: "assistant", state: "queued", reason: undefined },
+      { task: "transcription", state: "queued", reason: undefined },
+      { task: "vision", state: "queued", reason: undefined },
+      {
+        task: "labels",
+        state: "skipped",
+        reason: "Disabled for this household.",
+      },
+      {
+        task: "search",
+        state: "skipped",
+        reason: "No search provider is configured.",
+      },
+    ]);
+  });
+
+  it("requires one confirmation and sends no live request when cancelled", async () => {
+    renderPanel();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Test all AI tasks" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText(/3 sequential, minimal synthetic probes/),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByText(
+        /General assistant, Voice transcription, Photo recognition/,
+      ),
+    ).toBeVisible();
+    expect(within(dialog).getByText(/may incur usage or credits/)).toBeVisible();
+    expect(
+      within(dialog).getByText(/no inventory, photos, real documents/),
+    ).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("runs sequentially, continues after failure, blocks duplicates and refreshes status", async () => {
+    let resolveAssistant: (value: AiTaskTestResult) => void = () => {};
+    const assistant = new Promise<AiTaskTestResult>((resolve) => {
+      resolveAssistant = resolve;
+    });
+    const result = (
+      task: string,
+      taskStatus: AiTaskTestResult["status"],
+      message: string,
+    ): AiTaskTestResult => ({
+      task,
+      status: taskStatus,
+      message,
+      tested_at: "2026-11-06T13:00:00Z",
+      model: "shared-model",
+      provider_label: "Fixture provider",
+    });
+    vi.mocked(api.post).mockImplementation(((path: string) => {
+      if (path === "/ai/tasks/assistant/test") return assistant;
+      if (path === "/ai/tasks/transcription/test") {
+        return Promise.resolve(
+          result("transcription", "failed", "Transcription rejected"),
+        );
+      }
+      if (path === "/ai/tasks/vision/test") {
+        return Promise.resolve(result("vision", "passed", "Vision accepted"));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    }) as typeof api.post);
+
+    const { client } = renderPanel();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Test all AI tasks" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Run 3 task tests" }),
+    );
+
+    await waitFor(() => expect(screen.getByText("Running…")).toBeVisible());
+    expect(api.post).toHaveBeenCalledTimes(1);
+    const runningButton = screen.getByRole("button", {
+      name: "Testing AI tasks…",
+    });
+    expect(runningButton).toBeDisabled();
+    await userEvent.click(runningButton);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText("Skipped")).toHaveLength(2);
+    expect(screen.getByText("Disabled for this household.")).toBeVisible();
+    expect(
+      screen.getAllByText("No search provider is configured.").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("Queued")).toHaveLength(2);
+
+    resolveAssistant(result("assistant", "passed", "Assistant accepted"));
+    await waitFor(() =>
+      expect(screen.getByText("Transcription rejected")).toBeVisible(),
+    );
+    expect(api.post).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(api.post).mock.calls.map(([path]) => path)).toEqual([
+      "/ai/tasks/assistant/test",
+      "/ai/tasks/transcription/test",
+      "/ai/tasks/vision/test",
+    ]);
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("1 failed"),
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.systemStatus,
+    });
+    expect(
+      screen.getByRole("button", { name: "Test all AI tasks" }),
+    ).toBeEnabled();
+    expect(screen.getByText("3 of 3 live tasks finished")).toBeVisible();
   });
 });
