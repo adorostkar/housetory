@@ -1,4 +1,10 @@
-"""Built-in item illustrations, display priority and image provenance helpers."""
+"""Item image display priority and provenance helpers.
+
+Actual photographs remain in ``item_photos`` and always take priority. The only
+selectable non-photo sources are downloaded reference images and accepted AI
+illustrations. No-photo fallback is rendered by the frontend as a simple category
+icon, not generated line art.
+"""
 
 from __future__ import annotations
 
@@ -12,30 +18,11 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import Item, ItemImage
-from ..schemas.item_images import (
-    BuiltinOption,
-    ItemImageOut,
-    ItemImageSettingsOut,
-    ItemImageState,
-)
+from ..schemas.item_images import ItemImageOut, ItemImageSettingsOut, ItemImageState
 
-BUILTIN_OPTIONS: tuple[BuiltinOption, ...] = (
-    BuiltinOption(key="drill", label="Power drill"),
-    BuiltinOption(key="tv", label="Television"),
-    BuiltinOption(key="ethernet-cable", label="Ethernet cable"),
-    BuiltinOption(key="suitcase", label="Suitcase"),
-    BuiltinOption(key="box", label="Storage box"),
-    BuiltinOption(key="chair", label="Chair"),
-    BuiltinOption(key="sofa", label="Sofa"),
-    BuiltinOption(key="camera", label="Camera"),
-    BuiltinOption(key="laptop", label="Laptop"),
-    BuiltinOption(key="kettle", label="Kettle"),
-    BuiltinOption(key="bicycle", label="Bicycle"),
-    BuiltinOption(key="book", label="Book"),
-    BuiltinOption(key="generic", label="Generic item"),
-)
-
-_BUILTIN_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+# Product-type vocabulary used by reference-image matching. It contains no
+# artwork or presentation data.
+_ITEM_TYPE_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ethernet-cable", ("ethernet cable", "ethernet", "network cable", "cat6", "cat 6", "rj45")),
     ("drill", ("drill", "impact driver", "hammer drill", "cordless drill")),
     ("tv", ("television", "oled tv", "qled tv", "smart tv", " tv", "tv ")),
@@ -49,23 +36,21 @@ _BUILTIN_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("box", ("storage box", "cardboard box", "plastic box", "storage bin", "crate")),
     ("book", ("book", "novel", "hardcover", "paperback")),
 )
-_BUILTIN_LABELS = {entry.key: entry.label for entry in BUILTIN_OPTIONS}
 
 
 def _normalize(value: str | None) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
 
-def builtin_key_for_item(item: Item) -> str | None:
-    """Conservatively match a small built-in illustration.
+def item_type_key(item: Item) -> str | None:
+    """Conservatively classify a product type for reference-image matching.
 
     Name matches take precedence. Two different strong type matches in the name
-    are ambiguous and intentionally fall back to the category/generic icon rather
-    than guessing.
+    are ambiguous and intentionally return ``None`` rather than guessing.
     """
     name = f" {_normalize(item.name)} "
     matches: list[str] = []
-    for key, terms in _BUILTIN_TERMS:
+    for key, terms in _ITEM_TYPE_TERMS:
         if any(term in name for term in terms):
             matches.append(key)
     if len(set(matches)) == 1:
@@ -74,34 +59,26 @@ def builtin_key_for_item(item: Item) -> str | None:
         return None
     category = f" {_normalize(item.category.name if item.category else '')} "
     text = f" {_normalize(item.description)} "
-    for key, terms in _BUILTIN_TERMS:
+    for key, terms in _ITEM_TYPE_TERMS:
         if any(term in category for term in terms):
             matches.append(key)
     if len(set(matches)) == 1:
         return matches[0]
     if len(set(matches)) > 1:
         return None
-    for key, terms in _BUILTIN_TERMS:
+    for key, terms in _ITEM_TYPE_TERMS:
         if any(term in text for term in terms):
             matches.append(key)
     return matches[0] if len(set(matches)) == 1 else None
 
 
-def builtin_image(item: Item, key: str | None = None) -> ItemImageOut | None:
-    illustration_key = key or builtin_key_for_item(item)
-    if illustration_key is None:
-        return None
-    return ItemImageOut(
-        source_type="builtin",
-        label="Generic illustration",
-        status="active",
-        illustration_key=illustration_key,
-        automatic=True,
-    )
-
-
 def active_image(item: Item) -> ItemImage | None:
-    active = [image for image in item.images if image.status == "active"]
+    """Return the selected display image, ignoring legacy built-in rows."""
+    active = [
+        image
+        for image in item.images
+        if image.status == "active" and image.source_type in {"reference", "ai"}
+    ]
     if not active:
         return None
     return max(active, key=lambda image: image.created_at)
@@ -109,7 +86,7 @@ def active_image(item: Item) -> ItemImage | None:
 
 def pending_images(item: Item) -> list[ItemImage]:
     return sorted(
-        (image for image in item.images if image.status == "pending"),
+        (image for image in item.images if image.status == "pending" and image.source_type == "ai"),
         key=lambda image: image.created_at,
         reverse=True,
     )
@@ -127,17 +104,18 @@ def _image_urls(image: ItemImage) -> tuple[str | None, str | None]:
 
 def image_out(image: ItemImage) -> ItemImageOut:
     url, thumbnail_url = _image_urls(image)
-    label = {
+    labels = {
         "reference": "Reference image",
         "ai": "AI illustration",
-        "builtin": "Generic illustration",
-    }[image.source_type]
+    }
+    label = labels.get(image.source_type)
+    if label is None:
+        raise ValueError("Legacy built-in illustrations are not displayable.")
     return ItemImageOut(
         id=image.id,
         source_type=image.source_type,
         label=label,
         status=image.status,
-        illustration_key=image.illustration_key,
         url=url,
         thumbnail_url=thumbnail_url,
         width=image.width,
@@ -153,16 +131,15 @@ def image_out(image: ItemImage) -> ItemImageOut:
         exact_model_confirmed=image.exact_model_confirmed,
         model_label=image.model_label,
         provider_label=image.provider.display_name if image.provider else None,
-        automatic=False,
         created_at=image.created_at,
     )
 
 
 def representative_image_out(item: Item) -> ItemImageOut | None:
     selected = active_image(item)
-    if selected is not None:
-        return image_out(selected)
-    return builtin_image(item)
+    if selected is None:
+        return None
+    return image_out(selected)
 
 
 def image_search_fingerprint(item: Item) -> str:
@@ -226,15 +203,12 @@ def state_out(
     generation_reason: str | None,
 ) -> ItemImageState:
     selected = active_image(item)
-    automatic = builtin_image(item)
     return ItemImageState(
         item_id=item.id,
         actual_photo_count=len(item.photos),
-        image=image_out(selected) if selected is not None else automatic,
+        image=image_out(selected) if selected is not None else None,
         selected=image_out(selected) if selected is not None else None,
-        automatic_builtin=automatic,
         pending=[image_out(image) for image in pending_images(item)],
-        builtin_options=list(BUILTIN_OPTIONS),
         settings=settings_out(db, item.household),
         search_configured=search_configured,
         search_provider_label=search_provider_label,
@@ -255,39 +229,3 @@ def clear_active_images(db: Session, item_id: uuid.UUID) -> None:
     for image in active:
         image.status = "superseded"
     db.flush()
-
-
-def set_active_image(db: Session, item: Item, image: ItemImage) -> None:
-    clear_active_images(db, item.id)
-    image.status = "active"
-    image.item_id = item.id
-    image.household_id = item.household_id
-    db.flush()
-
-
-def make_builtin_image(
-    db: Session,
-    item: Item,
-    *,
-    illustration_key: str,
-    actor_user_id: uuid.UUID | None,
-) -> ItemImage:
-    if illustration_key not in _BUILTIN_LABELS:
-        raise ValueError("Unknown built-in illustration.")
-    clear_active_images(db, item.id)
-    image = ItemImage(
-        household_id=item.household_id,
-        item_id=item.id,
-        created_by_user_id=actor_user_id,
-        source_type="builtin",
-        status="active",
-        illustration_key=illustration_key,
-        model_label=None,
-    )
-    db.add(image)
-    db.flush()
-    return image
-
-
-def builtin_label(key: str | None) -> str | None:
-    return _BUILTIN_LABELS.get(key or "")

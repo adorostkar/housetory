@@ -55,31 +55,20 @@ async function createItem(
 }
 
 function image(
-  sourceType: "reference" | "ai" | "builtin",
+  sourceType: "reference" | "ai",
   overrides: Record<string, unknown> = {},
 ) {
   return {
-    id: sourceType === "builtin" ? null : `image-${sourceType}`,
+    id: `image-${sourceType}`,
     source_type: sourceType,
     label:
-      sourceType === "reference"
-        ? "Reference image"
-        : sourceType === "ai"
-          ? "AI illustration"
-          : "Generic illustration",
+      sourceType === "reference" ? "Reference image" : "AI illustration",
     status: "active",
-    illustration_key: sourceType === "builtin" ? "tv" : null,
-    url:
-      sourceType === "builtin"
-        ? null
-        : `/api/v1/item-images/image-${sourceType}/file`,
-    thumbnail_url:
-      sourceType === "builtin"
-        ? null
-        : `/api/v1/item-images/image-${sourceType}/thumbnail`,
-    width: sourceType === "builtin" ? null : 640,
-    height: sourceType === "builtin" ? null : 420,
-    source_name: sourceType === "reference" ? "lg.com" : sourceType === "ai" ? "OpenAI" : null,
+    url: `/api/v1/item-images/image-${sourceType}/file`,
+    thumbnail_url: `/api/v1/item-images/image-${sourceType}/thumbnail`,
+    width: 640,
+    height: 420,
+    source_name: sourceType === "reference" ? "lg.com" : "OpenAI",
     source_url:
       sourceType === "reference" ? "https://media.lg.com/oled.png" : null,
     source_page_url:
@@ -91,12 +80,11 @@ function image(
     license_name: null,
     license_url: null,
     permission_basis: sourceType === "reference" ? "configured_source_policy" : null,
-    retrieved_at: sourceType === "builtin" ? null : "2026-11-06T00:00:00Z",
+    retrieved_at: "2026-11-06T00:00:00Z",
     exact_model_confirmed: false,
     model_label: null,
     provider_label: sourceType === "ai" ? "OpenAI Images" : null,
-    automatic: sourceType === "builtin",
-    created_at: sourceType === "builtin" ? null : "2026-11-06T00:00:00Z",
+    created_at: "2026-11-06T00:00:00Z",
     ...overrides,
   };
 }
@@ -106,19 +94,12 @@ function imageState(
   selected: ReturnType<typeof image> | null,
   overrides: Record<string, unknown> = {},
 ) {
-  const builtin = image("builtin");
   return {
     item_id: itemId,
     actual_photo_count: 0,
-    image: selected ?? builtin,
+    image: selected,
     selected,
-    automatic_builtin: builtin,
     pending: [],
-    builtin_options: [
-      { key: "tv", label: "Television" },
-      { key: "chair", label: "Chair" },
-      { key: "generic", label: "Generic item" },
-    ],
     settings: {
       auto_reference: false,
       auto_generate: false,
@@ -146,7 +127,7 @@ async function mockImageAsset(page: Page, kind: "reference" | "ai") {
   );
 }
 
-test("built-in fallback, automatic reference selection, and actual-photo priority", async ({
+test("category icon fallback, automatic reference selection, and actual-photo priority", async ({
   page,
   request,
 }) => {
@@ -200,12 +181,27 @@ test("built-in fallback, automatic reference selection, and actual-photo priorit
   });
 
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByRole("img", { name: "Generic illustration" })).toBeVisible();
-  await expect(page.getByText("Generic illustration").first()).toBeVisible();
+  await expect(page.getByRole("img", { name: "Category icon" })).toBeVisible();
+  await expect(page.getByText("Category icon").first()).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/01-builtin-light.png",
+    path: "../../docs/walkthrough/item-images/01-category-icon-light.png",
     fullPage: false,
   });
+  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  await page.locator("html.dark").waitFor();
+  await page.waitForTimeout(350);
+  await page.screenshot({
+    path: "../../docs/walkthrough/item-images/02-category-icon-dark.png",
+    fullPage: false,
+  });
+  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  await page.screenshot({
+    path: "../../docs/walkthrough/item-images/03-category-icon-mobile.png",
+    fullPage: false,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
 
   await page.getByRole("button", { name: "Find image" }).click();
   await expect(page.getByText("Reference image").first()).toBeVisible();
@@ -213,7 +209,7 @@ test("built-in fallback, automatic reference selection, and actual-photo priorit
   await expect(page.getByText(/lg\.com/).first()).toBeVisible();
   await expect(page.getByRole("img", { name: /reference image/i }).first()).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/02-reference-light.png",
+    path: "../../docs/walkthrough/item-images/04-reference-light.png",
     fullPage: false,
   });
 
@@ -221,14 +217,14 @@ test("built-in fallback, automatic reference selection, and actual-photo priorit
   await page.locator("html.dark").waitFor();
   await page.waitForTimeout(350);
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/03-reference-dark.png",
+    path: "../../docs/walkthrough/item-images/05-reference-dark.png",
     fullPage: false,
   });
   await page.getByRole("button", { name: "Switch to light mode" }).first().click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/04-reference-mobile.png",
+    path: "../../docs/walkthrough/item-images/06-reference-mobile.png",
     fullPage: false,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -251,7 +247,7 @@ test("built-in fallback, automatic reference selection, and actual-photo priorit
   await expect(page.getByText("Actual photo is used")).toBeVisible();
   await expect(page.getByRole("button", { name: "Find image" })).toHaveCount(0);
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/05-actual-photo-priority.png",
+    path: "../../docs/walkthrough/item-images/07-actual-photo-priority.png",
     fullPage: false,
   });
 });
@@ -270,15 +266,15 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
     description: "Oak frame, pale fabric, reading chair for the study",
   });
   await mockImageAsset(page, "ai");
-  const builtinState = imageState(item.item.id, null, {
+  const emptyState = imageState(item.item.id, null, {
     search_configured: false,
     search_reason: "Set BRAVE_SEARCH_API_KEY to use reference-image search.",
   });
   const pendingImage = image("ai", { id: "image-ai", status: "pending" });
-  const activeImage = image("ai", { id: "image-ai", status: "active", automatic: false });
+  const activeImage = image("ai", { id: "image-ai", status: "active" });
   await page.route(new RegExp(`/api/v1/items/${item.item.id}/image$`), async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, json: builtinState });
+      await route.fulfill({ status: 200, json: emptyState });
     } else {
       await route.continue();
     }
@@ -315,14 +311,14 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
   await page.getByRole("button", { name: "Generate" }).click();
   await expect(page.getByText("AI illustration preview")).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/06-ai-preview-light.png",
+    path: "../../docs/walkthrough/item-images/08-ai-preview-light.png",
     fullPage: false,
   });
   await page.getByRole("button", { name: "Use", exact: true }).click();
   await expect(page.getByText("AI illustration").first()).toBeVisible();
   await expect(page.getByText(/not a photo/).first()).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/07-ai-accepted-light.png",
+    path: "../../docs/walkthrough/item-images/09-ai-accepted-light.png",
     fullPage: false,
   });
 });
@@ -342,13 +338,13 @@ test("household image settings and explicit batch cancellation", async ({ page, 
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Household settings updated")).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/08-household-settings-light.png",
+    path: "../../docs/walkthrough/item-images/10-household-settings-light.png",
     fullPage: false,
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/09-household-settings-mobile.png",
+    path: "../../docs/walkthrough/item-images/11-household-settings-mobile.png",
     fullPage: false,
   });
 
@@ -431,12 +427,50 @@ test("household image settings and explicit batch cancellation", async ({ page, 
   await expect(dialog.getByText(/Queued|Running/)).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/10-batch-queued-light.png",
+    path: "../../docs/walkthrough/item-images/12-batch-queued-light.png",
     fullPage: false,
     animations: "disabled",
   });
   await dialog.getByRole("button", { name: "Cancel batch" }).click();
   await expect(dialog.getByText("Cancelled")).toBeVisible();
+});
+
+test("item cards and compact list rows use the category icon fallback", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  const id = suffix();
+  const room = await createRoom(request, `Icon list room ${id}`);
+  const item = await createItem(
+    request,
+    `Plain storage box ${id}`,
+    room.id,
+    { description: "Plain cardboard storage box" },
+  );
+  await page.goto("/items");
+  const card = page
+    .getByRole("link", { name: new RegExp(`Plain storage box ${id}`) })
+    .first();
+  await expect(card).toBeVisible();
+  await expect(card.getByRole("img", { name: "Category icon" })).toBeVisible();
+  await page.screenshot({
+    path: "../../docs/walkthrough/item-images/13-item-card-category-icon.png",
+    fullPage: false,
+  });
+  await page.getByRole("button", { name: "Compact list view" }).click();
+  const row = page
+    .getByRole("link", { name: new RegExp(`Plain storage box ${id}`) })
+    .first();
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("img", { name: "Category icon" })).toBeVisible();
+  await page.screenshot({
+    path: "../../docs/walkthrough/item-images/14-item-list-category-icon.png",
+    fullPage: false,
+  });
 });
 
 test("existing item generation stays opt-in and no external provider is required", async ({
@@ -458,6 +492,6 @@ test("existing item generation stays opt-in and no external provider is required
   expect(state.ok()).toBeTruthy();
   const body = await state.json();
   expect(body["selected"]).toBeNull();
-  expect(body["automatic_builtin"]["illustration_key"]).toBe("box");
+  expect(body["image"]).toBeNull();
   expect(body["generation_configured"]).toBe(false);
 });

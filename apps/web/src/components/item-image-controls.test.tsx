@@ -12,7 +12,6 @@ const baseImage: ItemImage = {
   source_type: "reference",
   label: "Reference image",
   status: "active",
-  illustration_key: null,
   url: "/api/v1/item-images/image-1/file",
   thumbnail_url: "/api/v1/item-images/image-1/thumbnail",
   width: 1200,
@@ -29,7 +28,6 @@ const baseImage: ItemImage = {
   exact_model_confirmed: false,
   model_label: null,
   provider_label: null,
-  automatic: false,
   created_at: "2026-01-01T00:00:00Z",
 };
 
@@ -38,9 +36,7 @@ const state: ItemImageState = {
   actual_photo_count: 0,
   image: baseImage,
   selected: baseImage,
-  automatic_builtin: null,
   pending: [],
-  builtin_options: [{ key: "tv", label: "Television" }],
   settings: {
     auto_reference: false,
     auto_generate: false,
@@ -66,7 +62,6 @@ const aiPending: ItemImage = {
   source_page_url: null,
   exact_model_confirmed: false,
   provider_label: "OpenAI",
-  automatic: false,
 };
 
 vi.mock("@/lib/queries", async (importOriginal) => {
@@ -124,6 +119,17 @@ describe("ItemImageControls", () => {
     ).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/");
     await userEvent.click(screen.getByRole("button", { name: /Change image/ }));
     expect(api.post).toHaveBeenCalledWith("/items/item-1/image/find", { force: true });
+  });
+
+  it("resets a selected reference or AI image to the category icon", async () => {
+    vi.mocked(api.delete).mockResolvedValue({
+      ...state,
+      image: null,
+      selected: null,
+    });
+    renderControls();
+    await userEvent.click(screen.getByRole("button", { name: /Use icon/ }));
+    expect(api.delete).toHaveBeenCalledWith("/items/item-1/image");
   });
 
   it("generates a pending AI preview and accepts it explicitly", async () => {

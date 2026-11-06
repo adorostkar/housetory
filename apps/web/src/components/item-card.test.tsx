@@ -98,13 +98,13 @@ describe("ItemCard", () => {
     );
   });
 
-  it("shows an arch placeholder when no photograph exists", () => {
+  it("shows a simple category icon when no photograph exists", () => {
     render(
       <MemoryRouter>
         <ItemCard item={{ ...item, primary_photo: null, purchase: null }} />
       </MemoryRouter>,
     );
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Category icon" })).toBeVisible();
     expect(screen.getByText("Kitchenware")).toBeInTheDocument();
   });
 });
@@ -122,7 +122,6 @@ describe("ItemCard image sources", () => {
               source_type: "reference",
               label: "Reference image",
               status: "active",
-              illustration_key: null,
               url: "/api/v1/item-images/image-ref/file",
               thumbnail_url: "/api/v1/item-images/image-ref/thumbnail",
               width: 1200,
@@ -135,7 +134,6 @@ describe("ItemCard image sources", () => {
               exact_model_confirmed: false,
               model_label: null,
               provider_label: null,
-              automatic: false,
               created_at: "2026-01-01T00:00:00Z",
             },
           }}
@@ -149,40 +147,20 @@ describe("ItemCard image sources", () => {
     expect(screen.getByText("Reference")).toBeVisible();
   });
 
-  it("shows a built-in illustration instead of an empty placeholder", () => {
+  it("uses the category icon instead of any built-in artwork", () => {
     render(
       <MemoryRouter>
         <ItemCard
           item={{
             ...item,
             primary_photo: null,
-            representative_image: {
-              id: null,
-              source_type: "builtin",
-              label: "Generic illustration",
-              status: "active",
-              illustration_key: "drill",
-              url: null,
-              thumbnail_url: null,
-              width: null,
-              height: null,
-              source_name: null,
-              source_url: null,
-              source_page_url: null,
-              license_note: null,
-              retrieved_at: null,
-              exact_model_confirmed: false,
-              model_label: null,
-              provider_label: null,
-              automatic: true,
-              created_at: null,
-            },
+            representative_image: null,
           }}
         />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("img", { name: "Generic illustration" })).toBeVisible();
-    expect(screen.getByText("Illustration")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Category icon" })).toBeVisible();
+    expect(screen.queryByText("Illustration")).not.toBeInTheDocument();
   });
 
   it("keeps the actual photo ahead of a stored reference image", () => {
@@ -196,7 +174,6 @@ describe("ItemCard image sources", () => {
               source_type: "ai",
               label: "AI illustration",
               status: "active",
-              illustration_key: null,
               url: "/api/v1/item-images/ai/file",
               thumbnail_url: "/api/v1/item-images/ai/thumbnail",
               width: 800,
@@ -209,7 +186,6 @@ describe("ItemCard image sources", () => {
               exact_model_confirmed: false,
               model_label: null,
               provider_label: "OpenAI",
-              automatic: false,
               created_at: "2026-01-01T00:00:00Z",
             },
           }}

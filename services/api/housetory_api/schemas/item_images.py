@@ -5,17 +5,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class BuiltinOption(BaseModel):
-    key: str
-    label: str
-
-
 class ItemImageOut(BaseModel):
     id: uuid.UUID | None = None
-    source_type: Literal["reference", "ai", "builtin"]
+    source_type: Literal["reference", "ai"]
     label: str
     status: str = "active"
-    illustration_key: str | None = None
     url: str | None = None
     thumbnail_url: str | None = None
     width: int | None = None
@@ -31,7 +25,6 @@ class ItemImageOut(BaseModel):
     exact_model_confirmed: bool = False
     model_label: str | None = None
     provider_label: str | None = None
-    automatic: bool = False
     created_at: datetime | None = None
 
 
@@ -48,9 +41,7 @@ class ItemImageState(BaseModel):
     actual_photo_count: int = 0
     image: ItemImageOut | None = None
     selected: ItemImageOut | None = None
-    automatic_builtin: ItemImageOut | None = None
     pending: list[ItemImageOut] = Field(default_factory=list)
-    builtin_options: list[BuiltinOption] = Field(default_factory=list)
     settings: ItemImageSettingsOut
     search_configured: bool = False
     search_provider_label: str | None = None
@@ -62,10 +53,6 @@ class ItemImageState(BaseModel):
 
 class ItemImageFindRequest(BaseModel):
     force: bool = False
-
-
-class BuiltinImageChoice(BaseModel):
-    illustration_key: str = Field(min_length=1, max_length=40)
 
 
 class ItemImageBatchPreviewRequest(BaseModel):
@@ -103,8 +90,6 @@ class ItemImageBatchJobOut(BaseModel):
 
 
 __all__ = [
-    "BuiltinImageChoice",
-    "BuiltinOption",
     "ItemImageBatchJobOut",
     "ItemImageBatchPreview",
     "ItemImageBatchPreviewRequest",

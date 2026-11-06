@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ImageOff, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { BuiltinIllustration } from "@/components/builtin-illustration";
+import { CategoryIcon } from "@/components/category-icon";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CameraUpload } from "@/components/camera-upload";
 import { PhotoLightbox } from "@/components/photo-lightbox";
@@ -161,22 +161,18 @@ export function PhotoGallery({
           </button>
         ) : representative ? (
           <>
-            {representative.source_type === "builtin" &&
-            representative.illustration_key ? (
-              <BuiltinIllustration
-                illustrationKey={representative.illustration_key}
-                label={representative.label}
-                className="size-full"
-              />
-            ) : representative.url ? (
+            {representative.url ? (
               <img
                 src={representative.thumbnail_url ?? representative.url}
                 alt={`${item.name} ${representative.label.toLowerCase()}`}
                 className="size-full object-cover"
               />
             ) : (
-              <div className="image-placeholder flex size-full items-center justify-center">
-                <ImageOff className="size-5" />
+              <div className="image-placeholder flex size-full min-h-[150px] items-center justify-center">
+                <CategoryIcon
+                  category={item.category?.name}
+                  className="size-6 text-foreground/30"
+                />
               </div>
             )}
             <Badge
@@ -188,8 +184,11 @@ export function PhotoGallery({
           </>
         ) : (
           <div className="image-placeholder flex min-h-[150px] flex-col items-center justify-center px-5 py-5 text-center">
-            <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/30 backdrop-blur-sm">
-              <ImageOff className="size-4" strokeWidth={1.5} />
+            <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/35 backdrop-blur-sm">
+              <CategoryIcon
+                category={item.category?.name}
+                className="size-4"
+              />
             </span>
             <p className="mt-3 text-[0.82rem] font-medium text-foreground/75">
               No photograph yet

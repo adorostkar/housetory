@@ -28,9 +28,10 @@ if TYPE_CHECKING:
 class ItemImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A non-photographic display image for an item.
 
-    Actual user photographs stay in ``item_photos``. This table only stores
-    reference downloads, generated illustrations and explicit built-in choices,
-    with provenance for every stored source.
+    Actual user photographs stay in ``item_photos``. This table stores reference
+    downloads and accepted AI illustrations with provenance. Legacy
+    ``source_type='builtin'`` rows are retained for compatibility but are
+    superseded/ignored and never rendered.
     """
 
     __tablename__ = "item_images"
@@ -70,6 +71,7 @@ class ItemImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    # Legacy built-in illustration identifier; no new rows use this column.
     illustration_key: Mapped[str | None] = mapped_column(String(40))
     storage_key: Mapped[str | None] = mapped_column(String(500), unique=True)
     thumbnail_key: Mapped[str | None] = mapped_column(String(500), unique=True)

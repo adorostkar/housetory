@@ -26,9 +26,9 @@ from ..models import Item, ItemImage
 from . import storage
 from .item_images import (
     active_image,
-    builtin_key_for_item,
     clear_active_images,
     image_search_fingerprint,
+    item_type_key,
 )
 from .manual_web import (
     ManualFetchError,
@@ -580,7 +580,7 @@ def build_product_profile(item: Item) -> ProductProfile:
     sizes = _sizes(combined)
     technologies = _tech_families(" ".join(tokens))
     variants = _variants(combined)
-    item_type = builtin_key_for_item(item)
+    item_type = item_type_key(item)
     if item_type is None and sizes and technologies:
         item_type = "tv"
     brand = (item.brand or "").strip() or None
@@ -1048,8 +1048,8 @@ def _download_candidate(
     raise ApiError(
         422,
         "image_download_failed",
-        "The selected image could not be downloaded safely; the built-in "
-        "illustration remains available.",
+        "The selected image could not be downloaded safely; the category icon "
+        "fallback remains available.",
     ) from last_error
 
 
@@ -1163,8 +1163,8 @@ def find_and_select_reference(
             503,
             "image_search_policy_unconfigured",
             "Reference-image downloads require an explicit permitted-source policy. "
-            "Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. The built-in "
-            "illustration remains available.",
+            "Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. The category "
+            "icon fallback remains available.",
         )
     profile = build_product_profile(item)
     if profile.brand_ambiguous or not profile.brand or not profile.item_type:
@@ -1172,7 +1172,7 @@ def find_and_select_reference(
             422,
             "image_description_required",
             "Add a recognizable product brand and type before finding a reference image. "
-            "The built-in illustration remains available.",
+            "The category icon fallback remains available.",
         )
     query = _query(item, profile)
     if not query.strip():
@@ -1194,14 +1194,14 @@ def find_and_select_reference(
             "no_permitted_image_candidate",
             "A compatible image was found, but its reuse permission is not established "
             "by the configured permitted-source policy or provider license evidence. "
-            "The built-in illustration remains available.",
+            "The category icon fallback remains available.",
         )
     if not permitted:
         raise ApiError(
             422,
             "no_image_candidate",
-            "No suitable compatible image source was found. The built-in illustration "
-            "remains available.",
+            "No suitable compatible image source was found. The category icon "
+            "fallback remains available.",
         )
     chosen, permission = permitted[0]
     content, final_url, _kind = _download_candidate(

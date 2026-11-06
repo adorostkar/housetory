@@ -202,33 +202,27 @@ def other_household_headers(email="other-images@example.com"):
     return {"Cookie": f"housetory_session={token}"}
 
 
-def test_builtin_library_override_remove_and_actual_photo_priority(owner_client):
+def test_category_icon_fallback_and_actual_photo_priority(owner_client):
     room = create_room(owner_client)
     vague = create_item(owner_client, "Mystery object", room["id"])
     state = owner_client.get(f"/api/v1/items/{vague['id']}/image").json()
     assert state["image"] is None
-    assert len(state["builtin_options"]) >= 10
-
-    chosen = owner_client.post(
+    assert state["selected"] is None
+    assert "builtin_options" not in state
+    assert "automatic_builtin" not in state
+    removed_builtin = owner_client.post(
         f"/api/v1/items/{vague['id']}/image/builtin",
         json={"illustration_key": "generic"},
     )
-    assert chosen.status_code == 200, chosen.text
-    assert chosen.json()["selected"]["source_type"] == "builtin"
-    assert chosen.json()["selected"]["illustration_key"] == "generic"
+    assert removed_builtin.status_code == 404
     summary = owner_client.get(f"/api/v1/items/{vague['id']}").json()["item"]
     assert summary["primary_photo"] is None
-    assert summary["representative_image"]["illustration_key"] == "generic"
-
-    removed = owner_client.delete(f"/api/v1/items/{vague['id']}/image")
-    assert removed.status_code == 200
-    assert removed.json()["selected"] is None
-    assert removed.json()["image"] is None
+    assert summary["representative_image"] is None
 
     tv = create_item(owner_client, "OLED television 77 inch", room["id"])
     automatic = owner_client.get(f"/api/v1/items/{tv['id']}/image").json()
-    assert automatic["automatic_builtin"]["illustration_key"] == "tv"
-    assert automatic["image"]["automatic"] is True
+    assert automatic["image"] is None
+    assert automatic["selected"] is None
 
     photo = owner_client.post(
         f"/api/v1/items/{tv['id']}/photos",
@@ -238,10 +232,43 @@ def test_builtin_library_override_remove_and_actual_photo_priority(owner_client)
     detail = owner_client.get(f"/api/v1/items/{tv['id']}").json()["item"]
     assert detail["primary_photo"] is not None
     assert detail["photos"][0]["url"]
-    assert detail["representative_image"]["source_type"] == "builtin"
+    assert detail["representative_image"] is None
     blocked = owner_client.post(f"/api/v1/items/{tv['id']}/image/find", json={"force": False})
     assert blocked.status_code == 409
     assert blocked.json()["detail"]["code"] == "actual_photo_exists"
+
+
+def test_legacy_builtin_rows_are_ignored_without_deleting_them(owner_client):
+    room = create_room(owner_client)
+    item = create_item(owner_client, "Power drill", room["id"])
+    with SessionLocal() as db:
+        stored = db.get(Item, uuid.UUID(item["id"]))
+        assert stored is not None
+        db.add(
+            ItemImage(
+                household_id=stored.household_id,
+                item_id=stored.id,
+                source_type="builtin",
+                status="active",
+                illustration_key="drill",
+            )
+        )
+        db.commit()
+
+    state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
+    assert state["image"] is None
+    assert state["selected"] is None
+    detail = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
+    assert detail["representative_image"] is None
+    with SessionLocal() as db:
+        legacy = db.scalar(
+            select(ItemImage).where(
+                ItemImage.item_id == uuid.UUID(item["id"]),
+                ItemImage.source_type == "builtin",
+            )
+        )
+        assert legacy is not None
+        assert legacy.illustration_key == "drill"
 
 
 def test_brave_image_contract_ranking_conflicts_and_representative_selection(
@@ -322,7 +349,7 @@ def test_brave_image_contract_ranking_conflicts_and_representative_selection(
     assert rejected.json()["detail"]["code"] == "no_image_candidate"
     wrong_state = owner_client.get(f"/api/v1/items/{wrong['id']}/image").json()
     assert wrong_state["selected"] is None
-    assert wrong_state["automatic_builtin"]["illustration_key"] == "tv"
+    assert wrong_state["image"] is None
 
 
 def test_reference_is_excluded_from_evidence_and_does_not_mutate_stock(owner_client, monkeypatch):
@@ -487,10 +514,9 @@ def test_image_permissions_household_isolation_and_viewer_read_only(owner_client
 
     assert anon_client.get(f"/api/v1/items/{item['id']}/image", headers=viewer).status_code == 200
     assert (
-        anon_client.post(
-            f"/api/v1/items/{item['id']}/image/builtin",
+        anon_client.delete(
+            f"/api/v1/items/{item['id']}/image",
             headers=viewer,
-            json={"illustration_key": "tv"},
         ).status_code
         == 403
     )

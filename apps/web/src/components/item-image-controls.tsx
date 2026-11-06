@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  ImageOff,
   ImagePlus,
   Info,
-  Palette,
   RefreshCw,
   Sparkles,
   Trash2,
@@ -11,16 +11,8 @@ import {
 import * as React from "react";
 import { toast } from "sonner";
 
-import { BuiltinIllustration } from "@/components/builtin-illustration";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
@@ -36,10 +28,7 @@ function sourceNote(image: ItemImage) {
       ? `Exact model reference${image.model_label ? ` · ${image.model_label}` : ""}`
       : "Reference image · exact model not confirmed";
   }
-  if (image.source_type === "ai") {
-    return `AI illustration${image.provider_label ? ` · ${image.provider_label}` : ""} · not a photo`;
-  }
-  return "Generic illustration · not a photo";
+  return `AI illustration${image.provider_label ? ` · ${image.provider_label}` : ""} · not a photo`;
 }
 
 function PendingPreview({
@@ -127,16 +116,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       "Illustration generated for review",
     );
 
-  const useBuiltin = (illustrationKey: string) =>
-    run(
-      "builtin",
-      () =>
-        api.post<ItemImageState>(`/items/${itemId}/image/builtin`, {
-          illustration_key: illustrationKey,
-        }),
-      "Generic illustration selected",
-    );
-
   const remove = () =>
     run(
       "remove",
@@ -195,7 +174,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           ? "Your actual photograph always takes priority over reference images and illustrations."
           : image
             ? sourceNote(image)
-            : "No photograph or matched illustration. A category icon is shown."}
+            : "No photograph or selected reference/AI image. A category icon is shown."}
       </p>
 
       {!actual && image?.source_type === "reference" && sourceLink && (
@@ -282,32 +261,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
             {busyAction === "generate" ? <Spinner /> : <Sparkles />}
             Generate
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost" disabled={busy}>
-                <Palette />
-                Use generic
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-80 w-56 overflow-y-auto">
-              <DropdownMenuLabel>Built-in illustrations</DropdownMenuLabel>
-              {state.builtin_options.map((option) => (
-                <DropdownMenuItem
-                  key={option.key}
-                  onSelect={() => useBuiltin(option.key)}
-                >
-                  <span className="flex size-7 items-center justify-center overflow-hidden rounded-md bg-secondary">
-                    <BuiltinIllustration
-                      illustrationKey={option.key}
-                      label={option.label}
-                      className="size-full scale-125"
-                    />
-                  </span>
-                  {option.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
           {state.selected && (
             <Button
               type="button"
@@ -316,8 +269,8 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
               disabled={busy}
               onClick={remove}
             >
-              {busyAction === "remove" ? <Spinner /> : <Trash2 />}
-              Remove
+              {busyAction === "remove" ? <Spinner /> : <ImageOff />}
+              Use icon
             </Button>
           )}
         </div>
@@ -339,7 +292,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           onClick={remove}
         >
           {busyAction === "remove" ? <Spinner /> : <Trash2 />}
-          Remove stored reference/illustration
+          Remove stored image
         </Button>
       )}
       {canWrite && !actual && !state.search_configured && state.search_reason && (

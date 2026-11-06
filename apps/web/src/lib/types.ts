@@ -682,19 +682,13 @@ export interface Warranty {
   updated_at: string | null;
 }
 
-export type ItemImageSource = "reference" | "ai" | "builtin";
-
-export interface BuiltinIllustrationOption {
-  key: string;
-  label: string;
-}
+export type ItemImageSource = "reference" | "ai";
 
 export interface ItemImage {
   id: UUID | null;
   source_type: ItemImageSource;
   label: string;
   status: string;
-  illustration_key: string | null;
   url: string | null;
   thumbnail_url: string | null;
   width: number | null;
@@ -710,7 +704,6 @@ export interface ItemImage {
   exact_model_confirmed: boolean;
   model_label: string | null;
   provider_label: string | null;
-  automatic: boolean;
   created_at: string | null;
 }
 
@@ -727,9 +720,7 @@ export interface ItemImageState {
   actual_photo_count: number;
   image: ItemImage | null;
   selected: ItemImage | null;
-  automatic_builtin: ItemImage | null;
   pending: ItemImage[];
-  builtin_options: BuiltinIllustrationOption[];
   settings: ItemImageSettings;
   search_configured: boolean;
   search_provider_label: string | null;

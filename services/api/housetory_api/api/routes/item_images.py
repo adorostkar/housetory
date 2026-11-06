@@ -13,7 +13,6 @@ from ...domain import JobStatus
 from ...jobs import enqueue
 from ...models import Item, ItemImage, Job
 from ...schemas.item_images import (
-    BuiltinImageChoice,
     ItemImageBatchJobOut,
     ItemImageBatchPreview,
     ItemImageBatchPreviewRequest,
@@ -105,34 +104,6 @@ def find_item_image(
         actor_user_id=auth.user.id,
         force=payload.force,
     )
-    db.commit()
-    db.refresh(item)
-    return _state(db, item)
-
-
-@router.post("/items/{item_id}/image/builtin", response_model=ItemImageState)
-def choose_builtin_image(
-    item_id: uuid.UUID,
-    payload: BuiltinImageChoice,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ItemImageState:
-    item = _item(db, auth.household.id, item_id)
-    if item.photos:
-        raise ApiError(
-            409,
-            "actual_photo_exists",
-            "Actual photos take priority over a generic illustration.",
-        )
-    try:
-        image_service.make_builtin_image(
-            db,
-            item,
-            illustration_key=payload.illustration_key,
-            actor_user_id=auth.user.id,
-        )
-    except ValueError as exc:
-        raise ApiError(422, "unknown_illustration", str(exc)) from None
     db.commit()
     db.refresh(item)
     return _state(db, item)
