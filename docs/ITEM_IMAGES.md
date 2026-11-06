@@ -303,8 +303,8 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **370 PostgreSQL backend tests**, **195 Vitest tests**
-and **61 disposable-stack Playwright workflows** (60 passed, 1 fixture-dependent
+Final local verification: **377 PostgreSQL backend tests**, **200 Vitest tests**
+and **63 disposable-stack Playwright workflows** (62 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and

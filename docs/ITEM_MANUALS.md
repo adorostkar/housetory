@@ -442,14 +442,14 @@ in the main column.
 
 ## Verification
 
-- **370 PostgreSQL-backed backend tests** pass, including household online-search
+- **377 PostgreSQL-backed backend tests** pass, including household online-search
   credential lifecycle/fallback/domain tests plus manual attachment,
   identity-gate, citation, idempotency, duplicate, provider-output and SSRF tests.
-- **195 Vitest frontend tests** pass, including the write-only online-search
+- **200 Vitest frontend tests** pass, including the write-only online-search
   Settings card, bulk AI-task progress/skips/confirmation, manual card/actions,
   Ask dialogs, real-page citations, no-AI/unconfigured states, identity
   confirmation, candidate review/download and viewer controls.
-- **61 disposable-stack Playwright workflows** pass (60 passed, 1
+- **63 disposable-stack Playwright workflows** pass (62 passed, 1
   fixture-dependent skip), including online-search Settings, bulk AI-task
   confirmation/results and two named manual workflows: a real synthetic
   upload/attach/answer flow and a mocked gated search/review/save flow at mobile

@@ -117,6 +117,7 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   ).not.toBeChecked();
   await clickFindSuggestions(page);
   await expect(page.getByText(/offline rules only/)).toBeVisible();
+  await expect(page.getByText(/Review complete:/)).toBeHidden({ timeout: 10_000 });
 
   const categoryCard = page
     .locator("li")
@@ -130,6 +131,9 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
 
   await categoryCard.getByRole("button", { name: "Accept", exact: true }).click();
   await expect(page.getByText("Suggestion applied to the item.")).toBeVisible();
+  await expect(page.getByText("Suggestion applied to the item.")).toBeHidden({
+    timeout: 10_000,
+  });
   await page.getByLabel("Filter suggestions by status").selectOption("accepted");
   const acceptedCard = page
     .locator("li")
@@ -137,12 +141,16 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
     .first();
   await expect(acceptedCard.getByText("accepted")).toBeVisible();
   await expect(acceptedCard.getByRole("button", { name: "Undo" })).toBeVisible();
+  await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/inventory-review/02-accepted-with-undo.png",
     fullPage: false,
   });
   await acceptedCard.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Applied review change reverted.")).toBeVisible();
+  await expect(page.getByText("Applied review change reverted.")).toBeHidden({
+    timeout: 10_000,
+  });
 
   await page.getByLabel("Filter suggestions by status").selectOption("pending");
   const duplicateCard = page
@@ -157,11 +165,12 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   const compareDialog = page.getByRole("dialog");
   await expect(compareDialog.getByText(/does not merge inventory/i)).toBeVisible();
   await expect(compareDialog.getByText(/On loan: 1/)).toBeVisible();
+  await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/inventory-review/03-duplicate-compare.png",
     fullPage: false,
   });
-  await compareDialog.getByRole("button", { name: "Close" }).click();
+  await compareDialog.getByRole("button", { name: "Close" }).first().click();
 
   await duplicateCard.getByRole("button", { name: "Dismiss" }).click();
   await expect(page.getByText("Suggestion dismissed.")).toBeVisible();
@@ -199,6 +208,7 @@ test("selected-items review is reachable from the Items bulk action", async ({
   await expect(page.getByLabel("Review scope type")).toHaveValue("items");
   await expect(page.getByText(`Scoped drill ${id}`).first()).toBeVisible();
   await clickFindSuggestions(page);
+  await expect(page.getByText(/Review complete:/)).toBeHidden({ timeout: 10_000 });
   await expect(page.getByText(`Assign category “Scoped tools ${id}”`)).toBeVisible();
   await expect(
     page.getByText(new RegExp(`Selected items \\(2\\)`)),

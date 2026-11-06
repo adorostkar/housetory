@@ -390,8 +390,11 @@ export function ReviewPage() {
   });
   const origin = itemOrigin(`${location.pathname}${location.search}`, "Review");
   const aiReady = Boolean(aiStatus.data?.configured);
-  const aiProvider =
-    aiStatus.data?.provider_label ?? aiStatus.data?.provider ?? "the Assistant task";
+  const aiProvider = aiReady
+    ? aiStatus.data?.provider_label ??
+      aiStatus.data?.provider ??
+      "the Assistant task"
+    : "the Assistant task";
 
   const updateUrlScope = (nextType: ReviewScopeType, nextId: string) => {
     setScopeType(nextType);
@@ -731,11 +734,13 @@ export function ReviewPage() {
               disabled={!isOwner || !aiReady || runReview.isPending}
               onChange={(event) => setIncludeAi(event.target.checked)}
             />
-            <span>
+            <span className="min-w-0 break-words">
               Include optional AI-assisted category suggestions
               <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
                 Owner only. Uses the existing household Assistant task via{" "}
-                <strong className="font-medium text-foreground/80">{aiProvider}</strong>.
+                <strong className="break-all font-medium text-foreground/80">
+                  {aiProvider}
+                </strong>.
                 Sends at most {40} uncategorised item names, descriptions, brand/model
                 and existing category names. No photos, receipts, loans, prices,
                 borrower data or other households are sent. One bounded provider

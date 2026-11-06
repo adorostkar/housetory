@@ -111,3 +111,11 @@ applied/skipped/stale/unsupported outcomes.
 - `POST /inventory-review/suggestions/{id}/dismiss`
 - `POST /inventory-review/suggestions/{id}/undo`
 - `POST /inventory-review/suggestions/bulk-accept`
+
+
+## Walkthrough screenshots
+
+- [Suggestion queue and review scope](walkthrough/inventory-review/01-suggestion-queue.png)
+- [Accepted change with undo](walkthrough/inventory-review/02-accepted-with-undo.png)
+- [Advisory duplicate comparison](walkthrough/inventory-review/03-duplicate-compare.png)
+- [Selected-items scope from the Items bulk action](walkthrough/inventory-review/04-selected-items-scope.png)
