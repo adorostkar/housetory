@@ -2316,11 +2316,23 @@ branch. Main was not merged or pushed and no server release was performed.
 
 #### Local delivery and exclusions
 
-- [ ] Local Mac volumes backed up, append-only migration applied, and the real local
-  snapshot verified unchanged (apart from schema/tables).
-- [ ] No borrowed fixture was created in the real household, and no paid AI call,
+- [x] Backed up all local Mac volumes to `backups/housetory-20261106T115353Z`
+  before deployment; database, uploads, imports and exports checksums are valid.
+- [x] Applied append-only migration `a1c3e5f7b9d2` and deployed the feature branch
+  locally. Runtime code artifact commit `13fe409a3297`; API/database/worker/web are
+  healthy, current assets return `200`, unauthenticated operator status returns
+  `401`, and Alembic reports no drift.
+- [x] Preserved the real local snapshot: 1 household, 1 property, 8 rooms, 10
+  storage locations, 51 items, 1 user, 1 membership, 1 loan, 0 borrowed
+  records/returns/photos, 0 evidence exports, 0 item photos, 0 item images, 2
+  encrypted providers and 6 existing task assignments. Room/item ID and updated-at
+  hashes remain `1a5062a82a47556362436a12e312f926` and
+  `408a6762cdf81c7274f6d9974383c1b8`; stored file counts remain 2 uploads, 5
+  imports and 0 exports.
+- [x] No borrowed fixture was created in the real household, and no paid AI call,
   email, credential, nginx/SMTP change, server release, main merge/push or arbitrary
-  Docker cleanup was performed.
+  Docker cleanup was performed. Remaining live checks are operator-run model choices
+  and provider tests, unchanged from release stabilisation.
 
 ### Release direction and offline requirement — 2026-11-06
 
