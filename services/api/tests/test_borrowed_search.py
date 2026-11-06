@@ -72,6 +72,25 @@ def test_search_reports_exact_owned_total_and_separate_borrowed_records(owner_cl
     assert "Borrowed from Ali" in (borrowed_quick[0]["subtitle"] or "")
     assert borrowed_quick[0]["url"] == f"/borrowed/{borrowed_one['id']}"
 
+    # Bounded structured search reports the exact match count and an explicit cap.
+    bounded = owner_client.post("/api/v1/assistant/query", json={"question": "List cable"})
+    assert bounded.status_code == 200, bounded.text
+    bounded_body = bounded.json()
+    assert bounded_body["tool"] == "search_items"
+    assert bounded_body["facts"]["total"] == 51
+    assert bounded_body["facts"]["quantity_total"] == 51
+    assert "Found 51 matching owned items" in bounded_body["answer"]
+    assert "first 30 are listed" in bounded_body["answer"]
+
+    natural_bounded = owner_client.post(
+        "/api/v1/search/natural", json={"question": "List cable", "limit": 30}
+    )
+    assert natural_bounded.status_code == 200, natural_bounded.text
+    natural_body = natural_bounded.json()
+    assert natural_body["total"] == 51
+    assert len(natural_body["items"]) == 30
+    assert "Found 51 owned items" in (natural_body["answer"] or "")
+
     # Only the owned records count as owned units; borrowed quantity is separate.
     summary = owner_client.post(
         "/api/v1/assistant/query", json={"question": "How many cables do I have?"}
