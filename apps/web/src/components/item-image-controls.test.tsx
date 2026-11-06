@@ -20,7 +20,11 @@ const baseImage: ItemImage = {
   source_name: "lg.com",
   source_url: "https://media.lg.com/tv.png",
   source_page_url: "https://www.lg.com/tv",
-  license_note: "Manufacturer-hosted image; reuse rights not independently verified.",
+  license_note:
+    "Provider metadata records the license cc-by. This is recorded evidence, not an independent legal determination.",
+  license_name: "cc-by",
+  license_url: "https://creativecommons.org/licenses/by/4.0/",
+  permission_basis: "provider_license",
   retrieved_at: "2026-01-01T00:00:00Z",
   exact_model_confirmed: false,
   model_label: null,
@@ -115,6 +119,9 @@ describe("ItemImageControls", () => {
     renderControls();
     expect(screen.getAllByText(/Reference image/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/exact model not confirmed/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: "cc-by" }),
+    ).toHaveAttribute("href", "https://creativecommons.org/licenses/by/4.0/");
     await userEvent.click(screen.getByRole("button", { name: /Change image/ }));
     expect(api.post).toHaveBeenCalledWith("/items/item-1/image/find", { force: true });
   });

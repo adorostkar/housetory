@@ -32,15 +32,30 @@ from ..errors import ApiError
 router = APIRouter(tags=["item-images"])
 
 
+def _search_availability():
+    provider = image_search.resolve_image_search_provider()
+    if not provider.configured:
+        return False, provider.label, provider.reason
+    if not image_search.permitted_source_policy_configured():
+        return (
+            False,
+            provider.label,
+            "Reference-image search is configured, but no permitted-source download "
+            "policy is set. Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. "
+            "Built-in illustrations remain available.",
+        )
+    return True, provider.label, None
+
+
 def _provider_state(db: Session, household_id: uuid.UUID):
-    search_provider = image_search.resolve_image_search_provider()
+    search_configured, search_label, search_reason = _search_availability()
     generation_configured, generation_label, generation_reason = generation.generation_status(
         db, household_id
     )
     return {
-        "search_configured": search_provider.configured,
-        "search_provider_label": search_provider.label,
-        "search_reason": search_provider.reason,
+        "search_configured": search_configured,
+        "search_provider_label": search_label,
+        "search_reason": search_reason,
         "generation_configured": generation_configured,
         "generation_provider_label": generation_label,
         "generation_reason": generation_reason,
@@ -215,7 +230,7 @@ def _preview(
     action: str,
 ) -> ItemImageBatchPreview:
     items = _items_for_batch(db, household_id, item_ids)
-    search_provider = image_search.resolve_image_search_provider()
+    search_ready, _search_label, search_reason = _search_availability()
     generation_configured, _label, _reason = generation.generation_status(db, household_id)
     settings = image_service.settings_out(db, items[0].household)
     eligible = 0
@@ -228,7 +243,9 @@ def _preview(
         if item.is_archived:
             unavailable += 1
             continue
-        if action == "reference" and (not search_provider.configured or not item.brand):
+        if action == "reference" and (
+            not search_ready or not image_search.reference_search_ready(item)
+        ):
             unavailable += 1
             continue
         if action == "illustration" and not generation_configured:
@@ -236,8 +253,8 @@ def _preview(
             continue
         eligible += 1
     notices = []
-    if action == "reference" and not search_provider.configured:
-        notices.append(search_provider.reason or "Reference-image search is not configured.")
+    if action == "reference" and not search_ready:
+        notices.append(search_reason or "Reference-image search is not configured.")
     if action == "illustration" and not generation_configured:
         notices.append("Item illustration generation is not configured for this household.")
     if action == "illustration" and settings.daily_generations_remaining <= 0:

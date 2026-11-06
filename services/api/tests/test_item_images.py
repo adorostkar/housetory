@@ -12,6 +12,7 @@ from housetory_api.models import (
     AiTaskSetting,
     Household,
     HouseholdMember,
+    Item,
     ItemImage,
     Job,
     User,
@@ -23,8 +24,11 @@ from housetory_api.services.item_image_generation import run_batch_job, run_new_
 from housetory_api.services.item_image_search import (
     ImageCandidate,
     ImageSearchProvider,
+    build_product_profile,
     parse_brave_image_results,
     rank_candidates,
+    reference_search_ready,
+    source_permission,
 )
 
 
@@ -49,7 +53,14 @@ def create_item(client, name, room_id, **extra):
     return response.json()["item"]
 
 
-def provider(monkeypatch, *, candidates=None, download=None):
+def provider(
+    monkeypatch,
+    *,
+    candidates=None,
+    download=None,
+    permitted_domains="lg.com",
+    permitted_licenses=None,
+):
     def fake_provider():
         return ImageSearchProvider(
             kind="brave",
@@ -74,13 +85,21 @@ def provider(monkeypatch, *, candidates=None, download=None):
         "_download_candidate",
         download
         or (
-            lambda candidate: (
+            lambda candidate, **_kwargs: (
                 png_bytes(),
                 candidate.image_url,
                 "original",
             )
         ),
     )
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings,
+        "item_image_permitted_source_domains",
+        permitted_domains,
+    )
+    if permitted_licenses is not None:
+        monkeypatch.setattr(settings, "item_image_permitted_licenses", permitted_licenses)
     return search_calls
 
 
@@ -264,7 +283,10 @@ def test_brave_image_contract_ranking_conflicts_and_representative_selection(
     assert state["selected"]["label"] == "Reference image"
     assert state["selected"]["exact_model_confirmed"] is False
     assert state["selected"]["source_page_url"] == "https://www.lg.com/us/tvs/oled-tv"
-    assert "licensing rights are not independently verified" in state["selected"]["license_note"]
+    assert "configured permitted-source policy" in state["selected"]["license_note"]
+    assert "not a legal determination" in state["selected"]["license_note"]
+    assert state["selected"]["permission_basis"] == "configured_source_policy"
+    assert state["selected"]["license_name"] is None
     assert search_calls["count"] == 1
 
     # A second identical item reuses the household reference instead of calling
@@ -612,3 +634,292 @@ def test_image_download_rejects_private_or_nonimage_responses(monkeypatch):
         assert getattr(exc, "code", None) == "image_download_failed"
     else:  # pragma: no cover
         raise AssertionError("Non-image response was accepted")
+
+
+def test_name_only_brand_and_description_attributes_are_query_only(owner_client, monkeypatch):
+    room = create_room(owner_client, "Name-only brand room")
+    item = create_item(owner_client, "LG TV", room["id"], description="OLED77inch")
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        profile = build_product_profile(stored_item)
+        assert profile.brand == "lg"
+        assert profile.brand_source == "inferred"
+        assert profile.item_type == "tv"
+        assert profile.size_constraint == 77
+        assert profile.tech_constraint == "oled"
+        assert reference_search_ready(stored_item) is True
+
+    provider(
+        monkeypatch,
+        candidates=[lg_candidate(title="LG OLED TV 77 inch product photo")],
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_type"] == "reference"
+    assert selected["exact_model_confirmed"] is False
+    assert selected["model_label"] is None
+    assert selected["permission_basis"] == "configured_source_policy"
+    assert "configured permitted-source policy" in selected["license_note"]
+    assert "not a legal determination" in selected["license_note"]
+
+    # Inference is query-only: no brand/model/description facts were written.
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        assert stored_item.brand is None
+        assert stored_item.model is None
+        assert stored_item.description == "OLED77inch"
+        stored_image = db.scalar(select(ItemImage).where(ItemImage.item_id == stored_item.id))
+        assert stored_image is not None
+        assert stored_image.source_page_url == "https://www.lg.com/us/tvs/oled-tv"
+        assert stored_image.permission_basis == "configured_source_policy"
+
+
+def test_conflicting_size_technology_and_variant_evidence_is_rejected(owner_client):
+    room = create_room(owner_client, "Attribute conflict room")
+    created = create_item(owner_client, "LG TV", room["id"], description="OLED77inch")
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(created["id"]))
+        assert item is not None
+        compatible = rank_candidates(item, [lg_candidate(title="LG OLED TV 77 inch product photo")])
+        assert compatible
+        assert compatible[0].exact_model_confirmed is False
+
+        assert rank_candidates(item, [lg_candidate(title="LG OLED TV 65 inch product photo")]) == []
+        assert rank_candidates(item, [lg_candidate(title="LG LCD TV 77 inch product photo")]) == []
+        assert rank_candidates(item, [lg_candidate(title="LG LCD TV 65 inch product photo")]) == []
+
+    pro = create_item(owner_client, "LG TV Pro", room["id"], description="OLED77inch")
+    with SessionLocal() as db:
+        pro_item = db.get(Item, uuid.UUID(pro["id"]))
+        assert pro_item is not None
+        assert build_product_profile(pro_item).variants == frozenset({"pro"})
+        assert (
+            rank_candidates(pro_item, [lg_candidate(title="LG OLED TV 77 inch Lite product photo")])
+            == []
+        )
+        assert rank_candidates(
+            pro_item, [lg_candidate(title="LG OLED TV 77 inch Pro product photo")]
+        )
+
+
+def test_vague_or_brandless_items_fall_back_without_forcing_a_match(owner_client):
+    room = create_room(owner_client, "Vague image room")
+    vague = create_item(
+        owner_client, "Mystery object", room["id"], description="Something in the cupboard"
+    )
+    generic = replace(
+        lg_candidate(title="Mystery object product photo"),
+        page_url="https://www.lg.com/mystery",
+        image_url="https://media.lg.com/mystery.png",
+    )
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(vague["id"]))
+        assert item is not None
+        assert build_product_profile(item).brand is None
+        assert build_product_profile(item).item_type is None
+        assert reference_search_ready(item) is False
+        assert rank_candidates(item, [generic]) == []
+
+    television = create_item(owner_client, "Television", room["id"], description="65 inch LCD")
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(television["id"]))
+        assert item is not None
+        assert build_product_profile(item).item_type == "tv"
+        assert build_product_profile(item).brand is None
+        assert (
+            rank_candidates(
+                item,
+                [lg_candidate(title="65 inch LCD television product photo")],
+            )
+            == []
+        )
+
+    ambiguous = create_item(owner_client, "LG Samsung TV", room["id"], description="65 inch LCD")
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(ambiguous["id"]))
+        assert item is not None
+        assert build_product_profile(item).brand_ambiguous is True
+        assert (
+            rank_candidates(item, [lg_candidate(title="LG 65 inch LCD television product photo")])
+            == []
+        )
+
+
+def test_unknown_attributes_are_representative_and_exact_model_has_token_boundaries(
+    owner_client,
+):
+    room = create_room(owner_client, "Exact model room")
+    unknown = create_item(owner_client, "LG TV", room["id"], description="OLED 77 inch")
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(unknown["id"]))
+        assert item is not None
+        ranked = rank_candidates(item, [lg_candidate(title="LG television product photo")])
+        assert ranked
+        assert ranked[0].exact_model_confirmed is False
+
+    exact = create_item(
+        owner_client,
+        "LG TV",
+        room["id"],
+        brand="LG",
+        model="A1",
+        description="OLED 77 inch",
+    )
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(exact["id"]))
+        assert item is not None
+        ranked = rank_candidates(item, [lg_candidate(title="LG A1 OLED TV 77 inch product photo")])
+        assert ranked
+        assert ranked[0].exact_model_confirmed is True
+
+        # A10 and A1X are not the exact A1 model; A10 is a contradictory longer
+        # model and A1X simply fails the token boundary.
+        assert (
+            rank_candidates(item, [lg_candidate(title="LG A10 OLED TV 77 inch product photo")])
+            == []
+        )
+        suffix_ranked = rank_candidates(
+            item, [lg_candidate(title="LG A1X OLED TV 77 inch product photo")]
+        )
+        assert suffix_ranked
+        assert suffix_ranked[0].exact_model_confirmed is False
+
+        # An extra known variant prevents an exact-model claim when the item's
+        # own variant is not established.
+        variant_ranked = rank_candidates(
+            item, [lg_candidate(title="LG A1 Pro OLED TV 77 inch product photo")]
+        )
+        assert variant_ranked
+        assert variant_ranked[0].exact_model_confirmed is False
+
+
+def test_manufacturer_provenance_uses_official_registrable_domains(owner_client):
+    room = create_room(owner_client, "Provenance room")
+    created = create_item(owner_client, "LG TV", room["id"], description="OLED 77 inch")
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(created["id"]))
+        assert item is not None
+        official = rank_candidates(item, [lg_candidate()])
+        assert official
+        assert official[0].manufacturer_verified is True
+
+        malicious = replace(
+            lg_candidate(),
+            page_url="https://lg.com.evil.example/tv",
+            source_domain="lg.com",
+            image_url="https://lg.com.evil.example/tv.png",
+        )
+        assert rank_candidates(item, [malicious]) == []
+
+        deceptive = replace(
+            lg_candidate(),
+            page_url="https://lg-deals.example/tv",
+            source_domain="lg-deals.example",
+            image_url="https://cdn.lg-deals.example/tv.png",
+        )
+        assert rank_candidates(item, [deceptive]) == []
+
+        retailer = replace(
+            lg_candidate(title="LG OLED TV 77 inch retailer listing"),
+            page_url="https://shop.example/lg-tv",
+            source_domain="shop.example",
+            image_url="https://cdn.example/tv.png",
+        )
+        ranked = rank_candidates(item, [retailer])
+        assert ranked
+        assert ranked[0].manufacturer_verified is False
+        assert source_permission(retailer) is None
+
+
+def test_downloads_require_permitted_policy_or_license_evidence(owner_client, monkeypatch):
+    room = create_room(owner_client, "Permission room")
+    item = create_item(owner_client, "LG TV", room["id"], description="OLED 77 inch")
+    provider(
+        monkeypatch,
+        candidates=[lg_candidate()],
+        permitted_domains="example.com",
+    )
+    denied = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert denied.status_code == 422, denied.text
+    assert denied.json()["detail"]["code"] == "no_permitted_image_candidate"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
+        )
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "lg.com")
+    allowed = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert allowed.status_code == 200, allowed.text
+    selected = allowed.json()["selected"]
+    assert selected["permission_basis"] == "configured_source_policy"
+    assert selected["license_name"] is None
+    assert "permission guarantee" in selected["license_note"]
+
+    licensed_item = create_item(
+        owner_client,
+        "LG TV",
+        room["id"],
+        description="OLED 77 inch licensed fixture",
+    )
+    licensed = replace(
+        lg_candidate(),
+        page_url="https://photos.example.org/lg-tv",
+        source_domain="photos.example.org",
+        image_url="https://photos.example.org/lg-tv.png",
+        license_name="cc-by",
+        license_url="https://creativecommons.org/licenses/by/4.0/",
+    )
+    provider(
+        monkeypatch,
+        candidates=[licensed],
+        permitted_domains="example.com",
+    )
+    licensed_response = owner_client.post(
+        f"/api/v1/items/{licensed_item['id']}/image/find", json={}
+    )
+    assert licensed_response.status_code == 200, licensed_response.text
+    licensed_selected = licensed_response.json()["selected"]
+    assert licensed_selected["permission_basis"] == "provider_license"
+    assert licensed_selected["license_name"] == "cc-by"
+    assert licensed_selected["license_url"] == "https://creativecommons.org/licenses/by/4.0/"
+    assert "Provider metadata records the license" in licensed_selected["license_note"]
+
+    unknown_item = create_item(
+        owner_client,
+        "LG TV",
+        room["id"],
+        description="OLED 77 inch unknown-rights fixture",
+    )
+    unknown = replace(
+        licensed,
+        license_name="all-rights-reserved",
+        license_url="https://example.org/terms",
+    )
+    provider(
+        monkeypatch,
+        candidates=[unknown],
+        permitted_domains="example.com",
+    )
+    unknown_response = owner_client.post(f"/api/v1/items/{unknown_item['id']}/image/find", json={})
+    assert unknown_response.status_code == 422, unknown_response.text
+    assert unknown_response.json()["detail"]["code"] == "no_permitted_image_candidate"
+
+
+def test_search_is_unavailable_until_a_permitted_source_policy_is_set(owner_client, monkeypatch):
+    room = create_room(owner_client, "No policy room")
+    item = create_item(owner_client, "LG TV", room["id"], description="OLED 77 inch")
+    provider(monkeypatch, candidates=[lg_candidate()], permitted_domains="")
+    state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
+    assert state["search_configured"] is False
+    assert "ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS" in state["search_reason"]
+    blocked = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert blocked.status_code == 503, blocked.text
+    assert blocked.json()["detail"]["code"] == "image_search_policy_unconfigured"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
+        )

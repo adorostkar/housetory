@@ -703,6 +703,9 @@ export interface ItemImage {
   source_url: string | null;
   source_page_url: string | null;
   license_note: string | null;
+  license_name?: string | null;
+  license_url?: string | null;
+  permission_basis?: "configured_source_policy" | "provider_license" | null;
   retrieved_at: string | null;
   exact_model_confirmed: boolean;
   model_label: string | null;

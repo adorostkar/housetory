@@ -86,8 +86,11 @@ function image(
       sourceType === "reference" ? "https://www.lg.com/us/tvs/oled" : null,
     license_note:
       sourceType === "reference"
-        ? "Manufacturer-hosted image; source page recorded. Reuse rights are not independently verified."
+        ? "Download allowed by the server's configured permitted-source policy for lg.com. Source page and retrieval time are recorded. This records an operator policy, not a legal determination or permission guarantee; review the source's terms before reuse."
         : null,
+    license_name: null,
+    license_url: null,
+    permission_basis: sourceType === "reference" ? "configured_source_policy" : null,
     retrieved_at: sourceType === "builtin" ? null : "2026-11-06T00:00:00Z",
     exact_model_confirmed: false,
     model_label: null,

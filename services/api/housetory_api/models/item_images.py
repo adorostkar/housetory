@@ -41,6 +41,11 @@ class ItemImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="valid_status",
         ),
         CheckConstraint("byte_size IS NULL OR byte_size > 0", name="byte_size_positive"),
+        CheckConstraint(
+            "permission_basis IS NULL OR permission_basis in "
+            "('configured_source_policy', 'provider_license')",
+            name="valid_permission_basis",
+        ),
         Index("ix_item_images_item_status", "item_id", "status"),
         Index("ix_item_images_household_created", "household_id", "created_at"),
         Index(
@@ -77,6 +82,9 @@ class ItemImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_name: Mapped[str | None] = mapped_column(String(200))
     source_page_url: Mapped[str | None] = mapped_column(Text)
     license_note: Mapped[str | None] = mapped_column(String(400))
+    license_name: Mapped[str | None] = mapped_column(String(120))
+    license_url: Mapped[str | None] = mapped_column(Text)
+    permission_basis: Mapped[str | None] = mapped_column(String(40))
     retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exact_model_confirmed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"

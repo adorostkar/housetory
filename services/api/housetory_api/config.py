@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     item_image_max_download_mb: int = Field(default=15, ge=1, le=50)
     item_image_batch_max: int = Field(default=50, ge=1, le=100)
     item_image_search_count: int = Field(default=12, ge=1, le=30)
+    # Automatic reference downloads require an explicit operator policy. An
+    # empty list means "no automatic downloads"; built-in illustrations remain
+    # available. Values are registrable domains (subdomains included).
+    item_image_permitted_source_domains: str = ""
+    item_image_permitted_licenses: str = "cc0,cc-by,cc-by-sa,public-domain"
+    # Optional extra/override entries: "brand=registrable-domain|another-domain".
+    item_image_manufacturer_domains: str = ""
+    # Optional extra brand lexicon entries for conservative query-only inference.
+    item_image_known_brands: str = ""
     evidence_export_max_items: int = Field(default=300, ge=1, le=2000)
     evidence_export_max_documents: int = Field(default=300, ge=1, le=2000)
     evidence_export_max_photos: int = Field(default=500, ge=1, le=2000)

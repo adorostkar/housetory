@@ -213,6 +213,31 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           {!image.exact_model_confirmed ? " · exact model not confirmed" : ""}
         </p>
       )}
+      {!actual &&
+        image?.source_type === "reference" &&
+        (image.license_name || image.license_note) && (
+          <p className="mt-1 text-[0.63rem] leading-relaxed text-muted-foreground">
+            {image.license_name ? (
+              <>
+                License evidence:{" "}
+                {image.license_url ? (
+                  <a
+                    href={image.license_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-4 hover:text-foreground"
+                  >
+                    {image.license_name}
+                  </a>
+                ) : (
+                  image.license_name
+                )}
+                .{" "}
+              </>
+            ) : null}
+            {image.license_note}
+          </p>
+        )}
       {!actual && image?.source_type === "ai" && (
         <p className="mt-1 text-[0.66rem] text-muted-foreground">
           Generated image; it is not evidence of the item's condition or exact model.
