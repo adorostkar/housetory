@@ -9,34 +9,34 @@ photographs, change inventory facts, or count as a stocktake/evidence observatio
 | --- | --- | --- |
 | 1 | **Actual photo** (`item_photos`) | A user upload of the real unit. May show condition, colour and wear. |
 | 2 | **Reference image** (`item_images`, `reference`) | A downloaded product image with recorded source/provenance. Not proof of the exact unit or condition. |
-| 3 | **AI illustration** (`item_images`, `ai`) | A generated illustration from product text. Not a photo and never an exact-model claim. |
-| 4 | **Built-in illustration** (`item_images` or derived) | Small curated offline line-art library matched conservatively from the item name/description/category. |
-| 5 | **Category icon** | Lucide fallback when no image or built-in match exists. |
+| 3 | **AI illustration** (`item_images`, `ai`) | An accepted generated illustration from product text. Not a photo and never an exact-model claim. |
+| 4 | **Category icon** | A simple Lucide icon based on the item's category when no actual photo or selected reference/AI image exists. |
 
 The detail page always uses the actual photo gallery first. Non-photographic
 imagery is shown only when no actual photo exists, with an explicit
-`Reference image`, `AI illustration` or `Generic illustration` label. The item
-card/list thumbnail follows the same priority.
+`Reference image` or `AI illustration` label. The item card/list thumbnail
+follows the same priority.
 
-Users can **Change image**, **Remove** a stored reference/illustration, or
-**Use generic** and choose one of the built-in illustrations. Actual photos are
-never overwritten or deleted by these actions.
+Users can **Change image**, **Remove** a stored reference/AI image, or
+**Use icon** to clear a selected non-photo image and return to the simple
+category-icon fallback. Actual photos and accepted media are never overwritten
+or deleted by these actions.
 
-## Built-in library
+## No-photo state and category icons
 
-A small local library ships with the app for: power drill, television, Ethernet
-cable, suitcase, storage box, chair, sofa, camera, laptop, kettle, bicycle, book
-and a generic item. The SVGs are inline React components, usable offline, with
-no external assets, generated downloads, API keys or LLM calls.
+There is no built-in illustration library, shape chooser or automatic line-art
+matching. When an item has no actual photo and no selected reference/AI image,
+the app renders a small category icon (tool, TV, cable, luggage, furniture,
+camera, laptop, kitchen, book, bike or a generic package). The icon is derived
+from the existing category name and is a compact fallback, not artwork or a
+substitute photograph. It is not included in evidence, recognition or stocktake
+physical evidence.
 
-Matching is deliberately conservative:
-
-- strong name matches win;
-- category, then description, are considered next;
-- two conflicting strong types are ambiguous and fall back to the category icon;
-- vague items are not forced into a specific illustration.
-
-The user can correct a vague or wrong match from item details.
+Legacy `item_images` rows with `source_type='builtin'` are retained but ignored
+by display code; an append-only migration marks pending/active legacy rows as
+`superseded`. No item, photo, reference, AI image or stored file is deleted by
+this retirement. The old built-in endpoint and chooser are removed, so new
+built-in rows cannot be created.
 
 ## Reference-image search
 
@@ -103,7 +103,7 @@ saves are **default deny**:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Comma-separated registrable source domains whose terms the operator has reviewed and permits for automatic reference downloads. Subdomains are included. Empty disables automatic downloads and keeps built-in illustrations. |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Comma-separated registrable source domains whose terms the operator has reviewed and permits for automatic reference downloads. Subdomains are included. Empty disables automatic downloads and keeps the category icon fallback. |
 | `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence. The current documented Brave Image Search response does not include license metadata, so a domain policy is normally required. |
 | `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` additions or overrides for provenance checks. |
 | `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for conservative query-only inference. |
@@ -112,14 +112,14 @@ Before a candidate can be downloaded, its source page and asset host must match 
 permitted domain, or it must carry explicit provider license metadata with an
 allowed license identifier and evidence URL. If a compatible image has unknown
 reuse rights, the app returns a `no_permitted_image_candidate` state and shows
-the built-in/category fallback; it does not invent a license note or silently
+the category icon fallback; it does not invent a license note or silently
 download. The stored note records the policy basis or provider license plus the
 evidence URL and says explicitly that this is not a legal determination or
 permission guarantee. Housetory does not provide legal advice, does not claim
 vendor terms are satisfied, and does not bypass hotlink restrictions, watermarks
 or paywalls.
 
-If no suitable candidate is found, the built-in/category fallback remains.
+If no suitable candidate is found, the category icon fallback remains.
 The result is downloaded through the same public-DNS/private-address/redirect/
 byte/time limits as manual retrieval, then decoded and re-encoded into a private
 derivative. Original EXIF/metadata is not copied into the derivative. Source URLs
@@ -228,10 +228,10 @@ state, purchase data and room/container placement are unchanged.
 
 `item_images` stores:
 - household/item/creator/provider ownership;
-- source type (`reference`, `ai`, `builtin`) and status
-  (`pending`, `active`, `superseded`, `rejected`);
+- source type (`reference`, `ai`; legacy `builtin` rows are retained but
+  superseded/ignored) and status (`pending`, `active`, `superseded`, `rejected`);
 - private storage keys, dimensions, MIME type and size;
-- illustration key for built-ins;
+- legacy illustration key (not written or rendered);
 - source URL/page/publisher, retrieval time;
 - permission basis (`configured_source_policy` or `provider_license`), provider
   license name/URL when supplied, and an honest policy/license note;
@@ -240,16 +240,15 @@ state, purchase data and room/container placement are unchanged.
 
 A partial unique index ensures only one active non-photo image per item. The
 append-only migrations add the three household image settings, a durable job
-result JSON field, and the permission/license provenance columns. They do not
-create image rows for existing items, change item/photo IDs, or alter existing
-provider/task choices.
+result JSON field, permission/license provenance columns, and retire legacy
+built-in rows by status. They do not create image rows for existing items,
+delete media, change item/photo IDs, or alter existing provider/task choices.
 
 ## API summary
 
 - `GET /items/{id}/image` — current source, pending previews, settings and
   provider availability.
 - `POST /items/{id}/image/find` — automatic reference lookup/selection.
-- `POST /items/{id}/image/builtin` — explicit built-in choice.
 - `POST /items/{id}/illustration` — generate pending AI preview.
 - `POST /items/{id}/images/{image_id}/accept` — accept pending AI.
 - `DELETE /items/{id}/images/{image_id}` — reject/delete pending or selected.
@@ -261,7 +260,8 @@ provider/task choices.
 
 ## Verification and limits
 
-Backend tests cover built-in selection, override/remove, actual-photo priority,
+Backend tests cover category-icon fallback, legacy built-in-row ignoring without
+deletion, actual-photo priority,
 Brave image response parsing/ranking, name-only brand and description-attribute
 inference without persisted item facts, screen-size/technology/variant conflict
 rejection, vague/brandless fallback, unknown-attribute representative labels,
@@ -272,18 +272,18 @@ evidence exclusion, AI preview/accept/reject, hard caps, batch
 preview/dedupe/cancel, permission/IDOR and the OpenAI Images adapter contract.
 They use fixture responses and never make live search/generation calls.
 
-Vitest covers built-in/reference/actual card priority, source controls and
-preview acceptance. Disposable Playwright covers built-in fallback, a mocked
+Vitest covers category-icon/reference/actual card priority, source controls and
+preview acceptance. Disposable Playwright covers category-icon fallback, a mocked
 automatic reference flow with source labels, actual-photo priority, manual AI
 preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **333 PostgreSQL backend tests**, **143 Vitest tests**
-and **44 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
+Final local verification: **334 PostgreSQL backend tests**, **144 Vitest tests**
+and **45 disposable-stack Playwright workflows** pass; Ruff, strict TypeScript
 typecheck, production build and Alembic drift checks pass. Backup
-`backups/housetory-20261106T041557Z` includes the database, uploads, imports and
-exports volume; migrations `a8c0e2f4b6d8` and `b2d4f6a8c0e1` preserved the
+`backups/housetory-20261106T064635Z` includes the database, uploads, imports and
+exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
 existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task
 choices. The real household has no item-image rows and both automation settings
 remain off by default. No permitted source domain is configured, so automatic

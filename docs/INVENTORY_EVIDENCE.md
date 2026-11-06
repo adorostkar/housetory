@@ -117,9 +117,9 @@ columns:
 located; the full path begins with the property. Last-checked fields are populated
 only from completed stocktake observations for that item. `last_checked_stale=yes` means the item/loan/location changed after
 that check; the historical date is still exported, but not as a current
-verification claim. Reference images, built-in illustrations and AI item
-illustrations are not `item_photos` and are excluded from the preview, PDF, CSV,
-ZIP and manifest. Only actual photographs count as photographic evidence.
+verification claim. Reference images, AI item illustrations and category icons
+are not `item_photos` and are excluded from the preview, PDF, CSV, ZIP and
+manifest. Only actual photographs count as photographic evidence.
 
 `purchase_total_scope` explicitly identifies a shared purchase total and whether it
 includes unselected items. The purchase total is not duplicated into a per-item

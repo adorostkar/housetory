@@ -23,8 +23,8 @@ No new top-level navigation was added.
 
 ## Scope and snapshot
 
-Reference images and AI/generic illustrations are not physical photo evidence and
-are excluded from stocktake snapshots and observations. Scope labels and snapshot
+Reference images, AI illustrations and category icons are not physical photo
+evidence and are excluded from stocktake snapshots and observations. Scope labels and snapshot
 paths include the property when the room belongs to one. Starting from a room includes that room, descendant rooms, items assigned to
 those rooms, and items inside storage places in those rooms. Starting from a
 container includes that container, descendant containers and the items assigned

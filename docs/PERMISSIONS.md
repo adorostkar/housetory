@@ -13,8 +13,8 @@ membership again. A session stores the selected household id, not a global role.
 | Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
-| Read item image sources/provenance and built-in illustrations | Yes | Yes | Yes |
-| Find/change/remove item reference images, use generic illustrations, generate/accept/reject AI illustrations, run image batches | Yes | Yes | No |
+| Read item image sources/provenance and category-icon fallback | Yes | Yes | Yes |
+| Find/change/remove item reference images, use the category-icon fallback, generate/accept/reject AI illustrations, run image batches | Yes | Yes | No |
 | Change household automatic item-image lookup/generation settings and generation cap | Yes | No | No |
 | Create imports, scans, recognition records, OCR and summary jobs | Yes | Yes | No |
 | Generate/download label PDFs that record label timestamps | Yes | Yes | No |

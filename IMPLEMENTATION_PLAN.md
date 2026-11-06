@@ -1720,25 +1720,25 @@ current memberships. Full rules are in `docs/HOUSEHOLDS.md`.
 ## Staged milestone — item images, references and illustrations
 
 This is the final planned roadmap milestone. Actual photographs remain the only
-physical evidence; reference/AI/built-in images are labelled display aids. Full
+physical evidence; reference/AI images and category icons are labelled display aids. Full
 rules are in `docs/ITEM_IMAGES.md`.
 
-### Stage A — source model, built-ins and display priority
+### Stage A — source model and display priority
 
 - [x] Added a separate `item_images` source model with household/item/provider
   ownership, source type, status, private storage metadata, source URL/page/
   publisher, retrieval time, exact-model confirmation, fingerprint, prompt/error
   and one-active-image-per-item partial unique index. Actual `item_photos` are
   untouched and always take priority.
-- [x] Added a small offline built-in line-art library (drill, TV, Ethernet cable,
-  suitcase, box, chair, sofa, camera, laptop, kettle, bicycle, book, generic) with
-  conservative local matching and category-icon fallback. Users can choose/change/
-  remove/reset or use a generic illustration without overwriting actual photos.
-- [x] Item cards/details show explicit Reference image / AI illustration / Generic
-  illustration labels and provenance; source, retrieval date and “exact model not
-  confirmed” are available in details. Non-actual imagery is excluded from
-  evidence, recognition and stocktake physical evidence. Item facts/stock/loans
-  are never changed.
+- [x] Built-in line-art was removed after user review. No-photo items now use a
+  compact category icon based on the existing category name; there is no shape
+  chooser or automatic artwork matching. Users can change/remove a selected
+  reference/AI image or use the icon fallback without overwriting actual photos.
+- [x] Item cards/details show explicit Reference image / AI illustration labels
+  and provenance; source, retrieval date and “exact model not confirmed” are
+  available in details. Non-photographic imagery is excluded from evidence,
+  recognition and stocktake physical evidence. Item facts/stock/loans are never
+  changed.
 
 ### Stage B — automatic reference-image search
 
@@ -1753,7 +1753,7 @@ rules are in `docs/ITEM_IMAGES.md`.
   gate.
 - [x] Explicit Find image and the default-off new-item setting automatically
   select and display a suitable permitted candidate without a candidate-approval
-  dialog. No candidate falls back to the built-in/category illustration. Source
+  dialog. No candidate falls back to the category icon. Source
   page/retrieval/provenance is stored; reuse/licensing is not assumed or verified.
 - [x] Added safe image download: public DNS/pinned address, redirect/byte/time
   bounds, image type/signature/dimension decode validation and private normalized
@@ -1780,15 +1780,15 @@ rules are in `docs/ITEM_IMAGES.md`.
   daily cap, default off), member image actions and viewer read-only labels.
   Household-scoped provider/artifacts/jobs/file routes and stale-tab context rules
   are reused. Non-photographic files are private and never logged with contents.
-- [x] Added backend coverage for built-ins/priority/override, Brave parsing/ranking/
-  conflicts/stock-host rejection, provenance, representative vs exact labels,
+- [x] Added backend coverage for category-icon fallback/legacy-row retirement,
+  actual-photo priority, Brave parsing/ranking/conflicts/stock-host rejection, provenance, representative vs exact labels,
   reuse/dedupe, evidence exclusion, AI preview/accept/reject, caps, batch
   preview/replay/cancel, permissions/IDOR and OpenAI image adapter success/error
   contracts with fixtures. Vitest covers card/control source priority and preview
-  acceptance. Disposable Playwright covers built-in → mocked automatic reference →
-  actual-photo priority, manual AI preview/accept, no-provider states, settings and
+  acceptance. Disposable Playwright covers category-icon fallback → mocked
+  automatic reference → actual-photo priority, manual AI preview/accept, no-provider states, settings and
   batch cancellation with screenshots.
-- [x] 333 PostgreSQL backend tests, 143 Vitest tests and 44 disposable-stack
+- [x] 334 PostgreSQL backend tests, 144 Vitest tests and 45 disposable-stack
   Playwright workflows pass. Ruff, strict TypeScript typecheck, production build
   and Alembic drift checks pass. Item-image screenshots are under
   `docs/walkthrough/item-images/`.
@@ -1828,15 +1828,36 @@ rules are in `docs/ITEM_IMAGES.md`.
 - [x] Automatic reference downloads are now default-deny. Operators must set
   `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` or supply explicit provider license
   evidence accepted by `ITEM_IMAGE_PERMITTED_LICENSES`. Unknown reuse rights
-  return `no_permitted_image_candidate` with built-in fallback; no permission is
-  inferred from manufacturer hosting or brand text, and notes explicitly avoid a
-  legal/permission guarantee.
+  return `no_permitted_image_candidate` with category-icon fallback; no permission
+  is inferred from manufacturer hosting or brand text, and notes explicitly avoid
+  a legal/permission guarantee.
 - [x] Added permission/license provenance columns (`license_name`, `license_url`,
   `permission_basis`), detailed source-policy documentation, backend regressions
   for the reviewed scenarios, and a UI license/provenance line. Relevant suites,
   typecheck, build and Alembic drift checks pass; migration `b2d4f6a8c0e1` and
   backup `backups/housetory-20261106T041557Z` were applied locally without
   mutating the real household.
+
+### Review correction — remove built-in line-art shapes
+
+- [x] Removed the built-in SVG illustration library, automatic built-in matching,
+  the built-in chooser endpoint/control and all shape-rendering branches from item
+  cards, list rows, the photo gallery and source controls. No replacement artwork
+  was added.
+- [x] No-photo items now use a simple Lucide category icon (tool, TV, cable,
+  luggage, furniture, camera, laptop, kitchen, book, bike or generic package)
+  derived from the existing category name. The icon is a compact fallback, not a
+  photo or evidence.
+- [x] Actual photos, downloaded reference images and accepted AI illustrations are
+  unchanged and retain their priority/labels/preview flows. `Use icon` clears a
+  selected reference/AI image back to the category icon.
+- [x] Legacy `source_type='builtin'` rows are ignored by display code and moved to
+  `superseded` by append-only migration `d6f8b0c2e4a6`; rows/files/items are not
+  deleted. The old built-in endpoint now returns 404 and cannot create new rows.
+- [x] Updated backend/frontend/E2E fixtures and documentation; category-icon
+  fallback, legacy-row ignoring, actual-photo priority and reference/AI flows are
+  covered. Relevant suites, typecheck, build and Alembic drift checks pass before
+  local backup/migration/deployment.
 
 ## Agreed product roadmap — updated 2026-11-05
 
@@ -2009,13 +2030,15 @@ complete and awaits final user review.
 12. **Item images — reference pictures and illustrations (implemented locally):**
    deliver after the property/household milestones, preserving the existing visual feel. Distinguish
    actual user photos, downloaded product references, representative images,
-   custom AI illustrations and built-in illustrations in storage and presentation.
+   custom AI illustrations and a simple category-icon fallback in storage and
+   presentation. Built-in line-art was explicitly rejected by the user after
+   review and removed; the category icon is the only no-photo fallback.
    - Display priority: user photo, suitable product/reference image, accepted
-     custom AI illustration, built-in type illustration, category icon. User can
-     change/remove/reset the choice; actual photos always take precedence.
-   - Small curated built-in illustration library for common types (Ethernet cable,
-     TV, drill, suitcase etc.), consistently styled, locally matched conservatively
-     and usable offline without LLM calls. Vague types use broad fallback icons.
+     custom AI illustration, category icon. User can change/remove/reset the
+     choice; actual photos always take precedence.
+   - No built-in illustration library or shape chooser. Items without a photo or
+     selected reference/AI image use a compact icon derived from the existing
+     category name. Legacy built-in rows are superseded/ignored, never rendered.
    - Find product image uses real configured search and bounded safe downloads,
      manufacturer sources preferred. Exact confirmed make/model yields an exact
      reference only when evidence supports compatibility. An LLM may rank real
@@ -2029,8 +2052,8 @@ complete and awaits final user review.
    - Label downloaded images “Reference image”; source and whether exact model is
      confirmed are available in details. Representative images must not silently
      populate make/model/colour/specification/condition fields from depicted details.
-     Provide Change image, Remove and Use generic illustration; user need not
-     choose a candidate in the normal automatic flow.
+     Provide Change image, Remove and Use icon fallback; user need not choose a
+     candidate in the normal automatic flow.
    - Automatic lookup for newly saved items is a household opt-in setting, off by
      default, operating only after inventory review/save with sufficient description
      and no real photo. No per-keystroke searches. Separate batch action for old
@@ -2051,13 +2074,65 @@ complete and awaits final user review.
      downloads, private storage and cleanup. Generated/reference artwork must be
      visibly distinguished and excluded from insurance/evidence/condition claims
      and physical photo-based recognition/stocktake evidence. Never overwrite photos.
-   - Stages: provenance/display + built-in library; real search with automatic
-     representative selection; manual AI generation; automation/batch. Test known
+   - Stages: provenance/display + category-icon fallback; real search with
+     automatic representative selection; manual AI generation; automation/batch. Test known
      attributes vs conflicting candidates, fallback, labels/evidence exclusion,
      permissions, job races/cost caps and real-photo priority on isolated fixtures.
      No paid/external calls in automated tests. This relaxation applies ONLY to
      images: manuals and model-specific online instructions retain complete,
      confirmed manufacturer/model gates.
+
+13. **Borrowed from others:** track possessions temporarily held from someone
+   else, alongside existing lent-out inventory. Use one Loans list with explicit
+   built-in direction badges “Lent out · to [person]” and “Borrowed · from [person]”,
+   subtle distinct colours and an All / Lent out / Borrowed filter. Colour is
+   supplemental, not the sole signal; direction is a protected domain field, not
+   an ordinary editable tag. No separate tabs needed initially.
+   - Borrowed records contain item name, optional actual photo, quantity, owner
+     display name, borrowed date, optional due date and current keeping location.
+     No owner account required. Support partial returns and immutable history.
+   - Borrowed quantities do NOT become owned inventory, purchase/current-owned
+     value or insurance/evidence ownership totals. Search/assistant can find them
+     with explicit ownership and location wording. Avoid fake owned-item records
+     as a shortcut; review a separate record or explicit ownership model first.
+   - Actions clearly distinguish Record return (lent out) and Return to owner
+     (borrowed), with explicit confirmation and correct outstanding quantities.
+     Household scoping, roles, idempotency/concurrency, no unsolicited reminders
+     and current lending/history behavior must remain intact.
+   - Preserve visual feel; verify mixed list readability, ownership distinctions,
+     filters and partial returns using isolated local fixtures before acceptance.
+
+### Mandatory independent local acceptance review
+
+OpenCode reports and automated checks are necessary but NOT sufficient to mark
+work ready. The reviewing assistant must actually open the locally deployed app
+and exercise the delivered workflows before advancing to the next milestone.
+Previous summaries based mainly on test counts/source inspection do not establish
+visual quality or usability. Do not describe them as independent UI verification.
+
+- Read the completion report once and inspect relevant source/tests/limitations,
+  then use the real local UI to check the intended user journey, action visibility,
+  wording, layout, source labels and error/empty states. Check representative
+  desktop/mobile and light/dark views where the change affects them.
+- Use an isolated test household/account or disposable stack for mutations; never
+  modify the user's live drill loan, inventory, files or settings as test fixtures.
+  Read-only inspection of the user's household is permitted. Don't create test
+  accounts/credentials or transmit data without required authorization.
+- Compare actual results with the user's examples and visual-style requirement;
+  inspect generated artifacts (PDFs/images) visually, not just their headers or
+  test assertions. Independently assess design quality and trade-offs; challenge
+  weak choices even when automated tests pass. Don't simply endorse OpenCode's
+  output or every user suggestion without judgment.
+- Send concrete corrections for observed issues, wait for completion and inspect
+  the affected local flow again. Advance only when acceptance criteria are met.
+  Distinguish mocked-provider validation from live external-service validation;
+  missing credentials/hardware must be reported as an unverified limitation, not
+  silently claimed complete. Ask for access if local login is required; don't
+  bypass authentication or print secrets to obtain it.
+- Keep reviews bounded and token-efficient. When an hourly monitoring cycle is
+  explicitly active, check OpenCode no more often than once per hour; UI review
+  follows completed work. No repeated progress dumps. A completed/stopped cycle
+  does not automatically restart just because this roadmap is edited.
 
 ### Visual continuity and delivery boundaries
 

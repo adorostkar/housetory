@@ -88,9 +88,10 @@ Tailscale is optional.
   one household's data through another household's AI provider or consent. See
   [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md).
 - **Item images, references and illustrations**: actual photos always take
-  priority, followed by labelled reference images, accepted AI illustrations,
-  built-in line art and category icons. A small offline built-in library covers
-  common item types. Optional Brave Image Search automatically selects a
+  priority, followed by labelled reference images, accepted AI illustrations and
+  a compact category-icon fallback. Built-in line-art shapes and their chooser
+  have been removed; legacy built-in rows are retained but retired from display.
+  Optional Brave Image Search automatically selects a
   compatible permitted-source reference without a candidate-approval dialog,
   using conservative query-only brand/type/size/technology inference when the
   structured brand is blank, whole-token exact-model matching and verified
@@ -246,7 +247,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 333 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 334 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -292,14 +293,14 @@ stack, not just unit mocks:
   creation/listing/switching, same-account role differences, stale mutation
   context, revoked-membership fallback, all-places search counts/paths/loans,
   cross-household ambiguity/property isolation and per-household AI provider
-  selection, item-image built-ins/reference ranking/actual-photo priority,
-  query-only attribute inference, size/technology/variant conflicts, exact-model
+  selection, item-image category-icon fallback/legacy-row retirement/reference
+  ranking/actual-photo priority, query-only attribute inference, size/technology/variant conflicts, exact-model
   token boundaries, manufacturer/deceptive-host provenance, default-deny source
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 143 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 44 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 144 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 45 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
