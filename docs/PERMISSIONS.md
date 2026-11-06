@@ -13,6 +13,9 @@ membership again. A session stores the selected household id, not a global role.
 | Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
+| Read item image sources/provenance and built-in illustrations | Yes | Yes | Yes |
+| Find/change/remove item reference images, use generic illustrations, generate/accept/reject AI illustrations, run image batches | Yes | Yes | No |
+| Change household automatic item-image lookup/generation settings and generation cap | Yes | No | No |
 | Create imports, scans, recognition records, OCR and summary jobs | Yes | Yes | No |
 | Generate/download label PDFs that record label timestamps | Yes | Yes | No |
 | Read/export CSV reports, preview and download evidence packages, and use read-only quick/natural search | Yes | Yes | Yes |
@@ -32,6 +35,14 @@ membership again. A session stores the selected household id, not a global role.
   account may create a household and becomes its owner; this never changes its
   role in another household. Selecting a household validates the membership
   before changing the session.
+- Item images are separate from item photographs. Reference/AI images are private
+  household/item artifacts with authenticated file routes, explicit provenance
+  and one active non-photo image per item. Viewers can read them but cannot
+  search, generate, accept/reject, remove or batch. Outbound Brave image search
+  receives minimized product text only; OpenAI Images generation receives the
+  same minimized text and requires the household Item illustrations task and
+  provider consent. Non-photographic images are excluded from evidence,
+  recognition and stocktake physical evidence.
 - `enforce_household_context` requires a current `X-Household-Id` on unsafe
   requests for accounts with more than one membership and rejects a stale id with
   `409 household_context_changed`. The frontend sends the id of the workspace it

@@ -1717,13 +1717,107 @@ current memberships. Full rules are in `docs/HOUSEHOLDS.md`.
   performed. Real external AI provider quality remains untested. Item images were
   not started.
 
+## Staged milestone — item images, references and illustrations
+
+This is the final planned roadmap milestone. Actual photographs remain the only
+physical evidence; reference/AI/built-in images are labelled display aids. Full
+rules are in `docs/ITEM_IMAGES.md`.
+
+### Stage A — source model, built-ins and display priority
+
+- [x] Added a separate `item_images` source model with household/item/provider
+  ownership, source type, status, private storage metadata, source URL/page/
+  publisher, retrieval time, exact-model confirmation, fingerprint, prompt/error
+  and one-active-image-per-item partial unique index. Actual `item_photos` are
+  untouched and always take priority.
+- [x] Added a small offline built-in line-art library (drill, TV, Ethernet cable,
+  suitcase, box, chair, sofa, camera, laptop, kettle, bicycle, book, generic) with
+  conservative local matching and category-icon fallback. Users can choose/change/
+  remove/reset or use a generic illustration without overwriting actual photos.
+- [x] Item cards/details show explicit Reference image / AI illustration / Generic
+  illustration labels and provenance; source, retrieval date and “exact model not
+  confirmed” are available in details. Non-actual imagery is excluded from
+  evidence, recognition and stocktake physical evidence. Item facts/stock/loans
+  are never changed.
+
+### Stage B — automatic reference-image search
+
+- [x] Extended the real Brave integration to the documented Image Search endpoint
+  (`/res/v1/images/search`) with bounded response/query limits, official auth
+  fields and fixture-tested parsing. No invented endpoints or custom gateway is
+  required.
+- [x] Implemented deterministic candidate ranking with brand/type conflict
+  rejection, stock/watermark-host rejection, manufacturer-host preference,
+  exact-model evidence detection and representative fallback. Image-only model
+  relaxation applies; manuals/model-specific instructions retain the full model
+  gate.
+- [x] Explicit Find image and the default-off new-item setting automatically
+  select and display a suitable lawful candidate without a candidate-approval
+  dialog. No candidate falls back to the built-in/category illustration. Source
+  page/retrieval/provenance is stored; reuse/licensing is not assumed or verified.
+- [x] Added safe image download: public DNS/pinned address, redirect/byte/time
+  bounds, image type/signature/dimension decode validation and private normalized
+  derivatives. The same lookup is deduplicated and reused within a household only.
+
+### Stage C — AI illustrations and automation
+
+- [x] Added the Item illustrations AI task using the documented OpenAI Images API
+  (`/images/generations`, inline `b64_json` only), not chat-completion output.
+  Reuses encrypted providers/task/consent settings; the prompt contains only
+  minimized product text. URL-only/malformed responses fail honestly.
+- [x] Manual generation is preview → accept/reject/regenerate with an AI/not-a-
+  photo label. Automatic new-item generation is a separate default-off setting,
+  requires sufficient saved product text/no photo, and runs only after save.
+  Explicit batch action is the only old-item path.
+- [x] Added hard daily generation count caps, one-attempt jobs, replay/dedupe,
+  progress/cancel, draft TTL/stale checks, actual-photo/archived/item-change
+  rejection and file cleanup. No monetary cap or provider-billing estimate is
+  claimed.
+
+### Stage D — permissions, jobs, UI, tests and local delivery
+
+- [x] Added owner-only household settings (auto reference, auto generation, hard
+  daily cap, default off), member image actions and viewer read-only labels.
+  Household-scoped provider/artifacts/jobs/file routes and stale-tab context rules
+  are reused. Non-photographic files are private and never logged with contents.
+- [x] Added backend coverage for built-ins/priority/override, Brave parsing/ranking/
+  conflicts/stock-host rejection, provenance, representative vs exact labels,
+  reuse/dedupe, evidence exclusion, AI preview/accept/reject, caps, batch
+  preview/replay/cancel, permissions/IDOR and OpenAI image adapter success/error
+  contracts with fixtures. Vitest covers card/control source priority and preview
+  acceptance. Disposable Playwright covers built-in → mocked automatic reference →
+  actual-photo priority, manual AI preview/accept, no-provider states, settings and
+  batch cancellation with screenshots.
+- [x] 326 PostgreSQL backend tests, 143 Vitest tests and 44 disposable-stack
+  Playwright workflows pass. Ruff, strict TypeScript typecheck, production build
+  and Alembic drift checks pass. Item-image screenshots are under
+  `docs/walkthrough/item-images/`.
+- [x] Backed up all local persistent volumes (database, uploads, imports and the
+  separate evidence exports volume) to `backups/housetory-20261106T031456Z` with
+  valid checksums, applied append-only migration `a8c0e2f4b6d8`, and rebuilt the
+  local Compose stack.
+- [x] Verified existing data/settings: 1 household, 1 property, 8 rooms, 10
+  storage locations, 51 items, 1 user, 1 membership, 1 loan, 0 evidence exports,
+  0 actual item photos and 0 item-image rows; unchanged room/item ID and item
+  `updated_at` hashes; uploads 2 files/1,177,655 bytes, imports 5 files/75,620
+  bytes, exports 0 files. Existing AI providers/tasks (assistant, documents,
+  imports, labels, search, vision) are unchanged; the new item-image settings
+  default to off/off/10 and no item-image jobs were queued for existing records.
+- [x] Local api/db/worker/web are healthy, current assets return 200, new image
+  routes return 401 unauthenticated, Alembic reports no drift and the DB port
+  remains unpublished. SMTP/AI credentials and all existing item/photo/document
+  IDs/files were preserved. No real item images, external Brave/OpenAI calls,
+  remote deployment, email, credential changes or arbitrary Docker cleanup were
+  performed. Real external provider image quality/availability remains for live
+  validation.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
 Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8, 9,
-10 and 11 are implemented and locally verified; item images remain for a separate
-instruction and review.
+10, 11 and 12 are implemented and locally verified; the planned roadmap is
+complete and awaits final user review.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
@@ -1885,8 +1979,8 @@ instruction and review.
    Mutations identify a particular household/property and clarify ambiguity.
    Cross-household item transfers are deferred beyond the initial release.
 
-12. **Item images — reference pictures and illustrations:** deliver after the
-   property/household milestones, preserving the existing visual feel. Distinguish
+12. **Item images — reference pictures and illustrations (implemented locally):**
+   deliver after the property/household milestones, preserving the existing visual feel. Distinguish
    actual user photos, downloaded product references, representative images,
    custom AI illustrations and built-in illustrations in storage and presentation.
    - Display priority: user photo, suitable product/reference image, accepted

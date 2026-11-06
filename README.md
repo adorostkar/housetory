@@ -87,6 +87,18 @@ Tailscale is optional.
   immediately. All-my-places assistant answers are deterministic and never send
   one household's data through another household's AI provider or consent. See
   [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md).
+- **Item images, references and illustrations**: actual photos always take
+  priority, followed by labelled reference images, accepted AI illustrations,
+  built-in line art and category icons. A small offline built-in library covers
+  common item types. Optional Brave Image Search automatically selects a
+  suitable manufacturer-hosted reference without a candidate-approval dialog,
+  records source/provenance and honestly labels representative images as “exact
+  model not confirmed.” Optional OpenAI Images task generation is manual
+  preview/accept/reject by default, with a separate default-off new-item setting,
+  hard daily count caps and an explicit batch action. Non-photographic imagery is
+  excluded from evidence packages, photo recognition and physical stocktake
+  evidence; no generated/reference detail changes item facts. See
+  [`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md).
 - **Stocktake / last verified here**: start a bounded check from a room or
   container, including descendants. The expected snapshot keeps owned, at-home
   and on-loan quantities separate; loaned units are never marked missing.
@@ -229,7 +241,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 317 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 326 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -275,9 +287,11 @@ stack, not just unit mocks:
   creation/listing/switching, same-account role differences, stale mutation
   context, revoked-membership fallback, all-places search counts/paths/loans,
   cross-household ambiguity/property isolation and per-household AI provider
-  selection.
-- 138 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 40 checked-in Playwright workflows pass on disposable Compose stacks, covering
+  selection, item-image built-ins/reference ranking/actual-photo priority,
+  evidence exclusion, AI preview/accept/reject, caps/batch cancellation and the
+  OpenAI Images adapter contract with fixture responses.
+- 143 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 44 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -300,7 +314,8 @@ stack, not just unit mocks:
   partial completion, keyboard close, failed-save recovery, abandonment,
   light/dark desktop/mobile screenshots, and two-household creation, switching,
   property-filter reset, all-places search and loan answers, remembered scope and
-  a cross-household result link opening in its own household.
+  a cross-household result link opening in its own household, and item-image
+  built-in/reference/AI/actual-photo workflows with batch cancellation.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt
@@ -326,7 +341,9 @@ undo rules are in [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md)
 bulk selection boundaries, batch semantics and compact-list behavior are in
 [`docs/BULK_ORGANISATION.md`](docs/BULK_ORGANISATION.md), and document scan
 limits, original/derivative storage, cleanup and OCR artifact behavior are in
-[`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md), and reviewed line-item
+[`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md), and item-image
+sources, provenance, consent and batch limits are in
+[`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md), and reviewed line-item
 extraction, matching, AI fallback and apply semantics are in
 [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md), and manual
 attachment, grounded citations, identity gates, reviewed online search/download,
