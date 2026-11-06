@@ -117,16 +117,20 @@ Tailscale is optional.
   excluded from evidence packages, photo recognition and physical stocktake
   evidence; no generated/reference detail changes item facts. See
   [`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md).
-- **On-demand inventory review**: one persistent `/review` destination for scoped,
-  rule-first inventory suggestions across the household, property, room, container
-  or selected items. Offline checks propose evidence-backed categories, conservative
-  naming consistency, advisory possible duplicates with comparison-only handling,
-  missing purchase details and description/location wording conflicts. Suggestions
-  persist, deduplicate unchanged findings, support applied category/name changes
-  with stale checks and real undo, and keep duplicates/missing details advisory.
-  Optional owner-triggered AI review reuses the existing consented Assistant task
-  with a bounded one-request data disclosure; no schedule, silent AI call or merge
-  is introduced. See [`docs/INVENTORY_REVIEW.md`](docs/INVENTORY_REVIEW.md).
+- **Inventory review and optional schedule**: one persistent `/review` destination
+  for scoped, rule-first inventory suggestions across the household, property, room,
+  container or selected items. Offline checks propose evidence-backed categories,
+  conservative naming consistency, advisory possible duplicates with comparison-only
+  handling, missing purchase details and description/location wording conflicts.
+  Suggestions persist, deduplicate unchanged findings, support applied category/name
+  changes with stale checks and real undo, and keep duplicates/missing details
+  advisory. Optional owner-triggered AI review reuses the existing consented
+  Assistant task with a bounded one-request data disclosure. An optional
+  owner-managed weekly/monthly schedule is off by default, runs through durable
+  worker jobs with hard item/daily caps, and never auto-applies changes. Scheduled
+  AI requires its own consent tied to the current Assistant route; provider/model
+  changes safely skip AI until reconfirmed. See
+  [`docs/INVENTORY_REVIEW.md`](docs/INVENTORY_REVIEW.md).
 - **Stocktake / last verified here**: start a bounded check from a room or
   container, including descendants. The expected snapshot keeps owned, at-home
   and on-loan quantities separate; loaned units are never marked missing.
@@ -292,7 +296,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 377 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 387 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -351,8 +355,8 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 203 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 64 checked-in Playwright workflows (63 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 210 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 65 checked-in Playwright workflows (64 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

@@ -79,12 +79,35 @@ class SystemStatusSummaryOut(BaseModel):
     generated_at: datetime
 
 
+class ScheduledReviewStatus(BaseModel):
+    configured: bool
+    enabled: bool
+    state: str
+    state_detail: str
+    scope_label: str
+    frequency: str
+    timezone: str
+    include_ai: bool
+    ai_consent_valid: bool
+    assistant_configured: bool
+    assistant_provider_label: str | None = None
+    assistant_model: str | None = None
+    last_run_at: datetime | None = None
+    last_run_status: str
+    last_run_detail: str | None = None
+    next_due_at: datetime | None = None
+    max_items: int
+    max_runs_per_day: int
+    provider_request_cap: int
+
+
 class SystemStatusOut(BaseModel):
     release: ReleaseStatus
     readiness: list[ReadinessComponent]
     jobs: JobStatusOut
     tasks: list[TaskStatusOut]
     external_services: list[ExternalServiceStatus]
+    scheduled_review: ScheduledReviewStatus
     generated_at: datetime
 
 
@@ -101,6 +124,7 @@ __all__ = [
     "JobStatusOut",
     "ReadinessComponent",
     "ReleaseStatus",
+    "ScheduledReviewStatus",
     "SystemStatusIssue",
     "SystemStatusOut",
     "SystemStatusSummaryOut",

@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { FormError } from "@/components/form-field";
 import { PageHeader } from "@/components/page-header";
+import { ReviewSchedulePanel } from "@/components/review-schedule-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -896,6 +897,12 @@ export function ReviewPage() {
           )}
         </section>
       )}
+
+      <ReviewSchedulePanel
+        isOwner={isOwner}
+        schedule={summaryQuery.data?.schedule}
+        onChanged={refreshReview}
+      />
 
       <section className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-end gap-3">

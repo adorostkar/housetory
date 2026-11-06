@@ -187,21 +187,85 @@ def _scope_conditions(
     raise ApiError(422, "invalid_review_scope", "Choose a valid review scope.")
 
 
-def _load_scope(db: Session, household_id: uuid.UUID, payload: ReviewRunRequest) -> _Scope:
+def _load_scope(
+    db: Session,
+    household_id: uuid.UUID,
+    payload: ReviewRunRequest,
+    *,
+    max_items: int = MAX_SCAN_ITEMS,
+    prioritize_since: datetime | None = None,
+    scan_offset: int = 0,
+) -> _Scope:
     conditions, label, scope_id = _scope_conditions(db, household_id, payload)
     total = int(db.scalar(select(func.count(Item.id)).where(*conditions)) or 0)
-    items = list(
-        db.scalars(
-            select(Item)
-            .options(*item_load_options())
-            .where(*conditions)
-            .order_by(Item.updated_at.desc(), Item.id)
-            .limit(MAX_SCAN_ITEMS + 1)
-        ).all()
-    )
-    capped = len(items) > MAX_SCAN_ITEMS
-    if capped:
-        items = items[:MAX_SCAN_ITEMS]
+    limit = max(1, min(max_items, MAX_SCAN_ITEMS))
+
+    if prioritize_since is None and scan_offset == 0:
+        # Preserve the on-demand review ordering exactly: newest first, bounded.
+        items = list(
+            db.scalars(
+                select(Item)
+                .options(*item_load_options())
+                .where(*conditions)
+                .order_by(Item.updated_at.desc(), Item.id)
+                .limit(limit + (1 if limit == MAX_SCAN_ITEMS else 0))
+            ).all()
+        )
+        if len(items) > limit:
+            items = items[:limit]
+        return _Scope(
+            kind=payload.scope_type,
+            label=label,
+            scope_id=scope_id,
+            total_count=total,
+            items=items,
+        )
+
+    items: list[Item] = []
+    if prioritize_since is not None:
+        items = list(
+            db.scalars(
+                select(Item)
+                .options(*item_load_options())
+                .where(*conditions, Item.updated_at > prioritize_since)
+                .order_by(Item.updated_at.desc(), Item.id)
+                .limit(limit)
+            ).all()
+        )
+
+    remaining = limit - len(items)
+    if remaining > 0:
+        selected_ids = {item.id for item in items}
+        remaining_conditions = list(conditions)
+        if selected_ids:
+            remaining_conditions.append(Item.id.not_in(selected_ids))
+        remaining_total = int(
+            db.scalar(select(func.count(Item.id)).where(*remaining_conditions)) or 0
+        )
+        if remaining_total:
+            offset = scan_offset % remaining_total
+            window = list(
+                db.scalars(
+                    select(Item)
+                    .options(*item_load_options())
+                    .where(*remaining_conditions)
+                    .order_by(Item.updated_at.asc(), Item.id)
+                    .offset(offset)
+                    .limit(remaining)
+                ).all()
+            )
+            if len(window) < remaining and offset > 0:
+                window.extend(
+                    db.scalars(
+                        select(Item)
+                        .options(*item_load_options())
+                        .where(*remaining_conditions)
+                        .order_by(Item.updated_at.asc(), Item.id)
+                        .limit(remaining - len(window))
+                    ).all()
+                )
+            items.extend(window)
+
     return _Scope(
         kind=payload.scope_type,
         label=label,
@@ -592,18 +656,34 @@ def _ai_category_candidates(
     return output, {"provider": status.provider_label, "model": status.model}, partial, None
 
 
+def _canonical_fingerprint_value(value: Any) -> Any:
+    """Make fingerprints independent of the order items happened to be scanned."""
+    if isinstance(value, dict):
+        return {key: _canonical_fingerprint_value(entry) for key, entry in value.items()}
+    if isinstance(value, list):
+        normalized = [_canonical_fingerprint_value(entry) for entry in value]
+        return sorted(
+            normalized,
+            key=lambda entry: json.dumps(entry, sort_keys=True, separators=(",", ":"), default=str),
+        )
+    return value
+
+
 def _candidate_fingerprint(candidate: _Candidate) -> str:
+    item_ids = sorted(
+        str(value)
+        for value in (candidate.item_id, candidate.secondary_item_id)
+        if value is not None
+    )
     return _hash(
         {
             "type": candidate.type,
-            "item_id": str(candidate.item_id) if candidate.item_id else None,
-            "secondary_item_id": (
-                str(candidate.secondary_item_id) if candidate.secondary_item_id else None
-            ),
+            "item_id": item_ids[0] if item_ids else None,
+            "secondary_item_id": item_ids[1] if len(item_ids) > 1 else None,
             "category_id": str(candidate.category_id) if candidate.category_id else None,
-            "before": candidate.before or {},
-            "after": candidate.after or {},
-            "evidence": candidate.evidence or {},
+            "before": _canonical_fingerprint_value(candidate.before or {}),
+            "after": _canonical_fingerprint_value(candidate.after or {}),
+            "evidence": _canonical_fingerprint_value(candidate.evidence or {}),
         }
     )
 
@@ -718,6 +798,12 @@ def run_review(
     actor_user_id: uuid.UUID | None,
     actor_name: str | None,
     allow_ai: bool,
+    max_items: int = MAX_SCAN_ITEMS,
+    prioritize_since: datetime | None = None,
+    scan_offset: int = 0,
+    trigger_type: str = "manual",
+    schedule_id: uuid.UUID | None = None,
+    ai_skip_note: str | None = None,
 ) -> ReviewRunOut:
     request_fingerprint = _request_fingerprint(payload)
     existing = db.scalar(
@@ -734,11 +820,20 @@ def run_review(
                 "That review request id was used for a different scope.",
             )
         return _run_out(existing)
-    scope = _load_scope(db, household_id, payload)
+    scope = _load_scope(
+        db,
+        household_id,
+        payload,
+        max_items=max_items,
+        prioritize_since=prioritize_since,
+        scan_offset=scan_offset,
+    )
     run = InventoryReviewRun(
         household_id=household_id,
         request_id=payload.request_id,
         request_fingerprint=request_fingerprint,
+        trigger_type=trigger_type,
+        schedule_id=schedule_id,
         scope_type=payload.scope_type,
         scope_id=scope.scope_id,
         scope_label=scope.label,
@@ -762,6 +857,8 @@ def run_review(
     if payload.include_ai:
         if not allow_ai:
             ai_error = "Only the household owner can run the optional AI review pass."
+        elif ai_skip_note:
+            ai_error = ai_skip_note
         else:
             already_targeted = {
                 candidate.item_id
@@ -773,12 +870,11 @@ def run_review(
             )
             ai_used = bool(ai_meta) or bool(ai_error)
             candidates.extend(ai_candidates)
+    elif ai_skip_note:
+        ai_error = ai_skip_note
     partial_reason = ai_partial
     if len(scope.items) < scope.total_count:
-        reason = (
-            f"Reviewed the first {len(scope.items)} of {scope.total_count} items in "
-            "this bounded scan."
-        )
+        reason = f"Reviewed {len(scope.items)} of {scope.total_count} items in this bounded scan."
         partial_reason = f"{partial_reason} {reason}".strip() if partial_reason else reason
     run.partial_reason = partial_reason
     run.ai_error = ai_error
@@ -960,11 +1056,14 @@ def review_summary(db: Session, household_id: uuid.UUID) -> ReviewSummaryOut:
         .order_by(InventoryReviewRun.created_at.desc())
         .limit(1)
     )
+    from .inventory_review_schedule import schedule_summary
+
     return ReviewSummaryOut(
         pending_count=status_counts.get("pending", 0),
         status_counts=status_counts,
         type_counts=type_counts,
         last_run=_run_out(last_run) if last_run else None,
+        schedule=schedule_summary(db, household_id),
     )
 
 

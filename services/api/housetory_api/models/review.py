@@ -33,6 +33,10 @@ class InventoryReviewRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "scope_type in ('items', 'room', 'container', 'property', 'household')",
             name="valid_scope_type",
         ),
+        CheckConstraint(
+            "trigger_type in ('manual', 'scheduled')",
+            name="valid_trigger_type",
+        ),
         Index("ix_inventory_review_runs_household_created", "household_id", "created_at"),
     )
 
@@ -41,6 +45,11 @@ class InventoryReviewRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="manual")
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("inventory_review_schedules.id", ondelete="SET NULL"),
+    )
     scope_type: Mapped[str] = mapped_column(String(20), nullable=False)
     scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     scope_label: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -154,4 +163,82 @@ class InventoryReviewSuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
 
-__all__ = ["InventoryReviewRun", "InventoryReviewSuggestion"]
+class InventoryReviewSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "inventory_review_schedules"
+    __table_args__ = (
+        UniqueConstraint("household_id", name="uq_inventory_review_schedules_household"),
+        CheckConstraint(
+            "scope_type in ('household', 'property', 'room', 'container')",
+            name="valid_scope_type",
+        ),
+        CheckConstraint(
+            "(scope_type = 'household' and scope_id is null) or "
+            "(scope_type in ('property', 'room', 'container') and scope_id is not null)",
+            name="scope_shape",
+        ),
+        CheckConstraint("frequency in ('weekly', 'monthly')", name="valid_frequency"),
+        CheckConstraint("weekday between 0 and 6", name="valid_weekday"),
+        CheckConstraint("monthly_day between 1 and 28", name="valid_monthly_day"),
+        CheckConstraint("local_hour between 0 and 23", name="valid_local_hour"),
+        CheckConstraint("max_items between 1 and 500", name="valid_max_items"),
+        CheckConstraint("max_runs_per_day between 1 and 4", name="valid_max_runs_per_day"),
+        CheckConstraint(
+            "last_run_status in ('never', 'queued', 'running', 'completed', "
+            "'partial', 'failed', 'skipped', 'disabled')",
+            name="valid_last_run_status",
+        ),
+        Index("ix_inventory_review_schedules_due", "enabled", "next_due_at"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    scope_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="household")
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    scope_label: Mapped[str] = mapped_column(
+        String(200), nullable=False, server_default="Whole household"
+    )
+    frequency: Mapped[str] = mapped_column(String(10), nullable=False, server_default="weekly")
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    monthly_day: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    local_hour: Mapped[int] = mapped_column(Integer, nullable=False, server_default="9")
+    max_items: Mapped[int] = mapped_column(Integer, nullable=False, server_default="200")
+    max_runs_per_day: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    include_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    ai_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    ai_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ai_consent_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    ai_consent_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="SET NULL")
+    )
+    ai_consent_provider_label: Mapped[str | None] = mapped_column(String(160))
+    ai_consent_model: Mapped[str | None] = mapped_column(String(160))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="never")
+    last_run_detail: Mapped[str | None] = mapped_column(Text)
+    last_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("inventory_review_runs.id", ondelete="SET NULL"),
+    )
+    last_run_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL")
+    )
+    last_dispatch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scan_cursor: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+__all__ = [
+    "InventoryReviewRun",
+    "InventoryReviewSchedule",
+    "InventoryReviewSuggestion",
+]

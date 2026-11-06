@@ -21,6 +21,7 @@ from ..schemas.system import (
     JobStatusOut,
     ReadinessComponent,
     ReleaseStatus,
+    ScheduledReviewStatus,
     SystemStatusIssue,
     SystemStatusOut,
     SystemStatusSummaryOut,
@@ -28,6 +29,7 @@ from ..schemas.system import (
 )
 from . import ai, item_image_search, manual_web
 from . import ai_settings as settings_service
+from .inventory_review_schedule import schedule_summary
 
 TASK_ORDER = (
     AiTask.ASSISTANT.value,
@@ -263,11 +265,37 @@ def _failed_job_count(db: Session, household_id: uuid.UUID) -> int:
     )
 
 
+def _scheduled_review(db: Session, household_id: uuid.UUID) -> ScheduledReviewStatus:
+    summary = schedule_summary(db, household_id)
+    return ScheduledReviewStatus(
+        configured=summary.configured,
+        enabled=summary.enabled,
+        state=summary.state,
+        state_detail=summary.state_detail,
+        scope_label=summary.scope_label,
+        frequency=summary.frequency,
+        timezone=summary.timezone,
+        include_ai=summary.include_ai,
+        ai_consent_valid=summary.ai_consent_valid,
+        assistant_configured=summary.assistant_configured,
+        assistant_provider_label=summary.assistant_provider_label,
+        assistant_model=summary.assistant_model,
+        last_run_at=summary.last_run_at,
+        last_run_status=summary.last_run_status,
+        last_run_detail=summary.last_run_detail,
+        next_due_at=summary.next_due_at,
+        max_items=summary.max_items,
+        max_runs_per_day=summary.max_runs_per_day,
+        provider_request_cap=summary.provider_request_cap,
+    )
+
+
 def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusSummaryOut:
     readiness = _readiness(db)
     tasks = _tasks(db, household_id)
     external_services = _external_services(db, household_id)
     failed_jobs = _failed_job_count(db, household_id)
+    scheduled_review = _scheduled_review(db, household_id)
     issues: list[SystemStatusIssue] = []
     for component in readiness:
         if component.status == "ok":
@@ -331,6 +359,19 @@ def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusS
                 settings_path=service.settings_path or "/settings#online-search",
             )
         )
+    if scheduled_review.enabled and scheduled_review.state in {
+        "consent_needed",
+        "ai_not_configured",
+        "attention",
+    }:
+        issues.append(
+            SystemStatusIssue(
+                kind="configured_feature",
+                label="Scheduled inventory review",
+                detail=scheduled_review.state_detail,
+                settings_path="/review",
+            )
+        )
     optional: list[str] = []
     settings = get_settings()
     if not settings.email_configured:
@@ -340,6 +381,8 @@ def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusS
             optional.append(service.name)
     if not any(task.configured for task in tasks):
         optional.append("AI tasks")
+    if not scheduled_review.configured:
+        optional.append("Scheduled inventory review")
     core_count = sum(1 for issue in issues if issue.kind == "core")
     configured_count = sum(1 for issue in issues if issue.kind == "configured_feature")
     return SystemStatusSummaryOut(
@@ -360,6 +403,7 @@ def system_status(db: Session, household_id: uuid.UUID) -> SystemStatusOut:
         jobs=_jobs(db, household_id),
         tasks=_tasks(db, household_id),
         external_services=_external_services(db, household_id),
+        scheduled_review=_scheduled_review(db, household_id),
         generated_at=datetime.now(UTC),
     )
 

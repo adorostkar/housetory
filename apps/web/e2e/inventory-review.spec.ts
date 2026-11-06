@@ -365,3 +365,89 @@ test("selected-items review is reachable from the Items bulk action", async ({
   });
   expect(first.item.id).not.toBe(second.item.id);
 });
+
+test("Review schedule is off by default, saves offline-only and disables cleanly", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  const headers = await currentHeaders(request);
+  const reset = await request.put("/api/v1/inventory-review/schedule", {
+    headers,
+    data: {
+      enabled: false,
+      scope_type: "household",
+      scope_id: null,
+      frequency: "weekly",
+      timezone: "UTC",
+      weekday: 0,
+      monthly_day: 1,
+      local_hour: 9,
+      max_items: 200,
+      max_runs_per_day: 1,
+      include_ai: false,
+      ai_consent: false,
+    },
+  });
+  expect(reset.ok()).toBeTruthy();
+  await page.goto("/review");
+  await expect(
+    page.getByRole("heading", { name: "Scheduled review" }),
+  ).toBeVisible();
+  await expect(page.getByText("Off", { exact: true })).toBeVisible();
+
+  // The disposable household starts without a schedule; if a prior local
+  // attempt left one, open its edit dialog instead.
+  const setupButton = page.getByRole("button", { name: "Set up schedule" });
+  const editButton = page.getByRole("button", { name: "Edit schedule" });
+  if (await setupButton.isVisible()) {
+    await setupButton.click();
+  } else {
+    await editButton.click();
+  }
+  await expect(
+    page.getByRole("dialog").getByText("Scheduled inventory review"),
+  ).toBeVisible();
+  const enable = page.getByLabel("Enable scheduled review");
+  if (!(await enable.isChecked())) await enable.check();
+  const timezone = page.getByLabel("Schedule timezone");
+  await timezone.fill("UTC");
+  await page.getByLabel("Schedule scope type").selectOption("household");
+  await expect(
+    page.getByLabel("Include scheduled AI-assisted categories"),
+  ).not.toBeChecked();
+
+  const saved = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().endsWith("/api/v1/inventory-review/schedule"),
+  );
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  expect((await saved).ok()).toBeTruthy();
+  await expect(page.getByText("Scheduled review settings saved.")).toBeVisible();
+  await expect(page.getByText("Scheduled review settings saved.")).toBeHidden({
+    timeout: 10_000,
+  });
+  await expect(page.getByText("Scheduled", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Next:/)).toBeVisible();
+  await expect(page.getByText(/Weekly on/)).toBeVisible();
+  await page.screenshot({
+    path: "../../docs/walkthrough/inventory-review/06-review-schedule.png",
+    fullPage: false,
+  });
+
+  await page.getByRole("button", { name: "Edit schedule" }).click();
+  await page.getByLabel("Enable scheduled review").uncheck();
+  const disabled = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().endsWith("/api/v1/inventory-review/schedule"),
+  );
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  expect((await disabled).ok()).toBeTruthy();
+  await expect(page.getByText("Off", { exact: true })).toBeVisible();
+  await expect(page.getByText("Automatic review is off.")).toBeVisible();
+});

@@ -45,6 +45,7 @@ import type {
   OnlineSearchSettings,
   ItemSummary,
   PlaceTransferPreview,
+  ReviewSchedule,
   ReviewSummary,
   ReviewSuggestionList,
   SessionState,
@@ -98,6 +99,7 @@ export const queryKeys = {
     locationId: string,
   ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
   reviewSummary: ["inventory-review", "summary"] as const,
+  reviewSchedule: ["inventory-review", "schedule"] as const,
   reviewSuggestions: (filters: Record<string, string>) =>
     ["inventory-review", "suggestions", filters] as const,
   reviewScopeItems: (itemIds: string[]) =>
@@ -867,6 +869,15 @@ export function useReviewSummary(enabled = true) {
   return useQuery({
     queryKey: queryKeys.reviewSummary,
     queryFn: () => api.get<ReviewSummary>("/inventory-review/summary"),
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useReviewSchedule(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.reviewSchedule,
+    queryFn: () => api.get<ReviewSchedule | null>("/inventory-review/schedule"),
     enabled,
     staleTime: 10_000,
   });

@@ -152,6 +152,27 @@ const status: SystemStatus = {
       detail: "SMTP is not configured.",
     },
   ],
+  scheduled_review: {
+    configured: true,
+    enabled: true,
+    state: "scheduled",
+    state_detail: "Next run 2026-11-10 09:00 GMT.",
+    scope_label: "Whole household",
+    frequency: "weekly",
+    timezone: "Europe/London",
+    include_ai: false,
+    ai_consent_valid: false,
+    assistant_configured: true,
+    assistant_provider_label: "OpenAI household",
+    assistant_model: "shared-model",
+    last_run_at: "2026-11-03T09:00:00Z",
+    last_run_status: "completed",
+    last_run_detail: "Scanned 4 of 4; 2 new, 0 already queued.",
+    next_due_at: "2026-11-10T09:00:00Z",
+    max_items: 200,
+    max_runs_per_day: 1,
+    provider_request_cap: 1,
+  },
   generated_at: "2026-11-06T12:30:00Z",
 };
 
@@ -224,6 +245,10 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText("Source: Household settings")).toBeVisible();
     expect(screen.getByText("Source: Installation fallback")).toBeVisible();
     expect(screen.getAllByRole("link", { name: "Open settings" })).toHaveLength(2);
+    expect(screen.getByText("Scheduled review")).toBeVisible();
+    expect(screen.getByText(/Whole household · weekly/)).toBeVisible();
+    expect(screen.getByText(/Next due:/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open Review schedule" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Test all AI tasks" })).toBeEnabled();
     expect(api.post).not.toHaveBeenCalled();

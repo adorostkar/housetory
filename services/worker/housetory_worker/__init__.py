@@ -53,6 +53,11 @@ from housetory_api.services.item_image_generation import (
 from housetory_api.services.item_image_generation import (
     run_new_item_job as run_item_image_new_item,
 )
+from housetory_api.services.inventory_review_schedule import (
+    SCHEDULED_REVIEW_TASK,
+    dispatch_due_reviews,
+    run_scheduled_review_job,
+)
 from housetory_api.services.recognition import (
     RECOGNITION_TASK,
 )
@@ -159,6 +164,7 @@ HANDLERS = {
         payload, uuid.UUID(str(payload["job_id"]))
     ),
     PRUNE_ITEM_IMAGES_TASK: lambda payload: {"expired": expire_pending_illustrations()},
+    SCHEDULED_REVIEW_TASK: run_scheduled_review_job,
 }
 
 
@@ -226,6 +232,13 @@ def schedule_maintenance() -> None:
             enqueue(db, PRUNE_ITEM_IMAGES_TASK)
 
 
+def dispatch_scheduled_reviews() -> None:
+    with SessionLocal() as db:
+        count = dispatch_due_reviews(db)
+    if count:
+        logger.info("Dispatched %s scheduled inventory review(s)", count)
+
+
 def run() -> None:
     settings = get_settings()
     logger.info(
@@ -239,6 +252,7 @@ def run() -> None:
         if requeued:
             logger.warning("Requeued %s stale job(s)", requeued)
     schedule_maintenance()
+    dispatch_scheduled_reviews()
     _heartbeat()
     _record_worker_heartbeat(worker_id)
 
@@ -255,6 +269,7 @@ def run() -> None:
                 time.sleep(POLL_SECONDS)
             if time.monotonic() - last_maintenance_check > 60:
                 schedule_maintenance()
+                dispatch_scheduled_reviews()
                 last_maintenance_check = time.monotonic()
             if time.monotonic() - last_db_heartbeat > 15:
                 _record_worker_heartbeat(worker_id)

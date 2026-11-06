@@ -1855,9 +1855,31 @@ export type ReviewSuggestionStatus =
   | "reverted";
 export type ReviewActionKind = "apply_category" | "apply_name" | "advisory";
 
+export type ReviewRunTrigger = "manual" | "scheduled";
+export type ReviewScheduleScope = "household" | "property" | "room" | "container";
+export type ReviewScheduleFrequency = "weekly" | "monthly";
+export type ReviewScheduleState =
+  | "disabled"
+  | "not_configured"
+  | "consent_needed"
+  | "ai_not_configured"
+  | "scheduled"
+  | "attention";
+export type ReviewScheduleLastStatus =
+  | "never"
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "skipped"
+  | "disabled";
+
 export interface ReviewRun {
   id: UUID;
   request_id: UUID;
+  trigger_type: ReviewRunTrigger;
+  schedule_id: UUID | null;
   scope_type: ReviewScopeType;
   scope_id: UUID | null;
   scope_label: string;
@@ -1917,11 +1939,57 @@ export interface ReviewSuggestionList {
   type_counts: Record<string, number>;
 }
 
+export interface ReviewScheduleSummary {
+  configured: boolean;
+  enabled: boolean;
+  state: ReviewScheduleState;
+  state_detail: string;
+  scope_type: ReviewScheduleScope;
+  scope_label: string;
+  frequency: ReviewScheduleFrequency;
+  timezone: string;
+  weekday: number;
+  monthly_day: number;
+  local_hour: number;
+  max_items: number;
+  max_runs_per_day: number;
+  provider_request_cap: number;
+  include_ai: boolean;
+  ai_consent_valid: boolean;
+  assistant_configured: boolean;
+  assistant_provider_label: string | null;
+  assistant_model: string | null;
+  last_run_at: string | null;
+  last_run_status: ReviewScheduleLastStatus;
+  last_run_detail: string | null;
+  next_due_at: string | null;
+}
+
+export interface ReviewSchedule extends ReviewScheduleSummary {
+  id: UUID;
+  household_id: UUID;
+  scope_id: UUID | null;
+  ai_consent: boolean;
+  ai_consent_at: string | null;
+  ai_consent_reason: string | null;
+  ai_consent_provider_label: string | null;
+  ai_consent_model: string | null;
+  assistant_task: string;
+  assistant_mode: string;
+  assistant_error: string | null;
+  last_run_id: UUID | null;
+  last_run_job_id: UUID | null;
+  last_dispatch_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ReviewSummary {
   pending_count: number;
   status_counts: Record<string, number>;
   type_counts: Record<string, number>;
   last_run: ReviewRun | null;
+  schedule: ReviewScheduleSummary | null;
 }
 
 export interface ReviewDecision {
@@ -1956,6 +2024,28 @@ export interface SystemStatusSummary {
   generated_at: string;
 }
 
+export interface SystemScheduledReview {
+  configured: boolean;
+  enabled: boolean;
+  state: string;
+  state_detail: string;
+  scope_label: string;
+  frequency: string;
+  timezone: string;
+  include_ai: boolean;
+  ai_consent_valid: boolean;
+  assistant_configured: boolean;
+  assistant_provider_label: string | null;
+  assistant_model: string | null;
+  last_run_at: string | null;
+  last_run_status: string;
+  last_run_detail: string | null;
+  next_due_at: string | null;
+  max_items: number;
+  max_runs_per_day: number;
+  provider_request_cap: number;
+}
+
 export interface SystemStatus {
   release: {
     version: string;
@@ -1972,6 +2062,7 @@ export interface SystemStatus {
   };
   tasks: SystemTaskStatus[];
   external_services: SystemExternalService[];
+  scheduled_review: SystemScheduledReview;
   generated_at: string;
 }
 

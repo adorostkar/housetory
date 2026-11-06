@@ -96,6 +96,7 @@ const summary: ReviewSummary = {
   status_counts: { pending: 2 },
   type_counts: { category: 1, possible_duplicate: 1 },
   last_run: null,
+  schedule: null,
 };
 
 let canWrite = true;
@@ -132,6 +133,12 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     useLocations: () => ({ data: { items: [] }, isPending: false }),
     useCategories: () => ({ data: { items: [] }, isPending: false }),
     useReviewSummary: () => ({ data: summary, isPending: false }),
+    useReviewSchedule: () => ({
+      data: null,
+      isPending: false,
+      isError: false,
+      error: null,
+    }),
     useReviewSuggestions: () => ({
       data: {
         items: suggestions,
@@ -155,6 +162,51 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      put: vi.fn(async (path: string) => {
+        if (path === "/inventory-review/schedule") {
+          return {
+            id: "schedule-1",
+            household_id: "household-1",
+            enabled: true,
+            state: "scheduled",
+            state_detail: "Next run 2026-11-09 09:00 UTC.",
+            scope_type: "household",
+            scope_id: null,
+            scope_label: "Whole household",
+            frequency: "weekly",
+            timezone: "UTC",
+            weekday: 0,
+            monthly_day: 1,
+            local_hour: 9,
+            max_items: 200,
+            max_runs_per_day: 1,
+            provider_request_cap: 1,
+            include_ai: false,
+            ai_consent: false,
+            ai_consent_at: null,
+            ai_consent_valid: false,
+            ai_consent_reason: null,
+            ai_consent_provider_label: null,
+            ai_consent_model: null,
+            assistant_task: "assistant",
+            assistant_configured: true,
+            assistant_provider_label: "OpenAI household",
+            assistant_model: "gpt-test",
+            assistant_mode: "cloud",
+            assistant_error: null,
+            last_run_at: null,
+            last_run_status: "never",
+            last_run_detail: null,
+            last_run_id: null,
+            last_run_job_id: null,
+            last_dispatch_at: null,
+            next_due_at: "2026-11-09T09:00:00Z",
+            created_at: "2026-11-06T12:00:00Z",
+            updated_at: "2026-11-06T12:00:00Z",
+          };
+        }
+        throw new Error(`Unexpected PUT ${path}`);
+      }),
       post: vi.fn(async (path: string) => {
         if (path.endsWith("/accept")) {
           return {

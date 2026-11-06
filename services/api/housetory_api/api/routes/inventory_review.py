@@ -13,15 +13,43 @@ from ...schemas.inventory_review import (
     ReviewDismissRequest,
     ReviewRunOut,
     ReviewRunRequest,
+    ReviewScheduleOut,
+    ReviewScheduleUpdate,
     ReviewScopeItemsOut,
     ReviewSuggestionListOut,
     ReviewSummaryOut,
 )
-from ...services import inventory_review
-from ..deps import AuthContext, require_auth
+from ...services import inventory_review, inventory_review_schedule
+from ..deps import AuthContext, require_auth, require_owner
 from ..errors import ApiError
 
 router = APIRouter(prefix="/inventory-review", tags=["inventory-review"])
+
+
+@router.get("/schedule", response_model=ReviewScheduleOut | None)
+def read_review_schedule(
+    auth: AuthContext = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> ReviewScheduleOut | None:
+    return inventory_review_schedule.schedule_out(db, auth.household.id)
+
+
+@router.put("/schedule", response_model=ReviewScheduleOut)
+def update_review_schedule(
+    payload: ReviewScheduleUpdate,
+    auth: AuthContext = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> ReviewScheduleOut:
+    try:
+        return inventory_review_schedule.save_schedule(
+            db,
+            auth.household.id,
+            payload,
+            actor_user_id=auth.user.id,
+        )
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/summary", response_model=ReviewSummaryOut)

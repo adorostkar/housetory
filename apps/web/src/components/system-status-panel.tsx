@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  CalendarClock,
   Check,
   Database,
   Minus,
@@ -441,6 +442,70 @@ export function SystemStatusPanel({
                 })}
               </ul>
             </div>
+          </div>
+
+          <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                <CalendarClock className="size-3.5" /> Scheduled review
+              </p>
+              <Badge
+                variant={
+                  statusQuery.data.scheduled_review.state === "scheduled"
+                    ? "sage"
+                    : statusQuery.data.scheduled_review.state === "attention"
+                      ? "destructive"
+                      : statusQuery.data.scheduled_review.state === "consent_needed" ||
+                          statusQuery.data.scheduled_review.state ===
+                            "ai_not_configured"
+                        ? "brass"
+                        : "outline"
+                }
+              >
+                {statusQuery.data.scheduled_review.state.replaceAll("_", " ")}
+              </Badge>
+            </div>
+            <p className="mt-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              {statusQuery.data.scheduled_review.state_detail}
+            </p>
+            <p className="mt-1 text-[0.68rem] text-muted-foreground">
+              {statusQuery.data.scheduled_review.scope_label} ·{" "}
+              {statusQuery.data.scheduled_review.frequency} ·{" "}
+              {statusQuery.data.scheduled_review.timezone}
+              {statusQuery.data.scheduled_review.include_ai
+                ? ` · AI ${
+                    statusQuery.data.scheduled_review.ai_consent_valid
+                      ? "consented"
+                      : "consent needed"
+                  }`
+                : " · offline rules only"}
+            </p>
+            <p className="mt-1 text-[0.68rem] text-muted-foreground">
+              Last run:{" "}
+              {statusQuery.data.scheduled_review.last_run_status === "never"
+                ? "never"
+                : `${statusQuery.data.scheduled_review.last_run_status} · ${formatTimestamp(
+                    statusQuery.data.scheduled_review.last_run_at,
+                  )}`}
+              {" · "}Next due:{" "}
+              {formatTimestamp(statusQuery.data.scheduled_review.next_due_at)}
+            </p>
+            {statusQuery.data.scheduled_review.last_run_detail ? (
+              <p className="mt-1 break-words text-[0.68rem] text-muted-foreground">
+                {statusQuery.data.scheduled_review.last_run_detail}
+              </p>
+            ) : null}
+            <p className="mt-1 text-[0.64rem] text-muted-foreground">
+              Hard caps: {statusQuery.data.scheduled_review.max_items} items per run,{" "}
+              {statusQuery.data.scheduled_review.provider_request_cap} AI provider
+              request per run.
+            </p>
+            <Link
+              to="/review"
+              className="mt-1 inline-block text-[0.66rem] text-brass underline-offset-2 hover:underline"
+            >
+              Open Review schedule
+            </Link>
           </div>
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">

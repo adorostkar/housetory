@@ -1,7 +1,8 @@
 # On-demand inventory review
 
 Review is one persistent destination at `/review` for inventory-management
-suggestions. It is not limited to imports and does not schedule itself.
+suggestions. It is not limited to imports. Review can run on demand or on an
+optional, owner-managed schedule that is off by default.
 
 ## Scopes
 
@@ -87,16 +88,79 @@ applied/skipped/stale/unsupported outcomes.
 - Related-items, moves, merges, quantities and purchase values are never AI
   actions.
 
+## Scheduled review
+
+Scheduling is optional and **off by default** for existing and new households.
+The migration creates no enabled schedule and does not change on-demand review.
+
+Only the household owner can read or change the schedule:
+
+- **Enable/disable** is explicit. Offline rules are the base of every scheduled
+  run; optional AI is a separate choice.
+- **Scope**: whole household, property, room or container/place. These scope IDs
+  are validated against the current household when saving and again on every run.
+- **Cadence**: weekly (weekday) or monthly (day 1–28), at a whole hour in a
+  validated IANA timezone. Next due is computed in that timezone and follows
+  daylight-saving changes.
+- **Caps**: 1–500 items per run, 1–4 scheduled runs per local day, and at most one
+  AI provider request per run. The existing server rule-scan cap of 500 and AI
+  pass cap of 40 remain enforced. On-demand reviews do not count against the
+  scheduled daily cap.
+- **Fair coverage**: items changed or created since the last successful run are
+  selected first; a persisted cursor rotates through older items on later runs so
+  a bounded schedule does not permanently starve the rest of the scope.
+- **No automatic mutation**: every scheduled run uses the same persistent
+  suggestion queue, fingerprint dedupe, dismissed-unchanged suppression, stale
+  handling and explicit apply/undo semantics as an on-demand review.
+
+### Scheduled AI consent
+
+Scheduled AI has its own opt-in. Provider-level cloud consent or a previous
+on-demand AI review do **not** enable it. The consent text states that one
+bounded request per run sends at most 40 uncategorised item names, descriptions,
+brand/model and existing category names from the selected scope to the current
+Assistant provider, with no photos, receipts, loans, prices, borrower data or
+other households. It also states that the provider may charge usage or cost;
+Housetory does not invent a cost estimate.
+
+The consent is fingerprinted against the current Assistant route: provider,
+endpoint/base URL, model, mode, source and cloud-consent state. If any of those
+change, if the provider becomes unavailable, or if consent is withdrawn, the
+scheduled run **skips AI** and continues with offline rules. The run is marked
+partial and the Review/system status surfaces the reason. It never silently
+switches to a different provider or model.
+
+### Dispatch and safety
+
+Due schedules are claimed with `FOR UPDATE SKIP LOCKED` and dispatched as
+durable `inventory.review.scheduled` worker jobs. A per-schedule active-job check,
+a row lock and a deterministic request id prevent duplicate or overlapping runs
+across retries, multiple workers and restarts. A missed schedule dispatches at
+most one catch-up run; the next due time is always recomputed from the current
+time, so a restart cannot create a burst of historical runs.
+
+Disabling a schedule stops future dispatch and cancels a still-queued scheduled
+job. A run already in progress cannot be interrupted safely and may finish; the
+recorded status says it was disabled while the run was in flight. Before every
+run, the household scope and the approving owner's current owner membership are
+validated. If the approving owner is no longer an owner, the run is skipped with
+an actionable failure status until an owner saves the schedule again.
+
+Review and System status show the last run, last status/detail, next due time and
+clear disabled, not-configured, consent-needed and attention states.
+
 ## Limits and permissions
 
-- Rule scans are bounded to 500 scoped items per run; larger scopes are marked
-  partial. AI receives at most 40 uncategorised items.
-- Runs are synchronous; there is no background queue or cancellation UI yet.
+- Rule scans are bounded to 500 scoped items per run; scheduled scans also
+  respect the owner's smaller item cap. Larger scopes are marked partial. AI
+  receives at most 40 uncategorised items.
+- On-demand runs are synchronous. Scheduled runs use the durable worker queue and
+  report queued/running/completed/partial/failed/skipped states.
 - Viewers can read suggestions but cannot run, apply, dismiss or undo.
 - Members can run offline reviews and apply/dismiss; only owners can request the
   optional AI pass.
-- There is no automatic schedule, recurring run, last/next-run scheduler or
-  notification in this phase. Scheduling remains separately reviewed future work.
+- Scheduling is opt-in, owner-only and off by default; enabling a schedule does
+  not enable AI or trigger a provider call.
 - Existing item ownership, borrowing records, locations, quantities, loans,
   documents, receipts, history and household permissions are preserved. Review
   does not merge inventory or alter borrowed records.
@@ -104,6 +168,8 @@ applied/skipped/stale/unsupported outcomes.
 ## API summary
 
 - `GET /inventory-review/summary`
+- `GET /inventory-review/schedule` (owner)
+- `PUT /inventory-review/schedule` (owner)
 - `GET /inventory-review/suggestions`
 - `GET /inventory-review/scope-items`
 - `POST /inventory-review/runs`
@@ -137,3 +203,4 @@ across a changed queue.
 - [Advisory duplicate comparison](walkthrough/inventory-review/03-duplicate-compare.png)
 - [Selected-items scope from the Items bulk action](walkthrough/inventory-review/04-selected-items-scope.png)
 - [Queue filters and item edit roundtrip](walkthrough/inventory-review/05-filter-context-roundtrip.png)
+- [Offline scheduled review settings and next run](walkthrough/inventory-review/06-review-schedule.png)

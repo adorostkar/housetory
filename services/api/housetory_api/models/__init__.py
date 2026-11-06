@@ -47,7 +47,11 @@ from .item_images import ItemImage
 from .jobs import Job, WorkerHeartbeat
 from .online_search import HouseholdOnlineSearchSettings
 from .property import Property
-from .review import InventoryReviewRun, InventoryReviewSuggestion
+from .review import (
+    InventoryReviewRun,
+    InventoryReviewSchedule,
+    InventoryReviewSuggestion,
+)
 from .stocktake import (
     StocktakeApplication,
     StocktakeCorrection,
@@ -95,6 +99,7 @@ __all__ = [
     "ImportSourceFile",
     "InventoryEvidenceExport",
     "InventoryReviewRun",
+    "InventoryReviewSchedule",
     "InventoryReviewSuggestion",
     "ItemImage",
     "Job",
