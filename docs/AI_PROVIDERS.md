@@ -16,6 +16,57 @@ recording.
 | Item illustrations | Yes, `/images/generations` | No | No direct adapter | No | Yes, image-output models via `/images` | No |
 | Local/private endpoint | OpenAI-compatible base URL | — | — | — | — | Native chat |
 
+## Task-specific selection contract
+
+The model picker and server use one capability contract:
+
+| Task(s) | Actual minimum | Adapter providers |
+| --- | --- | --- |
+| Assistant, Smart imports, Document interpretation, Natural-language search, Label summaries | Text output | OpenAI, Anthropic, Gemini, xAI, OpenRouter, Ollama |
+| Image recognition | Image input + text output | Same provider adapters, model metadata permitting |
+| Voice transcription | STT output or audio input | OpenAI, Gemini, OpenRouter |
+| Item illustrations | Image output | OpenAI, OpenRouter |
+
+Native tool calling and native structured-output support are **not** blanket
+requirements. Label summaries, for example, only need a text model. Existing
+server-side JSON validation and safe text-parsing fallbacks remain in force.
+
+Models are presented in four states:
+
+- **Suggested** — provider metadata confirms the required capability. This is a
+  heuristic ordering, not a quality benchmark.
+- **Compatible** — the task adapter and model metadata support the task.
+- **Unverified** — capability metadata is incomplete or the exact model ID is not
+  in the catalog. Saving is allowed, but the UI warns and offers an explicit live
+  test. Confirmed-incompatible IDs are still rejected.
+- **Unavailable / adapter unavailable** — the implemented adapter cannot serve
+  that task/provider. The message distinguishes a Housetory adapter gap from a
+  provider being incapable.
+
+A missing adapter is never presented as proof that a provider cannot do the task.
+Selecting one key/provider remains valid; there is no silent alternate-provider or
+key fallback.
+
+## Explicit live task tests
+
+Discovery only reads catalog metadata. A separate owner-only
+`POST /ai/tasks/{task}/test` requires `confirm: true` and uses minimal synthetic
+data (a short text/JSON prompt, a tiny generated image, a synthetic WAV tone or a
+small generated image depending on the task). The UI shows a confirmation warning
+that the provider may incur usage/cost and that no inventory, borrower, document or
+private note data is used. Results and bounded errors are stored for the status
+screen. No test runs on typing, discovery, page load or model recommendation.
+
+## System status
+
+Settings → System status shows the deployed release commit/build/channel/identity,
+database/storage/worker readiness, job counts and recent failures with explicit
+retry, per-task configured/compatible/live-tested state and last error/time, plus
+configured/not-configured optional external services. It never returns API keys,
+job payloads, prompts, borrower notes or inventory details. A catalog listing is
+not a successful inference test; only an explicit task test marks a task
+live-tested.
+
 Unsupported provider/task combinations are rejected with an explicit API error;
 they are not sent to a guessed endpoint and do not produce fake previews or
 transcripts.

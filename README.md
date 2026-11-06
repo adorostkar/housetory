@@ -220,6 +220,9 @@ Tailscale is optional.
   duplicate decisions and grouped-suggestion splitting are supported. Audio is
   deleted after transcription; nothing is written before explicit confirmation.
   See [`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md).
+- Search examples, Enter submission and debounced typing keep one URL/query source
+  of truth, preserve scope parameters and avoid stale async results. The offline
+  core path is documented in [`docs/OFFLINE_ACCEPTANCE.md`](docs/OFFLINE_ACCEPTANCE.md).
 - A conservative hierarchy importer that understands rooms, boxes, nested
   containers, legacy identifiers such as `STO-01` and their contents. Index
   pages and empty templates are skipped, and the tree is reviewed before apply.
@@ -232,10 +235,12 @@ Tailscale is optional.
   warnings and explicit remote-processing consent. Local, private-network and
   remote endpoints are labelled separately. Voice transcription is opt-in and
   supports OpenAI/Gemini audio plus OpenRouter STT or audio-input models; item
-  illustrations support the OpenAI Images API and OpenRouter Image API. Models are
-  filtered by discovered input/output modalities, and a chat model is never
-  silently reused for audio or image generation. See
-  [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
+  illustrations support the OpenAI Images API and OpenRouter Image API. Each task
+  has a specific minimum capability (text, image input, audio input/STT or image
+  output), not a blanket tools/structured requirement. Confirmed-incompatible
+  models are hidden; unknown metadata and exact IDs are offered with an unverified
+  warning and an explicit, bounded live test. No discovery or status request runs a
+  paid inference. See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
 - Optional direct HTTPS with nginx, or Tailscale Serve as an optional private
   access layer. PWA and camera features work in secure contexts.
 - Document-to-item relationship suggestions that require explicit linking.
@@ -251,7 +256,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 338 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 342 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -259,8 +264,9 @@ stack, not just unit mocks:
   provider adapters, task capabilities, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, voice-note grouping/corrections/
   duplicate resolution/split/idempotent confirmation, OpenAI/Gemini/OpenRouter
-  transcription adapters, OpenRouter image-output adapter, audio validation and
-  cleanup, lending quantities/concurrency/returns/
+  transcription adapters, OpenRouter image-output adapter, task-specific
+  capability contracts, unverified exact-ID paths, bounded task tests, worker
+  heartbeat/status scoping, audio validation and cleanup, lending quantities/concurrency/returns/
   retries, item and container history snapshots, safe undo and quantity/archive/
   delete guards, atomic bulk move/tag/category batches, batch replay/idempotency,
   per-item bulk-move undo, private document scan crop/perspective/rotation/
@@ -304,7 +310,7 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 146 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 153 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 46 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
@@ -332,7 +338,11 @@ stack, not just unit mocks:
   category-icon/reference/AI/actual-photo workflows with batch cancellation, and
   a disposable OpenRouter fixture covering capability-filtered voice/image task
   configuration, mocked STT transcription, image preview/accept and provider
-  error handling.
+  error handling, release search query/example/submit regression, system status
+  build identity/jobs/task states and compact unavailable-feature states. The
+  isolated offline stack additionally passed 31 core workflows plus a zero-external-
+  browser-request audit with API/worker outbound TCP and HTTPS blocked; see
+  [`docs/OFFLINE_ACCEPTANCE.md`](docs/OFFLINE_ACCEPTANCE.md).
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt

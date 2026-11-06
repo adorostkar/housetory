@@ -1902,6 +1902,94 @@ rules are in `docs/ITEM_IMAGES.md`.
   credential creation were performed. Remaining live validation requires real
   OpenRouter STT/image model access, credit and operator terms review.
 
+## Staged release stabilisation — search, AI parity, status and offline core
+
+Worked on `codex/release-stabilisation`; main is not merged or pushed.
+
+### Search query loss
+
+- [x] Reproduced that the initial empty debounced value could fire after an example
+  click or immediate Enter and delete `q` from `/search`.
+- [x] Fixed the state ordering with a draft/debounce guard: a stale debounced value
+  cannot overwrite an explicit submit, example or URL navigation. Example/clear/scope
+  actions preserve unrelated URL parameters, and the duplicated mode/action buttons
+  were reduced to one task-appropriate action.
+- [x] Added frontend regression tests for example questions, immediate Enter with a
+  pending debounce, keyword results, ask mode and URL scope; the release E2E repeats
+  the reproduced browser flow. Async queries remain keyed by URL query and scope.
+
+### Task-specific AI parity
+
+- [x] Added a single capability contract (`services/task_capabilities.py`) used by
+  discovery, the picker, save validation and status. Text tasks require text; vision
+  requires image input; transcription requires STT/audio input; item illustrations
+  require image output. Native tools/structured output are not blanket requirements.
+- [x] Hidden only confirmed-incompatible/adapter-unavailable models. Unknown metadata
+  and exact IDs remain selectable as **Unverified** with an explicit warning; the
+  server still rejects confirmed incompatibility and distinguishes a missing
+  Housetory adapter from provider incapability. Suggested ordering uses provider
+  metadata only, with no invented quality/price claims.
+- [x] Added owner-confirmed, bounded live task tests (text/JSON, synthetic vision
+  image, synthetic WAV tone and image output) with cost/usage warning, no automatic
+  discovery/typing calls, and persisted last-test status/time/error. Preserved saved
+  IDs rather than rewriting them; unlisted IDs are surfaced in the picker and status.
+- [x] Updated OpenRouter/OpenAI/Gemini/Ollama paths without silent provider/key
+  fallback. Existing encrypted credentials and task choices were not changed.
+
+### System status and worker evidence
+
+- [x] Added owner-only `GET /system/status` and `POST /system/jobs/{id}/retry` with
+  release version/commit/build/channel/identity, DB/storage/worker readiness, job
+  counts/recent failures, per-task configured/compatibility/live-tested state and
+  optional external-service configuration. Job payloads, keys, prompts and borrower
+  data are never returned; non-owners receive an access note.
+- [x] Added append-only migration `f2b4d6c8a0e1`: bounded last-test columns/constraint
+  on `ai_task_settings` and a PostgreSQL `worker_heartbeats` table. The worker writes
+  a 15-second DB heartbeat; the status screen shows stale/unknown honestly.
+- [x] Added Settings → System status UI and tests with retry, release identity and
+  compact desktop/mobile light/dark screenshots.
+
+### Offline-core acceptance
+
+- [x] Added `compose.offline.yaml`: API/database/worker have no outbound route; web
+  also joins an edge network so the browser can reach the published LAN port.
+- [x] Proved API and worker TCP/HTTPS outbound are blocked, then ran 31 core workflows
+  against disposable volumes: login/restart, CRUD, deterministic search, loans/history,
+  local scan/OCR, QR/labels, stocktake and PDF/CSV/ZIP worker exports. Added a browser
+  audit showing zero external requests. See `docs/OFFLINE_ACCEPTANCE.md`.
+- [x] Documented limits: this is not browser-offline editing/sync; LAN/trusted HTTPS
+  and stable QR addressing still matter; cloud AI/search/email remain optional,
+  honest unavailable states; no live provider quality claim.
+
+### Copy/usability cleanup
+
+- [x] Removed stale “built-in illustrations remain available” copy.
+- [x] Item image/voice optional features now show one compact setup status and one
+  Configure action instead of disabled artwork/recorder and repeated paragraphs;
+  server environment-variable guidance lives in Settings.
+- [x] Preserved typography, palette, cards, rounded controls, navigation and existing
+  mobile/desktop light/dark visual language.
+
+### Verification and local delivery
+
+- [x] **342** PostgreSQL backend tests, **153** Vitest tests and **49** normal
+  disposable-stack Playwright workflows pass. The isolated offline stack passed **31**
+  core workflows plus its zero-external-request audit. Ruff, strict TypeScript
+  typecheck, production build and Alembic drift checks pass.
+- [x] Screenshots: `docs/walkthrough/release-stabilisation/`; offline method and
+  commands: `docs/OFFLINE_ACCEPTANCE.md`; provider matrix: `docs/AI_PROVIDERS.md`.
+- [x] Backed up local Mac data to `backups/housetory-20261106T103043Z` with valid
+  checksums before the append-only migration/local deployment.
+- [x] Preserved the real local snapshot: 1 household, 1 property, 8 rooms, 10 storage
+  locations, 51 items, 1 user, 1 membership, 1 loan, 0 evidence exports, 0 actual
+  photos, 0 item images, 2 encrypted providers and 6 existing task assignments;
+  room/item ID and updated-at hashes unchanged. No task choice, credential, key or
+  household content was rewritten.
+- [x] No remote deployment, email, credential creation, paid/live provider call,
+  server wipe, nginx/key/SMTP change or arbitrary Docker cleanup was performed.
+  Remaining live checks are operator-run OpenRouter/OpenAI/Gemini usage tests and
+  real provider quality/access/billing validation, separate from this acceptance.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
