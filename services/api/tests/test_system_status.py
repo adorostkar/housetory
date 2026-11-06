@@ -137,6 +137,7 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
     from housetory_api.config import get_settings
 
     settings = get_settings()
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
     monkeypatch.setattr(settings, "release_commit", "abc123release")
     monkeypatch.setattr(settings, "release_build_time", "2026-11-06T12:00:00Z")
     monkeypatch.setattr(settings, "release_channel", "local-test")
@@ -155,7 +156,7 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
                 queue="default",
                 task="fixture.failed",
                 payload={
-                    "household_id": str(uuid.uuid4()),
+                    "household_id": str(household_id),
                     "private_payload": "must-not-leak",
                 },
                 status="failed",
@@ -166,7 +167,20 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
                 finished_at=datetime.now(UTC),
             )
         )
+        other_job = Job(
+            queue="default",
+            task="fixture.other-household",
+            payload={"household_id": str(uuid.uuid4())},
+            status="failed",
+            attempts=1,
+            max_attempts=2,
+            last_error="other household failure",
+            created_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+        )
+        db.add(other_job)
         db.commit()
+        other_job_id = other_job.id
 
     response = owner_client.get("/api/v1/system/status")
     assert response.status_code == 200, response.text
@@ -180,6 +194,8 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
     assert readiness["Worker"]["status"] == "ok"
     assert body["jobs"]["counts"].get("failed", 0) >= 1
     assert any(job["task"] == "fixture.failed" for job in body["jobs"]["recent_failed"])
+    assert "fixture.other-household" not in response.text
+    assert "other household failure" not in response.text
     assert "private_payload" not in response.text
     assert "must-not-leak" not in response.text
     assert "sk-test" not in response.text
@@ -219,6 +235,7 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
         job = db.scalar(select(Job).where(Job.task == "fixture.failed"))
         assert job is not None
         job_id = job.id
+    assert owner_client.post(f"/api/v1/system/jobs/{other_job_id}/retry").status_code == 404
     assert owner_client.post(f"/api/v1/system/jobs/{job_id}/retry").status_code == 200
     with SessionLocal() as db:
         retried = db.get(Job, job_id)

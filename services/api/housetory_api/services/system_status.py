@@ -6,7 +6,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from .. import __version__
@@ -116,16 +116,24 @@ def _readiness(db: Session) -> list[ReadinessComponent]:
     return components
 
 
-def _jobs(db: Session) -> JobStatusOut:
+def _job_scope(household_id: uuid.UUID):
+    return or_(
+        Job.payload["household_id"].astext == str(household_id),
+        Job.task.like("maintenance.%"),
+    )
+
+
+def _jobs(db: Session, household_id: uuid.UUID) -> JobStatusOut:
+    scope = _job_scope(household_id)
     counts = {
         str(status): int(count or 0)
         for status, count in db.execute(
-            select(Job.status, func.count(Job.id)).group_by(Job.status)
+            select(Job.status, func.count(Job.id)).where(scope).group_by(Job.status)
         ).all()
     }
     recent_failed = db.scalars(
         select(Job)
-        .where(Job.status == JobStatus.FAILED.value)
+        .where(Job.status == JobStatus.FAILED.value, scope)
         .order_by(Job.finished_at.desc().nullslast(), Job.created_at.desc())
         .limit(10)
     ).all()
@@ -225,16 +233,23 @@ def system_status(db: Session, household_id: uuid.UUID) -> SystemStatusOut:
     return SystemStatusOut(
         release=_release(),
         readiness=_readiness(db),
-        jobs=_jobs(db),
+        jobs=_jobs(db, household_id),
         tasks=_tasks(db, household_id),
         external_services=_external_services(),
         generated_at=datetime.now(UTC),
     )
 
 
-def retry_job(db: Session, job_id: uuid.UUID) -> JobRetryOut:
+def retry_job(
+    db: Session,
+    household_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> JobRetryOut:
     job = db.get(Job, job_id)
-    if job is None:
+    scoped_household = (job.payload or {}).get("household_id") if job else None
+    if job is None or (scoped_household is not None and str(scoped_household) != str(household_id)):
+        raise ApiError(404, "job_not_found", "Job not found.")
+    if scoped_household is None and not job.task.startswith("maintenance."):
         raise ApiError(404, "job_not_found", "Job not found.")
     if job.status != JobStatus.FAILED.value:
         raise ApiError(409, "job_not_failed", "Only failed jobs can be retried.")

@@ -25,5 +25,4 @@ def retry_system_job(
     auth: AuthContext = Depends(require_owner),
     db: Session = Depends(get_db),
 ) -> JobRetryOut:
-    del auth
-    return retry_job(db, job_id)
+    return retry_job(db, auth.household.id, job_id)
