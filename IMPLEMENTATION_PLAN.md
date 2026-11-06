@@ -2319,7 +2319,7 @@ branch. Main was not merged or pushed and no server release was performed.
 - [x] Backed up all local Mac volumes to `backups/housetory-20261106T115353Z`
   before deployment; database, uploads, imports and exports checksums are valid.
 - [x] Applied append-only migration `a1c3e5f7b9d2` and deployed the feature branch
-  locally. Runtime code artifact commit `13fe409a3297`; API/database/worker/web are
+  locally. Runtime code artifact commit `ad23f51a23ee`; API/database/worker/web are
   healthy, current assets return `200`, unauthenticated operator status returns
   `401`, and Alembic reports no drift.
 - [x] Preserved the real local snapshot: 1 household, 1 property, 8 rooms, 10
