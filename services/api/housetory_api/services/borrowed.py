@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -700,8 +701,22 @@ def create_record(
         request_fingerprint=fingerprint,
     )
     _apply_place(record, snapshot)
-    db.add(record)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.add(record)
+            db.flush()
+    except IntegrityError:
+        # A concurrent create with the same request id won the unique constraint.
+        existing = _request_record(db, household_id, payload.request_id)
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                raise ApiError(
+                    409,
+                    "request_id_payload_mismatch",
+                    "That request id was already used with different borrowed-item details.",
+                ) from None
+            return record_detail(db, household_id, existing.id, on_date=on_date)
+        raise
     details = _event_details(record)
     details["request_fingerprint"] = fingerprint
     history.record_event(

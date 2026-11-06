@@ -16,7 +16,7 @@ from housetory_api.models import (
     Property,
     User,
 )
-from housetory_api.schemas.borrowed import BorrowedReturnCreate
+from housetory_api.schemas.borrowed import BorrowedCreate, BorrowedReturnCreate
 from housetory_api.security import hash_password
 from housetory_api.services import borrowed as borrowed_service
 from housetory_api.services.auth import create_session
@@ -394,6 +394,41 @@ def test_borrowed_dates_validation_concurrency_and_household_isolation(owner_cli
             except ApiError as exc:
                 db.rollback()
                 return exc.code
+
+    shared_create = BorrowedCreate(
+        item_name="Shared request fixture",
+        owner_name="Roya",
+        quantity=1,
+        borrowed_on=date(2026, 1, 1),
+        request_id=uuid.uuid4(),
+    )
+
+    def do_create(_index: int) -> str:
+        with SessionLocal() as db:
+            try:
+                detail = borrowed_service.create_record(
+                    db,
+                    household,
+                    shared_create,
+                    actor_user_id=None,
+                    actor_name="Concurrency Test",
+                )
+                db.commit()
+                return str(detail.id)
+            except ApiError as exc:
+                db.rollback()
+                return exc.code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        created_ids = list(pool.map(do_create, range(2)))
+    assert len(set(created_ids)) == 1
+    with SessionLocal() as db:
+        assert (
+            db.query(BorrowedRecord)
+            .filter(BorrowedRecord.request_id == shared_create.request_id)
+            .count()
+            == 1
+        )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(do_return, range(2)))
