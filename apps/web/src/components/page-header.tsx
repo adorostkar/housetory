@@ -37,11 +37,11 @@ export function PageHeader({
       )}
       <div
         className={cn(
-          "flex flex-col gap-5 sm:flex-row sm:justify-between",
+          "flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:justify-between",
           actionsPlacement === "title" ? "sm:items-start" : "sm:items-end",
         )}
       >
-        <div className="min-w-0">
+        <div className="min-w-0 sm:min-w-[14rem] sm:flex-1">
           {eyebrow && <p className="eyebrow mb-2.5">{eyebrow}</p>}
           <h1 className="display-title">{title}</h1>
           {titleAddon}
@@ -54,7 +54,7 @@ export function PageHeader({
         {actions && (
           <div
             className={cn(
-              "flex shrink-0 flex-wrap items-center gap-2.5",
+              "flex min-w-0 max-w-full flex-wrap items-center gap-2.5 sm:justify-end sm:max-w-[70%]",
               actionsPlacement === "title" && "sm:mt-6",
             )}
           >

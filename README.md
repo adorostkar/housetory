@@ -76,6 +76,17 @@ Tailscale is optional.
   properties with an explicit scope preview, preserved identities and loan-safe
   last-checked staleness. Populated properties cannot be archived or deleted.
   See [`docs/PROPERTIES.md`](docs/PROPERTIES.md).
+- **Scoped place management and safe emptying**: room, storage-place and container
+  item lists reuse the Items bulk selection/action workflow with direct/nested
+  scope, search, sort and mobile-friendly selection. Item detail preserves a safe
+  same-app origin through edit/save/back, including after an item moves. Containers
+  expose consistent delete actions; empty places confirm deletion, while nonempty
+  rooms/containers offer **Move contents and delete** with previews, or
+  **Move all contents** without deleting. Transfers preserve nested places,
+  quantities, documents, loans and active borrowed placements, reparent child
+  rooms, reject cycles/cross-household destinations, and roll back completely on
+  stale counts or verification failure. See
+  [`docs/PLACE_MANAGEMENT.md`](docs/PLACE_MANAGEMENT.md).
 - **Multiple households and All my places**: one account can join independent
   households with a different owner/member/viewer role in each. Create or switch
   households from a compact selector; editing stays in one explicit workspace,
@@ -271,7 +282,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 360 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 366 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -330,8 +341,8 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 179 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 56 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 191 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 60 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

@@ -97,11 +97,16 @@ test("box item list selects only its contents and bulk-moves them to a room", as
   );
 
   await page.goto(`/containers/${box.id}`);
-  await expect(page.getByRole("heading", { name: box.identifier })).toBeVisible();
-  await expect(page.getByText(`Lamp ${id}`)).toBeVisible();
-  await expect(page.getByText(`Cable ${id}`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: box.identifier, level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Lamp ${id}`, level: 3 }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: `Cable ${id}`, level: 3 }),
+  ).toBeVisible();
   await page.getByRole("checkbox", { name: "Select all loaded items" }).check();
   await expect(page.getByText(/2 items selected/)).toBeVisible();
+  await page.getByText(/2 items selected/).scrollIntoViewIfNeeded();
   await page.screenshot({
     path: "../../docs/walkthrough/place-management/01-box-bulk-selection.png",
     fullPage: false,
@@ -115,12 +120,16 @@ test("box item list selects only its contents and bulk-moves them to a room", as
   const dialog = page.getByRole("dialog", { name: "Move selected items" });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Destination room").selectOption(destinationRoom.id);
+  await expect(dialog.getByRole("button", { name: "Move selected" })).toBeEnabled();
+  await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/place-management/02-box-move-dialog.png",
     fullPage: false,
   });
   await dialog.getByRole("button", { name: "Move selected" }).click();
-  await expect(page.getByText(/Moved 2 items/)).toBeVisible();
+  await expect(
+    page.getByText(`Moved 2 items to ${destinationRoom.name}`),
+  ).toBeVisible();
 
   const firstState = await itemPlace(request, first.item.id);
   const secondState = await itemPlace(request, second.item.id);
@@ -151,7 +160,7 @@ test("room/box origin survives edit, save, move and cancel", async ({ page, requ
   await expect(page).toHaveURL(new RegExp(`/items/${item.item.id}`));
   await expect(page).toHaveURL(/from=/);
 
-  await page.getByRole("link", { name: "Edit" }).click();
+  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
   await expect(page).toHaveURL(/\/edit\?from=/);
   await expect(page.getByRole("link", { name: "Back to item" })).toBeVisible();
   await page.getByLabel("Item name").fill(`Renamed origin lamp ${id}`);
@@ -163,22 +172,75 @@ test("room/box origin survives edit, save, move and cancel", async ({ page, requ
   const moved = await itemPlace(request, item.item.id);
   expect(moved.item.room.id).toBe(destinationRoom.id);
   expect(moved.item.location).toBeNull();
+  await page.waitForTimeout(450);
   await page.screenshot({
     path: "../../docs/walkthrough/place-management/03-origin-after-save.png",
     fullPage: false,
   });
 
   await page.getByRole("link", { name: `Back to ${box.identifier}` }).click();
-  await expect(page.getByRole("heading", { name: box.identifier })).toBeVisible();
+  await expect(page.getByRole("heading", { name: box.identifier, level: 1 })).toBeVisible();
   await expect(page.getByText("This container is empty.")).toBeVisible();
 
   // Cancel returns to the same item detail and does not save the draft.
   await page.goto(`/items/${item.item.id}?from=${encodeURIComponent(`/containers/${box.id}`)}&from_label=${encodeURIComponent(box.identifier)}`);
-  await page.getByRole("link", { name: "Edit" }).click();
+  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
   await page.getByLabel("Item name").fill(`Discarded rename ${id}`);
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: `Renamed origin lamp ${id}` })).toBeVisible();
   await expect(page.getByRole("link", { name: `Back to ${box.identifier}` })).toBeVisible();
+});
+
+test("nonempty room deletion reparents child rooms before removing the room", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  const id = suffix();
+  const source = await createRoom(request, `Room delete source ${id}`);
+  const destination = await createRoom(request, `Room delete target ${id}`);
+  const headers = await currentHeaders(request);
+  const childResponse = await request.post("/api/v1/rooms", {
+    headers,
+    data: { name: `Child room ${id}`, parent_id: source.id },
+  });
+  expect(childResponse.ok()).toBeTruthy();
+  const child = (await childResponse.json()) as { id: string; name: string };
+  const direct = await createItem(request, `Room direct ${id}`, source.id);
+  const childItem = await createItem(request, `Room child ${id}`, child.id);
+
+  await page.goto(`/rooms/${source.id}`);
+  await expect(
+    page.getByRole("heading", { name: source.name, level: 1 }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Room options" }).click();
+  await page.getByRole("menuitem", { name: "Delete room" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: new RegExp(`Move contents and delete ${source.name}`),
+  });
+  await dialog.getByLabel("Destination room").selectOption(destination.id);
+  await expect(
+    dialog.getByRole("button", { name: "Move contents and delete" }),
+  ).toBeEnabled();
+  await page.waitForTimeout(350);
+  await page.screenshot({
+    path: "../../docs/walkthrough/place-management/06-room-delete-preview.png",
+    fullPage: false,
+  });
+  await dialog.getByRole("button", { name: "Move contents and delete" }).click();
+  await expect(page).toHaveURL(/\/rooms$/);
+
+  const childState = await request.get(`/api/v1/rooms/${child.id}`, { headers });
+  expect((await childState.json()).parent_id).toBe(destination.id);
+  const directState = await itemPlace(request, direct.item.id);
+  const childItemState = await itemPlace(request, childItem.item.id);
+  expect(directState.item.room.id).toBe(destination.id);
+  expect(childItemState.item.room.id).toBe(child.id);
+  const deleted = await request.get(`/api/v1/rooms/${source.id}`, { headers });
+  expect(deleted.status()).toBe(404);
 });
 
 test("container delete offers empty confirmation, move-all, and move-contents-and-delete", async ({
@@ -217,6 +279,10 @@ test("container delete offers empty confirmation, move-all, and move-contents-an
   const moveDialog = page.getByRole("dialog", { name: /Move all contents out of/i });
   await moveDialog.getByLabel("Destination room").selectOption(destinationRoom.id);
   await expect(moveDialog.getByText(/Deleting .* is permanent/i)).toHaveCount(0);
+  await expect(
+    moveDialog.getByRole("button", { name: "Move all contents" }),
+  ).toBeEnabled();
+  await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/place-management/04-move-contents-preview.png",
     fullPage: false,
@@ -243,6 +309,10 @@ test("container delete offers empty confirmation, move-all, and move-contents-an
   const deleteDialog = page.getByRole("dialog", { name: /Move contents and delete/i });
   await deleteDialog.getByLabel("Destination room").selectOption(destinationRoom.id);
   await expect(deleteDialog.getByText(/Deleting .* is permanent/i)).toBeVisible();
+  await expect(
+    deleteDialog.getByRole("button", { name: "Move contents and delete" }),
+  ).toBeEnabled();
+  await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/place-management/05-move-and-delete-preview.png",
     fullPage: false,

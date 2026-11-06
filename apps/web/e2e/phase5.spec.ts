@@ -74,7 +74,7 @@ test("moves a container across rooms without changing its identity or contents",
 
   await page.goto(`/containers/${container.id}`);
   await expect(page.getByRole("heading", { name: container.identifier, level: 1, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Move" }).click();
+  await page.getByRole("button", { name: "Move", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Destination room").selectOption(destination.id);
   await dialog.getByRole("button", { name: "Move container" }).click();
@@ -132,7 +132,7 @@ test("shows an authenticated QR destination and mobile container view", async ({
   const mobilePage = await mobile.newPage();
   await mobilePage.goto(`/containers/${container.id}`);
   await expect(mobilePage.getByRole("heading", { name: container.identifier, level: 1, exact: true })).toBeVisible();
-  await expect(mobilePage.getByRole("button", { name: "Move" })).toBeVisible();
+  await expect(mobilePage.getByRole("button", { name: "Move", exact: true })).toBeVisible();
   await mobilePage.goto("/labels");
   await expect(mobilePage.getByText("Printer checklist")).toBeVisible();
   await mobile.close();
