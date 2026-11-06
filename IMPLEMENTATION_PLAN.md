@@ -1623,13 +1623,107 @@ or any purchase/loan ownership. Full rules are in `docs/PROPERTIES.md`.
   creation beyond the required additive backfill, volume cleanup or arbitrary
   Docker rollback was performed. Multiple-household switching was not started.
 
+## Staged milestone — multiple households and All my places
+
+This milestone keeps the household as the membership/security boundary while
+letting one account join several households independently. The editable workspace
+stays one household/property; search and assistant add a separate read scope over
+current memberships. Full rules are in `docs/HOUSEHOLDS.md`.
+
+### Stage A — account/household lifecycle
+
+- [x] Added household list/create/select routes. Creation makes the account an
+  owner, creates an initial property, selects the new household and is bounded by
+  a per-account household cap/rate limit. Any authenticated account can create
+  its first household from the no-household page; first-run setup is still sealed
+  after the instance has users.
+- [x] Session state now returns only the caller's current memberships and effective
+  role. Selecting a household is membership-validated; an unauthorized id returns
+  not-found without revealing another account's household name.
+- [x] Same account may have different roles per household. Viewers remain read-only
+  in that household but can be owners elsewhere; no global role or automatic
+  cross-household access exists.
+- [x] Added compact desktop/mobile household switching and a compact mobile account
+  menu list. Account settings, household settings, members and properties remain
+  distinct. Existing household/data/IDs/QR/provider settings are preserved.
+- [x] Last-owner, concurrency and member-removal session revocation protections are
+  retained. Invitations remain bound to household/email/role with wrong-account
+  rejection. Household deletion/leave/transfer is intentionally unsupported.
+
+### Stage B — explicit workspace context and isolation
+
+- [x] Unsafe requests from multi-household accounts require a current
+  `X-Household-Id`. A stale tab receives `409 household_context_changed` instead of
+  writing to a newly selected household. The frontend sends the rendered
+  workspace id and clears all non-session query caches/hash scope on switch.
+- [x] Switching resets the remembered property filter, invalid remembered search
+  scope, in-page selections and stale query results. Jobs/proposals remain owned by
+  their creating household and are revalidated before apply/download.
+- [x] Revoked selected membership returns a specific auth error; session state falls
+  back to another current membership or the no-household state. Old caches are
+  removed promptly. All existing routes/jobs/media/files were audited as
+  household-owned.
+
+### Stage C — All my places search, assistant and consent isolation
+
+- [x] Added `/search/scopes` (current memberships + active properties), all-places
+  quick search and paginated all-places item search. Default scope is All my places;
+  deliberate household/property scopes are remembered and server-validated.
+  Caller-supplied ids never grant another household. Results include household,
+  property, room and place labels; duplicate names are distinct and ambiguous.
+- [x] Assistant defaults to All my places. All-places and property-wide answers use
+  deterministic retrieval only, querying each household separately and explaining
+  the scope. AI interpretation is used only for one household without a property
+  filter, with that household's own provider/task/cloud consent. All-scope tests
+  assert AI planning is never invoked.
+- [x] Loan whereabouts keep borrower/quantity facts and household-qualified home
+  paths; cross-household duplicates ask which item was meant. Ordinary keyword and
+  structured search works without AI. No cross-household writes or transfers exist.
+- [x] Result/citation deep links carry validated household context and switch only
+  after membership confirmation; old QR/deep links remain stable. Bounded household
+  fanout, search windows, indexes/joins and in-process request limits avoid unbounded
+  fanout and per-row N+1 queries.
+
+### Stage D — UI, tests and local delivery
+
+- [x] Added the compact household selector/creation dialog, no-household creation
+  flow, All-my-places scope selectors, household-qualified item/assistant/search
+  paths and clear read-scope vs editable-workspace wording without changing the
+  visual system.
+- [x] Added PostgreSQL tests for lifecycle, roles per household, stale context,
+  revocation fallback, invitations, IDOR, all-places counts/paths/loans, duplicate
+  names, property isolation and per-household AI provider selection. Vitest covers
+  selector/cache-reset behavior. Disposable Playwright covers two-household creation,
+  switching, property reset, all-places search/loan answers, remembered scope and
+  cross-household deep links.
+- [x] 317 PostgreSQL backend tests, 138 Vitest tests and 40 disposable-stack
+  Playwright workflows pass. Ruff, strict TypeScript typecheck, production build
+  and Alembic drift checks pass. Light/dark desktop/mobile screenshots are under
+  `docs/walkthrough/households/`.
+- [x] Backed up all local persistent volumes (database, uploads, imports and the
+  separate evidence exports volume) to `backups/housetory-20261106T011330Z` with
+  valid checksums, rebuilt the local Compose stack and verified health/assets.
+  No new schema migration was needed: the existing membership/session tables
+  already carry the multi-household model. Alembic head remains
+  `f1a3c5e7b9d2`.
+- [x] Verified the real local data is unchanged: 1 household, 1 property, 8
+  rooms, 10 storage locations, 51 items, 1 user, 1 membership, 1 loan, 0 evidence
+  exports; unchanged room/item ID and item `updated_at` hashes; uploads 2 files/
+  1,177,655 bytes, imports 5 files/75,620 bytes, exports 0 files. No real
+  household was created, no membership/settings were changed, the DB port stays
+  unpublished and the test-only database was removed.
+- [x] No remote deployment, email sending, paid AI/provider call, credential
+  change, arbitrary Docker volume cleanup or cross-household transfer was
+  performed. Real external AI provider quality remains untested. Item images were
+  not started.
+
 ## Agreed product roadmap — updated 2026-11-05
 
 This sequence supersedes the previous desktop-app recommendation. These are
 planned milestones, not completed capabilities or authorization to start them.
-Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8, 9
-and 10 are implemented and locally verified; multiple-household switching remains
-for a separate instruction.
+Voice notes are complete and locally verified. Milestones 2, 3, 4, 5, 6, 7, 8, 9,
+10 and 11 are implemented and locally verified; item images remain for a separate
+instruction and review.
 
 1. **Voice notes:** complete and verify recording/upload, transcription, repeated
    mention quantities, location matching and review-before-confirmation.
@@ -1781,7 +1875,7 @@ for a separate instruction.
    migrate existing inventory into an initial property without breaking IDs,
    attachments or QR links. Add property context/filters and clear location paths.
    Initially retain household-level permissions across all its properties.
-11. **Multiple households:** creation, switching, household-specific invitations,
+11. **Multiple households (implemented locally):** creation, switching, household-specific invitations,
    membership roles, settings and verified isolation in jobs, AI and documents.
    Search and assistant must support “All my places” across households/properties
    the account can access, with explicit filters and labelled result locations;

@@ -76,6 +76,17 @@ Tailscale is optional.
   properties with an explicit scope preview, preserved identities and loan-safe
   last-checked staleness. Populated properties cannot be archived or deleted.
   See [`docs/PROPERTIES.md`](docs/PROPERTIES.md).
+- **Multiple households and All my places**: one account can join independent
+  households with a different owner/member/viewer role in each. Create or switch
+  households from a compact selector; editing stays in one explicit workspace,
+  while keyword search and the assistant default to **All my places** across only
+  the account's current memberships. Search and answer labels include household,
+  property, room and place; duplicate names across households stay distinct and
+  ambiguous. Multi-household mutations require a current household context, so a
+  stale tab cannot write to a newly selected household. Revoked access falls back
+  immediately. All-my-places assistant answers are deterministic and never send
+  one household's data through another household's AI provider or consent. See
+  [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md).
 - **Stocktake / last verified here**: start a bounded check from a room or
   container, including descendants. The expected snapshot keeps owned, at-home
   and on-loan quantities separate; loaned units are never marked missing.
@@ -218,7 +229,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 307 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 317 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -260,9 +271,13 @@ stack, not just unit mocks:
   exact evidence last-checked fields, hierarchical imports and exhaustive
   cross-household access checks, property backfill/IDs, property CRUD guards,
   room/container/bulk moves across properties, property filters, import/voice
-  property scoping, QR/loan preservation and last-checked staleness.
-- 132 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 39 checked-in Playwright workflows pass on disposable Compose stacks, covering
+  property scoping, QR/loan preservation and last-checked staleness, household
+  creation/listing/switching, same-account role differences, stale mutation
+  context, revoked-membership fallback, all-places search counts/paths/loans,
+  cross-household ambiguity/property isolation and per-household AI provider
+  selection.
+- 138 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 40 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -282,8 +297,10 @@ stack, not just unit mocks:
   mobile width, item selection, evidence preview, PDF/CSV/ZIP generation and
   downloads, cancellation/error states and mobile package preview, and the
   stocktake start → mark → refresh/resume → review/apply → complete flow with
-  partial completion, keyboard close, failed-save recovery, abandonment and
-  light/dark desktop/mobile screenshots.
+  partial completion, keyboard close, failed-save recovery, abandonment,
+  light/dark desktop/mobile screenshots, and two-household creation, switching,
+  property-filter reset, all-places search and loan answers, remembered scope and
+  a cross-household result link opening in its own household.
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.
 - Real Tesseract OCR in the Compose worker extracted a photographed receipt

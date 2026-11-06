@@ -7,6 +7,8 @@ membership again. A session stores the selected household id, not a global role.
 | Area | Owner | Member | Viewer |
 | --- | --- | --- | --- |
 | Read inventory, rooms, places, containers, photos, documents, manuals, purchases, warranties, search, assistant | Yes | Yes | Yes |
+| Search/assistant across **All my places** for every current membership | Yes | Yes | Yes (read-only, current memberships only) |
+| Create a household and become its owner; switch the current workspace | Yes (account-level) | Yes (account-level) | Yes (account-level) |
 | Ask attached-manual or read-only online product questions | Yes | Yes | Yes |
 | Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
@@ -26,6 +28,15 @@ membership again. A session stores the selected household id, not a global role.
 
 ## Enforcement
 
+- Household creation and selection are account-level routes. Any authenticated
+  account may create a household and becomes its owner; this never changes its
+  role in another household. Selecting a household validates the membership
+  before changing the session.
+- `enforce_household_context` requires a current `X-Household-Id` on unsafe
+  requests for accounts with more than one membership and rejects a stale id with
+  `409 household_context_changed`. The frontend sends the id of the workspace it
+  rendered; this prevents a tab left on the old household from writing after
+  another tab switched.
 - `enforce_household_write_access` is attached at router level to all
   household-data routers. Unsafe HTTP methods are rejected for viewers before
   endpoint code runs. The read-only POST exceptions are assistant questions,
@@ -36,7 +47,9 @@ membership again. A session stores the selected household id, not a global role.
   candidate download remain writer-only. Stocktake writes stay behind the same
   household write guard; viewers may read sessions and reviews only. Property
   management follows the same owner/member write rules; property IDs never grant
-  access outside the household.
+  access outside the household. All-places search resolves only the caller's
+  current memberships and validates any explicit household/property scope; it is
+  read-only and never implies a cross-household write.
 - Owner-only endpoints use `require_owner`. Account endpoints use the account
   session without requiring a household, so an invited existing account can sign
   in before accepting membership.
@@ -47,15 +60,17 @@ membership again. A session stores the selected household id, not a global role.
   requests and can never leave zero owners.
 - Removing a membership deletes that account's sessions for the selected
   household. Role changes take effect on the next request because membership is
-  re-read rather than trusted from the session.
+  re-read rather than trusted from the session. A session whose selected
+  membership was revoked returns `401 household_access_revoked`; session state
+  then falls back to another current membership or the no-household state.
 - Invitations are bound server-side to household, email and role. Acceptance
   cannot choose a different email, household or role. Invitation tokens are
   hashed at rest, single-use, expire, and are locked during acceptance.
 - Password reset tokens are hashed, single-use, expire, invalidate older reset
   tokens and revoke all of the account's sessions when consumed.
-- Invite/recovery endpoints use the existing in-process sliding rate limiter with
-  hashed email/IP keys. It resets on API restart and is not a substitute for
-  reverse-proxy or Tailscale rate controls.
+- Invite/recovery/creation and all-places search endpoints use in-process sliding
+  limits in addition to household fanout caps. They reset on API restart and are
+  not a substitute for reverse-proxy or Tailscale rate controls.
 
 ## UI behavior
 
@@ -66,4 +81,6 @@ They retain manual reading, document downloads, attached-manual questions, CSV
 exports, their own inventory evidence package previews/downloads and read-only
 stocktake history/last-checked information. The server remains the authority; UI
 hiding is only a usability layer. Account settings are separate from household
-and member administration.
+and member administration. The compact household selector changes the editable
+workspace; the search/assistant scope selector defaults to All my places and is a
+separate read scope.
