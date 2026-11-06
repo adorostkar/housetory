@@ -274,7 +274,7 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
   await mockImageAsset(page, "ai");
   const emptyState = imageState(item.item.id, null, {
     search_configured: false,
-    search_reason: "Set BRAVE_SEARCH_API_KEY to use reference-image search.",
+    search_reason: "Reference-image search is disabled in Settings → Online search.",
   });
   const pendingImage = image("ai", { id: "image-ai", status: "pending" });
   const activeImage = image("ai", { id: "image-ai", status: "active" });
@@ -314,11 +314,11 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
   await page.getByRole("button", { name: "Find online image" }).click();
   await expect(page.getByText("Online image lookup setup required")).toBeVisible();
   await expect(
-    page.getByText(/Set BRAVE_SEARCH_API_KEY to use reference-image search/i),
+    page.getByText(/Reference-image search is disabled in Settings/i),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Open image settings" }),
-  ).toHaveAttribute("href", "/settings#item-images");
+    page.getByRole("link", { name: "Open online search settings" }),
+  ).toHaveAttribute("href", "/settings#online-search");
   await expect(
     page.getByRole("button", { name: "Find online image" }),
   ).toBeVisible();

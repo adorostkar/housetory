@@ -115,56 +115,66 @@ Optional `country` and `search_lang` parameters are sent only when
 `description`, `extra_snippets`, `profile.name` / `profile.long_name` and
 `language`. It does not use a guessed endpoint or invent result fields.
 
-Registration/configuration:
+Registration/configuration (household owner, no restart):
 
 1. Create a Brave Search API account and subscription token in the
    [Brave API dashboard](https://api-dashboard.search.brave.com/). Review
    Brave's current plan, quota and terms; a paid tier may be required for the
    volume you need.
-2. Set the server-side environment variable:
-
-   ```dotenv
-   MANUAL_SEARCH_PROVIDER=brave
-   BRAVE_SEARCH_API_KEY=<your Brave subscription token>
-   BRAVE_SEARCH_BASE_URL=https://api.search.brave.com
-   # Optional:
-   BRAVE_SEARCH_COUNTRY=US
-   BRAVE_SEARCH_LANG=en
-   ```
-
-3. Restart the API service. The key remains server-side and is sent only in the
-   `X-Subscription-Token` header to the configured Brave base URL. It is never
-   returned to the browser or written to logs.
+2. Sign in as the household owner and open **Settings → Online search**. Paste
+   the token into the write-only **Brave Search API key** field, enable
+   **Online manual search**, and save. The key is encrypted at rest with the
+   installation credential key and is never returned to the browser, written to
+   logs, or placed in a URL. A saved-key indicator confirms storage; leaving the
+   field blank keeps the existing key. Replacement and removal are explicit.
+3. One saved Brave key serves both manual discovery and reference-image lookup;
+   their enable controls are separate. Changes are resolved from the database on
+   the next API or worker request, without editing deployment environment files
+   or restarting services.
 4. Do not press **Search** until you are ready for a real request. The manuals
    status endpoint and UI report whether a provider/key is configured without
    contacting Brave. The first actual Brave request happens only when a writer
    confirms an item's exact identity and explicitly presses **Search for exact
    model**.
 
-Connection validation without spending quota: after restart, open an item's
-Find manual dialog or read `GET /api/v1/items/{item_id}/manuals`. The nested
-`search` object reports the provider, configured/can-search state and a safe
-reason; it does not contact Brave. Housetory deliberately does not perform an
-automatic key handshake because that would consume provider quota.
+Optional connection validation (user-triggered, bounded): the owner can press
+**Test connection** in Settings → Online search and confirm the dialog. Housetory
+sends one fixed neutral query (`Housetory connectivity test`) to the Brave
+endpoints and reports the result. It sends no inventory, manual, borrower or
+household content, does not download anything and may use subscription quota. The
+manuals status endpoint still reports configuration without contacting Brave.
+
+Installation fallback (operator-only): if a household has no saved online-search
+row, the installation environment can provide `BRAVE_SEARCH_API_KEY` and the
+older provider-selection variables. Saving the Settings card makes the household
+row authoritative, including when both channels are explicitly disabled or the
+key is removed; the fallback is not silently reactivated. The advanced
+`MANUAL_SEARCH_URL` gateway remains an operator-only fallback and is not edited
+in the household card.
 
 The default base URL is the official `https://api.search.brave.com`. The base URL
 override exists for a compatible proxy or isolated test fixture; production
 should leave it at the official HTTPS endpoint. Automated tests use a fixture
 and never call Brave.
 
-Provider selection is controlled by `MANUAL_SEARCH_PROVIDER`:
+Household provider selection is controlled by the saved Settings row:
 
-- `auto` (default): use `MANUAL_SEARCH_URL` when set (advanced gateway), otherwise
-  use `BRAVE_SEARCH_API_KEY` when set, otherwise remain unconfigured.
-- `brave`: require `BRAVE_SEARCH_API_KEY`.
-- `gateway`: require `MANUAL_SEARCH_URL`.
-- `none`: disable online discovery while keeping upload and attached-manual Q&A.
+- **Online manual search** enabled with a saved key: use Brave regardless of the
+  installation fallback.
+- **Online manual search** disabled: keep upload and attached-manual Q&A, and do
+  not fall back to an environment key.
+- No household row: use the operator `MANUAL_SEARCH_PROVIDER` fallback:
+  - `auto` (default): use `MANUAL_SEARCH_URL` when set (advanced gateway),
+    otherwise use `BRAVE_SEARCH_API_KEY` when set, otherwise remain unconfigured.
+  - `brave`: require `BRAVE_SEARCH_API_KEY`.
+  - `gateway`: require `MANUAL_SEARCH_URL`.
+  - `none`: disable online discovery while keeping upload and attached-manual Q&A.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MANUAL_SEARCH_PROVIDER` | `auto` | `auto`, `brave`, `gateway` or `none` |
-| `BRAVE_SEARCH_API_KEY` | empty | Brave Search API subscription token; server-side only |
-| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official endpoint or compatible test/proxy base |
+| `MANUAL_SEARCH_PROVIDER` | `auto` | Operator fallback when no household row exists: `auto`, `brave`, `gateway` or `none` |
+| `BRAVE_SEARCH_API_KEY` | empty | Operator-only fallback key; prefer Settings → Online search |
+| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official endpoint or compatible operator test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language code |
 | `MANUAL_SEARCH_URL` | empty | Advanced JSON gateway URL; only when provider is `gateway`/`auto` |
@@ -384,13 +394,13 @@ idempotency and duplicate handling are covered by PostgreSQL backend tests.
 
 Not live-verified in this milestone: calling the real Brave Search API with a
 real subscription token, downloading a real vendor PDF, and calling a paid cloud
-model for manual synthesis. `BRAVE_SEARCH_API_KEY` is empty by default. To verify
-live, register a Brave Search API token, set `MANUAL_SEARCH_PROVIDER=brave` and
-`BRAVE_SEARCH_API_KEY`, restart the API, confirm the status shows **Brave Search
-API**, then perform one deliberate search and one download while watching the
-API/worker logs. Configure a consented assistant provider only if AI synthesis is
-wanted. No live network, paid AI, email or remote deployment is performed by the
-automated tests.
+model for manual synthesis. No real Brave credential is stored by this change.
+To verify live, register a Brave Search API token, save it under
+**Settings → Online search** as the household owner, use the explicit
+**Test connection** action if desired, then perform one deliberate search and
+one download while watching the API/worker logs. Configure a consented assistant
+provider only if AI synthesis is wanted. No live network, paid AI, email or
+remote deployment is performed by the automated tests.
 
 ## Representative screenshots
 

@@ -26,13 +26,17 @@ import re
 import socket
 import ssl
 import time
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from typing import Any, Literal
 from urllib.parse import unquote, urlencode, urljoin, urlparse
 
+from sqlalchemy.orm import Session
+
 from ..config import get_settings
+from . import online_search
 
 MAX_SEARCH_RESPONSE_BYTES = 1_000_000
 MAX_LANDING_PAGE_BYTES = 512_000
@@ -73,6 +77,7 @@ class SearchProviderConfig:
     gateway_url: str | None = None
     brave_api_key: str | None = None
     brave_base_url: str | None = None
+    source: Literal["household", "environment", "none"] = "environment"
 
     @property
     def configured(self) -> bool:
@@ -138,9 +143,10 @@ def _read_bounded(
 
 def _unconfigured_reason() -> str:
     return (
-        "Online manual search is not configured. Set BRAVE_SEARCH_API_KEY for the "
-        "Brave Search API, or MANUAL_SEARCH_URL for an advanced gateway. Manual "
-        "upload and attached-manual questions do not require it."
+        "Online manual search is not configured. Add a Brave Search API key in "
+        "Settings → Online search, or use the installation fallback "
+        "BRAVE_SEARCH_API_KEY / MANUAL_SEARCH_URL. Manual upload and attached-manual "
+        "questions do not require it."
     )
 
 
@@ -150,54 +156,103 @@ def _gateway_config(url: str, label: str) -> SearchProviderConfig:
         return SearchProviderConfig(
             kind="none",
             reason="MANUAL_SEARCH_URL is not a valid absolute http(s) URL.",
+            source="environment",
         )
     if parsed.username or parsed.password:
         return SearchProviderConfig(
             kind="none",
             reason="MANUAL_SEARCH_URL must not contain embedded credentials.",
+            source="environment",
         )
     return SearchProviderConfig(
         kind="gateway",
         label=label.strip() or "Configured manual search",
         gateway_url=url,
+        source="environment",
     )
+
+
+def brave_connection_test(provider: SearchProviderConfig) -> None:
+    """User-triggered bounded probe using a fixed neutral query.
+
+    No item, manual, household or borrower content is included.
+    """
+    if provider.kind != "brave":
+        raise ManualSearchUnavailable(provider.reason or "Brave manual search is not configured.")
+    _brave_search_results(provider, "Housetory connectivity test", 1)
 
 
 def _brave_config(
     *,
     api_key: str,
     base_url: str,
+    source: Literal["household", "environment"] = "environment",
 ) -> SearchProviderConfig:
     if not api_key:
         return SearchProviderConfig(
             kind="none",
             reason=(
-                "MANUAL_SEARCH_PROVIDER=brave requires BRAVE_SEARCH_API_KEY. Create a "
-                "Brave Search API subscription token and set it on the server; no "
-                "provider request is made until an item search is confirmed."
+                "MANUAL_SEARCH_PROVIDER=brave requires BRAVE_SEARCH_API_KEY. Add a "
+                "Brave Search API key in Settings → Online search or set the "
+                "installation fallback; no provider request is made until an item "
+                "search is confirmed."
             ),
+            source=source,
         )
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return SearchProviderConfig(
             kind="none",
             reason="BRAVE_SEARCH_BASE_URL must be an absolute http(s) URL.",
+            source=source,
         )
     if parsed.username or parsed.password:
         return SearchProviderConfig(
             kind="none",
             reason="BRAVE_SEARCH_BASE_URL must not contain embedded credentials.",
+            source=source,
         )
     return SearchProviderConfig(
         kind="brave",
         label="Brave Search API",
         brave_api_key=api_key,
         brave_base_url=base_url.rstrip("/"),
+        source=source,
     )
 
 
-def resolve_search_provider() -> SearchProviderConfig:
+def resolve_search_provider(
+    db: Session | None = None,
+    household_id: uuid.UUID | None = None,
+) -> SearchProviderConfig:
     settings = get_settings()
+    if db is not None and household_id is not None:
+        row = online_search.get_row(db, household_id)
+        if row is not None:
+            if row.provider != "brave":
+                return SearchProviderConfig(
+                    kind="none",
+                    reason="This household selected an unsupported online search provider.",
+                    source="household",
+                )
+            if not row.manual_enabled:
+                return SearchProviderConfig(
+                    kind="none",
+                    reason=online_search.MANUAL_DISABLED_REASON,
+                    source="household",
+                )
+            key, reason = online_search.decrypt_household_key(row)
+            if not key:
+                return SearchProviderConfig(
+                    kind="none",
+                    reason=reason or online_search.NO_KEY_REASON,
+                    source="household",
+                )
+            return _brave_config(
+                api_key=key,
+                base_url=settings.brave_search_base_url.strip(),
+                source="household",
+            )
     provider = settings.manual_search_provider
     gateway_url = settings.manual_search_url.strip()
     brave_key = settings.brave_search_api_key.strip()
@@ -208,12 +263,14 @@ def resolve_search_provider() -> SearchProviderConfig:
                 "Online manual search is disabled by MANUAL_SEARCH_PROVIDER=none. "
                 "Manual upload and attached-manual questions remain available."
             ),
+            source="environment",
         )
     if provider == "gateway":
         if not gateway_url:
             return SearchProviderConfig(
                 kind="none",
                 reason="MANUAL_SEARCH_PROVIDER=gateway requires MANUAL_SEARCH_URL.",
+                source="environment",
             )
         return _gateway_config(gateway_url, settings.manual_search_provider_label)
     if provider == "brave":
@@ -230,7 +287,7 @@ def resolve_search_provider() -> SearchProviderConfig:
             api_key=brave_key,
             base_url=settings.brave_search_base_url.strip(),
         )
-    return SearchProviderConfig(kind="none", reason=_unconfigured_reason())
+    return SearchProviderConfig(kind="none", reason=_unconfigured_reason(), source="none")
 
 
 def _normalized(value: str) -> str:
@@ -335,8 +392,13 @@ def _parse_candidate(item: dict[str, Any], *, file_required: bool) -> SearchCand
     )
 
 
-def _post_search(payload: dict[str, Any]) -> dict[str, Any]:
-    provider = resolve_search_provider()
+def _post_search(
+    payload: dict[str, Any],
+    *,
+    db: Session | None = None,
+    household_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    provider = resolve_search_provider(db, household_id)
     if provider.kind != "gateway" or not provider.gateway_url:
         raise ManualSearchUnavailable(provider.reason or "Manual search is not configured.")
     settings = get_settings()
@@ -853,8 +915,10 @@ def search_manual_candidates(
     manufacturer: str,
     model: str,
     variant: str | None,
+    db: Session | None = None,
+    household_id: uuid.UUID | None = None,
 ) -> SearchOutcome:
-    provider = resolve_search_provider()
+    provider = resolve_search_provider(db, household_id)
     if provider.kind == "brave":
         return _brave_manual_outcome(
             provider, manufacturer=manufacturer, model=model, variant=variant
@@ -867,7 +931,9 @@ def search_manual_candidates(
             "manufacturer": manufacturer,
             "model": model,
             "variant": variant,
-        }
+        },
+        db=db,
+        household_id=household_id,
     )
     results = raw.get("results")
     if not isinstance(results, list):
@@ -897,8 +963,10 @@ def search_online_sources(
     model: str,
     variant: str | None,
     question: str,
+    db: Session | None = None,
+    household_id: uuid.UUID | None = None,
 ) -> SearchOutcome:
-    provider = resolve_search_provider()
+    provider = resolve_search_provider(db, household_id)
     if provider.kind == "brave":
         settings = get_settings()
         raw_results = _brave_search_results(
@@ -935,7 +1003,9 @@ def search_online_sources(
             "model": model,
             "variant": variant,
             "question": question,
-        }
+        },
+        db=db,
+        household_id=household_id,
     )
     results = raw.get("results")
     if not isinstance(results, list):

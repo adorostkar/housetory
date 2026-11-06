@@ -336,26 +336,20 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
                 <p className="font-medium text-foreground/85">
                   Online image lookup setup required
                 </p>
-                <Badge variant="brass">Server configuration</Badge>
+                <Badge variant="brass">Owner settings</Badge>
               </div>
               <p className="mt-1 break-words text-muted-foreground">
                 {state.search_reason ??
-                  "Online reference-image lookup is not configured on this server."}
+                  "Online reference-image lookup is not configured for this household."}
               </p>
               <p className="mt-1.5 text-muted-foreground">
-                This is separate from AI generation. Housetory needs a server-side
-                image-search provider{" "}
-                <code className="break-all rounded bg-background/60 px-1 py-0.5">
-                  BRAVE_SEARCH_API_KEY
-                </code>{" "}
-                and a reviewed permitted-source allowlist{" "}
-                <code className="break-all rounded bg-background/60 px-1 py-0.5">
-                  ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
-                </code>. An AI provider key does not enable online lookup, and downloads
-                remain limited to permitted sources.
+                This is separate from AI generation. The household owner can enable
+                reference-image lookup and add permitted source domains in Online
+                search settings. An AI provider key does not enable online lookup, and
+                downloads remain limited to permitted sources.
               </p>
               <Button className="mt-2" size="sm" variant="outline" asChild>
-                <Link to="/settings#item-images">Open image settings</Link>
+                <Link to="/settings#online-search">Open online search settings</Link>
               </Button>
             </div>
           )}

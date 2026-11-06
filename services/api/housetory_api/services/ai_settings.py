@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..config import get_settings
 from ..domain import AiProviderType, AiTask
-from ..models import AiProvider, AiTaskSetting
+from ..models import AiProvider, AiTaskSetting, HouseholdOnlineSearchSettings
 from ..schemas.ai_settings import (
     AiModelOut,
     AiProviderCreate,
@@ -514,6 +514,20 @@ def rotate_credentials(db: Session, household_id: uuid.UUID) -> tuple[int, int]:
         try:
             provider.encrypted_api_key = rotate_secret(provider.encrypted_api_key)
             provider.api_key_version += 1
+            rotated += 1
+        except CredentialError:
+            failed += 1
+    online_search_rows = db.scalars(
+        select(HouseholdOnlineSearchSettings).where(
+            HouseholdOnlineSearchSettings.household_id == household_id
+        )
+    ).all()
+    for row in online_search_rows:
+        if not row.encrypted_api_key:
+            continue
+        try:
+            row.encrypted_api_key = rotate_secret(row.encrypted_api_key)
+            row.api_key_version += 1
             rotated += 1
         except CredentialError:
             failed += 1

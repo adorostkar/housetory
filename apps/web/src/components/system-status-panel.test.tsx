@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SystemStatusPanel } from "@/components/system-status-panel";
@@ -73,6 +74,22 @@ const status: SystemStatus = {
   ],
   external_services: [
     {
+      name: "Online manual search",
+      configured: true,
+      status: "configured",
+      detail: "Configured via Household Settings (not probed).",
+      source: "household",
+      settings_path: "/settings#online-search",
+    },
+    {
+      name: "Reference-image search",
+      configured: false,
+      status: "partial",
+      detail: "Search provider is configured, but no permitted source domains are set.",
+      source: "environment",
+      settings_path: "/settings#online-search",
+    },
+    {
       name: "Email delivery",
       configured: false,
       status: "not_configured",
@@ -117,9 +134,11 @@ function renderPanel(isOwner = true) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={client}>
-      <SystemStatusPanel isOwner={isOwner} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <SystemStatusPanel isOwner={isOwner} />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -141,6 +160,11 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText(/Live-tested/)).toBeVisible();
     expect(screen.getByText("Email delivery")).toBeVisible();
     expect(screen.getByText("not configured")).toBeVisible();
+    expect(screen.getByText("Online manual search")).toBeVisible();
+    expect(screen.getByText("Reference-image search")).toBeVisible();
+    expect(screen.getByText("Source: Household settings")).toBeVisible();
+    expect(screen.getByText("Source: Installation fallback")).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Open settings" })).toHaveLength(2);
   });
 
   it("retries a failed job through the owner endpoint", async () => {

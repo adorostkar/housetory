@@ -115,7 +115,7 @@ def configure_search(monkeypatch):
     monkeypatch.setattr(
         manual_web,
         "resolve_search_provider",
-        lambda: manual_web.SearchProviderConfig(
+        lambda *args, **kwargs: manual_web.SearchProviderConfig(
             kind="gateway",
             label="Test manual search",
             gateway_url="https://search.example/manuals",
@@ -128,7 +128,7 @@ def disable_search(monkeypatch):
     monkeypatch.setattr(
         manual_web,
         "resolve_search_provider",
-        lambda: manual_web.SearchProviderConfig(
+        lambda *args, **kwargs: manual_web.SearchProviderConfig(
             kind="none",
             reason="Online manual search is not configured.",
         ),
@@ -275,7 +275,7 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
 
     calls = []
 
-    def fake_search(payload):
+    def fake_search(payload, **kwargs):
         calls.append(payload)
         return {
             "results": [
@@ -362,7 +362,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
             }
         ]
     }
-    monkeypatch.setattr(manual_web, "_post_search", lambda payload: candidate_payload)
+    monkeypatch.setattr(manual_web, "_post_search", lambda payload, **kwargs: candidate_payload)
     first_candidate = owner_client.post(f"/api/v1/items/{first['id']}/manual-search").json()[
         "candidates"
     ][0]
@@ -435,7 +435,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
     monkeypatch.setattr(
         manual_web,
         "_post_search",
-        lambda payload: {
+        lambda payload, **kwargs: {
             "results": [
                 {
                     "title": "DeWalt DCD791B service manual",
@@ -650,7 +650,7 @@ def test_online_questions_require_full_gate_and_send_only_product_context(
     monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
     calls = []
 
-    def fake_search(payload):
+    def fake_search(payload, **kwargs):
         calls.append(payload)
         return {
             "results": [
@@ -698,7 +698,7 @@ def test_online_questions_require_full_gate_and_send_only_product_context(
     monkeypatch.setattr(
         manual_web,
         "_post_search",
-        lambda payload: {
+        lambda payload, **kwargs: {
             "results": [
                 {
                     "title": "DCD790 battery guide",
@@ -716,7 +716,7 @@ def test_online_questions_require_full_gate_and_send_only_product_context(
     assert similar["mode"] == "no_evidence"
     assert similar["citations"] == []
 
-    monkeypatch.setattr(manual_web, "_post_search", lambda payload: {"results": "bad"})
+    monkeypatch.setattr(manual_web, "_post_search", lambda payload, **kwargs: {"results": "bad"})
     malformed = owner_client.post(
         f"/api/v1/items/{item['id']}/manual-questions/online",
         json={"question": "What battery does it use?"},

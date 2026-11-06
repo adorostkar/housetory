@@ -97,8 +97,9 @@ Tailscale is optional.
   structured brand is blank, whole-token exact-model matching and verified
   manufacturer registrable domains. It records source/provenance and honestly
   labels representative images as “exact model not confirmed.” Automatic
-  downloads are default-deny until an operator sets
-  `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` or provider license evidence. Optional
+  downloads are default-deny until the household owner adds at least one
+  permitted source domain in **Settings → Online search** (or explicit provider
+  license evidence exists). Optional
   OpenAI Images task generation is manual
   preview/accept/reject by default, with a separate default-off new-item setting,
   hard daily count caps and an explicit batch action. Non-photographic imagery is
@@ -124,8 +125,10 @@ Tailscale is optional.
   text, cite real pages when page-level OCR exists and explicit sections/excerpts
   otherwise, and fall back to extractive evidence without AI. Online search and
   download require a deliberate, server-enforced manufacturer + complete model
-  confirmation, reviewed candidates and a configured search provider (built-in
-  Brave Search API adapter or an advanced gateway); similar products are never
+  confirmation, reviewed candidates and a configured search provider. The owner
+  adds one encrypted Brave Search API key and enables manual discovery in
+  **Settings → Online search**; an operator-only environment fallback and the
+  advanced manual gateway remain available. Similar products are never
   auto-accepted. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - CPU-only local OCR through Tesseract and Poppler in the worker: merchant,
@@ -608,13 +611,13 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI providers |
 | `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
 | `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
-| `MANUAL_SEARCH_PROVIDER` | `auto` | `auto`, `brave`, `gateway` or `none` |
-| `BRAVE_SEARCH_API_KEY` | empty | Brave Search API subscription token; server-side only |
-| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible test/proxy base |
+| `MANUAL_SEARCH_PROVIDER` | `auto` | Operator fallback when no household online-search row exists: `auto`, `brave`, `gateway` or `none` |
+| `BRAVE_SEARCH_API_KEY` | empty | Operator-only installation fallback; configure the Brave key in Settings → Online search instead |
+| `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible operator test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
-| `ITEM_IMAGE_SEARCH_PROVIDER` | `auto` | `auto`, `brave` or `none` for automatic reference-image lookup |
-| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Default-deny registrable domains permitted for automatic reference downloads; empty keeps built-in fallback |
+| `ITEM_IMAGE_SEARCH_PROVIDER` | `auto` | Operator fallback when no household online-search row exists: `auto`, `brave` or `none` |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Operator-only fallback domain policy; the owner normally sets structured domains in Settings → Online search. Empty disables automatic downloads |
 | `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider license identifiers accepted as explicit download evidence |
 | `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` manufacturer provenance additions/overrides |
 | `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for query-only matching |
@@ -638,10 +641,15 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 
 Manual answers use the existing **assistant** AI task when configured and
 consented; they remain extractive without it. Online discovery uses the official
-**Brave Search API** adapter with a user-supplied server-side key, or an advanced
-operator gateway, and never pretends a chat model has live browsing. The Brave
-setup, real API contract, source/PDF evidence rules, candidate review, download
-safety and page-citation limits are documented in
+**Brave Search API** adapter with an owner-managed encrypted key, or an advanced
+operator gateway, and never pretends a chat model has live browsing. Configure
+one Brave key plus separate manual and reference-image enable controls in
+**Settings → Online search**; changes apply on the next API or worker request
+without a restart. The environment variables below are an installation fallback
+only when a household has no saved online-search row. An explicit disable or key
+removal in Settings remains authoritative and does not reactivate the fallback.
+The Brave setup, real API contract, source/PDF evidence rules, candidate review,
+download safety and page-citation limits are documented in
 [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 | `IMPORT_MAX_FILES` | `2000` | Maximum files accepted from one vault ZIP |
 | `IMPORT_MAX_TOTAL_MB` | `50` | Maximum decompressed vault size |

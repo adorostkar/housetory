@@ -6,6 +6,7 @@ import {
   Server,
   ShieldCheck,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -288,6 +289,24 @@ export function SystemStatusPanel({ isOwner }: { isOwner: boolean }) {
                     <span className="mt-0.5 block break-words text-[0.66rem] text-muted-foreground">
                       {service.detail}
                     </span>
+                    {service.source && service.source !== "unknown" ? (
+                      <span className="mt-1 block text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground">
+                        Source:{" "}
+                        {service.source === "household"
+                          ? "Household settings"
+                          : service.source === "environment"
+                            ? "Installation fallback"
+                            : "Not configured"}
+                      </span>
+                    ) : null}
+                    {service.settings_path ? (
+                      <Link
+                        to={service.settings_path}
+                        className="mt-1 inline-block text-[0.66rem] text-brass underline-offset-2 hover:underline"
+                      >
+                        Open settings
+                      </Link>
+                    ) : null}
                   </span>
                   <Badge
                     variant={

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..config import get_settings
 from ..models import Item, ItemImage
-from . import storage
+from . import online_search, storage
 from .item_images import (
     active_image,
     clear_active_images,
@@ -212,6 +212,19 @@ _MULTI_PART_SUFFIXES = {
     "com.tr",
     "com.sg",
     "com.hk",
+    # Shared hosting suffixes need one extra label so a tenant policy does not
+    # silently widen to every unrelated tenant on the same platform.
+    "azurewebsites.net",
+    "blogspot.com",
+    "cloudfront.net",
+    "firebaseapp.com",
+    "github.io",
+    "herokuapp.com",
+    "netlify.app",
+    "pages.dev",
+    "vercel.app",
+    "web.app",
+    "wordpress.com",
 }
 
 _TYPE_CONFLICTS = {
@@ -279,6 +292,8 @@ class ImageSearchProvider:
     reason: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+    source: Literal["household", "environment", "none"] = "environment"
+    permitted_domains: frozenset[str] = frozenset()
 
     @property
     def configured(self) -> bool:
@@ -356,8 +371,55 @@ class ProductProfile:
         return next(iter(self.tech_families)) if len(self.tech_families) == 1 else None
 
 
-def resolve_image_search_provider() -> ImageSearchProvider:
+def resolve_image_search_provider(
+    db: Session | None = None,
+    household_id: uuid.UUID | None = None,
+) -> ImageSearchProvider:
     settings = get_settings()
+    if db is not None and household_id is not None:
+        row = online_search.get_row(db, household_id)
+        if row is not None:
+            if row.provider != "brave":
+                return ImageSearchProvider(
+                    kind="none",
+                    reason="This household selected an unsupported online search provider.",
+                    source="household",
+                )
+            if not row.reference_enabled:
+                return ImageSearchProvider(
+                    kind="none",
+                    reason=online_search.REFERENCE_DISABLED_REASON,
+                    source="household",
+                )
+            key, reason = online_search.decrypt_household_key(row)
+            if not key:
+                return ImageSearchProvider(
+                    kind="none",
+                    reason=reason or online_search.NO_KEY_REASON,
+                    source="household",
+                )
+            base = settings.brave_search_base_url.strip().rstrip("/")
+            parsed = urlparse(base)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                return ImageSearchProvider(
+                    kind="none",
+                    reason="BRAVE_SEARCH_BASE_URL must be an absolute http(s) URL.",
+                    source="household",
+                )
+            if parsed.username or parsed.password:
+                return ImageSearchProvider(
+                    kind="none",
+                    reason="BRAVE_SEARCH_BASE_URL must not contain embedded credentials.",
+                    source="household",
+                )
+            return ImageSearchProvider(
+                kind="brave",
+                label="Brave Image Search API",
+                api_key=key,
+                base_url=base,
+                source="household",
+                permitted_domains=online_search.effective_domains(row),
+            )
     configured_mode = settings.item_image_search_provider
     if configured_mode == "none":
         return ImageSearchProvider(
@@ -366,16 +428,19 @@ def resolve_image_search_provider() -> ImageSearchProvider:
                 "Online reference-image search is disabled. The category icon fallback "
                 "remains available offline."
             ),
+            source="environment",
         )
     key = settings.brave_search_api_key.strip()
     if not key:
         return ImageSearchProvider(
             kind="none",
             reason=(
-                "Reference-image search is not configured. Set BRAVE_SEARCH_API_KEY "
-                "on the server to use the Brave Image Search API. The category icon "
-                "fallback remains available without it."
+                "Reference-image search is not configured. Add a Brave Search API key "
+                "in Settings → Online search, or set the installation fallback "
+                "BRAVE_SEARCH_API_KEY. The category icon fallback remains available "
+                "without it."
             ),
+            source="none",
         )
     base = settings.brave_search_base_url.strip().rstrip("/")
     parsed = urlparse(base)
@@ -383,18 +448,33 @@ def resolve_image_search_provider() -> ImageSearchProvider:
         return ImageSearchProvider(
             kind="none",
             reason="BRAVE_SEARCH_BASE_URL must be an absolute http(s) URL.",
+            source="environment",
         )
     if parsed.username or parsed.password:
         return ImageSearchProvider(
             kind="none",
             reason="BRAVE_SEARCH_BASE_URL must not contain embedded credentials.",
+            source="environment",
         )
     return ImageSearchProvider(
         kind="brave",
         label="Brave Image Search API",
         api_key=key,
         base_url=base,
+        source="environment",
+        permitted_domains=_environment_permitted_source_domains(),
     )
+
+
+def brave_image_connection_test(provider: ImageSearchProvider) -> None:
+    """User-triggered bounded probe using a fixed neutral query."""
+    if not provider.configured:
+        raise ApiError(
+            503,
+            "image_search_unconfigured",
+            provider.reason or "Image search is not configured.",
+        )
+    _brave_image_results(provider, "Housetory connectivity test")
 
 
 def _normalized(value: str | None) -> str:
@@ -850,7 +930,7 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
     return ranked
 
 
-def _permitted_source_domains() -> frozenset[str]:
+def _environment_permitted_source_domains() -> frozenset[str]:
     domains = set()
     for entry in _split_config(get_settings().item_image_permitted_source_domains):
         host = urlparse(entry if "//" in entry else f"//{entry}").hostname or entry
@@ -860,19 +940,32 @@ def _permitted_source_domains() -> frozenset[str]:
     return frozenset(domains)
 
 
+def _permitted_source_domains(
+    provider: ImageSearchProvider | None = None,
+) -> frozenset[str]:
+    if provider is not None:
+        return provider.permitted_domains
+    return _environment_permitted_source_domains()
+
+
 def _permitted_license_names() -> frozenset[str]:
     configured = get_settings().item_image_permitted_licenses
     entries = _split_config(configured) if configured.strip() else list(DEFAULT_PERMITTED_LICENSES)
     return frozenset(_compact(entry) for entry in entries if _compact(entry))
 
 
-def permitted_source_policy_configured() -> bool:
+def permitted_source_policy_configured(
+    provider: ImageSearchProvider | None = None,
+) -> bool:
     """The Brave adapter has no license metadata; it needs an explicit domain policy."""
-    return bool(_permitted_source_domains())
+    return bool(_permitted_source_domains(provider))
 
 
-def _asset_host_permitted(candidate: ImageCandidate) -> bool:
-    domains = _permitted_source_domains()
+def _asset_host_permitted(
+    candidate: ImageCandidate,
+    provider: ImageSearchProvider | None = None,
+) -> bool:
+    domains = _permitted_source_domains(provider)
     if not domains:
         return False
     _page_host, image_host, thumbnail_host = _candidate_hosts(candidate)
@@ -880,7 +973,10 @@ def _asset_host_permitted(candidate: ImageCandidate) -> bool:
     return bool(asset_host and _registrable_domain(asset_host) in domains)
 
 
-def source_permission(candidate: ImageCandidate) -> SourcePermission | None:
+def source_permission(
+    candidate: ImageCandidate,
+    provider: ImageSearchProvider | None = None,
+) -> SourcePermission | None:
     if not _source_domain_consistent(candidate):
         return None
     license_name = _compact(candidate.license_name)
@@ -892,7 +988,11 @@ def source_permission(candidate: ImageCandidate) -> SourcePermission | None:
         )
     page_host, _image_host, _thumbnail_host = _candidate_hosts(candidate)
     domain = _registrable_domain(page_host)
-    if domain and domain in _permitted_source_domains() and _asset_host_permitted(candidate):
+    if (
+        domain
+        and domain in _permitted_source_domains(provider)
+        and _asset_host_permitted(candidate, provider)
+    ):
         return SourcePermission(
             kind="configured_source_policy",
             label=domain,
@@ -901,13 +1001,17 @@ def source_permission(candidate: ImageCandidate) -> SourcePermission | None:
     return None
 
 
-def _url_permitted(url: str | None, permission: SourcePermission) -> bool:
+def _url_permitted(
+    url: str | None,
+    permission: SourcePermission,
+    provider: ImageSearchProvider | None = None,
+) -> bool:
     if not url:
         return False
     if permission.kind == "provider_license":
         return True
     host = (urlparse(url).hostname or "").lower()
-    return bool(host and _registrable_domain(host) in _permitted_source_domains())
+    return bool(host and _registrable_domain(host) in _permitted_source_domains(provider))
 
 
 def _brave_image_results(provider: ImageSearchProvider, query: str) -> list[ImageCandidate]:
@@ -1014,6 +1118,7 @@ def _download_candidate(
     candidate: ImageCandidate,
     *,
     permission: SourcePermission | None = None,
+    provider: ImageSearchProvider | None = None,
 ) -> tuple[bytes, str, str]:
     settings = get_settings()
     max_bytes = settings.item_image_max_download_bytes
@@ -1024,7 +1129,7 @@ def _download_candidate(
     ):
         if not url:
             continue
-        if permission is not None and not _url_permitted(url, permission):
+        if permission is not None and not _url_permitted(url, permission, provider):
             last_error = ManualFetchError("The asset host is outside the permitted source policy.")
             continue
         try:
@@ -1150,7 +1255,7 @@ def find_and_select_reference(
         reused = _reuse_household_reference(db, item, fingerprint, actor_user_id)
         if reused is not None:
             return reused
-    provider = resolve_image_search_provider()
+    provider = resolve_image_search_provider(db, household_id)
     if not provider.configured:
         raise ApiError(
             503, "image_search_unconfigured", provider.reason or "Image search is not configured."
@@ -1158,13 +1263,13 @@ def find_and_select_reference(
     # The current documented Brave Image Search response carries no license
     # metadata, so this adapter requires an explicit domain policy. An adapter
     # that later supplies license evidence can pass source_permission instead.
-    if provider.kind == "brave" and not permitted_source_policy_configured():
+    if provider.kind == "brave" and not permitted_source_policy_configured(provider):
         raise ApiError(
             503,
             "image_search_policy_unconfigured",
-            "Reference-image downloads require an explicit permitted-source policy. "
-            "Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. The category "
-            "icon fallback remains available.",
+            "Reference-image downloads require at least one permitted source domain. "
+            "Add domains in Settings → Online search. The category icon fallback "
+            "remains available.",
         )
     profile = build_product_profile(item)
     if profile.brand_ambiguous or not profile.brand or not profile.item_type:
@@ -1185,7 +1290,7 @@ def find_and_select_reference(
     ranked = rank_candidates(item, candidates)
     permitted: list[tuple[RankedImage, SourcePermission]] = []
     for entry in ranked:
-        permission = source_permission(entry.candidate)
+        permission = source_permission(entry.candidate, provider)
         if permission is not None:
             permitted.append((entry, permission))
     if not permitted and ranked:
@@ -1207,6 +1312,7 @@ def find_and_select_reference(
     content, final_url, _kind = _download_candidate(
         chosen.candidate,
         permission=permission,
+        provider=provider,
     )
     # Recheck after the network call so a real photo/change cannot be overwritten.
     db.refresh(item, attribute_names=["photos", "updated_at"])

@@ -185,36 +185,55 @@ def _tasks(db: Session, household_id: uuid.UUID) -> list[TaskStatusOut]:
     return tasks
 
 
-def _external_services() -> list[ExternalServiceStatus]:
+def _source_label(source: str | None) -> str:
+    if source == "household":
+        return "Household Settings"
+    if source == "environment":
+        return "Installation environment fallback"
+    return "Not configured"
+
+
+def _external_services(db: Session, household_id: uuid.UUID) -> list[ExternalServiceStatus]:
     settings = get_settings()
-    manual = manual_web.resolve_search_provider()
-    image = item_image_search.resolve_image_search_provider()
-    image_policy = item_image_search.permitted_source_policy_configured()
+    manual = manual_web.resolve_search_provider(db, household_id)
+    image = item_image_search.resolve_image_search_provider(db, household_id)
+    image_policy = item_image_search.permitted_source_policy_configured(image)
+    manual_configured = manual.kind != "none"
+    image_configured = image.configured and image_policy
     return [
         ExternalServiceStatus(
             name="Online manual search",
-            configured=manual.kind != "none",
-            status="configured" if manual.kind != "none" else "not_configured",
-            detail=manual.reason or f"{manual.label or 'Configured'} (not probed).",
+            configured=manual_configured,
+            status="configured" if manual_configured else "not_configured",
+            detail=(
+                f"Configured via {_source_label(manual.source)} (not probed)."
+                if manual_configured
+                else manual.reason or "Not configured."
+            ),
+            source=manual.source,
+            settings_path="/settings#online-search",
         ),
         ExternalServiceStatus(
             name="Reference-image search",
-            configured=image.configured and image_policy,
+            configured=image_configured,
             status=(
                 "configured"
-                if image.configured and image_policy
+                if image_configured
                 else "partial"
                 if image.configured
                 else "not_configured"
             ),
             detail=(
-                "Configured with a permitted-source policy (not probed)."
-                if image.configured and image_policy
-                else "Search provider configured, but automatic downloads have no "
-                "permitted-source policy."
+                f"Configured via {_source_label(image.source)} with "
+                f"{len(image.permitted_domains)} permitted source domain(s) (not probed)."
+                if image_configured
+                else "Search provider is configured, but no permitted source domains "
+                "are set in Settings → Online search."
                 if image.configured
                 else image.reason or "Not configured."
             ),
+            source=image.source,
+            settings_path="/settings#online-search",
         ),
         ExternalServiceStatus(
             name="Email delivery",
@@ -225,6 +244,7 @@ def _external_services() -> list[ExternalServiceStatus]:
                 if settings.email_configured
                 else "SMTP is not configured; LAN login and password reset status remain local."
             ),
+            source="environment" if settings.email_configured else "none",
         ),
     ]
 
@@ -235,7 +255,7 @@ def system_status(db: Session, household_id: uuid.UUID) -> SystemStatusOut:
         readiness=_readiness(db),
         jobs=_jobs(db, household_id),
         tasks=_tasks(db, household_id),
-        external_services=_external_services(),
+        external_services=_external_services(db, household_id),
         generated_at=datetime.now(UTC),
     )
 

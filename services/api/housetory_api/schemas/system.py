@@ -58,6 +58,8 @@ class ExternalServiceStatus(BaseModel):
     configured: bool
     status: Literal["configured", "partial", "not_configured", "unknown"]
     detail: str
+    source: str | None = None
+    settings_path: str | None = None
 
 
 class SystemStatusOut(BaseModel):

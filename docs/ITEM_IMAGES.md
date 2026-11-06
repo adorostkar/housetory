@@ -41,17 +41,23 @@ built-in rows cannot be created.
 ## Reference-image search
 
 The supported integration is the documented **Brave Image Search API**
-(`GET /res/v1/images/search`, `X-Subscription-Token`). It reuses the server's
-existing `BRAVE_SEARCH_API_KEY`, `BRAVE_SEARCH_BASE_URL`, country/language and
-timeout settings. No custom gateway is required for images. Manual document
-search remains a separate feature.
+(`GET /res/v1/images/search`, `X-Subscription-Token`). It reuses the same
+household Brave Search API key configured under **Settings → Online search** for
+manual discovery, plus the installation country/language, base-URL and timeout
+settings. No custom gateway is required for images. Manual document search
+remains a separate feature with its own enable control.
 
-`ITEM_IMAGE_SEARCH_PROVIDER` can be `auto`, `brave` or `none`; `auto` uses the
-Brave key when present. Parsing uses the documented Brave Image Search response
-fields (`results[].title`, `url`, `source`, `thumbnail.src`,
-`properties.url/width/height`). The current response has no documented license
-field, so Housetory does not invent one; provider license evidence is only used
-when an adapter actually supplies it.
+The owner can enable **Reference-image search** independently of manual search
+and must provide at least one permitted source domain in the same Settings card.
+Changes apply on the next API or worker request without a restart. If no
+household online-search row exists, `ITEM_IMAGE_SEARCH_PROVIDER` (`auto`,
+`brave` or `none`) and `BRAVE_SEARCH_API_KEY` act as an operator-only
+installation fallback. Saving the household row, explicitly disabling the
+channel or removing the key suppresses that fallback. Parsing uses the documented
+Brave Image Search response fields (`results[].title`, `url`, `source`,
+`thumbnail.src`, `properties.url/width/height`). The current response has no
+documented license field, so Housetory does not invent one; provider license
+evidence is only used when an adapter actually supplies it.
 
 ### Automatic selection, not candidate approval
 
@@ -103,10 +109,11 @@ saves are **default deny**:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Comma-separated registrable source domains whose terms the operator has reviewed and permits for automatic reference downloads. Subdomains are included. Empty disables automatic downloads and keeps the category icon fallback. |
+| **Settings → Online search → permitted source domains** | empty | Structured registrable source domains whose terms the household owner has reviewed and permits for automatic reference downloads. Subdomains are included; schemes, paths, ports, wildcards and IP addresses are rejected. Empty keeps automatic downloads disabled and the category icon fallback available. |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Operator-only installation fallback when no household online-search row exists. Comma-separated registrable domains; empty disables automatic downloads. |
 | `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence. The current documented Brave Image Search response does not include license metadata, so a domain policy is normally required. |
-| `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` additions or overrides for provenance checks. |
-| `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for conservative query-only inference. |
+| `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional operator `brand=domain|domain` additions or overrides for provenance checks. |
+| `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional operator extra brand names for conservative query-only inference. |
 
 Before a candidate can be downloaded, its source page and asset host must match a
 permitted domain, or it must carry explicit provider license metadata with an

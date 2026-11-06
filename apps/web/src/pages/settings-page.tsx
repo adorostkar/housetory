@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
 import { HouseholdSwitcher } from "@/components/household-switcher";
+import { OnlineSearchSettingsCard } from "@/components/online-search-settings";
 import { PropertiesSettings } from "@/components/properties-settings";
 import { SystemStatusPanel } from "@/components/system-status-panel";
 import { useTheme } from "@/components/theme-provider";
@@ -264,16 +265,16 @@ export function SettingsPage() {
             <div className="mt-3 rounded-lg border border-border/60 bg-background/30 p-3">
               <p className="text-[0.72rem] font-medium">Online reference-image lookup</p>
               <p className="mt-1 break-words text-[0.66rem] leading-relaxed text-muted-foreground">
-                Requires a server-side{" "}
-                <code className="break-all rounded bg-secondary px-1 py-0.5">
-                  BRAVE_SEARCH_API_KEY
-                </code>{" "}
-                and a reviewed{" "}
-                <code className="break-all rounded bg-secondary px-1 py-0.5">
-                  ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
-                </code>{" "}
-                allowlist. AI provider credentials do not enable online lookup, and
-                Housetory only downloads from the permitted sources.
+                Configure it in{" "}
+                <Link
+                  to="/settings#online-search"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  Online search
+                </Link>
+                : add one Brave Search key and at least one permitted source domain.
+                AI provider credentials do not enable online lookup, and Housetory only
+                downloads from the permitted sources.
               </p>
             </div>
             <div className="mt-2 rounded-lg border border-border/60 bg-background/30 p-3">
@@ -562,6 +563,8 @@ export function SettingsPage() {
             </div>
           ) : null}
         </section>
+
+        <OnlineSearchSettingsCard isOwner={isOwner} />
 
         <SystemStatusPanel isOwner={isOwner} />
 

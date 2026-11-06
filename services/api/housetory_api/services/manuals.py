@@ -228,7 +228,7 @@ def manual_documents(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
 def _search_status(
     db: Session, household_id: uuid.UUID, item_id: uuid.UUID
 ) -> ManualSearchStatusOut:
-    provider = manual_web.resolve_search_provider()
+    provider = manual_web.resolve_search_provider(db, household_id)
     configured = provider.configured
     reason = provider.reason
     profile = get_profile(db, household_id, item_id)
@@ -350,7 +350,7 @@ def _require_profile(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
 
 def _require_search(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> ItemManualProfile:
     profile = _require_profile(db, household_id, item_id)
-    provider = manual_web.resolve_search_provider()
+    provider = manual_web.resolve_search_provider(db, household_id)
     if not provider.configured:
         raise ApiError(
             409,
@@ -706,6 +706,8 @@ def search_candidates(
             manufacturer=profile.manufacturer,
             model=profile.model_identifier,
             variant=profile.variant,
+            db=db,
+            household_id=household_id,
         )
     except manual_web.ManualSearchUnavailable as exc:
         raise ApiError(502, "manual_search_unavailable", str(exc)) from exc
@@ -787,7 +789,7 @@ def list_candidates(
         ).all()
     )
     notices: list[str] = []
-    provider = manual_web.resolve_search_provider()
+    provider = manual_web.resolve_search_provider(db, household_id)
     if not provider.configured:
         notices.append(provider.reason or "Manual search is not configured.")
     return ManualCandidateList(
@@ -963,6 +965,8 @@ def ask_online_question(
             model=profile.model_identifier,
             variant=profile.variant,
             question=question,
+            db=db,
+            household_id=household_id,
         )
     except manual_web.ManualSearchUnavailable as exc:
         raise ApiError(502, "manual_search_unavailable", str(exc)) from exc

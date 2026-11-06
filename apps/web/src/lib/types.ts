@@ -1752,6 +1752,8 @@ export interface SystemExternalService {
   configured: boolean;
   status: "configured" | "partial" | "not_configured" | "unknown";
   detail: string;
+  source?: string | null;
+  settings_path?: string | null;
 }
 
 export interface SystemStatus {
@@ -1771,6 +1773,52 @@ export interface SystemStatus {
   tasks: SystemTaskStatus[];
   external_services: SystemExternalService[];
   generated_at: string;
+}
+
+export type OnlineSearchSource = "household" | "environment" | "none";
+
+export interface OnlineSearchChannel {
+  enabled: boolean;
+  configured: boolean;
+  source: OnlineSearchSource;
+  provider: string | null;
+  provider_label: string | null;
+  reason: string | null;
+}
+
+export interface OnlineSearchReferenceChannel extends OnlineSearchChannel {
+  permitted_source_domains: string[];
+  policy_configured: boolean;
+}
+
+export interface OnlineSearchSettings {
+  provider: "brave";
+  supported_providers: string[];
+  manual_enabled: boolean;
+  reference_enabled: boolean;
+  has_api_key: boolean;
+  environment_api_key_available: boolean;
+  credential_source: OnlineSearchSource;
+  api_key_version: number;
+  credential_storage_ready: boolean;
+  permitted_source_domains: string[];
+  max_permitted_domains: number;
+  manual: OnlineSearchChannel;
+  reference: OnlineSearchReferenceChannel;
+  environment_manual_available: boolean;
+  environment_reference_available: boolean;
+  updated_at: string | null;
+  warning: string | null;
+}
+
+export interface OnlineSearchTestResult {
+  ok: boolean;
+  message: string;
+  manual_ok: boolean | null;
+  reference_ok: boolean | null;
+  source: OnlineSearchSource;
+  provider_label: string | null;
+  tested_at: string;
 }
 
 export interface AiProviderModel {

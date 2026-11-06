@@ -61,12 +61,20 @@ def provider(
     permitted_domains="lg.com",
     permitted_licenses=None,
 ):
-    def fake_provider():
+    domains = frozenset(
+        domain.strip()
+        for domain in permitted_domains.replace(";", ",").split(",")
+        if domain.strip()
+    )
+
+    def fake_provider(*args, **kwargs):
         return ImageSearchProvider(
             kind="brave",
             label="Brave Image Search API",
             api_key="fixture",
             base_url="https://api.search.brave.com",
+            source="household",
+            permitted_domains=domains,
         )
 
     monkeypatch.setattr(item_image_search, "resolve_image_search_provider", fake_provider)
@@ -876,8 +884,7 @@ def test_downloads_require_permitted_policy_or_license_evidence(owner_client, mo
             db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
         )
 
-    settings = get_settings()
-    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "lg.com")
+    provider(monkeypatch, candidates=[lg_candidate()], permitted_domains="lg.com")
     allowed = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
     assert allowed.status_code == 200, allowed.text
     selected = allowed.json()["selected"]
@@ -941,7 +948,7 @@ def test_search_is_unavailable_until_a_permitted_source_policy_is_set(owner_clie
     provider(monkeypatch, candidates=[lg_candidate()], permitted_domains="")
     state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
     assert state["search_configured"] is False
-    assert "ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS" in state["search_reason"]
+    assert "Settings → Online search" in state["search_reason"]
     blocked = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
     assert blocked.status_code == 503, blocked.text
     assert blocked.json()["detail"]["code"] == "image_search_policy_unconfigured"

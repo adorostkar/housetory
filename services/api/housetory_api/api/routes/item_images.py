@@ -31,23 +31,23 @@ from ..errors import ApiError
 router = APIRouter(tags=["item-images"])
 
 
-def _search_availability():
-    provider = image_search.resolve_image_search_provider()
+def _search_availability(db: Session, household_id: uuid.UUID):
+    provider = image_search.resolve_image_search_provider(db, household_id)
     if not provider.configured:
         return False, provider.label, provider.reason
-    if not image_search.permitted_source_policy_configured():
+    if not image_search.permitted_source_policy_configured(provider):
         return (
             False,
             provider.label,
-            "Reference-image search is configured, but no permitted-source download "
-            "policy is set. Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. "
-            "The category icon fallback remains available.",
+            "Reference-image search is enabled, but no permitted source domains are "
+            "configured. Add at least one domain in Settings → Online search. The "
+            "category icon fallback remains available.",
         )
     return True, provider.label, None
 
 
 def _provider_state(db: Session, household_id: uuid.UUID):
-    search_configured, search_label, search_reason = _search_availability()
+    search_configured, search_label, search_reason = _search_availability(db, household_id)
     generation_configured, generation_label, generation_reason = generation.generation_status(
         db, household_id
     )
@@ -201,7 +201,7 @@ def _preview(
     action: str,
 ) -> ItemImageBatchPreview:
     items = _items_for_batch(db, household_id, item_ids)
-    search_ready, _search_label, search_reason = _search_availability()
+    search_ready, _search_label, search_reason = _search_availability(db, household_id)
     generation_configured, _label, _reason = generation.generation_status(db, household_id)
     settings = image_service.settings_out(db, items[0].household)
     eligible = 0

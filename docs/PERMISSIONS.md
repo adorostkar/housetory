@@ -41,8 +41,10 @@ membership again. A session stores the selected household id, not a global role.
   search, generate, accept/reject, remove or batch. Outbound Brave image search
   receives minimized product text only; OpenAI Images generation receives the
   same minimized text and requires the household Item illustrations task and
-  provider consent. Automatic reference downloads are default-deny and require
-  an owner/operator-configured permitted-source domain policy or explicit
+  provider consent. Online-search settings and the encrypted Brave credential
+  are owner-only, household-scoped and write-only; members and viewers cannot
+  read or change them. Automatic reference downloads are default-deny and
+  require an owner-configured permitted-source domain policy or explicit
   provider license evidence. Non-photographic images are excluded from evidence,
   recognition and stocktake physical evidence.
 - `enforce_household_context` requires a current `X-Household-Id` on unsafe

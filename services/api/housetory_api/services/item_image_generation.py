@@ -301,7 +301,7 @@ def run_new_item_job(payload: dict[str, Any]) -> dict[str, Any]:
         if item.photos or item.is_archived or not sufficient_description(item):
             return {"status": "skipped"}
         if household.item_image_auto_reference:
-            provider = resolve_image_search_provider()
+            provider = resolve_image_search_provider(db, household_id)
             if provider.configured:
                 try:
                     find_and_select_reference(
@@ -345,7 +345,7 @@ def run_batch_job(payload: dict[str, Any], job_id: uuid.UUID) -> dict[str, Any]:
                 if item.photos or item.is_archived:
                     skipped += 1
                 elif action == "reference":
-                    provider = resolve_image_search_provider()
+                    provider = resolve_image_search_provider(db, household_id)
                     if not provider.configured:
                         failed += 1
                     else:

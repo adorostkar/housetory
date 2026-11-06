@@ -24,6 +24,7 @@ from .routes import (
     loans,
     locations,
     manuals,
+    online_search,
     overview,
     ownership,
     properties,
@@ -47,6 +48,7 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(accounts.router)
 api_router.include_router(households.router)
+api_router.include_router(online_search.router, dependencies=write_guard)
 api_router.include_router(household.router, dependencies=write_guard)
 api_router.include_router(overview.router)
 api_router.include_router(ownership.router)

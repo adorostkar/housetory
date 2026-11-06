@@ -149,7 +149,7 @@ describe("ItemImageControls", () => {
       search_configured: false,
       search_provider_label: null,
       search_reason:
-        "Reference-image search is not configured. Set BRAVE_SEARCH_API_KEY and ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS.",
+        "Reference-image search is disabled in Settings → Online search.",
       generation_configured: false,
       generation_provider_label: null,
       generation_reason:
@@ -170,11 +170,13 @@ describe("ItemImageControls", () => {
     expect(
       screen.getByText("Online image lookup setup required"),
     ).toBeVisible();
-    expect(screen.getAllByText(/BRAVE_SEARCH_API_KEY/).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(/BRAVE_SEARCH_API_KEY/),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/AI provider key does not enable online lookup/)).toBeVisible();
     expect(
-      screen.getByRole("link", { name: "Open image settings" }),
-    ).toHaveAttribute("href", "/settings#item-images");
+      screen.getByRole("link", { name: "Open online search settings" }),
+    ).toHaveAttribute("href", "/settings#online-search");
     expect(api.post).not.toHaveBeenCalled();
 
     await userEvent.click(
