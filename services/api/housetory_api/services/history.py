@@ -38,6 +38,12 @@ ACTION_LABELS = {
     ActivityAction.LOAN_RETURNED.value: "Items returned",
     ActivityAction.LOAN_CORRECTED.value: "Loan corrected",
     ActivityAction.LOAN_CANCELLED.value: "Loan cancelled",
+    ActivityAction.BORROWED_CREATED.value: "Borrowed item recorded",
+    ActivityAction.BORROWED_RETURNED.value: "Borrowed item returned",
+    ActivityAction.BORROWED_CORRECTED.value: "Borrowed item corrected",
+    ActivityAction.BORROWED_CANCELLED.value: "Borrowed item cancelled",
+    ActivityAction.BORROWED_PHOTO_UPDATED.value: "Borrowed photo updated",
+    ActivityAction.BORROWED_PHOTO_REMOVED.value: "Borrowed photo removed",
     ActivityAction.ITEM_MOVE_UNDONE.value: "Item move undone",
     ActivityAction.CONTAINER_MOVE_UNDONE.value: "Container move undone",
     ActivityAction.LOAN_CREATION_UNDONE.value: "Loan creation undone",
@@ -107,6 +113,7 @@ def record_event(
     item_id: uuid.UUID | None = None,
     container_id: uuid.UUID | None = None,
     loan_id: uuid.UUID | None = None,
+    borrowed_item_id: uuid.UUID | None = None,
     request_id: uuid.UUID | None = None,
     undoes_event_id: uuid.UUID | None = None,
 ) -> ActivityEvent:
@@ -129,6 +136,7 @@ def record_event(
         item_id=item_id,
         container_id=container_id,
         loan_id=loan_id,
+        borrowed_item_id=borrowed_item_id,
         summary=_safe_text(summary, 500),
         details=details or {},
         request_id=request_id,
@@ -410,6 +418,7 @@ def serialize_event(db: Session, event: ActivityEvent) -> ActivityEventOut:
         item_id=event.item_id,
         container_id=event.container_id,
         loan_id=event.loan_id,
+        borrowed_item_id=event.borrowed_item_id,
         actor_user_id=event.actor_user_id,
         actor_name=event.actor_name_snapshot,
         summary=event.summary,
@@ -495,6 +504,27 @@ def history_for_loan(
             .where(
                 ActivityEvent.household_id == household_id,
                 ActivityEvent.loan_id == loan_id,
+            )
+            .order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
+            .limit(limit)
+        ).all()
+    )
+    return [serialize_event(db, event) for event in events]
+
+
+def history_for_borrowed(
+    db: Session,
+    household_id: uuid.UUID,
+    borrowed_item_id: uuid.UUID,
+    *,
+    limit: int = 50,
+) -> list[ActivityEventOut]:
+    events = list(
+        db.scalars(
+            select(ActivityEvent)
+            .where(
+                ActivityEvent.household_id == household_id,
+                ActivityEvent.borrowed_item_id == borrowed_item_id,
             )
             .order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
             .limit(limit)

@@ -19,6 +19,7 @@ import {
   useAddItems,
   useRegisterAddItemsContext,
 } from "@/components/add-items";
+import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
@@ -270,6 +271,8 @@ export function RoomDetailPage() {
       />
 
       <StocktakeEntry roomId={room.id} />
+
+      <BorrowedKeptHere roomId={room.id} />
 
       <section className="surface mb-5 p-4 sm:p-5">
         <EntityPhotoManager kind="room" entityId={room.id} name={room.name} />

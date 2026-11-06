@@ -90,7 +90,7 @@ describe("QuickSearch", () => {
     const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Camera");
     const panel = await screen.findByRole("listbox", { name: "Quick search results" });
-    expect(within(panel).getByText("Items")).toBeVisible();
+    expect(within(panel).getByText("Owned items")).toBeVisible();
     expect(within(panel).getByText("Boxes & containers")).toBeVisible();
     expect(within(panel).getByText("Locations")).toBeVisible();
     expect(within(panel).getByRole("option", { name: /Camera Body/ })).toBeVisible();

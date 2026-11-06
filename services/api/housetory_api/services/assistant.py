@@ -22,6 +22,7 @@ from ..schemas.ai import (
     NaturalSearchResponse,
 )
 from . import ai
+from . import borrowed as borrowed_service
 from .ai_tools import (
     ToolResult,
     _human_date,
@@ -50,6 +51,8 @@ Allowed tools and arguments:
 - find_missing_information: field(purchase|purchase_date|purchase_price|serial|room|
   location|warranty)
 - list_outstanding_loans: {}
+- list_borrowed_items: {}
+- find_borrowed_owner: q (item name or description)
 - locate_item: q (item name or description)
 - count_items: q (item name or description)
 Never invent an item id. Never make up filters. Use search_items for unknown questions.
@@ -115,6 +118,20 @@ def _extract_after(question: str, markers: tuple[str, ...]) -> str | None:
     return None
 
 
+def _borrowed_subject(question: str) -> str:
+    value = question.strip()
+    value = re.sub(
+        r"^(?:who owns|who's the owner of|who is the owner of|owner of|whose is)\s+",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(r"^who does\s+", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+belongs? to\s*[?.!]*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+(?:belong to|owned by)\s*[?.!]*$", "", value, flags=re.IGNORECASE)
+    return _clean_subject(value)
+
+
 def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> AssistantPlan:
     index = build_index(db, household_id)
     lowered = question.lower().strip()
@@ -129,7 +146,25 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
         )
 
     if re.search(
-        r"\b(?:on loan|loaned|lent out|lent to|borrowed|borrower|"
+        r"\b(?:who owns|who's the owner|who is the owner|owner of|whose is|"
+        r"who does|belong to|belongs to)\b",
+        lowered,
+    ):
+        return AssistantPlan(
+            tool="find_borrowed_owner", arguments={"q": _borrowed_subject(question)}
+        )
+    if re.search(
+        r"\b(?:what|which)\b.{0,50}\b(?:need|have|should)\b.{0,25}\b"
+        r"(?:return|give back)\b",
+        lowered,
+    ) or re.search(
+        r"\b(?:borrowed items?|what have i borrowed|what did i borrow|"
+        r"what is borrowed|items? borrowed|borrowed from)\b",
+        lowered,
+    ):
+        return AssistantPlan(tool="list_borrowed_items", arguments={})
+    if re.search(
+        r"\b(?:on loan|loaned|lent out|lent to|borrower|"
         r"outstanding loans?|overdue loans?)\b",
         lowered,
     ):
@@ -264,8 +299,16 @@ def structured_plan(db: Session, household_id: uuid.UUID, question: str) -> Assi
     if re.search(r"\b([A-Z]{2,12}-[0-9]{3,6})\b", question, re.IGNORECASE):
         return deterministic_plan(db, household_id, question)
     if re.search(
-        r"\b(?:on loan|loaned|lent out|lent to|borrowed|borrower|"
+        r"\b(?:on loan|loaned|lent out|lent to|borrower|"
         r"outstanding loans?|overdue loans?)\b",
+        lowered,
+    ):
+        return deterministic_plan(db, household_id, question)
+    if re.search(
+        r"\b(?:who owns|who's the owner|who is the owner|owner of|whose is|"
+        r"who does|belong to|belongs to|borrowed items?|what have i borrowed|"
+        r"what did i borrow|what is borrowed|items? borrowed|borrowed from|"
+        r"need to return|should return|have to return)\b",
         lowered,
     ):
         return deterministic_plan(db, household_id, question)
@@ -356,6 +399,22 @@ def _deterministic_answer(result: ToolResult) -> str:
             quantity = f" · {item.quantity} units" if item.quantity != 1 else ""
             loaned = f" · {item.on_loan_quantity} on loan" if item.on_loan_quantity else ""
             lines.append(f"• {item.name}{quantity} — {place}{loaned}")
+    for record in result.borrowed[:8]:
+        place = record.property_name or record.room_name
+        location = (
+            f"{record.storage_location_identifier} · {record.storage_location_name}"
+            if record.storage_location_identifier
+            and record.storage_location_name
+            and record.storage_location_identifier != record.storage_location_name
+            else record.storage_location_identifier or record.storage_location_name
+        )
+        place_parts = [part for part in (place, location) if part]
+        due = f", due {_human_date(record.due_on)}" if record.due_on else ""
+        lines.append(
+            f"• {record.item_name} — belongs to {record.owner_name}, kept at "
+            f"{' / '.join(place_parts) or 'no place recorded'}{due} · "
+            f"{record.outstanding_quantity} outstanding"
+        )
     for document in result.documents[:5]:
         suffix = f" — {document['merchant']}" if document.get("merchant") else ""
         lines.append(f"• Document: {document['title']}{suffix}")
@@ -516,6 +575,7 @@ def answer_question(
             tool=result.tool,
             filters=result.filters,
             items=result.items,
+            borrowed=result.borrowed,
             documents=result.documents,
             locations=result.locations,
             references=result.references,
@@ -556,6 +616,7 @@ def answer_question(
         tool=result.tool,
         filters=result.filters,
         items=result.items,
+        borrowed=result.borrowed,
         documents=result.documents,
         locations=result.locations,
         references=result.references,
@@ -904,6 +965,10 @@ def _plan_interpretation(plan: AssistantPlan) -> str:
         return f"purchase history: {args.get('merchant') or 'all'}"
     if plan.tool == "get_inventory_summary":
         return "inventory summary"
+    if plan.tool == "list_borrowed_items":
+        return "borrowed from others"
+    if plan.tool == "find_borrowed_owner":
+        return f"borrowed-item owner lookup: {args.get('q') or 'all'}"
     return f"tool: {plan.tool}"
 
 
@@ -912,8 +977,15 @@ def _search_answer(
     interpretation: str,
     filters: NaturalSearchFilters,
     summaries,
+    borrowed_total: int = 0,
 ) -> str:
     if total == 0:
+        if borrowed_total:
+            return (
+                f"No owned inventory records matched the filters I applied "
+                f"({interpretation}), but {borrowed_total} borrowed record(s) did. "
+                "Borrowed goods are listed separately and are not household stock."
+            )
         return (
             f"No inventory records matched the filters I applied ({interpretation}). "
             "Adjust the query or ask the assistant to rephrase it."
@@ -925,9 +997,15 @@ def _search_answer(
             f"Found 1 item matching the filters I applied ({interpretation}): "
             f"{item.name} — {place}."
         )
+    suffix = (
+        f" Separately, {borrowed_total} borrowed record(s) match and are shown as "
+        "borrowed from other owners, outside owned stock."
+        if borrowed_total
+        else ""
+    )
     return (
-        f"Found {total} items matching the filters I applied ({interpretation}). "
-        "The results below are the current household records."
+        f"Found {total} owned items matching the filters I applied ({interpretation}). "
+        f"The results below are the current household records.{suffix}"
     )
 
 
@@ -953,6 +1031,8 @@ def natural_search(
             interpretation=_plan_interpretation(plan),
             filters=_plan_filters(db, household_id, plan),
             items=result.items,
+            borrowed=result.borrowed,
+            borrowed_total=int(result.facts.get("borrowed_total", len(result.borrowed))),
             total=int(result.facts.get("total", len(result.items))),
             mode="deterministic",
             ai_available=status.configured,
@@ -984,18 +1064,27 @@ def natural_search(
         items,
         household_reminder_days=household_reminder_days,
     )
+    borrowed_matches, borrowed_total = borrowed_service.quick_search_records(
+        db,
+        household_id,
+        q=clean_subject(question),
+        limit=20,
+        property_id=filters.property_id,
+    )
     return NaturalSearchResponse(
         question=question,
         interpretation=interpretation,
         filters=filters,
         items=summaries,
+        borrowed=borrowed_matches,
+        borrowed_total=borrowed_total,
         total=total,
         mode="ai" if ai_used else "deterministic",
         ai_available=ai_available,
-        answer=_search_answer(total, interpretation, filters, summaries),
+        answer=_search_answer(total, interpretation, filters, summaries, borrowed_total),
         answer_kind="list",
         tool="search_items",
-        facts={"total": total},
-        needs_assistant=total == 0,
+        facts={"total": total, "borrowed_total": borrowed_total},
+        needs_assistant=total == 0 and borrowed_total == 0,
         suggested_question=question,
     )

@@ -217,7 +217,7 @@ def store_photo(item_id: uuid.UUID, upload: UploadFile) -> StoredPhoto:
 
 
 def store_entity_photo(
-    owner_type: Literal["items", "rooms", "locations"],
+    owner_type: Literal["items", "rooms", "locations", "borrowed"],
     owner_id: uuid.UUID,
     upload: UploadFile,
 ) -> StoredPhoto:

@@ -37,13 +37,15 @@ HTTPS example.com blocked: URLError
 
 ## Core workflows exercised
 
-Against the isolated stack, 31 checked-in Playwright workflows passed:
+Against the isolated stack, 34 checked-in Playwright workflows passed:
 
 - account setup/login and viewer role behavior;
 - item, room, property and household CRUD/context;
 - keyword and deterministic structured search, quick search, missing-purchase
   filters and the search query/submit regression;
-- loans, partial returns, history and move undo;
+- owned loans, partial returns, history and move undo;
+- borrowed-from-others creation, mixed direction filters, partial returns to owners,
+  private borrowed photos, search labels and viewer read-only behavior;
 - direct document scan/edit/reorder/save and local worker OCR;
 - QR/label creation, preview, calibration and authenticated container view;
 - room/container hierarchy and bulk operations;
@@ -87,6 +89,10 @@ With no AI/search/mail configuration:
 - Cloud AI, manual/image discovery and email are optional and honestly unavailable
   without configuration/Internet. Real provider live tests remain operator-run,
   explicit and outside this automated acceptance.
+- Borrowed records are private household logs, not owner accounts. They are
+  excluded from owned counts, values, evidence and stocktake. The offline stack
+  verified creation, mixed filters, partial returns, private photo access and viewer
+  restrictions with no AI/search/SMTP configuration and blocked API/worker egress.
 - The live household/Settings/task choices were not used to validate these
   destructive workflows; the acceptance stack is disposable and separate.
 
@@ -98,10 +104,11 @@ E2E_BASE_URL=http://localhost:8091 E2E_EMAIL=offline-core@example.com \
 E2E_PASSWORD=offline-core-password-2026 \
 E2E_DB_CONTAINER=housetory-offline-db-1 E2E_RELEASE_COMMIT=offline-core-test \
 npx playwright test e2e/accounts.spec.ts e2e/add-items.spec.ts \
-  e2e/bulk-organisation.spec.ts e2e/document-scanning.spec.ts \
-  e2e/inventory-evidence.spec.ts e2e/item-status.spec.ts e2e/lending.spec.ts \
-  e2e/phase5.spec.ts e2e/quick-search.spec.ts \
-  e2e/release-stabilisation.spec.ts e2e/single-home-polish.spec.ts \
-  e2e/stocktake.spec.ts e2e/zz-properties.spec.ts e2e/zzz-households.spec.ts
-npx playwright test e2e/offline-resource-audit.spec.ts
+  e2e/borrowed-items.spec.ts e2e/bulk-organisation.spec.ts \
+  e2e/document-scanning.spec.ts e2e/inventory-evidence.spec.ts \
+  e2e/item-status.spec.ts e2e/lending.spec.ts e2e/phase5.spec.ts \
+  e2e/quick-search.spec.ts e2e/release-stabilisation.spec.ts \
+  e2e/single-home-polish.spec.ts e2e/stocktake.spec.ts \
+  e2e/zz-properties.spec.ts e2e/zzz-households.spec.ts \
+  e2e/offline-resource-audit.spec.ts
 ```

@@ -1363,6 +1363,7 @@ export interface AssistantResponse {
   tool: string | null;
   filters: Record<string, unknown>;
   items: ItemSummary[];
+  borrowed: BorrowedRecord[];
   documents: Array<{
     id: string;
     title: string;
@@ -1428,6 +1429,8 @@ export interface NaturalSearchResponse {
   interpretation: string;
   filters: NaturalSearchFilters;
   items: ItemSummary[];
+  borrowed: BorrowedRecord[];
+  borrowed_total: number;
   total: number;
   mode: "deterministic" | "ai";
   ai_available: boolean;
@@ -1444,7 +1447,7 @@ export interface NaturalSearchResponse {
   property?: SearchProperty | null;
 }
 
-export type QuickSearchKind = "item" | "container" | "location";
+export type QuickSearchKind = "item" | "container" | "location" | "borrowed";
 
 export interface QuickSearchLoan {
   on_loan_quantity: number;
@@ -1479,6 +1482,8 @@ export interface SearchItemList {
   total: number;
   limit: number;
   offset: number;
+  borrowed: BorrowedRecord[];
+  borrowed_total: number;
   scope_label?: string;
   households?: SearchHousehold[];
   property?: SearchProperty | null;
@@ -1989,11 +1994,12 @@ export interface LoanReturn {
 export interface ActivityEvent {
   id: UUID;
   action: string;
-  entity_type: "item" | "container" | "loan" | "batch";
+  entity_type: "item" | "container" | "loan" | "batch" | "borrowed";
   entity_id: UUID | null;
   item_id: UUID | null;
   container_id: UUID | null;
   loan_id: UUID | null;
+  borrowed_item_id?: UUID | null;
   actor_user_id: UUID | null;
   actor_name: string;
   summary: string;
@@ -2036,6 +2042,98 @@ export interface ItemLoanSummary {
   outstanding_loan_count: number;
   overdue_count: number;
   loans: Loan[];
+}
+
+export interface BorrowedPhoto {
+  id: UUID;
+  original_filename: string;
+  content_type: string;
+  byte_size: number;
+  width: number;
+  height: number;
+  created_at: string;
+  url: string;
+  thumbnail_url: string;
+}
+
+export interface BorrowedRecord {
+  id: UUID;
+  direction: "borrowed";
+  household_id?: UUID | null;
+  household_name?: string | null;
+  item_name: string;
+  brand: string | null;
+  model: string | null;
+  owner_name: string;
+  quantity: number;
+  returned_quantity: number;
+  outstanding_quantity: number;
+  physically_held_quantity: number;
+  status: LoanStatus;
+  borrowed_on: string;
+  due_on: string | null;
+  notes: string | null;
+  overdue: boolean;
+  days_past_due: number | null;
+  latest_returned_on: string | null;
+  property_id: UUID | null;
+  property_name: string | null;
+  room_id: UUID | null;
+  room_name: string | null;
+  storage_location_id: UUID | null;
+  storage_location_name: string | null;
+  storage_location_identifier: string | null;
+  photo: BorrowedPhoto | null;
+  created_by_user_id: UUID | null;
+  created_by_name: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BorrowedReturn {
+  id: UUID;
+  quantity: number;
+  returned_on: string;
+  notes: string | null;
+  created_by_name: string | null;
+  created_at: string;
+}
+
+export interface BorrowedDetail extends BorrowedRecord {
+  returns: BorrowedReturn[];
+  history: ActivityEvent[];
+}
+
+export interface BorrowedList {
+  items: BorrowedRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+  open_count: number;
+  overdue_count: number;
+  total_borrowed_quantity: number;
+  outstanding_quantity: number;
+  returned_quantity: number;
+  physically_held_quantity: number;
+}
+
+export type BorrowedFilterStatus =
+  | "all"
+  | "open"
+  | "outstanding"
+  | "partially_returned"
+  | "returned"
+  | "cancelled";
+
+export interface BorrowedFilters {
+  status?: BorrowedFilterStatus;
+  q?: string;
+  overdue?: boolean;
+  property_id?: string;
+  room_id?: string;
+  storage_location_id?: string;
+  on_date?: string;
 }
 
 export interface LoanCreateInput {

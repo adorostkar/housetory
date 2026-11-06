@@ -241,6 +241,10 @@ export function EvidenceExportDialog({
                     {preview.on_loan_unit_count}
                   </p>
                 )}
+                <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                  Borrowed-from-others records and their private photos are excluded. This
+                  package covers household-owned inventory only.
+                </p>
               </div>
               <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground">
                 <input

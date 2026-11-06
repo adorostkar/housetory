@@ -22,6 +22,7 @@ import {
   useAddItems,
   useRegisterAddItemsContext,
 } from "@/components/add-items";
+import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
 import {
   ContainerMoveDialog,
   ContainerQrDialog,
@@ -237,6 +238,8 @@ export function ContainerDetailPage() {
       />
 
       <StocktakeEntry containerId={detail.id} />
+
+      <BorrowedKeptHere locationId={detail.id} />
 
       <section className="surface mb-4 p-4 sm:p-5">
         <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />

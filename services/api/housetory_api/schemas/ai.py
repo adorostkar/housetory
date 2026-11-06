@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain import PurchaseInfoFilter
+from ..schemas.borrowed import BorrowedOut
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.items import ItemSummary
 from ..schemas.search import SearchHousehold, SearchProperty
@@ -21,6 +22,8 @@ AssistantTool = Literal[
     "get_inventory_summary",
     "find_missing_information",
     "list_outstanding_loans",
+    "list_borrowed_items",
+    "find_borrowed_owner",
     "locate_item",
     "count_items",
 ]
@@ -165,7 +168,16 @@ class AssistantPlan(BaseModel):
 
 
 class AssistantReference(BaseModel):
-    type: Literal["item", "document", "room", "location", "purchase", "warranty", "loan"]
+    type: Literal[
+        "item",
+        "document",
+        "room",
+        "location",
+        "purchase",
+        "warranty",
+        "loan",
+        "borrowed",
+    ]
     id: uuid.UUID
     title: str
     subtitle: str | None = None
@@ -246,6 +258,8 @@ class NaturalSearchResponse(BaseModel):
     interpretation: str
     filters: NaturalSearchFilters
     items: list[ItemSummary]
+    borrowed: list[BorrowedOut] = Field(default_factory=list)
+    borrowed_total: int = 0
     total: int
     mode: Literal["deterministic", "ai"]
     ai_available: bool
@@ -268,6 +282,7 @@ class AssistantResponse(BaseModel):
     tool: str | None = None
     filters: dict[str, Any] = Field(default_factory=dict)
     items: list[ItemSummary] = Field(default_factory=list)
+    borrowed: list[BorrowedOut] = Field(default_factory=list)
     documents: list[dict[str, Any]] = Field(default_factory=list)
     locations: list[dict[str, Any]] = Field(default_factory=list)
     references: list[AssistantReference] = Field(default_factory=list)

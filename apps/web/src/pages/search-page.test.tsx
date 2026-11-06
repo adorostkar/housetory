@@ -6,10 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
 import type {
+  BorrowedRecord,
   ItemList,
   ItemSummary,
   NaturalSearchResponse,
   QuickSearchResponse,
+  SearchItemList,
 } from "@/lib/types";
 import { SearchPage } from "@/pages/search-page";
 
@@ -72,6 +74,39 @@ const itemList: ItemList = {
   offset: 0,
 };
 
+const borrowedRecord: BorrowedRecord = {
+  id: "borrowed-1",
+  direction: "borrowed",
+  item_name: "Cable crimper",
+  brand: "Knipex",
+  model: null,
+  owner_name: "Ali",
+  quantity: 2,
+  returned_quantity: 0,
+  outstanding_quantity: 2,
+  physically_held_quantity: 2,
+  status: "outstanding",
+  borrowed_on: "2026-01-01",
+  due_on: "2026-01-10",
+  notes: null,
+  overdue: false,
+  days_past_due: null,
+  latest_returned_on: null,
+  property_id: null,
+  property_name: null,
+  room_id: "room-1",
+  room_name: "Workshop",
+  storage_location_id: null,
+  storage_location_name: null,
+  storage_location_identifier: null,
+  photo: null,
+  created_by_user_id: null,
+  created_by_name: null,
+  cancelled_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
 const quickResponse: QuickSearchResponse = {
   query: "PS5",
   effective_query: null,
@@ -82,6 +117,8 @@ const quickResponse: QuickSearchResponse = {
 const naturalResponse: NaturalSearchResponse = {
   question: "where is my heavy drill",
   interpretation: "item: heavy drill",
+  borrowed: [],
+  borrowed_total: 0,
   filters: {
     q: "heavy drill",
     room_id: null,
@@ -238,6 +275,31 @@ describe("SearchPage unified entry", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("q=PS5");
     expect(screen.getByTestId("location")).not.toHaveTextContent("ask=1");
     expect(input).toHaveValue("PS5");
+  });
+
+  it("reports the exact owned total and borrowed count when results are capped", async () => {
+    const capped: SearchItemList = {
+      items: [item],
+      total: 51,
+      limit: 50,
+      offset: 0,
+      borrowed: [borrowedRecord],
+      borrowed_total: 2,
+    };
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/search/quick")) return quickResponse;
+      if (path.startsWith("/search/items")) return capped;
+      throw new Error(`Unexpected GET ${path}`);
+    });
+    renderPage("/search?q=Cable");
+    expect(await screen.findByText(/51 owned results/)).toBeVisible();
+    expect(
+      screen.getByText(/2 borrowed records shown separately/),
+    ).toBeVisible();
+    expect(screen.getByText("Borrowed from other owners")).toBeVisible();
+    expect(screen.getByText(/belongs to Ali/)).toBeVisible();
+    expect(screen.getByText("Cable crimper")).toBeVisible();
   });
 
   it("asks explicitly for a keyword query and then returns to keyword results when edited", async () => {

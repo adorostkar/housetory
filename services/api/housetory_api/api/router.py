@@ -6,6 +6,7 @@ from .routes import (
     ai,
     ai_settings,
     auth,
+    borrowed,
     bulk,
     containers,
     documents,
@@ -72,6 +73,7 @@ api_router.include_router(stocktake.router, dependencies=write_guard)
 api_router.include_router(imports.router, dependencies=write_guard)
 api_router.include_router(voice.router, dependencies=write_guard)
 api_router.include_router(ai.router, dependencies=write_guard)
+api_router.include_router(borrowed.router, dependencies=write_guard)
 api_router.include_router(ai_settings.router, dependencies=write_guard)
 api_router.include_router(system.router, dependencies=write_guard)
 api_router.include_router(entity_photos.router, dependencies=write_guard)

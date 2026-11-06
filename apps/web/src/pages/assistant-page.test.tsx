@@ -94,6 +94,7 @@ const firstAnswer: AssistantResponse = {
   tool: "locate_item",
   filters: { q: "heavy drill" },
   items: [item],
+  borrowed: [],
   documents: [],
   locations: [],
   references: [

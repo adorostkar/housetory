@@ -2,6 +2,7 @@ import {
   AlertCircle,
   ArrowRight,
   Boxes,
+  HandCoins,
   Loader2,
   MapPin,
   Package,
@@ -30,7 +31,8 @@ const GROUPS: Array<{
   icon: typeof Package;
   tone: "sage" | "brass" | "outline";
 }> = [
-  { kind: "item", label: "Items", icon: Package, tone: "sage" },
+  { kind: "item", label: "Owned items", icon: Package, tone: "sage" },
+  { kind: "borrowed", label: "Borrowed from others", icon: HandCoins, tone: "brass" },
   { kind: "container", label: "Boxes & containers", icon: Boxes, tone: "brass" },
   { kind: "location", label: "Locations", icon: MapPin, tone: "outline" },
 ];
@@ -38,7 +40,8 @@ const GROUPS: Array<{
 function resultLabel(kind: QuickSearchKind) {
   if (kind === "container") return "Container";
   if (kind === "location") return "Location";
-  return "Item";
+  if (kind === "borrowed") return "Borrowed";
+  return "Owned item";
 }
 
 function contextLine(result: QuickSearchResult) {

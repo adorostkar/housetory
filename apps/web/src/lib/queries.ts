@@ -6,6 +6,9 @@ import type {
   AiRecognition,
   AiRecognitionList,
   AiSettings,
+  BorrowedDetail,
+  BorrowedFilters,
+  BorrowedList,
   InvitationList,
   InvitationPublic,
   MemberList,
@@ -100,6 +103,8 @@ export const queryKeys = {
   voiceNote: (noteId: string) => ["voice", "note", noteId] as const,
   loans: ["loans"] as const,
   loan: (loanId: string) => ["loans", loanId] as const,
+  borrowed: ["borrowed"] as const,
+  borrowedRecord: (recordId: string) => ["borrowed", recordId] as const,
   itemLoans: (itemId: string) => ["items", itemId, "loans"] as const,
   itemHistory: (itemId: string) => ["items", itemId, "history"] as const,
   itemManuals: (itemId: string) => ["items", itemId, "manuals"] as const,
@@ -165,6 +170,37 @@ export function useLoans(filters: LoanFilters = {}, limit = 50) {
           limit,
         })}`,
       ),
+  });
+}
+
+export function useBorrowedList(filters: BorrowedFilters = {}, limit = 50, enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.borrowed, filters, limit],
+    queryFn: () =>
+      api.get<BorrowedList>(
+        `/borrowed${buildQuery({
+          status: filters.status ?? "open",
+          q: filters.q,
+          overdue: filters.overdue ? "true" : undefined,
+          property_id: filters.property_id,
+          room_id: filters.room_id,
+          storage_location_id: filters.storage_location_id,
+          on_date: filters.on_date ?? localDateISO(),
+          limit,
+        })}`,
+      ),
+    enabled,
+  });
+}
+
+export function useBorrowedRecord(recordId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.borrowedRecord(recordId ?? ""),
+    queryFn: () =>
+      api.get<BorrowedDetail>(
+        `/borrowed/${recordId}${buildQuery({ on_date: localDateISO() })}`,
+      ),
+    enabled: Boolean(recordId),
   });
 }
 

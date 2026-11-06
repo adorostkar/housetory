@@ -96,6 +96,7 @@ class ActivityEventOut(BaseModel):
     item_id: uuid.UUID | None
     container_id: uuid.UUID | None
     loan_id: uuid.UUID | None
+    borrowed_item_id: uuid.UUID | None = None
     actor_user_id: uuid.UUID | None
     actor_name: str
     summary: str

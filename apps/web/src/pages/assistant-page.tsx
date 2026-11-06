@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   Bot,
   FileText,
+  HandCoins,
   Loader2,
   MapPin,
   Send,
@@ -30,6 +31,8 @@ const SUGGESTIONS = [
   "Where is my heavy drill?",
   "Which items have no purchase information?",
   "What is on loan?",
+  "What do I need to return?",
+  "Who owns the ladder?",
   "What do I have stored in the attic?",
   "Which warranties are expiring soon?",
   "How many suitcases do I own?",
@@ -321,7 +324,12 @@ function contextualLink(response: AssistantResponse): string | null {
     } else if (criterion === "purchase_not_applicable") {
       path = "/items?purchase_info=not_applicable";
     } else path = "/items";
-  } else if (response.tool === "list_outstanding_loans") path = "/loans";
+  } else if (
+    response.tool === "list_outstanding_loans" ||
+    response.tool === "list_borrowed_items" ||
+    response.tool === "find_borrowed_owner"
+  )
+    path = "/loans";
   else if (response.tool === "get_warranty_status") path = "/warranties";
   else if (response.tool === "search_documents") path = "/documents";
   else if (response.tool === "get_purchase_history") path = "/purchases";
@@ -360,6 +368,39 @@ function AssistantAnswer({
             <li key={notice}>• {notice}</li>
           ))}
         </ul>
+      )}
+      {response && response.borrowed.length > 0 && (
+        <div className="mt-4 space-y-2" aria-label="Borrowed records">
+          {response.borrowed.slice(0, 8).map((record) => {
+            const place =
+              [record.property_name, record.room_name, record.storage_location_name]
+                .filter(Boolean)
+                .join(" / ") || "No keeping place recorded";
+            return (
+              <Link
+                key={record.id}
+                to={withHousehold(`/borrowed/${record.id}`, record.household_id)}
+                className="flex items-center gap-2 rounded-xl border border-brass/25 bg-brass-soft/20 px-3 py-2 text-[0.76rem] transition-colors hover:bg-brass-soft/35"
+              >
+                <HandCoins className="size-3.5 shrink-0 text-brass" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate">{record.item_name}</span>
+                    <Badge variant="brass" className="text-[0.58rem]">
+                      Borrowed
+                    </Badge>
+                  </span>
+                  <span className="block truncate text-[0.66rem] text-muted-foreground">
+                    Belongs to {record.owner_name} · kept at {place} ·{" "}
+                    {record.outstanding_quantity} outstanding
+                    {record.due_on ? ` · due ${record.due_on}` : ""}
+                  </span>
+                </span>
+                <ArrowUpRight className="size-3 shrink-0 text-muted-foreground" />
+              </Link>
+            );
+          })}
+        </div>
       )}
       {response && response.items.length > 0 && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">

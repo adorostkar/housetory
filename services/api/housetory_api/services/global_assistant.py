@@ -47,6 +47,8 @@ PROPERTY_AWARE_TOOLS = {
     "get_warranty_status",
     "get_inventory_summary",
     "list_outstanding_loans",
+    "list_borrowed_items",
+    "find_borrowed_owner",
 }
 
 
@@ -123,6 +125,9 @@ def _annotate_result(execution: ScopeExecution) -> ToolResult:
         for loan in loans:
             loan.setdefault("household_id", str(execution.household.id))
             loan.setdefault("household_name", execution.household.name)
+    for record in result.borrowed:
+        record.household_id = execution.household.id
+        record.household_name = execution.household.name
     whereabouts = result.facts.get("whereabouts")
     if isinstance(whereabouts, dict):
         whereabouts.setdefault("household_id", str(execution.household.id))
@@ -213,6 +218,18 @@ def _dedupe_items(executions: list[ScopeExecution]) -> list[Any]:
             seen.add(item.id)
             items.append(item)
     return items
+
+
+def _dedupe_borrowed(executions: list[ScopeExecution]) -> list[Any]:
+    seen: set[uuid.UUID] = set()
+    records = []
+    for execution in executions:
+        for record in execution.result.borrowed:
+            if record.id in seen:
+                continue
+            seen.add(record.id)
+            records.append(record)
+    return records
 
 
 def _dedupe_references(executions: list[ScopeExecution]) -> list[AssistantReference]:
@@ -400,6 +417,45 @@ def _loans_answer(executions: list[ScopeExecution]) -> tuple[str, dict[str, Any]
     }
 
 
+def _borrowed_answer(executions: list[ScopeExecution]) -> tuple[str, dict[str, Any]]:
+    records = _dedupe_borrowed(executions)
+    held = sum(int(record.outstanding_quantity) for record in records)
+    returned = sum(int(record.returned_quantity) for record in records)
+    overdue = sum(1 for record in records if record.overdue)
+    if not records:
+        return (
+            "No items are currently recorded as borrowed from others across your places.",
+            {
+                "total": 0,
+                "open_count": 0,
+                "overdue_count": 0,
+                "borrowed_outstanding_quantity": 0,
+                "borrowed_returned_quantity": 0,
+                "borrowed": [],
+            },
+        )
+    lines = [
+        f"{len(records)} borrowed record(s), {held} unit(s) held here and "
+        f"{returned} unit(s) returned from owners" + (f", {overdue} past due." if overdue else ".")
+    ]
+    for record in records[:10]:
+        due = f", due {_human_date(record.due_on)}" if record.due_on else ""
+        lines.append(
+            f"• {record.household_name or 'Household'}: {record.item_name} belongs to "
+            f"{record.owner_name}{due} — {record.outstanding_quantity} outstanding"
+        )
+    return "\n".join(lines), {
+        "total": len(records),
+        "open_count": sum(
+            1 for record in records if record.status in {"outstanding", "partially_returned"}
+        ),
+        "overdue_count": overdue,
+        "borrowed_outstanding_quantity": held,
+        "borrowed_returned_quantity": returned,
+        "borrowed": [record.model_dump(mode="json") for record in records],
+    }
+
+
 def _summary_answer(executions: list[ScopeExecution]) -> tuple[str, dict[str, Any]]:
     item_count = sum(int(execution.result.facts.get("item_count", 0)) for execution in executions)
     quantity = sum(int(execution.result.facts.get("total_quantity", 0)) for execution in executions)
@@ -448,6 +504,29 @@ def _global_answer(executions: list[ScopeExecution]) -> tuple[str, str, dict[str
     if tools == {"list_outstanding_loans"}:
         answer, facts = _loans_answer(executions)
         return "list_outstanding_loans", answer, facts
+    if tools == {"list_borrowed_items"}:
+        answer, facts = _borrowed_answer(executions)
+        return "list_borrowed_items", answer, facts
+    if tools == {"find_borrowed_owner"}:
+        borrowed = _dedupe_borrowed(executions)
+        lines = [
+            f"{record.household_name or 'Household'}: {record.item_name} belongs to "
+            f"{record.owner_name} — {record.outstanding_quantity} outstanding"
+            for record in borrowed[:10]
+        ]
+        answer = (
+            "\n".join(lines)
+            if lines
+            else "I couldn't find a borrowed record matching that item across your places."
+        )
+        return (
+            "find_borrowed_owner",
+            answer,
+            {
+                "borrowed_total": len(borrowed),
+                "borrowed": [record.model_dump(mode="json") for record in borrowed],
+            },
+        )
     if tools == {"get_inventory_summary"}:
         answer, facts = _summary_answer(executions)
         return "get_inventory_summary", answer, facts
@@ -469,12 +548,25 @@ def _global_answer(executions: list[ScopeExecution]) -> tuple[str, str, dict[str
         quantity = sum(
             int(execution.result.facts.get("quantity_total", 0)) for execution in executions
         )
+        borrowed = _dedupe_borrowed(executions)
+        borrowed_sentence = (
+            f" Separately, {len(borrowed)} borrowed record(s) match; they belong to "
+            "other owners and are not owned stock."
+            if borrowed
+            else ""
+        )
         return (
             "search_items",
-            f"Found {total} items across your places"
+            f"Found {total} owned items across your places"
             + (f" with {quantity} units recorded." if quantity else ".")
-            + " The matching records are listed below.",
-            {"total": total, "quantity_total": quantity},
+            + " The matching records are listed below."
+            + borrowed_sentence,
+            {
+                "total": total,
+                "quantity_total": quantity,
+                "borrowed_total": len(borrowed),
+                "borrowed": [record.model_dump(mode="json") for record in borrowed],
+            },
         )
     if tools == {"get_warranty_status"}:
         rows = [
@@ -512,15 +604,32 @@ def _global_answer(executions: list[ScopeExecution]) -> tuple[str, str, dict[str
     # combined count that would be wrong.
     lines = [f"Results across {len(executions)} households:"]
     for execution in executions:
-        if not execution.result.items and not execution.result.documents:
+        if (
+            not execution.result.items
+            and not execution.result.documents
+            and not execution.result.borrowed
+        ):
             continue
         lines.append(f"{execution.household.name}: {execution.result.summary}")
         for item in execution.result.items[:4]:
             lines.append(f"• {item.name} — {_item_place(item)}")
+        for record in execution.result.borrowed[:4]:
+            lines.append(
+                f"• {record.item_name} — borrowed from {record.owner_name}, "
+                f"{record.outstanding_quantity} held"
+            )
     return (
         "search_items",
         "\n".join(lines),
-        {"total": sum(len(execution.result.items) for execution in executions)},
+        {
+            "total": sum(len(execution.result.items) for execution in executions),
+            "borrowed_total": sum(len(execution.result.borrowed) for execution in executions),
+            "borrowed": [
+                record.model_dump(mode="json")
+                for execution in executions
+                for record in execution.result.borrowed
+            ],
+        },
     )
 
 
@@ -572,6 +681,7 @@ def answer_all_places(
         history=request.history,
     )
     items = _dedupe_items(executions)[:50]
+    borrowed = _dedupe_borrowed(executions)[:50]
     references = _dedupe_references(executions)[:50]
     if not executions:
         answer = "No current household could answer that request."
@@ -586,6 +696,7 @@ def answer_all_places(
         tool=tool,
         filters={"scope": facts["scope"]},
         items=items,
+        borrowed=borrowed,
         documents=[document for execution in executions for document in execution.result.documents],
         locations=[location for execution in executions for location in execution.result.locations],
         references=references,
@@ -610,6 +721,7 @@ def natural_search_all_places(
         history=[],
     )
     items = _dedupe_items(executions)[:limit]
+    borrowed = _dedupe_borrowed(executions)[:limit]
     references = _dedupe_references(executions)
     if not executions:
         tool = "search_items"
@@ -637,6 +749,8 @@ def natural_search_all_places(
             property_id=scope.property.id if scope.property is not None else None
         ),
         items=items,
+        borrowed=borrowed,
+        borrowed_total=int(facts.get("borrowed_total", len(borrowed))),
         total=total,
         mode="deterministic",
         ai_available=any(
@@ -649,7 +763,7 @@ def natural_search_all_places(
         facts=facts,
         notices=[*_scope_notices(scope, executions), *notices],
         references=references,
-        needs_assistant=total == 0,
+        needs_assistant=total == 0 and not borrowed,
         suggested_question=question,
         **_response_scope(scope),
     )

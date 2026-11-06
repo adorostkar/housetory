@@ -101,7 +101,7 @@ class ActivityEvent(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "activity_events"
     __table_args__ = (
         CheckConstraint(
-            "entity_type in ('item', 'container', 'loan', 'batch', 'room')",
+            "entity_type in ('item', 'container', 'loan', 'batch', 'room', 'borrowed')",
             name="valid_entity_type",
         ),
         UniqueConstraint(
@@ -117,6 +117,12 @@ class ActivityEvent(UUIDPrimaryKeyMixin, Base):
             "created_at",
         ),
         Index("ix_activity_events_household_loan", "household_id", "loan_id", "created_at"),
+        Index(
+            "ix_activity_events_household_borrowed",
+            "household_id",
+            "borrowed_item_id",
+            "created_at",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -137,6 +143,9 @@ class ActivityEvent(UUIDPrimaryKeyMixin, Base):
     )
     loan_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("loans.id", ondelete="SET NULL")
+    )
+    borrowed_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("borrowed_records.id", ondelete="SET NULL")
     )
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")

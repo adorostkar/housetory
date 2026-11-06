@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   Boxes,
+  HandCoins,
   ListFilter,
   MapPin,
   Package,
@@ -13,7 +14,11 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { api, getApiErrorMessage } from "@/lib/api";
-import type { NaturalSearchResponse, QuickSearchResult } from "@/lib/types";
+import type {
+  BorrowedRecord,
+  NaturalSearchResponse,
+  QuickSearchResult,
+} from "@/lib/types";
 
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
@@ -27,7 +32,7 @@ import { useSearchScope } from "@/hooks/use-search-scope";
 import { useAllPlacesItems, useQuickSearch } from "@/lib/queries";
 import { withHousehold } from "@/lib/household-links";
 import { looksLikeQuestion } from "@/lib/search";
-import { pluralize } from "@/lib/utils";
+import { formatDate, pluralize } from "@/lib/utils";
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -83,10 +88,15 @@ export function SearchPage() {
   const results = searchQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const total = searchQuery.data?.pages[0]?.total ?? 0;
   const answer = naturalQuery.data;
+  const borrowedResults = (placesQuery.data?.results ?? []).filter(
+    (result) => result.kind === "borrowed",
+  );
   const placeResults = (placesQuery.data?.results ?? []).filter(
-    (result) => result.kind !== "item",
+    (result) => result.kind !== "item" && result.kind !== "borrowed",
   );
   const placesPending = !askMode && hasQuery && placesQuery.isPending;
+  const borrowedFromItems = searchQuery.data?.pages[0]?.borrowed ?? [];
+  const borrowedTotal = searchQuery.data?.pages[0]?.borrowed_total ?? 0;
   const pending = askMode ? naturalQuery.isPending : searchQuery.isPending;
   const isError = askMode ? naturalQuery.isError : searchQuery.isError;
   const error = askMode ? naturalQuery.error : searchQuery.error;
@@ -262,6 +272,7 @@ export function SearchPage() {
                 "Where is my heavy drill?",
                 "Which items have no purchase information?",
                 "What is on loan?",
+                "What do I need to return?",
               ].map((example) => (
                 <button
                   key={example}
@@ -313,7 +324,10 @@ export function SearchPage() {
             message={getApiErrorMessage(error)}
             onRetry={() => void searchQuery.refetch()}
           />
-        ) : results.length === 0 && placeResults.length === 0 ? (
+        ) : results.length === 0 &&
+          placeResults.length === 0 &&
+          borrowedResults.length === 0 &&
+          borrowedFromItems.length === 0 ? (
           <div className="surface flex flex-col items-center px-6 py-16 text-center">
             <span className="flex size-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
               <SearchIcon className="size-5" strokeWidth={1.6} />
@@ -354,8 +368,13 @@ export function SearchPage() {
             <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
               <p className="text-[0.8rem] text-muted-foreground">
                 {results.length > 0
-                  ? pluralize(total, "result")
-                  : pluralize(placeResults.length, "matching place")}{" "}
+                  ? pluralize(total, "owned result")
+                  : borrowedTotal > 0 && placeResults.length === 0
+                    ? pluralize(borrowedTotal, "borrowed record")
+                    : pluralize(placeResults.length, "matching place")}
+                {borrowedTotal > 0 && results.length > 0
+                  ? ` · ${pluralize(borrowedTotal, "borrowed record")} shown separately`
+                  : ""}{" "}
                 for “{qParam}” in {scopeLabel}
               </p>
               {interpretedQuery && (
@@ -370,6 +389,37 @@ export function SearchPage() {
                   <ItemCard key={item.id} item={item} />
                 ))}
               </div>
+            )}
+            {borrowedFromItems.length > 0 && (
+              <section className="mt-8" aria-label="Borrowed from other owners">
+                <div className="mb-3 flex items-center gap-2">
+                  <HandCoins className="size-4 text-brass" />
+                  <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+                    Borrowed from other owners
+                  </h2>
+                  <Badge variant="brass">Not owned stock</Badge>
+                </div>
+                <div className="surface divide-y divide-border/60 overflow-hidden">
+                  {borrowedFromItems.map((record) => (
+                    <BorrowedSearchResult key={record.id} record={record} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {borrowedResults.length > borrowedFromItems.length && (
+              <section className="mt-8" aria-label="Borrowed quick results">
+                <div className="mb-3 flex items-center gap-2">
+                  <HandCoins className="size-4 text-brass" />
+                  <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+                    More borrowed matches
+                  </h2>
+                </div>
+                <div className="surface divide-y divide-border/60 overflow-hidden">
+                  {borrowedResults.map((result) => (
+                    <BorrowedQuickResult key={result.id} result={result} />
+                  ))}
+                </div>
+              </section>
             )}
             {placeResults.length > 0 && (
               <section className="mt-8" aria-label="Matching containers and locations">
@@ -423,6 +473,7 @@ function AnswerResults({
         ? "Open matching filters"
         : "Open matching records";
   const answerItems = answer.items;
+  const answerBorrowed = answer.borrowed ?? [];
   const showInterpretation =
     answer.tool === "search_items" &&
     Boolean(answer.interpretation) &&
@@ -493,11 +544,26 @@ function AnswerResults({
         </section>
       )}
 
+      {answerBorrowed.length > 0 && (
+        <section aria-label="Borrowed records">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+              {pluralize(answer.borrowed_total ?? answerBorrowed.length, "borrowed record")}
+            </h2>
+            <Badge variant="brass">Borrowed · not owned stock</Badge>
+          </div>
+          <div className="surface divide-y divide-border/60 overflow-hidden">
+            {answerBorrowed.map((record) => (
+              <BorrowedSearchResult key={record.id} record={record} />
+            ))}
+          </div>
+        </section>
+      )}
       {answerItems.length > 0 ? (
         <section aria-label="Matching items">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
-              {pluralize(answer.total, "matching item")}
+              {pluralize(answer.total, "owned matching item")}
             </h2>
             <p className="text-[0.7rem] text-muted-foreground">
               {answer.scope_label ?? scopeLabel}
@@ -509,11 +575,16 @@ function AnswerResults({
             ))}
           </div>
         </section>
-      ) : (
+      ) : answerBorrowed.length === 0 ? (
         <div className="surface px-5 py-4 text-[0.78rem] leading-relaxed text-muted-foreground">
-          No matching item records were returned. The answer above is based on the
+          No matching owned item records were returned. The answer above is based on the
           recorded filters and loan state, not on a model's memory.
         </div>
+      ) : (
+        <p className="text-[0.74rem] text-muted-foreground">
+          No owned item records matched; the borrowed records above are held from other
+          owners and are not household stock.
+        </p>
       )}
     </div>
   );
@@ -550,6 +621,58 @@ function contextualFilterLink(answer: NaturalSearchResponse): string | null {
   }
   if (!path) return null;
   return withHousehold(path, answer.households?.[0]?.id);
+}
+
+function BorrowedSearchResult({ record }: { record: BorrowedRecord }) {
+  const place =
+    [record.property_name, record.room_name, record.storage_location_name]
+      .filter(Boolean)
+      .join(" / ") || "keeping place not recorded";
+  return (
+    <Link
+      to={`/borrowed/${record.id}`}
+      className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/30"
+    >
+      <HandCoins className="mt-0.5 size-4 shrink-0 text-brass" />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-[0.84rem] font-medium">{record.item_name}</span>
+          <Badge variant="brass">Borrowed</Badge>
+          {record.due_on && (
+            <span className="text-[0.65rem] text-muted-foreground">
+              due {formatDate(record.due_on)}
+            </span>
+          )}
+        </span>
+        <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+          belongs to {record.owner_name} · kept at {place} ·{" "}
+          {record.outstanding_quantity} outstanding
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+function BorrowedQuickResult({ result }: { result: QuickSearchResult }) {
+  return (
+    <Link
+      to={withHousehold(result.url, result.household?.id)}
+      className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/30"
+    >
+      <HandCoins className="mt-0.5 size-4 shrink-0 text-brass" />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-[0.84rem] font-medium">{result.title}</span>
+          <Badge variant="brass">Borrowed</Badge>
+        </span>
+        <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+          {[result.household?.name, result.subtitle, result.context]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </span>
+    </Link>
+  );
 }
 
 function PlaceResult({ result }: { result: QuickSearchResult }) {

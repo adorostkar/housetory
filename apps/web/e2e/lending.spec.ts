@@ -145,6 +145,7 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
   const newLoan = page.getByRole("button", { name: "New loan" }).first();
   await newLoan.click();
   await expect(page.getByRole("heading", { name: "New loan" })).toBeVisible();
+  await page.getByRole("button", { name: /Lend out an item/ }).click();
   const itemSearch = page.getByLabel("Search inventory for a loan");
   await itemSearch.fill(`Missing ${suffix}`);
   await expect(page.getByText("No active items match that search.")).toBeVisible();
@@ -168,6 +169,7 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
   // immediately after the first loan mutation.
   await page.reload();
   await newLoan.click();
+  await page.getByRole("button", { name: /Lend out an item/ }).click();
   await itemSearch.fill(`Tent ${suffix}`);
   await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();
   await page.getByLabel("Borrower").fill(`Alex ${suffix}`);

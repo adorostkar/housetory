@@ -22,6 +22,7 @@ from ..models import (
     Warranty,
 )
 from ..schemas.ai import AssistantReference, NaturalSearchFilters
+from ..schemas.borrowed import BorrowedOut
 from ..schemas.items import ItemSummary
 from ..services.hierarchy import descendant_ids
 from ..services.ownership import financial_overview
@@ -37,6 +38,7 @@ from ..services.serializers import (
 )
 from ..services.warranties import warranty_status
 from ..services.warranty_dashboard import build_dashboard, load_warranties
+from . import borrowed as borrowed_service
 from .container_serializers import location_path_map
 from .containers import (
     deterministic_summary,
@@ -54,6 +56,7 @@ class ToolResult:
     summary: str
     filters: dict[str, Any] = field(default_factory=dict)
     items: list[ItemSummary] = field(default_factory=list)
+    borrowed: list[BorrowedOut] = field(default_factory=list)
     documents: list[dict[str, Any]] = field(default_factory=list)
     locations: list[dict[str, Any]] = field(default_factory=list)
     references: list[AssistantReference] = field(default_factory=list)
@@ -115,6 +118,48 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
         url=f"/items/{item.id}",
         household_id=household.id if household is not None else None,
         household_name=household.name if household is not None else None,
+    )
+
+
+def _borrowed_reference(record: BorrowedOut) -> AssistantReference:
+    place = _borrowed_place(record)
+    subtitle = f"{record.outstanding_quantity} held"
+    if place:
+        subtitle += f" · kept at {place}"
+    if record.due_on:
+        subtitle += f" · due {_human_date(record.due_on)}"
+    return AssistantReference(
+        type="borrowed",
+        id=record.id,
+        title=f"{record.item_name} borrowed from {record.owner_name}",
+        subtitle=subtitle,
+        url=f"/borrowed/{record.id}",
+    )
+
+
+def _borrowed_place(record: BorrowedOut) -> str | None:
+    parts = [
+        record.property_name,
+        record.room_name,
+        (
+            f"{record.storage_location_identifier} · {record.storage_location_name}"
+            if record.storage_location_identifier
+            and record.storage_location_name
+            and record.storage_location_identifier != record.storage_location_name
+            else record.storage_location_identifier or record.storage_location_name
+        ),
+    ]
+    filtered = [part for part in parts if part]
+    return " / ".join(filtered) if filtered else None
+
+
+def _borrowed_label(record: BorrowedOut) -> str:
+    place = _borrowed_place(record)
+    due = f", due {_human_date(record.due_on)}" if record.due_on else ""
+    return (
+        f"{record.item_name} — belongs to {record.owner_name}, "
+        f"kept at {place or 'no place recorded'}{due} · "
+        f"{record.outstanding_quantity} outstanding"
     )
 
 
@@ -334,14 +379,13 @@ def _resolve_category(
     )
 
 
-def search_inventory(
+def _inventory_conditions(
     db: Session,
     household_id: uuid.UUID,
     filters: NaturalSearchFilters,
     *,
     household_reminder_days: int,
-    limit: int = 30,
-) -> tuple[list[Item], int]:
+) -> list[Any] | None:
     conditions: list[Any] = [
         Item.household_id == household_id,
         Item.is_archived.is_(False),
@@ -357,7 +401,7 @@ def search_inventory(
         )
     room = _resolve_room(db, household_id, room_id=filters.room_id, name=filters.room_name)
     if filters.room_id and room is None:
-        return [], 0
+        return None
     room_rows = db.execute(
         select(Room.id, Room.parent_id).where(Room.household_id == household_id)
     ).all()
@@ -376,7 +420,7 @@ def search_inventory(
         db, household_id, location_id=filters.location_id, name=filters.location_name
     )
     if filters.location_id and location is None:
-        return [], 0
+        return None
     if location is not None:
         location_rows = db.execute(
             select(StorageLocation.id, StorageLocation.parent_id).where(
@@ -388,7 +432,7 @@ def search_inventory(
         db, household_id, category_id=filters.category_id, name=filters.category_name
     )
     if filters.category_id and category is None:
-        return [], 0
+        return None
     if category is not None:
         conditions.append(Item.category_id == category.id)
     if filters.tag:
@@ -467,6 +511,22 @@ def search_inventory(
                 Item.warranty.has(and_(Warranty.end_date.is_not(None), Warranty.end_date >= today))
             )
 
+    return conditions
+
+
+def search_inventory(
+    db: Session,
+    household_id: uuid.UUID,
+    filters: NaturalSearchFilters,
+    *,
+    household_reminder_days: int,
+    limit: int = 30,
+) -> tuple[list[Item], int]:
+    conditions = _inventory_conditions(
+        db, household_id, filters, household_reminder_days=household_reminder_days
+    )
+    if conditions is None:
+        return [], 0
     total = int(db.scalar(select(func.count(Item.id)).where(*conditions)) or 0)
     query = (
         select(Item)
@@ -481,6 +541,29 @@ def search_inventory(
         "relevance": [Item.updated_at.desc()],
     }[filters.sort]
     return list(db.scalars(query.order_by(*ordering).limit(limit)).all()), total
+
+
+def inventory_totals(
+    db: Session,
+    household_id: uuid.UUID,
+    filters: NaturalSearchFilters,
+    *,
+    household_reminder_days: int,
+) -> tuple[int, int]:
+    """Exact matching record and unit totals, independent of any display cap."""
+
+    conditions = _inventory_conditions(
+        db, household_id, filters, household_reminder_days=household_reminder_days
+    )
+    if conditions is None:
+        return 0, 0
+    row = db.execute(
+        select(
+            func.count(Item.id),
+            func.coalesce(func.sum(Item.quantity), 0),
+        ).where(*conditions)
+    ).one()
+    return int(row[0] or 0), int(row[1] or 0)
 
 
 def _add_item(items: list[ItemSummary], seen: set[uuid.UUID], item: Item, reminder: int) -> None:
@@ -523,16 +606,26 @@ def tool_search_items(
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days
     )
-    quantity_total = sum(item.quantity for item in summaries)
-    if not summaries:
-        summary = "No matching inventory items were found."
+    exact_total, quantity_total = inventory_totals(
+        db, household_id, filters, household_reminder_days=household_reminder_days
+    )
+    total = max(total, exact_total)
+    borrowed_matches = borrowed_service.matching_records(
+        db,
+        household_id,
+        q=filters.q or "",
+        limit=8,
+        property_id=filters.property_id,
+    )
+    if not summaries and not borrowed_matches:
+        summary = "No matching inventory items or borrowed records were found."
     elif len(summaries) == 1:
         item = summaries[0]
         place = item.room.name if item.room else "no room recorded"
         if item.location:
             place += f" / {_location_display(item.location)}"
         summary = (
-            f"Found 1 item: {item.name} "
+            f"Found 1 owned item: {item.name} "
             f"({item.quantity} {'unit' if item.quantity == 1 else 'units'}). "
             f"Location: {place}. "
             f"Purchase information: {item.purchase_info_status.replace('_', ' ')}."
@@ -544,20 +637,31 @@ def tool_search_items(
             )
     else:
         summary = (
-            f"Found {total} matching items with {quantity_total} units recorded. "
+            f"Found {total} matching owned items with {quantity_total} units recorded. "
             f"The first {min(total, len(summaries))} are listed."
         )
+    if borrowed_matches:
+        summary += (
+            f" Also found {len(borrowed_matches)} borrowed record(s); these are held "
+            "from other owners and are not part of owned stock."
+        )
     references = [_item_reference(item) for item in summaries]
+    references.extend(_borrowed_reference(record) for record in borrowed_matches)
     return ToolResult(
         tool="search_items",
         summary=summary,
         filters=filters.model_dump(mode="json", exclude_none=True),
         items=summaries,
+        borrowed=borrowed_matches,
         references=references,
         facts={
             "total": total,
             "quantity_total": quantity_total,
             "on_loan_quantity": sum(item.on_loan_quantity for item in summaries),
+            "borrowed_total": len(borrowed_matches),
+            "borrowed_outstanding_quantity": sum(
+                record.outstanding_quantity for record in borrowed_matches
+            ),
         },
     )
 
@@ -1076,16 +1180,29 @@ def tool_get_inventory_summary(
             )
             or 0
         )
+        borrowed = borrowed_service.borrowed_totals(db, household_id, property_id=property_id)
+        borrowed_sentence = (
+            f" Separately, {borrowed.outstanding_quantity} borrowed unit(s) are held "
+            f"here from {borrowed.open_count} external owner record(s); borrowed goods "
+            "are not included in owned item or value totals."
+            if borrowed.open_count
+            else ""
+        )
         return ToolResult(
             tool="get_inventory_summary",
             summary=(
                 f"This property has {item_count} active item records with "
                 f"{total_quantity} units. {on_loan} units are currently on loan."
+                f"{borrowed_sentence}"
             ),
             facts={
                 "item_count": item_count,
                 "total_quantity": total_quantity,
                 "on_loan_quantity": on_loan,
+                "borrowed_quantity": borrowed.total_borrowed_quantity,
+                "borrowed_outstanding_quantity": borrowed.outstanding_quantity,
+                "borrowed_returned_quantity": borrowed.returned_quantity,
+                "borrowed_physically_held_quantity": borrowed.physically_held_quantity,
                 "items_missing_purchase_count": 0,
                 "warranties": {"active": 0, "expiring": 0, "expired": 0},
                 "property_id": str(property_id),
@@ -1119,10 +1236,15 @@ def tool_get_inventory_summary(
         )
         or 0
     )
+    borrowed = borrowed_service.borrowed_totals(db, household_id)
     facts = {
         "item_count": financial.item_count,
         "total_quantity": total_quantity,
         "on_loan_quantity": on_loan,
+        "borrowed_quantity": borrowed.total_borrowed_quantity,
+        "borrowed_outstanding_quantity": borrowed.outstanding_quantity,
+        "borrowed_returned_quantity": borrowed.returned_quantity,
+        "borrowed_physically_held_quantity": borrowed.physically_held_quantity,
         "currency_totals": [entry.model_dump(mode="json") for entry in financial.currency_totals],
         "items_missing_purchase_count": financial.items_missing_purchase_count,
         "warranties": {
@@ -1131,6 +1253,13 @@ def tool_get_inventory_summary(
             "expired": warranties.expired_count,
         },
     }
+    borrowed_sentence = (
+        f" Separately, {borrowed.outstanding_quantity} borrowed unit(s) are held here "
+        f"from {borrowed.open_count} external owner record(s); borrowed goods are not "
+        "included in owned item or value totals."
+        if borrowed.open_count
+        else ""
+    )
     summary = (
         f"There are {financial.item_count} active item records with {total_quantity} units. "
         f"{on_loan} units are currently on loan. "
@@ -1138,12 +1267,129 @@ def tool_get_inventory_summary(
         f"purchase information. "
         f"Warranties: {warranties.active_count} active, {warranties.expiring_count} expiring soon, "
         f"{warranties.expired_count} expired."
+        f"{borrowed_sentence}"
     )
     return ToolResult(
         tool="get_inventory_summary",
         summary=summary,
         facts=facts,
         items=[entry.item for entry in financial.most_valuable_items[:5]],
+    )
+
+
+def tool_list_borrowed_items(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    del household_reminder_days
+    today = date.today()
+    result = borrowed_service.list_records(
+        db,
+        household_id,
+        status="open",
+        property_id=args.get("property_id"),
+        on_date=today,
+        limit=50,
+        offset=0,
+    )
+    records = result.items
+    if not records:
+        summary = "No items are currently recorded as borrowed from others."
+    else:
+        summary = (
+            f"{result.open_count} borrowed record(s), {result.outstanding_quantity} "
+            f"unit(s) held here and {result.returned_quantity} unit(s) returned so far"
+            f"{f', {result.overdue_count} past due' if result.overdue_count else ''}. "
+            "These are owned by other people and are not part of household stock."
+        )
+    references = [_borrowed_reference(record) for record in records]
+    return ToolResult(
+        tool="list_borrowed_items",
+        summary=summary,
+        borrowed=records,
+        references=references,
+        facts={
+            "total": result.total,
+            "open_count": result.open_count,
+            "overdue_count": result.overdue_count,
+            "borrowed_quantity": result.total_borrowed_quantity,
+            "borrowed_outstanding_quantity": result.outstanding_quantity,
+            "borrowed_returned_quantity": result.returned_quantity,
+            "borrowed_physically_held_quantity": result.physically_held_quantity,
+            "borrowed": [record.model_dump(mode="json") for record in records],
+        },
+    )
+
+
+def tool_find_borrowed_owner(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    del household_reminder_days
+    raw = str(args.get("q") or args.get("item_name") or "").strip()
+    subject = clean_subject(raw) or raw
+    borrowed_matches = (
+        borrowed_service.matching_records(
+            db,
+            household_id,
+            q=subject,
+            limit=20,
+            property_id=args.get("property_id"),
+        )
+        if subject
+        else []
+    )
+    owned_matches = (
+        borrowed_service.find_owned_items_matching(db, household_id, subject, limit=5)
+        if subject
+        else []
+    )
+    filters = {"q": subject} if subject else {}
+    if borrowed_matches:
+        lines = [_borrowed_label(record) for record in borrowed_matches[:8]]
+        summary = (
+            f"I found {len(borrowed_matches)} borrowed record(s) matching "
+            f"“{subject}”: " + "; ".join(lines) + "."
+        )
+        if owned_matches:
+            summary += (
+                " The household also owns item record(s) with a similar name; "
+                "those are separate from the borrowed goods."
+            )
+    elif owned_matches:
+        names = ", ".join(item.name for item in owned_matches)
+        summary = (
+            f"{names} is recorded as household-owned inventory. No borrowed record "
+            "lists another owner for that item."
+        )
+    else:
+        summary = (
+            f"I couldn't find an owned item or borrowed record matching "
+            f"“{subject or 'that item'}” in this household."
+        )
+    references = [_borrowed_reference(record) for record in borrowed_matches]
+    owned_summaries = [item_summary(item, household_reminder_days=0) for item in owned_matches]
+    references.extend(_item_reference(item) for item in owned_summaries)
+    return ToolResult(
+        tool="find_borrowed_owner",
+        summary=summary,
+        filters=filters,
+        items=owned_summaries,
+        borrowed=borrowed_matches,
+        references=references,
+        facts={
+            "total": len(borrowed_matches) + len(owned_matches),
+            "borrowed_total": len(borrowed_matches),
+            "owned_item_total": len(owned_matches),
+            "borrowed": [record.model_dump(mode="json") for record in borrowed_matches],
+            "owned_items": [item.model_dump(mode="json") for item in owned_summaries],
+        },
     )
 
 
@@ -1434,12 +1680,44 @@ def tool_locate_item(
         candidates = _locate_candidates(
             db, household_id, query, property_id=args.get("property_id")
         )
+    borrowed_matches = (
+        borrowed_service.matching_records(
+            db,
+            household_id,
+            q=query,
+            limit=8,
+            property_id=args.get("property_id"),
+        )
+        if query
+        else []
+    )
     if not candidates:
+        if borrowed_matches:
+            summary = (
+                f"I didn't find an owned item matching “{query}”, but this is recorded "
+                "as borrowed: "
+                + "; ".join(_borrowed_label(record) for record in borrowed_matches[:8])
+                + ". Borrowed goods are kept here but owned by someone else."
+            )
+            return ToolResult(
+                tool="locate_item",
+                summary=summary,
+                filters={"q": query},
+                borrowed=borrowed_matches,
+                references=[_borrowed_reference(record) for record in borrowed_matches],
+                facts={
+                    "total": 0,
+                    "ambiguous": False,
+                    "whereabouts": None,
+                    "borrowed_total": len(borrowed_matches),
+                    "borrowed": [record.model_dump(mode="json") for record in borrowed_matches],
+                },
+            )
         return ToolResult(
             tool="locate_item",
             summary=(
                 f"I couldn't find an item matching “{query or 'that description'}” "
-                "in this household."
+                "in this household, including borrowed records."
                 if query
                 else "Tell me the item name to look up its recorded whereabouts."
             ),
@@ -1457,19 +1735,28 @@ def tool_locate_item(
             for item in summaries[:6]
         )
         summary = (
-            f"I found {len(candidates)} items that could match “{query}”: {names}. "
+            f"I found {len(candidates)} owned items that could match “{query}”: {names}. "
             "Which one did you mean?"
         )
+        if borrowed_matches:
+            summary += (
+                " Borrowed records also match and are listed separately: "
+                + "; ".join(_borrowed_label(record) for record in borrowed_matches[:4])
+                + "."
+            )
         return ToolResult(
             tool="locate_item",
             summary=summary,
             filters={"q": query},
             items=summaries,
-            references=[_item_reference(item) for item in summaries],
+            borrowed=borrowed_matches,
+            references=[_item_reference(item) for item in summaries]
+            + [_borrowed_reference(record) for record in borrowed_matches],
             facts={
                 "total": len(candidates),
                 "ambiguous": True,
                 "whereabouts": None,
+                "borrowed_total": len(borrowed_matches),
             },
         )
 
@@ -1498,6 +1785,12 @@ def tool_locate_item(
         home=home,
         open_loans=open_loans,
     )
+    if borrowed_matches:
+        summary += (
+            " Separately, these borrowed records also match: "
+            + "; ".join(_borrowed_label(record) for record in borrowed_matches[:4])
+            + ". Borrowed goods are not owned stock."
+        )
     references = [_item_reference(item)]
     references.extend(
         AssistantReference(
@@ -1512,15 +1805,18 @@ def tool_locate_item(
         )
         for loan in open_loans
     )
+    references.extend(_borrowed_reference(record) for record in borrowed_matches)
     return ToolResult(
         tool="locate_item",
         summary=summary,
         filters={"q": query} if query else {},
         items=summaries,
+        borrowed=borrowed_matches,
         references=references,
         facts={
             "total": 1,
             "ambiguous": False,
+            "borrowed_total": len(borrowed_matches),
             "whereabouts": {
                 "item_id": str(item.id),
                 "item_name": item.name,
@@ -1561,10 +1857,16 @@ def tool_count_items(
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days
     )
-    quantity_total = sum(item.quantity for item in summaries)
+    exact_total, quantity_total = inventory_totals(
+        db, household_id, filters, household_reminder_days=household_reminder_days
+    )
+    total = max(total, exact_total)
     on_loan = sum(item.on_loan_quantity for item in summaries)
+    borrowed_matches = borrowed_service.matching_records(
+        db, household_id, q=subject, limit=8, property_id=filters.property_id
+    )
     if total == 0:
-        summary = f"No items matching “{subject}” were found in this household."
+        summary = f"No owned items matching “{subject}” were found in this household."
     elif total == 1:
         item = summaries[0]
         summary = (
@@ -1575,20 +1877,32 @@ def tool_count_items(
             summary += f" {item.on_loan_quantity} are currently on loan."
     else:
         summary = (
-            f"You have {quantity_total} units across {total} matching item records for “{subject}”."
+            f"You own {quantity_total} units across {total} matching item records for “{subject}”."
         )
         if on_loan:
             summary += f" {on_loan} units are currently on loan."
+    if borrowed_matches:
+        held = sum(record.outstanding_quantity for record in borrowed_matches)
+        summary += (
+            f" Separately, {held} borrowed unit(s) match “{subject}” across "
+            f"{len(borrowed_matches)} record(s); borrowed goods are not owned stock."
+        )
     return ToolResult(
         tool="count_items",
         summary=summary,
         filters=filters.model_dump(mode="json", exclude_none=True),
         items=summaries,
-        references=[_item_reference(item) for item in summaries],
+        borrowed=borrowed_matches,
+        references=[_item_reference(item) for item in summaries]
+        + [_borrowed_reference(record) for record in borrowed_matches],
         facts={
             "total": total,
             "quantity_total": quantity_total,
             "on_loan_quantity": on_loan,
+            "borrowed_total": len(borrowed_matches),
+            "borrowed_outstanding_quantity": sum(
+                record.outstanding_quantity for record in borrowed_matches
+            ),
             "subject": subject,
         },
     )
@@ -1634,6 +1948,12 @@ def execute_tool(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "list_outstanding_loans": lambda: tool_list_outstanding_loans(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "list_borrowed_items": lambda: tool_list_borrowed_items(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "find_borrowed_owner": lambda: tool_find_borrowed_owner(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "locate_item": lambda: tool_locate_item(

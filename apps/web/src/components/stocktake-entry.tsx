@@ -160,6 +160,10 @@ export function StocktakeEntry({
             never marked missing.
           </p>
         )}
+        <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+          Borrowed-from-others records are kept separate and are never added to owned
+          stocktake quantities.
+        </p>
       </section>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>

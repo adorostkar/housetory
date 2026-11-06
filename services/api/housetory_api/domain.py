@@ -231,6 +231,12 @@ class ActivityAction(StrEnum):
     CONTAINER_MOVE_UNDONE = "container.move_undone"
     LOAN_CREATION_UNDONE = "loan.creation_undone"
     LOAN_RETURN_UNDONE = "loan.return_undone"
+    BORROWED_CREATED = "borrowed.created"
+    BORROWED_RETURNED = "borrowed.returned"
+    BORROWED_CORRECTED = "borrowed.corrected"
+    BORROWED_CANCELLED = "borrowed.cancelled"
+    BORROWED_PHOTO_UPDATED = "borrowed.photo_updated"
+    BORROWED_PHOTO_REMOVED = "borrowed.photo_removed"
     STOCKTAKE_QUANTITY_CORRECTED = "stocktake.quantity_corrected"
     ROOM_MOVED = "room.moved"
 

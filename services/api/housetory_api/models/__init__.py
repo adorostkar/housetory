@@ -8,6 +8,7 @@ from .auth import (
     User,
 )
 from .base import Base
+from .borrowed import BorrowedPhoto, BorrowedRecord, BorrowedReturn
 from .exports import InventoryEvidenceExport
 from .intelligence import (
     AiProvider,
@@ -59,6 +60,9 @@ __all__ = [
     "ActivityEvent",
     "AuthSession",
     "Base",
+    "BorrowedPhoto",
+    "BorrowedRecord",
+    "BorrowedReturn",
     "Category",
     "CustomFieldDefinition",
     "Document",

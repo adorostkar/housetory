@@ -174,6 +174,18 @@ Tailscale is optional.
   [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md),
   [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md) and
   [`docs/LOANS_USABILITY.md`](docs/LOANS_USABILITY.md).
+- **Borrowed from others, kept separate from owned stock**: record possessions
+  temporarily held from an external owner with item/brand/model, quantity, owner
+  display name, borrowed/due dates, keeping property/room/container, optional
+  private notes and one private actual photo. One mixed Loans list uses protected
+  **Lent out** / **Borrowed** direction badges and All / Lent out / Borrowed
+  filters, with distinct Record return and Return to owner actions. Partial
+  returns, corrections, cancellation, request-id/payload binding, concurrency
+  guards and append-only history are supported. Borrowed quantities never enter
+  owned counts, values, evidence, search-as-owned results or stocktake. Search and
+  the deterministic assistant label them with owner/place/due-date wording, and
+  answer “What do I need to return?” and “Who owns X?” without AI. No owner
+  accounts, emails or reminders. See [`docs/BORROWED_ITEMS.md`](docs/BORROWED_ITEMS.md).
 - **Household movement and lending history**: item/container moves, inherited
   container moves, loans, returns, corrections and cancellation are recorded with
   actor and preserved name snapshots. Supported moves and lending actions offer a
@@ -256,7 +268,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 342 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 349 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -266,7 +278,10 @@ stack, not just unit mocks:
   duplicate resolution/split/idempotent confirmation, OpenAI/Gemini/OpenRouter
   transcription adapters, OpenRouter image-output adapter, task-specific
   capability contracts, unverified exact-ID paths, bounded task tests, worker
-  heartbeat/status scoping, audio validation and cleanup, lending quantities/concurrency/returns/
+  heartbeat/status scoping, borrowed-record quantities/partial returns/corrections/
+  cancellation/idempotency/concurrency/history, private borrowed photos, role and
+  cross-household IDOR checks, search/assistant borrowed totals and owned-vs-borrowed
+  exclusion from reports/stocktake, audio validation and cleanup, lending quantities/concurrency/returns/
   retries, item and container history snapshots, safe undo and quantity/archive/
   delete guards, atomic bulk move/tag/category batches, batch replay/idempotency,
   per-item bulk-move undo, private document scan crop/perspective/rotation/
@@ -310,8 +325,8 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 153 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 46 checked-in Playwright workflows pass on disposable Compose stacks, covering
+- 157 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 51 checked-in Playwright workflows pass on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -339,9 +354,11 @@ stack, not just unit mocks:
   a disposable OpenRouter fixture covering capability-filtered voice/image task
   configuration, mocked STT transcription, image preview/accept and provider
   error handling, release search query/example/submit regression, system status
-  build identity/jobs/task states and compact unavailable-feature states. The
-  isolated offline stack additionally passed 31 core workflows plus a zero-external-
-  browser-request audit with API/worker outbound TCP and HTTPS blocked; see
+  build identity/jobs/task states, compact unavailable-feature states, and the
+  borrowed-from-others create → mixed filters → partial return → refresh → private
+  photo → remaining return → viewer read-only workflow. The isolated offline stack
+  additionally passed 34 core workflows plus a zero-external-browser-request audit
+  with API/worker outbound TCP and HTTPS blocked; see
   [`docs/OFFLINE_ACCEPTANCE.md`](docs/OFFLINE_ACCEPTANCE.md).
 - `docker compose up --build` brings all services healthy; the worker processed
   real queued maintenance, OCR, import and recognition jobs.

@@ -54,6 +54,11 @@ const LoanDetailPage = React.lazy(() =>
     default: module.LoanDetailPage,
   })),
 );
+const BorrowedDetailPage = React.lazy(() =>
+  import("@/pages/borrowed-detail-page").then((module) => ({
+    default: module.BorrowedDetailPage,
+  })),
+);
 const ItemNewPage = React.lazy(() =>
   import("@/pages/item-form-pages").then((module) => ({ default: module.ItemNewPage })),
 );
@@ -285,6 +290,7 @@ export default function App() {
             <Route path="items/:itemId" element={<ItemDetailPage />} />
             <Route path="loans" element={<LoansPage />} />
             <Route path="loans/:loanId" element={<LoanDetailPage />} />
+            <Route path="borrowed/:borrowedId" element={<BorrowedDetailPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/:documentId" element={<DocumentDetailPage />} />
             <Route path="purchases" element={<PurchasesPage />} />

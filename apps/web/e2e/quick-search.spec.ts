@@ -152,7 +152,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   await expect(
     panel.getByRole("option", { name: new RegExp(`Camera ${suffix}`) }),
   ).toBeVisible();
-  await expect(panel.getByText("Items", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Owned items", { exact: true })).toBeVisible();
   await expect(panel.getByText(room.name, { exact: false })).toBeVisible();
 
   await page.keyboard.press("ArrowDown");

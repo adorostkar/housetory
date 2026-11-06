@@ -32,6 +32,7 @@ from ..schemas.search import (
     SearchScopeList,
 )
 from . import auth as auth_service
+from . import borrowed as borrowed_service
 from .ai_tools import _summaries_with_paths, search_inventory
 from .container_serializers import location_path_map
 from .hierarchy import descendant_ids
@@ -234,6 +235,24 @@ def _item_subtitle(item: Item) -> str | None:
     return None
 
 
+def _borrowed_context(record) -> str | None:  # noqa: ANN001
+    parts = [
+        record.property_name,
+        record.room_name,
+        (
+            f"{record.storage_location_identifier} · {record.storage_location_name}"
+            if record.storage_location_identifier
+            and record.storage_location_name
+            and record.storage_location_identifier != record.storage_location_name
+            else record.storage_location_identifier or record.storage_location_name
+        ),
+    ]
+    labels = [part for part in parts if part]
+    if record.due_on is not None:
+        labels.append(f"due {record.due_on.isoformat()}")
+    return " · ".join(labels) if labels else None
+
+
 def _quick_household(
     db: Session,
     household: Household,
@@ -243,7 +262,12 @@ def _quick_household(
     effective_term: str,
     patterns: list[str],
     limit: int,
-) -> tuple[list[QuickSearchResult], list[QuickSearchResult], list[QuickSearchResult]]:
+) -> tuple[
+    list[QuickSearchResult],
+    list[QuickSearchResult],
+    list[QuickSearchResult],
+    list[QuickSearchResult],
+]:
     household_id = household.id
     property_room_ids: set[uuid.UUID] | None = None
     property_location_ids: set[uuid.UUID] | None = None
@@ -446,7 +470,27 @@ def _quick_household(
                 household=_scope_household(household, role),
             )
         )
-    return item_results, container_results, location_results
+    borrowed_rows, _borrowed_total = borrowed_service.quick_search_records(
+        db,
+        household.id,
+        q=effective_term,
+        limit=limit,
+        property_id=property_id,
+    )
+    borrowed_results = [
+        QuickSearchResult(
+            id=record.id,
+            kind="borrowed",
+            title=record.item_name,
+            subtitle=f"Borrowed from {record.owner_name}"
+            + (f" · {record.brand} {record.model}".strip() if record.brand or record.model else ""),
+            context=_borrowed_context(record),
+            url=f"/borrowed/{record.id}",
+            household=_scope_household(household, role),
+        )
+        for record in borrowed_rows
+    ]
+    return item_results, borrowed_results, container_results, location_results
 
 
 def quick_search(
@@ -458,10 +502,16 @@ def quick_search(
 ) -> tuple[list[QuickSearchResult], list[str]]:
     patterns = _patterns(effective_term)
     items: list[QuickSearchResult] = []
+    borrowed: list[QuickSearchResult] = []
     containers: list[QuickSearchResult] = []
     locations: list[QuickSearchResult] = []
     for household, role in scope.households:
-        household_items, household_containers, household_locations = _quick_household(
+        (
+            household_items,
+            household_borrowed,
+            household_containers,
+            household_locations,
+        ) = _quick_household(
             db,
             household,
             role,
@@ -471,10 +521,16 @@ def quick_search(
             limit=limit,
         )
         items.extend(household_items)
+        borrowed.extend(household_borrowed)
         containers.extend(household_containers)
         locations.extend(household_locations)
     return (
-        [*items[:limit], *containers[:limit], *locations[:limit]],
+        [
+            *items[:limit],
+            *borrowed[:limit],
+            *containers[:limit],
+            *locations[:limit],
+        ],
         scope.notices,
     )
 
@@ -509,7 +565,9 @@ def search_items(
             "Narrow the scope or query.",
         )
     summaries: list[Any] = []
+    borrowed: list[Any] = []
     total = 0
+    borrowed_total = 0
     for household, _role in scope.households:
         filters = NaturalSearchFilters(
             q=(q or "").strip() or None,
@@ -532,6 +590,16 @@ def search_items(
                 household_reminder_days=household.warranty_reminder_days,
             )
         )
+        borrowed_rows, household_borrowed_total = borrowed_service.quick_search_records(
+            db,
+            household.id,
+            q=(q or "").strip(),
+            limit=limit if offset == 0 else 1,
+            property_id=scope.property.id if scope.property is not None else None,
+        )
+        if offset == 0:
+            borrowed.extend(borrowed_rows)
+        borrowed_total += household_borrowed_total
     ordered = _sort_summaries(summaries, sort)
     return (
         SearchItemList(
@@ -539,6 +607,8 @@ def search_items(
             total=total,
             limit=limit,
             offset=offset,
+            borrowed=borrowed[:limit],
+            borrowed_total=borrowed_total,
             scope_label=scope.label,
             households=scope_households(scope),
             property=scope_property(scope.property),

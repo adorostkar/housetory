@@ -2235,6 +2235,93 @@ complete and awaits final user review.
    - Preserve visual feel; verify mixed list readability, ownership distinctions,
      filters and partial returns using isolated local fixtures before acceptance.
 
+### Milestone 13 implemented — borrowed from others
+
+Worked on `codex/borrowed-items`, based on the unmerged release-stabilisation
+branch. Main was not merged or pushed and no server release was performed.
+
+#### Domain and accounting
+
+- [x] Added separate append-only tables `borrowed_records`, `borrowed_returns` and
+  `borrowed_photos` (migration `a1c3e5f7b9d2`). Borrowed possessions never create
+  fake `items` or `loans`; owned inventory, purchase/current value, insurance and
+  evidence totals are unchanged.
+- [x] A record stores item name, optional brand/model, quantity, owner display name,
+  borrowed date, optional due date, keeping property/room/container snapshots,
+  optional private notes and one private actual photo. No owner account, email,
+  contact or reminder exists.
+- [x] Totals are explicit and separate: total borrowed, returned, outstanding and
+  physically held. Partial returns are append-only; over-return, negative counts,
+  return-before-borrow and quantity-below-returned corrections are rejected.
+- [x] Corrections and cancellation append history. Cancellation is only allowed
+  before any return; records with return history cannot be erased or cancelled.
+- [x] Create/return/correct/cancel use request ids plus payload fingerprints, so a
+  replay returns the existing result but a reused id with different details gets
+  `409`. Borrowed rows are locked with `FOR UPDATE` for return/correct/cancel;
+  concurrent returns cannot over-return.
+
+#### Mixed Loans UI and keeping place
+
+- [x] One Loans list now shows protected **Lent out** and **Borrowed** direction
+  badges, person to/from, item, dates, outstanding quantities and subtle direction
+  colour, with All / Lent out / Borrowed and Outstanding / Returned / All filters.
+- [x] New loan first offers a compact choice: lend an owned item or borrow from
+  someone. The existing item-page Lend and Record return flows are unchanged.
+  Mixed rows use Record return for lent-out goods and Return to owner for borrowed
+  goods, with explicit partial-return dialogs.
+- [x] Borrowed create/detail/correct/cancel pages include item identity, owner,
+  keeping place, dates, private notes, actual photo, partial returns and
+  append-only history. Quantity and empty-state wording never claims everything is
+  home while borrowed units remain.
+- [x] Kitchen/room/container views keep owned counts unchanged and show a separate,
+  explicitly labelled “Borrowed items kept here” section when relevant. Evidence
+  and stocktake copy states that borrowed records and photos are excluded.
+- [x] Search and the deterministic assistant expose borrowed records as a distinct
+  kind with owner/place/due labels. “What do I need to return?” and “Who owns X?”
+  work without AI; owned “What is on loan?” answers remain about owned loans.
+  Borrowed and owned items with the same name are visibly distinguished.
+
+#### Privacy, roles and scope
+
+- [x] Borrowed photos use the existing bounded image normalization and private
+  file storage, render only through authenticated household-scoped endpoints,
+  return no-store cache headers, and are excluded from item photos, evidence
+  packages and search results.
+- [x] Every record/return/history/reference/photo query is household-scoped.
+  Cross-household room/container/property ids are rejected; viewers read only.
+  Existing stale-context headers and revocation behavior remain in force. Private
+  notes and owner names are not written to logs.
+- [x] Search counts now report exact matching totals or explicitly capped first-N
+  results. A >limit regression covers 51 owned matches with a 50-item page plus
+  separate borrowed totals; borrowed units are never folded into owned counts.
+
+#### Verification
+
+- [x] **349** PostgreSQL backend tests pass, including borrowed create/partial
+  return/correction/cancel/history/replay/concurrency, role/IDOR/stale context,
+  private photos, owned-vs-borrowed reports/search/evidence/stocktake and the
+  existing lending/search regressions. Ruff and Alembic drift checks pass.
+- [x] **157** Vitest tests pass; strict TypeScript typecheck and production build
+  pass. New tests cover mixed direction badges/filters, borrowed create/return
+  dialogs, exact owned/borrowed search counts, quick-search grouping and viewer
+  restrictions.
+- [x] **51** normal Playwright workflows pass on a clean disposable stack, including
+  borrowed create → partial return → refresh → private photo → remaining return →
+  returned filter, mixed filters/direct actions, mobile and viewer behavior.
+- [x] The isolated no-AI/outbound-blocked stack passes **34** core workflows
+  (including the borrowed flow) plus the zero-external-browser-request audit.
+- [x] Before/after light/dark desktop/mobile screenshots are in
+  `docs/walkthrough/borrowed-items/`. Semantics, API and non-goals are documented
+  in `docs/BORROWED_ITEMS.md`.
+
+#### Local delivery and exclusions
+
+- [ ] Local Mac volumes backed up, append-only migration applied, and the real local
+  snapshot verified unchanged (apart from schema/tables).
+- [ ] No borrowed fixture was created in the real household, and no paid AI call,
+  email, credential, nginx/SMTP change, server release, main merge/push or arbitrary
+  Docker cleanup was performed.
+
 ### Release direction and offline requirement — 2026-11-06
 
 User accepts stabilisation/provider fixes, small live acceptance tests, borrowed
