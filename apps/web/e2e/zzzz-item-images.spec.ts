@@ -306,7 +306,7 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
 
   await page.goto(`/items/${item.item.id}`);
   await expect(
-    page.getByText("Set BRAVE_SEARCH_API_KEY to use reference-image search."),
+    page.getByText("Reference-image lookup is not configured."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Generate" }).click();
   await expect(page.getByText("AI illustration preview")).toBeVisible();

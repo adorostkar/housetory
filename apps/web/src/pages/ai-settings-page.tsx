@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Wifi,
 } from "lucide-react";
@@ -45,6 +46,7 @@ import type {
   AiProviderRecord,
   AiProviderTest,
   AiTaskSetting,
+  AiTaskTestResult,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -159,6 +161,7 @@ export function AiSettingsPage() {
   >({});
   const [tasks, setTasks] = React.useState<Record<string, AiTaskSetting>>({});
   const [catalogStale, setCatalogStale] = React.useState(false);
+  const [testTarget, setTestTarget] = React.useState<AiTaskSetting | null>(null);
 
   React.useEffect(() => {
     if (settings) {
@@ -171,6 +174,7 @@ export function AiSettingsPage() {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.aiSettings });
     void queryClient.invalidateQueries({ queryKey: queryKeys.aiStatus });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatus });
   };
 
   const openCreate = () => {
@@ -335,6 +339,17 @@ export function AiSettingsPage() {
       setTasks((current) => ({ ...current, [task.task]: task }));
       refresh();
       toast.success(`${TASK_LABELS[task.task] ?? task.task} updated`);
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const testTask = useMutation({
+    mutationFn: (task: string) =>
+      api.post<AiTaskTestResult>(`/ai/tasks/${task}/test`, { confirm: true }),
+    onSuccess: (result) => {
+      refresh();
+      if (result.status === "passed") toast.success(result.message);
+      else toast.error(result.message);
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -588,20 +603,33 @@ export function AiSettingsPage() {
                   : requiredCapability === "image"
                     ? ["image"]
                     : ["chat"];
+              const selectedTaskState =
+                selectedModel?.task_states?.[task.task];
               const selectedCompatible =
                 !selectedModel ||
-                !requiredCapability ||
-                (allowedKinds.includes(selectedModel.kind) &&
-                  selectedModel.capabilities.includes(requiredCapability));
+                (selectedTaskState
+                  ? selectedTaskState !== "incompatible" &&
+                    selectedTaskState !== "adapter_unavailable"
+                  : !requiredCapability ||
+                    (allowedKinds.includes(selectedModel.kind) &&
+                      selectedModel.capabilities.includes(requiredCapability)));
               const noCompatibleDiscovered = Boolean(
                 provider &&
                   providerModels.length > 0 &&
                   requiredCapability &&
-                  !providerModels.some(
-                    (model) =>
+                  !providerModels.some((model) => {
+                    const state = model.task_states?.[task.task];
+                    if (state) {
+                      return (
+                        state !== "incompatible" &&
+                        state !== "adapter_unavailable"
+                      );
+                    }
+                    return (
                       allowedKinds.includes(model.kind) &&
-                      model.capabilities.includes(requiredCapability),
-                  ),
+                      model.capabilities.includes(requiredCapability)
+                    );
+                  }),
               );
               return (
                 <div
@@ -616,6 +644,13 @@ export function AiSettingsPage() {
                           "Capabilities need verification"
                         : "Disabled"}
                     </p>
+                    {task.model && !selectedModel ? (
+                      <p className="mt-0.5 text-[0.62rem] leading-relaxed text-brass">
+                        Saved ID is not in the provider catalog. It is not rewritten
+                        automatically; choose a discovered model or run Test model to
+                        verify the exact ID.
+                      </p>
+                    ) : null}
                   </div>
                   <Select
                     aria-label={`${TASK_LABELS[task.task]} provider`}
@@ -657,6 +692,7 @@ export function AiSettingsPage() {
                       models={providerModels}
                       disabled={!provider}
                       requiredCapability={requiredCapability}
+                      taskKey={task.task}
                       loading={providerModelStatus?.loading}
                       error={providerModelStatus?.error}
                       cached={providerModelStatus?.cached}
@@ -722,6 +758,20 @@ export function AiSettingsPage() {
                     >
                       {saveTask.isPending ? <Spinner /> : <Check />}
                       Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={
+                        testTask.isPending ||
+                        !task.enabled ||
+                        !task.provider_id ||
+                        !task.model
+                      }
+                      onClick={() => setTestTarget(task)}
+                    >
+                      {testTask.isPending ? <Spinner /> : <Sparkles />}
+                      Test
                     </Button>
                   </div>
                 </div>
@@ -988,6 +1038,26 @@ export function AiSettingsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(testTarget)}
+        onOpenChange={(open) => {
+          if (!open) setTestTarget(null);
+        }}
+        title="Run a live task test?"
+        description={
+          testTarget
+            ? `This sends one minimal synthetic request to ${
+                testTarget.provider_label ?? "the selected provider"
+              } using ${testTarget.model ?? "the selected model"}. It may incur provider usage or cost. It does not use household inventory, documents, audio, borrower data or notes. Image tests may generate one small test image; transcription tests use a synthetic tone.`
+            : ""
+        }
+        confirmLabel="Run test"
+        onConfirm={async () => {
+          if (!testTarget) return;
+          await testTask.mutateAsync(testTarget.task);
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

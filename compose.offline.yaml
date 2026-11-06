@@ -1,0 +1,34 @@
+# Isolated release-acceptance stack: API/database/worker have no Internet route.
+# The browser reaches nginx over the default network; the web container also joins
+# the internal network so it can proxy /api to the API. Disposable volumes only.
+services:
+  db:
+    networks:
+      - core_internal
+  migrate:
+    networks:
+      - core_internal
+  api:
+    networks:
+      - core_internal
+  worker:
+    networks:
+      - core_internal
+  web:
+    networks:
+      - core_internal
+      - default
+
+networks:
+  core_internal:
+    internal: true
+
+volumes:
+  housetory_pgdata:
+    name: housetory_offline_pgdata
+  housetory_uploads:
+    name: housetory_offline_uploads
+  housetory_imports:
+    name: housetory_offline_imports
+  housetory_exports:
+    name: housetory_offline_exports

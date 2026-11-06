@@ -356,27 +356,30 @@ export function VoicePage() {
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
-          {!noteId && (
-            <Recorder
-              config={voiceConfig.data}
-              transcriptionReady={transcriptionReady}
-              transcriptionStatus={transcriptionStatus.data}
-              uploadPending={upload.isPending}
-              properties={properties}
-              propertyId={propertyId}
-              onPropertyChange={changeProperty}
-              rooms={rooms}
-              defaultRoomId={defaultRoomId}
-              defaultLocationId={defaultLocationId}
-              defaultLocations={defaultLocations}
-              onDefaultRoomChange={(roomId) => {
-                setDefaultRoomId(roomId);
-                setDefaultLocationId("");
-              }}
-              onDefaultLocationChange={setDefaultLocationId}
-              onUpload={(file, duration) => upload.mutate({ file, duration })}
-            />
-          )}
+          {!noteId &&
+            (transcriptionReady ? (
+              <Recorder
+                config={voiceConfig.data}
+                transcriptionReady={transcriptionReady}
+                transcriptionStatus={transcriptionStatus.data}
+                uploadPending={upload.isPending}
+                properties={properties}
+                propertyId={propertyId}
+                onPropertyChange={changeProperty}
+                rooms={rooms}
+                defaultRoomId={defaultRoomId}
+                defaultLocationId={defaultLocationId}
+                defaultLocations={defaultLocations}
+                onDefaultRoomChange={(roomId) => {
+                  setDefaultRoomId(roomId);
+                  setDefaultLocationId("");
+                }}
+                onDefaultLocationChange={setDefaultLocationId}
+                onUpload={(file, duration) => upload.mutate({ file, duration })}
+              />
+            ) : (
+              <VoiceSetup status={transcriptionStatus.data} />
+            ))}
 
           {note && (
             <>
@@ -706,19 +709,6 @@ export function VoicePage() {
             </p>
           </section>
 
-          {!transcriptionReady && !transcriptionStatus.isPending && (
-            <section className="surface border-brass/25 p-5 text-[0.75rem] leading-relaxed text-muted-foreground">
-              <p className="font-medium text-foreground/85">Voice transcription is not configured.</p>
-              <p className="mt-2">
-                {transcriptionStatus.data?.error ??
-                  "Choose OpenAI audio transcriptions or Google Gemini audio input for the Voice transcription task."}
-              </p>
-              <Button className="mt-3" size="sm" variant="outline" asChild>
-                <Link to="/settings/ai">Configure AI providers</Link>
-              </Button>
-            </section>
-          )}
-
           <section className="surface p-5 text-[0.72rem] leading-relaxed text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground/80">
               <Sparkles className="size-3.5 text-brass" /> Supported audio
@@ -733,6 +723,39 @@ export function VoicePage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function VoiceSetup({
+  status,
+}: {
+  status: ReturnType<typeof useAiStatus>["data"];
+}) {
+  return (
+    <section className="surface p-5 sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-brass-soft text-brass">
+          <Mic className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-[1.4rem] tracking-[-0.02em]">
+            Voice transcription is not set up
+          </h2>
+          <p className="mt-1 max-w-xl text-[0.76rem] leading-relaxed text-muted-foreground">
+            {status?.error ??
+              "Choose a transcription-capable provider and model in AI settings to record or upload a voice note."}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" asChild>
+              <Link to="/settings/ai">Configure voice transcription</Link>
+            </Button>
+            <span className="text-[0.68rem] text-muted-foreground">
+              Manual entry, search, photos, documents and imports continue to work.
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1123,15 +1146,6 @@ function Recorder({
         </p>
       </div>
 
-      {!transcriptionReady && (
-        <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-[0.73rem] leading-relaxed text-muted-foreground">
-          Voice recording and upload stay disabled until a transcription task is configured.{" "}
-          <Link to="/settings/ai" className="font-medium text-foreground underline underline-offset-4">
-            Configure AI providers
-          </Link>
-          . Existing inventory and manual entry continue to work.
-        </p>
-      )}
     </section>
   );
 }

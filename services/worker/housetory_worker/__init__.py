@@ -10,8 +10,10 @@ import os
 import socket
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
+from housetory_api import __version__
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.domain import JobStatus
@@ -23,7 +25,7 @@ from housetory_api.jobs import (
     mark_succeeded,
     requeue_stale_jobs,
 )
-from housetory_api.models import AuthSession, Job
+from housetory_api.models import AuthSession, Job, WorkerHeartbeat
 from housetory_api.services.document_ocr import OCR_TASK
 from housetory_api.services.document_ocr import run_job as run_document_ocr
 from housetory_api.services.evidence_export import (
@@ -92,6 +94,19 @@ def _heartbeat() -> None:
     HEARTBEAT_FILE.write_text(
         json.dumps({"pid": os.getpid(), "time": time.time()}), encoding="utf-8"
     )
+
+
+def _record_worker_heartbeat(worker_id: str) -> None:
+    """Persist worker liveness for the owner-facing system status screen."""
+    with SessionLocal() as db:
+        row = db.get(WorkerHeartbeat, worker_id)
+        if row is None:
+            row = WorkerHeartbeat(worker_id=worker_id, version=__version__)
+            db.add(row)
+        else:
+            row.version = __version__
+            row.updated_at = datetime.now(UTC)
+        db.commit()
 
 
 def prune_expired_sessions(payload: dict) -> dict:
@@ -225,8 +240,10 @@ def run() -> None:
             logger.warning("Requeued %s stale job(s)", requeued)
     schedule_maintenance()
     _heartbeat()
+    _record_worker_heartbeat(worker_id)
 
     last_maintenance_check = time.monotonic()
+    last_db_heartbeat = time.monotonic()
     while True:
         try:
             job = None
@@ -239,6 +256,9 @@ def run() -> None:
             if time.monotonic() - last_maintenance_check > 60:
                 schedule_maintenance()
                 last_maintenance_check = time.monotonic()
+            if time.monotonic() - last_db_heartbeat > 15:
+                _record_worker_heartbeat(worker_id)
+                last_db_heartbeat = time.monotonic()
             _heartbeat()
         except KeyboardInterrupt:
             logger.info("Worker interrupted, shutting down")

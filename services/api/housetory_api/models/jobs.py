@@ -53,4 +53,16 @@ class Job(UUIDPrimaryKeyMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-__all__ = ["Job"]
+class WorkerHeartbeat(Base):
+    """Last known worker liveness record for the owner status screen."""
+
+    __tablename__ = "worker_heartbeats"
+
+    worker_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+__all__ = ["Job", "WorkerHeartbeat"]

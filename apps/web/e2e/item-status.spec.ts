@@ -70,8 +70,16 @@ async function createFixture(
   loans: Array<Record<string, unknown>>,
   options: { photo?: boolean } = {},
 ) {
+  const properties = (await (
+    await request.get("/api/v1/properties")
+  ).json()) as { items: Array<{ id: string }> };
   const room = (await (
-    await request.post("/api/v1/rooms", { data: { name: `Status room ${label}` } })
+    await request.post("/api/v1/rooms", {
+      data: {
+        name: `Status room ${label}`,
+        property_id: properties.items[0]?.id,
+      },
+    })
   ).json()) as { id: string };
   const box = (await (
     await request.post("/api/v1/containers", {

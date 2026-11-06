@@ -215,6 +215,31 @@ describe("AiSettingsPage", () => {
     );
   });
 
+  it("requires explicit confirmation before a live task test", async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      task: "assistant",
+      status: "passed",
+      message: "The model returned the expected structured test response.",
+      tested_at: "2026-11-06T12:00:00Z",
+      model: "gpt-4o",
+      provider_label: "OpenAI household",
+    });
+    renderPage();
+    const label = screen.getByText("General assistant");
+    const row = label.closest("div.grid") as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Test" }));
+    expect(
+      screen.getByRole("heading", { name: "Run a live task test?" }),
+    ).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Run test" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/ai/tasks/assistant/test", {
+        confirm: true,
+      }),
+    );
+  });
+
   it("saves a new provider, discovers models and chooses a default without a known ID", async () => {
     const created: AiProviderRecord = {
       ...settings.providers[0]!,

@@ -35,9 +35,13 @@ from .ai_runtime import (
     config_for_provider,
     endpoint_scope,
     model_capabilities,
-    model_supports_transcription,
-    provider_supports_transcription,
     resolve_config,
+)
+from .task_capabilities import (
+    adapter_gap_message,
+    model_task_state,
+    model_task_states,
+    provider_adapter_supported,
 )
 
 PROVIDER_LABELS = {
@@ -174,18 +178,39 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
             provider_id=None,
             provider_label=None,
             model=None,
+            model_label=None,
+            model_listed=False,
+            compatibility="not_configured",
             enabled=False,
             capabilities=[],
+            last_test_status=None,
+            last_test_at=None,
+            last_test_error=None,
             updated_at=None,
         )
     provider = db.get(AiProvider, setting.provider_id) if setting.provider_id else None
+    cached = _cached_model(provider, setting.model) if provider is not None else None
+    if provider is None:
+        compatibility = "not_configured"
+    elif cached is not None:
+        compatibility = model_task_state(provider.provider, task, cached)
+    elif provider_adapter_supported(provider.provider, task):
+        compatibility = "unverified"
+    else:
+        compatibility = "adapter_unavailable"
     return AiTaskSettingOut(
         task=task,
         provider_id=setting.provider_id,
         provider_label=provider.display_name if provider else None,
         model=setting.model,
+        model_label=cached.display_name if cached is not None else None,
+        model_listed=cached is not None,
+        compatibility=compatibility,
         enabled=setting.enabled,
         capabilities=(_capabilities_for(provider, setting.model) if provider else []),
+        last_test_status=setting.last_test_status,
+        last_test_at=setting.last_test_at,
+        last_test_error=setting.last_test_error,
         updated_at=setting.updated_at,
     )
 
@@ -359,80 +384,30 @@ def update_task(
                 "model_required",
                 "Choose a model for this task.",
             )
-        if task == AiTask.TRANSCRIPTION.value:
-            if not provider_supports_transcription(provider.provider):
-                raise ApiError(
-                    422,
-                    "transcription_provider_unsupported",
-                    "Choose OpenAI, OpenRouter or Google Gemini for audio transcription.",
-                )
-            if provider.provider == AiProviderType.OPENROUTER.value:
-                cached = _cached_model(provider, selected_model)
-                capabilities = (
-                    list(cached.capabilities)
-                    if cached is not None
-                    else model_capabilities(provider.provider, selected_model)
-                )
-                if cached is not None and cached.kind not in {"speech", "chat"}:
-                    raise ApiError(
-                        422,
-                        "transcription_model_unsupported",
-                        "The selected OpenRouter catalog model is not a speech-to-text "
-                        "or audio-input chat model.",
-                    )
-                if "audio" not in capabilities:
-                    raise ApiError(
-                        422,
-                        "transcription_model_unsupported",
-                        "The selected OpenRouter model does not advertise STT or audio "
-                        "input. Discover models and choose one with audio capability.",
-                    )
-            elif not model_supports_transcription(provider.provider, selected_model):
-                raise ApiError(
-                    422,
-                    "transcription_model_unsupported",
-                    "Choose an OpenAI whisper/transcription model or a Gemini audio model.",
-                )
-        elif task == AiTask.ITEM_IMAGES.value:
-            if provider.provider not in {
-                AiProviderType.OPENAI.value,
-                AiProviderType.OPENROUTER.value,
-            }:
-                raise ApiError(
-                    422,
-                    "illustration_provider_unsupported",
-                    "Item illustration generation supports the OpenAI Images API and "
-                    "OpenRouter Image API.",
-                )
-            cached = _cached_model(provider, selected_model)
-            capabilities = (
-                list(cached.capabilities)
-                if cached is not None
-                else model_capabilities(provider.provider, selected_model)
+        cached = _cached_model(provider, selected_model)
+        state = (
+            model_task_state(provider.provider, task, cached)
+            if cached is not None
+            else (
+                "unverified"
+                if provider_adapter_supported(provider.provider, task)
+                else "adapter_unavailable"
             )
-            if "image" not in capabilities:
-                raise ApiError(
-                    422,
-                    "model_capability_mismatch",
-                    "The selected model does not advertise image output. Discover "
-                    "models and choose an image-capable model.",
-                )
-        else:
-            cached_model = _cached_model(provider, selected_model)
-            capabilities = _capabilities_for(provider, selected_model)
-            if cached_model is not None and cached_model.kind != "chat":
-                raise ApiError(
-                    422,
-                    "model_not_chat_capable",
-                    "The selected catalog model is not a chat/completion model.",
-                )
-            if TASK_CAPABILITY[task] not in capabilities:
-                raise ApiError(
-                    422,
-                    "model_capability_mismatch",
-                    "The selected model does not advertise the "
-                    f"{TASK_CAPABILITY[task]} capability.",
-                )
+        )
+        if state == "adapter_unavailable":
+            raise ApiError(
+                422,
+                "task_adapter_unavailable",
+                adapter_gap_message(task),
+            )
+        if state == "incompatible":
+            raise ApiError(
+                422,
+                "model_capability_mismatch",
+                "The selected model is confirmed incompatible with this task's "
+                "implemented API/input/output requirements. Choose a compatible model "
+                "or refresh discovery.",
+            )
     setting = db.scalar(
         select(AiTaskSetting).where(
             AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
@@ -481,6 +456,7 @@ def provider_models(
             input_modalities=list(model.input_modalities),
             output_modalities=list(model.output_modalities),
             endpoints=list(model.endpoints),
+            task_states=model_task_states(config.provider, model),
         )
         for model in discovered
     ]

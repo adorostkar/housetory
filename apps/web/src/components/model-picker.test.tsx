@@ -55,6 +55,7 @@ const catalog: AiProviderModel[] = [
 function Harness({
   initial = "",
   requiredCapability,
+  taskKey,
   models = catalog,
   loading = false,
   error = null,
@@ -63,6 +64,7 @@ function Harness({
 }: {
   initial?: string;
   requiredCapability?: string;
+  taskKey?: string;
   models?: AiProviderModel[];
   loading?: boolean;
   error?: string | null;
@@ -78,6 +80,7 @@ function Harness({
         value={value}
         models={models}
         requiredCapability={requiredCapability}
+        taskKey={taskKey}
         loading={loading}
         error={error}
         onChange={setValue}
@@ -145,9 +148,47 @@ describe("ModelPicker", () => {
     expect(screen.queryByText("Text Only")).not.toBeInTheDocument();
   });
 
+  it("shows suggested, compatible and unverified task states without hiding unknown models", async () => {
+    const taskModels = [
+      model({
+        id: "verified-model",
+        display_name: "Verified Model",
+        capability_source: "provider_metadata",
+        task_states: { assistant: "compatible" },
+      }),
+      model({
+        id: "unverified-model",
+        display_name: "Unverified Model",
+        task_states: { assistant: "unverified" },
+      }),
+      model({
+        id: "image-only",
+        display_name: "Image Only",
+        kind: "image",
+        capabilities: ["image"],
+        task_states: { assistant: "incompatible" },
+      }),
+    ];
+    render(<Harness taskKey="assistant" requiredCapability="text" models={taskModels} />);
+    const input = screen.getByRole("combobox", { name: "Test model" });
+    await userEvent.click(input);
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent("Verified Model");
+    expect(screen.getByText("Suggested")).toBeVisible();
+    expect(screen.getByText("Unverified Model")).toBeVisible();
+    expect(screen.getByText("Unverified")).toBeVisible();
+    expect(screen.queryByText("Image Only")).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(input, "custom/exact-model");
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByTestId("value")).toHaveTextContent("custom/exact-model");
+    expect(screen.getByText(/Exact ID is not in the current catalog/)).toBeVisible();
+  });
+
   it("preserves an unlisted saved selection and allows exact-ID fallback", async () => {
     render(<Harness initial="saved-private-model" />);
-    expect(screen.getByText(/Saved model is not listed/)).toBeVisible();
+    expect(screen.getByText(/Exact ID is not in the current catalog/)).toBeVisible();
     expect(screen.getByTestId("value")).toHaveTextContent("saved-private-model");
 
     const input = screen.getByRole("combobox", { name: "Test model" });

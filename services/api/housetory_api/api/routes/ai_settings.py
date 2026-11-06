@@ -15,8 +15,11 @@ from ...schemas.ai_settings import (
     AiSettingsOut,
     AiTaskSettingOut,
     AiTaskSettingUpdate,
+    AiTaskTestOut,
+    AiTaskTestRequest,
 )
 from ...services import ai_settings as settings_service
+from ...services.ai_task_test import run_task_test
 from ..deps import AuthContext, require_owner
 from ..errors import ApiError
 
@@ -98,6 +101,25 @@ def update_task(
 ) -> AiTaskSettingOut:
     try:
         return settings_service.update_task(db, auth.household.id, task, payload)
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.post("/tasks/{task}/test", response_model=AiTaskTestOut)
+def test_task(
+    task: str,
+    payload: AiTaskTestRequest,
+    auth: AuthContext = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> AiTaskTestOut:
+    try:
+        return run_task_test(
+            db,
+            auth.household.id,
+            task,
+            confirm=payload.confirm,
+        )
     except Exception:
         db.rollback()
         raise

@@ -57,8 +57,12 @@ class AiTaskSetting(Base):
     __table_args__ = (
         CheckConstraint(
             "task in ('assistant', 'imports', 'documents', 'search', 'vision', "
-            "'labels', 'transcription')",
+            "'labels', 'transcription', 'item_images')",
             name="valid_task",
+        ),
+        CheckConstraint(
+            "last_test_status is null or last_test_status in ('passed', 'failed', 'unsupported')",
+            name="valid_last_test_status",
         ),
     )
 
@@ -71,6 +75,9 @@ class AiTaskSetting(Base):
     )
     model: Mapped[str | None] = mapped_column(String(160))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    last_test_status: Mapped[str | None] = mapped_column(String(24))
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_test_error: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

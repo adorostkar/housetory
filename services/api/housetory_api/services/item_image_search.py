@@ -363,8 +363,8 @@ def resolve_image_search_provider() -> ImageSearchProvider:
         return ImageSearchProvider(
             kind="none",
             reason=(
-                "Online reference-image search is disabled. Built-in illustrations "
-                "remain available offline."
+                "Online reference-image search is disabled. The category icon fallback "
+                "remains available offline."
             ),
         )
     key = settings.brave_search_api_key.strip()
@@ -373,8 +373,8 @@ def resolve_image_search_provider() -> ImageSearchProvider:
             kind="none",
             reason=(
                 "Reference-image search is not configured. Set BRAVE_SEARCH_API_KEY "
-                "on the server to use the Brave Image Search API. Built-in "
-                "illustrations remain available without it."
+                "on the server to use the Brave Image Search API. The category icon "
+                "fallback remains available without it."
             ),
         )
     base = settings.brave_search_base_url.strip().rstrip("/")

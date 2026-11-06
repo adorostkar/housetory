@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     app_name: str = "Housetory"
     environment: Literal["development", "test", "production"] = "development"
     debug: bool = False
+    release_commit: str = "unknown"
+    release_build_time: str = "unknown"
+    release_channel: str = "local"
+    server_identity: str = ""
     api_prefix: str = "/api/v1"
 
     database_url: str = "postgresql+psycopg://housetory:housetory@localhost:5432/housetory"

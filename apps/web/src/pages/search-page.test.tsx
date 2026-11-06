@@ -208,6 +208,38 @@ describe("SearchPage unified entry", () => {
     );
   });
 
+  it("keeps an example question after the debounce settles", async () => {
+    renderPage("/search");
+    const example = "Which items have no purchase information?";
+    await userEvent.click(screen.getByRole("button", { name: example }));
+    const params = () =>
+      new URLSearchParams(
+        (screen.getByTestId("location").textContent ?? "").split("?")[1] ?? "",
+      );
+    await waitFor(() => expect(params().get("q")).toBe(example));
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(params().get("q")).toBe(example);
+    expect(params().get("ask")).toBe("1");
+    expect(
+      screen.getByRole("textbox", {
+        name: "Search or ask about your inventory",
+      }),
+    ).toHaveValue(example);
+  });
+
+  it("keeps an immediately submitted keyword query after the debounce settles", async () => {
+    renderPage("/search");
+    const input = screen.getByRole("textbox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "PS5");
+    await userEvent.keyboard("{Enter}");
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(screen.getByTestId("location")).toHaveTextContent("q=PS5");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("ask=1");
+    expect(input).toHaveValue("PS5");
+  });
+
   it("asks explicitly for a keyword query and then returns to keyword results when edited", async () => {
     renderPage("/search?q=PS5");
     await screen.findByText("Heavy drill");

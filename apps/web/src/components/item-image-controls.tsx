@@ -2,13 +2,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ImageOff,
-  ImagePlus,
   Info,
   RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import * as React from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -147,6 +147,14 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
     image?.source_page_url && image.source_page_url.startsWith("http")
       ? image.source_page_url
       : null;
+  const searchReady = state.search_configured;
+  const generationReady = state.generation_configured;
+  const nothingConfigured = !searchReady && !generationReady;
+  const configureHref = nothingConfigured
+    ? "/settings#item-images"
+    : !generationReady
+      ? "/settings/ai"
+      : "/settings#item-images";
 
   return (
     <section
@@ -238,42 +246,73 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       )}
 
       {canWrite && !actual && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !state.search_configured}
-            title={state.search_reason ?? undefined}
-            onClick={findImage}
-          >
-            {busyAction === "find" ? <Spinner /> : <RefreshCw />}
-            {state.selected?.source_type === "reference" ? "Change image" : "Find image"}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !state.generation_configured}
-            title={state.generation_reason ?? undefined}
-            onClick={generate}
-          >
-            {busyAction === "generate" ? <Spinner /> : <Sparkles />}
-            Generate
-          </Button>
-          {state.selected && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy}
-              onClick={remove}
-            >
-              {busyAction === "remove" ? <Spinner /> : <ImageOff />}
-              Use icon
-            </Button>
+        <>
+          {nothingConfigured ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-background/35 px-3 py-2 text-[0.7rem] text-muted-foreground">
+              <span>Reference lookup and AI illustrations are not configured.</span>
+              <Button size="sm" variant="outline" asChild>
+                <Link to={configureHref}>Configure item images</Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {searchReady ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  title={state.search_reason ?? undefined}
+                  onClick={findImage}
+                >
+                  {busyAction === "find" ? <Spinner /> : <RefreshCw />}
+                  {state.selected?.source_type === "reference"
+                    ? "Change image"
+                    : "Find image"}
+                </Button>
+              ) : null}
+              {generationReady ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  title={state.generation_reason ?? undefined}
+                  onClick={generate}
+                >
+                  {busyAction === "generate" ? <Spinner /> : <Sparkles />}
+                  Generate
+                </Button>
+              ) : null}
+              {state.selected && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={remove}
+                >
+                  {busyAction === "remove" ? <Spinner /> : <ImageOff />}
+                  Use icon
+                </Button>
+              )}
+            </div>
           )}
-        </div>
+          {!nothingConfigured && (!searchReady || !generationReady) ? (
+            <p className="mt-2 flex items-center gap-1.5 text-[0.64rem] text-muted-foreground">
+              <Info className="size-3 shrink-0" />
+              {!searchReady
+                ? "Reference-image lookup is not configured."
+                : "AI illustration generation is not configured."}{" "}
+              <Link
+                to={configureHref}
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                Configure
+              </Link>
+            </p>
+          ) : null}
+        </>
       )}
 
       {!canWrite && image && (
@@ -295,18 +334,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           Remove stored image
         </Button>
       )}
-      {canWrite && !actual && !state.search_configured && state.search_reason && (
-        <p className="mt-2 flex items-start gap-1.5 text-[0.66rem] leading-relaxed text-muted-foreground">
-          <Info className="mt-0.5 size-3 shrink-0" />
-          {state.search_reason}
-        </p>
-      )}
-      {canWrite && !actual && !state.generation_configured && state.generation_reason && (
-        <p className="mt-1 flex items-start gap-1.5 text-[0.66rem] leading-relaxed text-muted-foreground">
-          <ImagePlus className="mt-0.5 size-3 shrink-0" />
-          {state.generation_reason}
-        </p>
-      )}
+
     </section>
   );
 }

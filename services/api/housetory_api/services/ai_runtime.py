@@ -14,6 +14,7 @@ from ..domain import AiProviderType, AiTask
 from ..models import AiProvider, AiTaskSetting
 from ..schemas.ai import AiStatus
 from .ai_credentials import CredentialError, decrypt_secret
+from .task_capabilities import adapter_gap_message, provider_adapter_supported
 
 DEFAULT_BASE_URLS: dict[str, str] = {
     AiProviderType.OPENAI.value: "https://api.openai.com/v1",
@@ -311,8 +312,8 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
     )
     if not providers:
         config = _env_config(task)
-        if task == AiTask.TRANSCRIPTION.value and not model_supports_transcription(
-            config.provider, config.model
+        if task == AiTask.TRANSCRIPTION.value and not provider_supports_transcription(
+            config.provider
         ):
             return replace(
                 config,
@@ -357,18 +358,11 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 error="The selected provider no longer exists.",
             )
         config = _provider_config(provider, task, setting.model or provider.default_model)
-        if task == AiTask.TRANSCRIPTION.value and not model_supports_transcription(
-            provider.provider, config.model
-        ):
+        if config.enabled and not provider_adapter_supported(provider.provider, task):
             return replace(
                 config,
                 configured=False,
-                error=(
-                    "The configured transcription provider or model does not support "
-                    "audio transcription. Choose OpenAI with a whisper/transcription "
-                    "model, an OpenRouter STT/audio-input model, or Google Gemini with "
-                    "an audio-capable model."
-                ),
+                error=adapter_gap_message(task),
             )
         return config
     if task == AiTask.VISION.value:

@@ -1,0 +1,252 @@
+"""Owner-facing system status built from real local evidence, not probes."""
+
+from __future__ import annotations
+
+import tempfile
+import uuid
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
+
+from .. import __version__
+from ..api.errors import ApiError
+from ..config import get_settings
+from ..domain import AiTask, JobStatus
+from ..models import Job, WorkerHeartbeat
+from ..schemas.system import (
+    ExternalServiceStatus,
+    FailedJobOut,
+    JobRetryOut,
+    JobStatusOut,
+    ReadinessComponent,
+    ReleaseStatus,
+    SystemStatusOut,
+    TaskStatusOut,
+)
+from . import ai, item_image_search, manual_web
+from . import ai_settings as settings_service
+
+TASK_ORDER = (
+    AiTask.ASSISTANT.value,
+    AiTask.DOCUMENTS.value,
+    AiTask.IMPORTS.value,
+    AiTask.ITEM_IMAGES.value,
+    AiTask.LABELS.value,
+    AiTask.SEARCH.value,
+    AiTask.TRANSCRIPTION.value,
+    AiTask.VISION.value,
+)
+
+
+def _release() -> ReleaseStatus:
+    settings = get_settings()
+    return ReleaseStatus(
+        version=__version__,
+        commit=settings.release_commit or "unknown",
+        build_time=settings.release_build_time or "unknown",
+        channel=settings.release_channel or "local",
+        environment=settings.environment,
+        identity=settings.server_identity or settings.app_base_url,
+    )
+
+
+def _readiness(db: Session) -> list[ReadinessComponent]:
+    components: list[ReadinessComponent] = []
+    try:
+        db.execute(text("SELECT 1"))
+        components.append(ReadinessComponent(name="Database", status="ok"))
+    except Exception:  # noqa: BLE001 - status must stay honest if the DB fails
+        components.append(
+            ReadinessComponent(
+                name="Database",
+                status="degraded",
+                detail="The database readiness query failed.",
+            )
+        )
+
+    try:
+        root = get_settings().resolved_uploads_dir
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=root, prefix=".status-", delete=True):
+            pass
+        components.append(ReadinessComponent(name="Storage", status="ok"))
+    except Exception:  # noqa: BLE001
+        components.append(
+            ReadinessComponent(
+                name="Storage",
+                status="degraded",
+                detail="The uploads volume is not writable.",
+            )
+        )
+
+    try:
+        heartbeat = db.scalar(
+            select(WorkerHeartbeat).order_by(WorkerHeartbeat.updated_at.desc()).limit(1)
+        )
+        if heartbeat is None:
+            components.append(
+                ReadinessComponent(
+                    name="Worker",
+                    status="unknown",
+                    detail="No worker heartbeat has been recorded.",
+                )
+            )
+        else:
+            age = datetime.now(UTC) - heartbeat.updated_at
+            stale = age > timedelta(seconds=60)
+            components.append(
+                ReadinessComponent(
+                    name="Worker",
+                    status="degraded" if stale else "ok",
+                    detail=(
+                        f"Last heartbeat {max(0, int(age.total_seconds()))}s ago "
+                        f"(v{heartbeat.version})."
+                    ),
+                )
+            )
+    except Exception:  # noqa: BLE001
+        components.append(
+            ReadinessComponent(
+                name="Worker",
+                status="unknown",
+                detail="Worker heartbeat could not be read.",
+            )
+        )
+    return components
+
+
+def _jobs(db: Session) -> JobStatusOut:
+    counts = {
+        str(status): int(count or 0)
+        for status, count in db.execute(
+            select(Job.status, func.count(Job.id)).group_by(Job.status)
+        ).all()
+    }
+    recent_failed = db.scalars(
+        select(Job)
+        .where(Job.status == JobStatus.FAILED.value)
+        .order_by(Job.finished_at.desc().nullslast(), Job.created_at.desc())
+        .limit(10)
+    ).all()
+    return JobStatusOut(
+        counts=counts,
+        recent_failed=[
+            FailedJobOut(
+                id=job.id,
+                task=job.task,
+                attempts=job.attempts,
+                max_attempts=job.max_attempts,
+                error=(job.last_error or "")[:400] or None,
+                created_at=job.created_at,
+                finished_at=job.finished_at,
+            )
+            for job in recent_failed
+        ],
+    )
+
+
+def _tasks(db: Session, household_id: uuid.UUID) -> list[TaskStatusOut]:
+    tasks: list[TaskStatusOut] = []
+    for task in TASK_ORDER:
+        serialized = settings_service.serialize_task(db, household_id, task)
+        status = ai.status_for(db, household_id, task, probe=False)
+        last_test_error = serialized.last_test_error
+        error = None if status.configured else status.error
+        if error is None and serialized.last_test_status == "failed":
+            error = last_test_error
+        tasks.append(
+            TaskStatusOut(
+                task=task,
+                label=settings_service.TASK_LABELS.get(task, task),
+                provider_label=serialized.provider_label,
+                model=serialized.model,
+                model_label=serialized.model_label,
+                model_listed=serialized.model_listed,
+                enabled=serialized.enabled,
+                configured=status.configured,
+                compatibility=serialized.compatibility,
+                capabilities=serialized.capabilities,
+                live_tested=serialized.last_test_status == "passed",
+                last_test_status=serialized.last_test_status,
+                last_test_at=serialized.last_test_at,
+                last_test_error=last_test_error,
+                error=error,
+            )
+        )
+    return tasks
+
+
+def _external_services() -> list[ExternalServiceStatus]:
+    settings = get_settings()
+    manual = manual_web.resolve_search_provider()
+    image = item_image_search.resolve_image_search_provider()
+    image_policy = item_image_search.permitted_source_policy_configured()
+    return [
+        ExternalServiceStatus(
+            name="Online manual search",
+            configured=manual.kind != "none",
+            status="configured" if manual.kind != "none" else "not_configured",
+            detail=manual.reason or f"{manual.label or 'Configured'} (not probed).",
+        ),
+        ExternalServiceStatus(
+            name="Reference-image search",
+            configured=image.configured and image_policy,
+            status=(
+                "configured"
+                if image.configured and image_policy
+                else "partial"
+                if image.configured
+                else "not_configured"
+            ),
+            detail=(
+                "Configured with a permitted-source policy (not probed)."
+                if image.configured and image_policy
+                else "Search provider configured, but automatic downloads have no "
+                "permitted-source policy."
+                if image.configured
+                else image.reason or "Not configured."
+            ),
+        ),
+        ExternalServiceStatus(
+            name="Email delivery",
+            configured=settings.email_configured,
+            status="configured" if settings.email_configured else "not_configured",
+            detail=(
+                "SMTP is configured; delivery is not probed by this screen."
+                if settings.email_configured
+                else "SMTP is not configured; LAN login and password reset status remain local."
+            ),
+        ),
+    ]
+
+
+def system_status(db: Session, household_id: uuid.UUID) -> SystemStatusOut:
+    return SystemStatusOut(
+        release=_release(),
+        readiness=_readiness(db),
+        jobs=_jobs(db),
+        tasks=_tasks(db, household_id),
+        external_services=_external_services(),
+        generated_at=datetime.now(UTC),
+    )
+
+
+def retry_job(db: Session, job_id: uuid.UUID) -> JobRetryOut:
+    job = db.get(Job, job_id)
+    if job is None:
+        raise ApiError(404, "job_not_found", "Job not found.")
+    if job.status != JobStatus.FAILED.value:
+        raise ApiError(409, "job_not_failed", "Only failed jobs can be retried.")
+    job.status = JobStatus.QUEUED.value
+    job.attempts = 0
+    job.run_at = datetime.now(UTC)
+    job.finished_at = None
+    job.locked_by = None
+    job.locked_at = None
+    job.last_error = None
+    db.commit()
+    return JobRetryOut(id=job.id, task=job.task, status=job.status)
+
+
+__all__ = ["retry_job", "system_status"]

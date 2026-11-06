@@ -31,6 +31,7 @@ export function ModelPicker({
   onChange,
   disabled = false,
   requiredCapability,
+  taskKey,
   loading = false,
   error = null,
   cached = false,
@@ -45,6 +46,7 @@ export function ModelPicker({
   onChange: (value: string) => void;
   disabled?: boolean;
   requiredCapability?: string;
+  taskKey?: string;
   loading?: boolean;
   error?: string | null;
   cached?: boolean;
@@ -68,15 +70,37 @@ export function ModelPicker({
           : ["chat"],
     [requiredCapability],
   );
-  const chatModels = React.useMemo(
-    () =>
-      models.filter(
-        (model) =>
-          allowedKinds.includes(model.kind) &&
-          (!requiredCapability || model.capabilities.includes(requiredCapability)),
-      ),
-    [models, requiredCapability, allowedKinds],
+  const modelState = React.useCallback(
+    (model: AiProviderModel) =>
+      taskKey ? model.task_states?.[taskKey] : undefined,
+    [taskKey],
   );
+  const isEligible = React.useCallback(
+    (model: AiProviderModel) => {
+      const state = modelState(model);
+      if (taskKey && model.task_states) {
+        return state !== "incompatible" && state !== "adapter_unavailable";
+      }
+      return (
+        allowedKinds.includes(model.kind) &&
+        (!requiredCapability || model.capabilities.includes(requiredCapability))
+      );
+    },
+    [allowedKinds, modelState, requiredCapability, taskKey],
+  );
+  const chatModels = React.useMemo(() => {
+    const eligible = models.filter(isEligible);
+    if (!taskKey || !models.some((model) => model.task_states)) return eligible;
+    const rank = (model: AiProviderModel) => {
+      const state = modelState(model);
+      if (state === "compatible" && model.capability_source === "provider_metadata") {
+        return 0;
+      }
+      if (state === "compatible") return 1;
+      return 2;
+    };
+    return [...eligible].sort((left, right) => rank(left) - rank(right));
+  }, [models, isEligible, taskKey, modelState]);
   const filtered = React.useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
     if (!term) return chatModels;
@@ -87,12 +111,14 @@ export function ModelPicker({
     );
   }, [chatModels, deferredSearch]);
   const visible = filtered.slice(0, 50);
+  const selectedState = selected ? modelState(selected) : undefined;
+  const selectedUnverified = selectedState === "unverified";
   const selectedUnsupported =
     models.length > 0 &&
     Boolean(value) &&
-    (!selected ||
-      !allowedKinds.includes(selected.kind) ||
-      (requiredCapability ? !selected.capabilities.includes(requiredCapability) : false));
+    Boolean(selected) &&
+    selected !== undefined &&
+    !isEligible(selected);
   const inputValue = open ? search : selected?.display_name ?? selected?.id ?? value;
 
   React.useEffect(() => {
@@ -211,8 +237,20 @@ export function ModelPicker({
       {selectedUnsupported && !open ? (
         <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
-          Saved model is not listed{requiredCapability ? ` as ${requiredCapability}-capable` : ""} in
-          the current catalog. You can keep it or choose a replacement.
+          Saved model is {selected ? "confirmed incompatible" : "not listed"} for this
+          task. Keep it only for inspection or choose a compatible replacement.
+        </p>
+      ) : selectedUnverified && !open ? (
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+          <AlertCircle className="mt-0.5 size-3 shrink-0" />
+          Capability is unverified from the current catalog metadata. Run Test model
+          before relying on it.
+        </p>
+      ) : value && !selected && models.length > 0 && !open ? (
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+          <AlertCircle className="mt-0.5 size-3 shrink-0" />
+          Exact ID is not in the current catalog. Support is unverified; confirmed
+          incompatible IDs are rejected on save. Run Test model after saving.
         </p>
       ) : null}
 
@@ -298,6 +336,17 @@ export function ModelPicker({
                         <Badge variant="outline" className="shrink-0 text-[0.55rem]">
                           {KIND_LABELS[model.kind]}
                         </Badge>
+                        {taskKey &&
+                        modelState(model) === "compatible" &&
+                        model.capability_source === "provider_metadata" ? (
+                          <Badge variant="sage" className="shrink-0 text-[0.55rem]">
+                            Suggested
+                          </Badge>
+                        ) : taskKey && modelState(model) === "unverified" ? (
+                          <Badge variant="brass" className="shrink-0 text-[0.55rem]">
+                            Unverified
+                          </Badge>
+                        ) : null}
                       </span>
                       <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                         {model.capabilities.length > 0 ? (

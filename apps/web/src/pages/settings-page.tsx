@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PropertiesSettings } from "@/components/properties-settings";
+import { SystemStatusPanel } from "@/components/system-status-panel";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -249,12 +250,30 @@ export function SettingsPage() {
               Save
             </Button>
           </form>
-          <div className="mt-5 rounded-xl border border-border/60 bg-background/35 p-3.5">
+          <div
+            id="item-images"
+            className="mt-5 rounded-xl border border-border/60 bg-background/35 p-3.5"
+          >
             <p className="text-[0.76rem] font-medium">Item images</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
               Manual Find image and Generate actions remain available in item details.
               Automatic actions run only after a new item is saved, never on every
               keystroke. Reference images are tried before AI illustrations.
+            </p>
+            <p className="mt-2 break-words text-[0.66rem] leading-relaxed text-muted-foreground">
+              Server-side reference search requires{" "}
+              <code className="break-all rounded bg-secondary px-1 py-0.5">
+                BRAVE_SEARCH_API_KEY
+              </code>{" "}
+              and a reviewed{" "}
+              <code className="break-all rounded bg-secondary px-1 py-0.5">
+                ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS
+              </code>{" "}
+              allowlist. AI illustrations are configured in{" "}
+              <Link to="/settings/ai" className="underline underline-offset-4 hover:text-foreground">
+                AI providers
+              </Link>
+              .
             </p>
             <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
               <input
@@ -527,6 +546,8 @@ export function SettingsPage() {
             </div>
           ) : null}
         </section>
+
+        <SystemStatusPanel isOwner={isOwner} />
 
         <section className="surface p-5 sm:p-6">
           <div className="flex items-center gap-2">

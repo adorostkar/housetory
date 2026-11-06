@@ -289,13 +289,20 @@ describe("VoicePage", () => {
     });
   });
 
-  it("shows a clear setup state when transcription is not configured", () => {
+  it("leads an unconfigured voice page to one setup action", () => {
     transcriptionConfigured = false;
     renderPage("/voice");
-    expect(screen.getByText("Voice transcription is not configured.")).toBeVisible();
-    expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Upload audio/ })).toBeDisabled();
-    expect(screen.getByText(/No transcription task is configured/)).toBeVisible();
+    expect(
+      screen.getByRole("heading", {
+        name: "Voice transcription is not set up",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Configure voice transcription" }),
+    ).toHaveAttribute("href", "/settings/ai");
+    expect(screen.queryByRole("button", { name: /Start recording/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Upload audio/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Manual entry, search, photos/)).toBeVisible();
   });
 
   it("explains unavailable microphone and unsupported upload formats", async () => {

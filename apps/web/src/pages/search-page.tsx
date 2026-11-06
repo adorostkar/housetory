@@ -98,6 +98,9 @@ export function SearchPage() {
 
   useEffect(() => {
     if (trimmed === qParam) return;
+    // A debounced value older than the current draft must never overwrite an
+    // explicit submit or example click. Wait until the debounce has caught up.
+    if (query !== trimmed) return;
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -107,7 +110,7 @@ export function SearchPage() {
       },
       { replace: true },
     );
-  }, [trimmed, qParam, setSearchParams]);
+  }, [trimmed, query, qParam, setSearchParams]);
 
   const setAskMode = (next: boolean) => {
     setSearchParams(
@@ -218,14 +221,15 @@ export function SearchPage() {
 
       <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[0.72rem] text-muted-foreground">
         <p>{scopeLabel}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => submit(false)}>
-            <SearchIcon /> Search
-          </Button>
+        {askMode ? (
           <Button size="sm" onClick={() => submit(true)}>
             <Sparkles /> Ask Housetory
           </Button>
-        </div>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => submit(false)}>
+            <SearchIcon /> Search
+          </Button>
+        )}
       </div>
 
       <div className="mx-auto mt-10 max-w-5xl">
@@ -265,7 +269,13 @@ export function SearchPage() {
                   onClick={() => {
                     setQuery(example);
                     setSearchParams(
-                      { q: example, ask: "1" },
+                      (previous) => {
+                        const params = new URLSearchParams(previous);
+                        params.set("q", example);
+                        params.set("ask", "1");
+                        params.delete("mode");
+                        return params;
+                      },
                       { replace: true },
                     );
                   }}
@@ -323,7 +333,16 @@ export function SearchPage() {
                 variant="ghost"
                 onClick={() => {
                   setQuery("");
-                  setSearchParams({}, { replace: true });
+                  setSearchParams(
+                    (previous) => {
+                      const params = new URLSearchParams(previous);
+                      params.delete("q");
+                      params.delete("ask");
+                      params.delete("mode");
+                      return params;
+                    },
+                    { replace: true },
+                  );
                 }}
               >
                 Clear search

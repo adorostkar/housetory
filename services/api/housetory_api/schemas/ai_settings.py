@@ -56,6 +56,15 @@ class AiProviderOut(BaseModel):
     updated_at: datetime
 
 
+TaskCompatibility = Literal[
+    "compatible",
+    "unverified",
+    "incompatible",
+    "adapter_unavailable",
+    "not_configured",
+]
+
+
 class AiModelOut(BaseModel):
     id: str
     display_name: str | None = None
@@ -65,6 +74,7 @@ class AiModelOut(BaseModel):
     input_modalities: list[str] = Field(default_factory=list)
     output_modalities: list[str] = Field(default_factory=list)
     endpoints: list[str] = Field(default_factory=list)
+    task_states: dict[str, TaskCompatibility] = Field(default_factory=dict)
 
 
 class AiProviderModels(BaseModel):
@@ -86,8 +96,14 @@ class AiTaskSettingOut(BaseModel):
     provider_id: uuid.UUID | None
     provider_label: str | None
     model: str | None
+    model_label: str | None = None
+    model_listed: bool = False
+    compatibility: TaskCompatibility = "not_configured"
     enabled: bool
     capabilities: list[str] = Field(default_factory=list)
+    last_test_status: Literal["passed", "failed", "unsupported"] | None = None
+    last_test_at: datetime | None = None
+    last_test_error: str | None = None
     updated_at: datetime | None = None
 
 
@@ -112,6 +128,19 @@ class AiCredentialRotationOut(BaseModel):
 
 class AiProviderTestRequest(BaseModel):
     model: trimmed(1, 160) | None = None
+
+
+class AiTaskTestRequest(BaseModel):
+    confirm: bool = False
+
+
+class AiTaskTestOut(BaseModel):
+    task: str
+    status: Literal["passed", "failed", "unsupported"]
+    message: str
+    tested_at: datetime
+    model: str | None = None
+    provider_label: str | None = None
 
 
 class AiSettingsModels(BaseModel):

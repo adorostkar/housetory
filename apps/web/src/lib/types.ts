@@ -1661,13 +1661,26 @@ export interface AiProviderRecord {
   updated_at: string;
 }
 
+export type AiTaskCompatibility =
+  | "compatible"
+  | "unverified"
+  | "incompatible"
+  | "adapter_unavailable"
+  | "not_configured";
+
 export interface AiTaskSetting {
   task: string;
   provider_id: UUID | null;
   provider_label: string | null;
   model: string | null;
+  model_label?: string | null;
+  model_listed?: boolean;
+  compatibility?: AiTaskCompatibility;
   enabled: boolean;
   capabilities: string[];
+  last_test_status?: "passed" | "failed" | "unsupported" | null;
+  last_test_at?: string | null;
+  last_test_error?: string | null;
   updated_at: string | null;
 }
 
@@ -1686,6 +1699,75 @@ export interface AiProviderTest {
   selected_model_available: boolean | null;
 }
 
+export interface AiTaskTestResult {
+  task: string;
+  status: "passed" | "failed" | "unsupported";
+  message: string;
+  tested_at: string;
+  model: string | null;
+  provider_label: string | null;
+}
+
+export interface SystemReadinessComponent {
+  name: string;
+  status: "ok" | "degraded" | "unknown";
+  detail: string | null;
+}
+
+export interface SystemFailedJob {
+  id: UUID;
+  task: string;
+  attempts: number;
+  max_attempts: number;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface SystemTaskStatus {
+  task: string;
+  label: string;
+  provider_label: string | null;
+  model: string | null;
+  model_label: string | null;
+  model_listed: boolean;
+  enabled: boolean;
+  configured: boolean;
+  compatibility: AiTaskCompatibility;
+  capabilities: string[];
+  live_tested: boolean;
+  last_test_status: "passed" | "failed" | "unsupported" | null;
+  last_test_at: string | null;
+  last_test_error: string | null;
+  error: string | null;
+}
+
+export interface SystemExternalService {
+  name: string;
+  configured: boolean;
+  status: "configured" | "partial" | "not_configured" | "unknown";
+  detail: string;
+}
+
+export interface SystemStatus {
+  release: {
+    version: string;
+    commit: string;
+    build_time: string;
+    channel: string;
+    environment: string;
+    identity: string;
+  };
+  readiness: SystemReadinessComponent[];
+  jobs: {
+    counts: Record<string, number>;
+    recent_failed: SystemFailedJob[];
+  };
+  tasks: SystemTaskStatus[];
+  external_services: SystemExternalService[];
+  generated_at: string;
+}
+
 export interface AiProviderModel {
   id: string;
   display_name: string | null;
@@ -1695,6 +1777,7 @@ export interface AiProviderModel {
   input_modalities?: string[];
   output_modalities?: string[];
   endpoints?: string[];
+  task_states?: Record<string, AiTaskCompatibility>;
 }
 
 export interface AiProviderModels {

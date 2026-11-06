@@ -140,8 +140,35 @@ def test_provider_models_test_and_consent_gate(owner_client, monkeypatch):
 
 
 def test_task_model_capability_validation(owner_client, monkeypatch):
-    monkeypatch.setattr(ai, "available_models", lambda config: ["gpt-4o", "text-embedding-3-small"])
-    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="gpt-4o",
+                display_name="GPT-4o",
+                kind="chat",
+                capabilities=("text", "vision", "structured", "tools"),
+                capability_source="provider_metadata",
+                input_modalities=("text", "image"),
+                output_modalities=("text",),
+                endpoints=("/api/v1/chat/completions",),
+            ),
+            DiscoveredModel(
+                id="text-embedding-3-small",
+                display_name="Embedding",
+                kind="embedding",
+                capabilities=(),
+                capability_source="provider_metadata",
+                input_modalities=("text",),
+                output_modalities=("embeddings",),
+            ),
+        ],
+    )
+    provider = owner_client.post(
+        "/api/v1/ai/providers", json=provider_payload(default_model=None)
+    ).json()
+    assert owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models").status_code == 200
     mismatch = owner_client.put(
         "/api/v1/ai/tasks/vision",
         json={
@@ -159,6 +186,7 @@ def test_task_model_capability_validation(owner_client, monkeypatch):
     )
     assert valid.status_code == 200, valid.text
     assert valid.json()["capabilities"].count("vision") == 1
+    assert valid.json()["compatibility"] == "compatible"
     disabled = owner_client.put(
         "/api/v1/ai/tasks/vision",
         json={"provider_id": provider["id"], "model": "gpt-4o", "enabled": False},
@@ -637,6 +665,9 @@ def test_cached_catalog_metadata_controls_task_capability_validation(owner_clien
                 kind="chat",
                 capabilities=("text",),
                 capability_source="provider_metadata",
+                input_modalities=("text",),
+                output_modalities=("text",),
+                endpoints=("/api/v1/chat/completions",),
             ),
             DiscoveredModel(
                 id="embedding-chat",
@@ -663,7 +694,7 @@ def test_cached_catalog_metadata_controls_task_capability_validation(owner_clien
         json={"provider_id": provider["id"], "model": "embedding-chat", "enabled": True},
     )
     assert embedding.status_code == 422
-    assert embedding.json()["detail"]["code"] == "model_not_chat_capable"
+    assert embedding.json()["detail"]["code"] == "model_capability_mismatch"
 
 
 def test_status_catalog_check_is_compact_and_never_serializes_models(owner_client, monkeypatch):
@@ -795,7 +826,9 @@ def test_transcription_task_status_is_explicit_and_accepts_audio_capability(owne
     assert saved.json()["task"] == "transcription"
     assert saved.json()["model"] == "whisper-1"
 
-    rejected = owner_client.put(
+    # Unknown/unlisted exact IDs are not blanket-rejected. They save as
+    # unverified and can be checked with an explicit bounded live test.
+    unverified = owner_client.put(
         "/api/v1/ai/tasks/transcription",
         json={
             "provider_id": provider["id"],
@@ -803,8 +836,9 @@ def test_transcription_task_status_is_explicit_and_accepts_audio_capability(owne
             "enabled": True,
         },
     )
-    assert rejected.status_code == 422
-    assert rejected.json()["detail"]["code"] == "transcription_model_unsupported"
+    assert unverified.status_code == 200, unverified.text
+    assert unverified.json()["compatibility"] == "unverified"
+    assert unverified.json()["model_listed"] is False
 
 
 def test_openrouter_discovery_reads_audio_and_image_modalities(monkeypatch):
@@ -1005,7 +1039,7 @@ def test_openrouter_task_saves_require_compatible_discovered_media_models(
         },
     )
     assert image_as_transcription.status_code == 422
-    assert image_as_transcription.json()["detail"]["code"] == "transcription_model_unsupported"
+    assert image_as_transcription.json()["detail"]["code"] == "model_capability_mismatch"
 
     text_as_transcription = owner_client.put(
         "/api/v1/ai/tasks/transcription",
@@ -1016,4 +1050,51 @@ def test_openrouter_task_saves_require_compatible_discovered_media_models(
         },
     )
     assert text_as_transcription.status_code == 422
-    assert text_as_transcription.json()["detail"]["code"] == "transcription_model_unsupported"
+    assert text_as_transcription.json()["detail"]["code"] == "model_capability_mismatch"
+
+
+def test_task_states_are_task_specific_and_text_only_labels_are_compatible(
+    owner_client, monkeypatch
+):
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(
+            display_name="Task state provider",
+            default_model="plain-text-model",
+        ),
+    ).json()
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="plain-text-model",
+                display_name="Plain Text",
+                kind="chat",
+                capabilities=("text",),
+                capability_source="provider_metadata",
+                input_modalities=("text",),
+                output_modalities=("text",),
+                endpoints=("/api/v1/chat/completions",),
+            )
+        ],
+    )
+    models = owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models")
+    assert models.status_code == 200, models.text
+    row = models.json()["models"][0]
+    assert row["task_states"]["assistant"] == "compatible"
+    assert row["task_states"]["labels"] == "compatible"
+    assert row["task_states"]["vision"] == "incompatible"
+    assert row["task_states"]["transcription"] == "incompatible"
+    assert row["task_states"]["item_images"] == "incompatible"
+
+    saved = owner_client.put(
+        "/api/v1/ai/tasks/labels",
+        json={
+            "provider_id": provider["id"],
+            "model": "plain-text-model",
+            "enabled": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["compatibility"] == "compatible"

@@ -40,6 +40,7 @@ import type {
   SearchItemList,
   SearchScopeList,
   SessionState,
+  SystemStatus,
   StocktakeScopeSummary,
   StocktakeReview,
   StocktakeSessionDetail,
@@ -80,6 +81,7 @@ export const queryKeys = {
   importBatch: (batchId: string) => ["imports", batchId] as const,
   aiStatus: ["ai", "status"] as const,
   aiSettings: ["ai", "settings"] as const,
+  systemStatus: ["system", "status"] as const,
   householdMembers: ["household", "members"] as const,
   householdInvitations: ["household", "invitations"] as const,
   invitation: (token: string) => ["invitation", token] as const,
@@ -763,6 +765,15 @@ export function useAiSettings(enabled = true) {
   return useQuery({
     queryKey: queryKeys.aiSettings,
     queryFn: () => api.get<AiSettings>("/ai/settings"),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useSystemStatus(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.systemStatus,
+    queryFn: () => api.get<SystemStatus>("/system/status"),
     enabled,
     staleTime: 15_000,
   });

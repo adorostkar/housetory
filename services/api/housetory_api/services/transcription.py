@@ -13,11 +13,7 @@ from pathlib import Path
 
 from ..domain import AiProviderType
 from . import ai
-from .ai_runtime import (
-    AiRuntimeConfig,
-    model_supports_transcription,
-    provider_supports_transcription,
-)
+from .ai_runtime import AiRuntimeConfig, provider_supports_transcription
 
 TRANSCRIPTION_PROVIDERS = {
     AiProviderType.OPENAI.value,
@@ -215,13 +211,6 @@ def transcribe_audio(
         raise ai.AiUnavailable("Choose a transcription model in AI settings.")
     if not provider_supports_transcription(config.provider):
         raise _provider_error()
-    if config.provider != AiProviderType.OPENROUTER.value and not model_supports_transcription(
-        config.provider, config.model
-    ):
-        raise ai.AiUnavailable(
-            "The selected model is not a transcription model. Choose an OpenAI "
-            "whisper/transcription model or a Gemini audio-capable model."
-        )
     if not ai._semaphore.acquire(timeout=5):
         raise ai.AiUnavailable("Audio transcription is busy; try again shortly.")
     try:
