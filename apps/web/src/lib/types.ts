@@ -1692,6 +1692,9 @@ export interface AiProviderModel {
   kind: "chat" | "embedding" | "speech" | "image" | "other";
   capabilities: string[];
   capability_source: "provider_metadata" | "heuristic";
+  input_modalities?: string[];
+  output_modalities?: string[];
+  endpoints?: string[];
 }
 
 export interface AiProviderModels {

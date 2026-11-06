@@ -318,8 +318,8 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 config,
                 configured=False,
                 error=(
-                    "No transcription task is configured. Choose OpenAI (audio "
-                    "transcriptions) or Google Gemini (audio input) under Settings → "
+                    "No transcription task is configured. Choose OpenAI, OpenRouter "
+                    "(STT/audio input) or Google Gemini (audio input) under Settings → "
                     "AI providers → Task defaults."
                 ),
             )
@@ -366,7 +366,8 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 error=(
                     "The configured transcription provider or model does not support "
                     "audio transcription. Choose OpenAI with a whisper/transcription "
-                    "model or Google Gemini with an audio-capable model."
+                    "model, an OpenRouter STT/audio-input model, or Google Gemini with "
+                    "an audio-capable model."
                 ),
             )
         return config
@@ -406,8 +407,9 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             cloud_consent=False,
             configured=False,
             error=(
-                "No item illustration task is configured. Choose an OpenAI image "
-                "model under Settings → AI providers → Task defaults."
+                "No item illustration task is configured. Choose an OpenAI Images or "
+                "OpenRouter image-output model under Settings → AI providers → "
+                "Task defaults."
             ),
         )
     if task == AiTask.TRANSCRIPTION.value:
@@ -427,8 +429,8 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             cloud_consent=False,
             configured=False,
             error=(
-                "No transcription task is configured. Choose OpenAI (audio "
-                "transcriptions) or Google Gemini (audio input) under Settings → "
+                "No transcription task is configured. Choose OpenAI, OpenRouter "
+                "(STT/audio input) or Google Gemini (audio input) under Settings → "
                 "AI providers → Task defaults."
             ),
         )
@@ -458,13 +460,17 @@ def provider_supports_transcription(provider: str) -> bool:
     return provider in {
         AiProviderType.OPENAI.value,
         AiProviderType.GEMINI.value,
+        AiProviderType.OPENROUTER.value,
     }
 
 
 def model_supports_transcription(provider: str, model: str | None) -> bool:
     if not provider_supports_transcription(provider) or not model:
         return False
-    if provider == AiProviderType.GEMINI.value:
+    if provider in {AiProviderType.GEMINI.value, AiProviderType.OPENROUTER.value}:
+        # Gemini accepts audio inline. OpenRouter audio models vary, so the
+        # transcription adapter revalidates discovered modalities/endpoints
+        # before sending any household audio.
         return True
     lowered = model.lower()
     return "whisper" in lowered or "transcribe" in lowered
@@ -484,7 +490,7 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
     elif provider == AiProviderType.GEMINI.value:
         capabilities.extend(["structured", "tools"])
     if provider == AiProviderType.GEMINI.value or any(
-        token in lowered for token in ("whisper", "transcribe")
+        token in lowered for token in ("whisper", "transcribe", "speech-to-text", "stt-", "-stt")
     ):
         capabilities.append("audio")
     if any(
@@ -498,6 +504,14 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
             "imagen",
             "gemini-2.5-flash-image",
             "gemini-3-pro-image",
+            "seedream",
+            "recraft",
+            "ideogram",
+            "qwen-image",
+            "hunyuan-image",
+            "kolors",
+            "sdxl",
+            "sd3",
         )
     ):
         capabilities.append("image")

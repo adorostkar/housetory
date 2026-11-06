@@ -62,6 +62,9 @@ class AiModelOut(BaseModel):
     kind: Literal["chat", "embedding", "speech", "image", "other"] = "chat"
     capabilities: list[str] = Field(default_factory=list)
     capability_source: Literal["provider_metadata", "heuristic"] = "heuristic"
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+    endpoints: list[str] = Field(default_factory=list)
 
 
 class AiProviderModels(BaseModel):

@@ -32,6 +32,24 @@ const catalog: AiProviderModel[] = [
     capabilities: [],
   }),
   model({ id: "text-only", display_name: "Text Only", capabilities: ["text"] }),
+  model({
+    id: "gpt-image-test",
+    display_name: "Image Generation",
+    kind: "image",
+    capabilities: ["image"],
+  }),
+  model({
+    id: "whisper-test",
+    display_name: "Whisper Test",
+    kind: "speech",
+    capabilities: ["audio"],
+  }),
+  model({
+    id: "audio-chat",
+    display_name: "Audio Chat",
+    kind: "chat",
+    capabilities: ["text", "audio"],
+  }),
 ];
 
 function Harness({
@@ -102,6 +120,29 @@ describe("ModelPicker", () => {
     expect(options[0]).toHaveTextContent("GPT-4o");
     expect(screen.queryByText("Text Only")).not.toBeInTheDocument();
     expect(screen.queryByText("Text embedding 3 small")).not.toBeInTheDocument();
+  });
+
+  it("filters image-output models for item illustrations", async () => {
+    render(<Harness requiredCapability="image" />);
+    const input = screen.getByRole("combobox", { name: "Test model" });
+    await userEvent.click(input);
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent("Image Generation");
+    expect(screen.queryByText("Whisper Test")).not.toBeInTheDocument();
+    expect(screen.queryByText("Text Only")).not.toBeInTheDocument();
+  });
+
+  it("filters audio-capable chat and speech models for transcription", async () => {
+    render(<Harness requiredCapability="audio" />);
+    const input = screen.getByRole("combobox", { name: "Test model" });
+    await userEvent.click(input);
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(screen.getByText("Whisper Test")).toBeInTheDocument();
+    expect(screen.getByText("Audio Chat")).toBeInTheDocument();
+    expect(screen.queryByText("Image Generation")).not.toBeInTheDocument();
+    expect(screen.queryByText("Text Only")).not.toBeInTheDocument();
   });
 
   it("preserves an unlisted saved selection and allows exact-ID fallback", async () => {

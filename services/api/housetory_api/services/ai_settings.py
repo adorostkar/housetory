@@ -364,27 +364,58 @@ def update_task(
                 raise ApiError(
                     422,
                     "transcription_provider_unsupported",
-                    "Choose OpenAI or Google Gemini for audio transcription.",
+                    "Choose OpenAI, OpenRouter or Google Gemini for audio transcription.",
                 )
-            if not model_supports_transcription(provider.provider, selected_model):
+            if provider.provider == AiProviderType.OPENROUTER.value:
+                cached = _cached_model(provider, selected_model)
+                capabilities = (
+                    list(cached.capabilities)
+                    if cached is not None
+                    else model_capabilities(provider.provider, selected_model)
+                )
+                if cached is not None and cached.kind not in {"speech", "chat"}:
+                    raise ApiError(
+                        422,
+                        "transcription_model_unsupported",
+                        "The selected OpenRouter catalog model is not a speech-to-text "
+                        "or audio-input chat model.",
+                    )
+                if "audio" not in capabilities:
+                    raise ApiError(
+                        422,
+                        "transcription_model_unsupported",
+                        "The selected OpenRouter model does not advertise STT or audio "
+                        "input. Discover models and choose one with audio capability.",
+                    )
+            elif not model_supports_transcription(provider.provider, selected_model):
                 raise ApiError(
                     422,
                     "transcription_model_unsupported",
                     "Choose an OpenAI whisper/transcription model or a Gemini audio model.",
                 )
         elif task == AiTask.ITEM_IMAGES.value:
-            if provider.provider != AiProviderType.OPENAI.value:
+            if provider.provider not in {
+                AiProviderType.OPENAI.value,
+                AiProviderType.OPENROUTER.value,
+            }:
                 raise ApiError(
                     422,
                     "illustration_provider_unsupported",
-                    "Item illustration generation currently supports the OpenAI Images API.",
+                    "Item illustration generation supports the OpenAI Images API and "
+                    "OpenRouter Image API.",
                 )
-            capabilities = _capabilities_for(provider, selected_model)
+            cached = _cached_model(provider, selected_model)
+            capabilities = (
+                list(cached.capabilities)
+                if cached is not None
+                else model_capabilities(provider.provider, selected_model)
+            )
             if "image" not in capabilities:
                 raise ApiError(
                     422,
                     "model_capability_mismatch",
-                    "The selected OpenAI model does not advertise image generation.",
+                    "The selected model does not advertise image output. Discover "
+                    "models and choose an image-capable model.",
                 )
         else:
             cached_model = _cached_model(provider, selected_model)
@@ -447,6 +478,9 @@ def provider_models(
             kind=model.kind,
             capabilities=list(model.capabilities),
             capability_source=model.capability_source,
+            input_modalities=list(model.input_modalities),
+            output_modalities=list(model.output_modalities),
+            endpoints=list(model.endpoints),
         )
         for model in discovered
     ]

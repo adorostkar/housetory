@@ -805,3 +805,215 @@ def test_transcription_task_status_is_explicit_and_accepts_audio_capability(owne
     )
     assert rejected.status_code == 422
     assert rejected.json()["detail"]["code"] == "transcription_model_unsupported"
+
+
+def test_openrouter_discovery_reads_audio_and_image_modalities(monkeypatch):
+    config = AiRuntimeConfig(
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="test-key",
+        model=None,
+        task="assistant",
+        provider_id=None,
+        display_name="OpenRouter",
+        mode="cloud",
+        source="database",
+        enabled=True,
+        cloud_consent=True,
+        configured=True,
+    )
+
+    def routed(url, payload, **kwargs):
+        if "output_modalities=text" in url:
+            return {
+                "data": [
+                    {
+                        "id": "openai/audio-chat",
+                        "name": "Audio Chat",
+                        "architecture": {
+                            "input_modalities": ["text", "audio"],
+                            "output_modalities": ["text"],
+                        },
+                        "endpoints": ["/api/v1/chat/completions"],
+                        "supported_parameters": ["temperature"],
+                    },
+                    {
+                        "id": "openai/text-chat",
+                        "name": "Text Chat",
+                        "architecture": {
+                            "input_modalities": ["text"],
+                            "output_modalities": ["text"],
+                        },
+                        "endpoints": ["/api/v1/chat/completions"],
+                        "supported_parameters": ["temperature"],
+                    },
+                ]
+            }
+        if "output_modalities=image" in url:
+            return {
+                "data": [
+                    {
+                        "id": "openai/gpt-image-test",
+                        "name": "Image Test",
+                        "architecture": {
+                            "input_modalities": ["text"],
+                            "output_modalities": ["image"],
+                        },
+                        "endpoints": ["/api/v1/images"],
+                        "supported_parameters": {},
+                    }
+                ]
+            }
+        if "output_modalities=transcription" in url:
+            return {
+                "data": [
+                    {
+                        "id": "openai/whisper-test",
+                        "name": "Whisper Test",
+                        "architecture": {
+                            "input_modalities": ["audio"],
+                            "output_modalities": ["transcription"],
+                        },
+                        "endpoints": ["/api/v1/audio/transcriptions"],
+                        "supported_parameters": ["temperature"],
+                    }
+                ]
+            }
+        return {"data": []}
+
+    monkeypatch.setattr(ai, "_request_json", routed)
+    models = {model.id: model for model in ai.discover_models(config)}
+    audio_chat = models["openai/audio-chat"]
+    assert audio_chat.kind == "chat"
+    assert "audio" in audio_chat.capabilities
+    assert audio_chat.input_modalities == ("text", "audio")
+
+    image = models["openai/gpt-image-test"]
+    assert image.kind == "image"
+    assert "image" in image.capabilities
+    assert image.output_modalities == ("image",)
+    assert "/api/v1/images" in image.endpoints
+
+    stt = models["openai/whisper-test"]
+    assert stt.kind == "speech"
+    assert "audio" in stt.capabilities
+    assert "/api/v1/audio/transcriptions" in stt.endpoints
+    assert stt.output_modalities == ("transcription",)
+
+
+def test_openrouter_task_saves_require_compatible_discovered_media_models(
+    owner_client, monkeypatch
+):
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(
+            provider="openrouter",
+            display_name="OpenRouter media",
+            base_url="https://openrouter.ai/api/v1",
+            default_model="openai/audio-chat",
+            api_key="sk-or-test-never-returned",
+        ),
+    ).json()
+
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="openai/whisper-test",
+                display_name="Whisper Test",
+                kind="speech",
+                capabilities=("audio",),
+                capability_source="provider_metadata",
+                endpoints=("/api/v1/audio/transcriptions",),
+                input_modalities=("audio",),
+                output_modalities=("transcription",),
+            ),
+            DiscoveredModel(
+                id="openai/audio-chat",
+                display_name="Audio Chat",
+                kind="chat",
+                capabilities=("text", "audio"),
+                capability_source="provider_metadata",
+                endpoints=("/api/v1/chat/completions",),
+                input_modalities=("text", "audio"),
+                output_modalities=("text",),
+            ),
+            DiscoveredModel(
+                id="openai/gpt-image-test",
+                display_name="Image Test",
+                kind="image",
+                capabilities=("image",),
+                capability_source="provider_metadata",
+                endpoints=("/api/v1/images",),
+                input_modalities=("text",),
+                output_modalities=("image",),
+            ),
+            DiscoveredModel(
+                id="openai/text-chat",
+                display_name="Text Chat",
+                kind="chat",
+                capabilities=("text",),
+                capability_source="provider_metadata",
+                endpoints=("/api/v1/chat/completions",),
+                input_modalities=("text",),
+                output_modalities=("text",),
+            ),
+        ],
+    )
+    discovered = owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models")
+    assert discovered.status_code == 200, discovered.text
+    assert discovered.json()["models"][0]["input_modalities"] is not None
+
+    transcription = owner_client.put(
+        "/api/v1/ai/tasks/transcription",
+        json={
+            "provider_id": provider["id"],
+            "model": "openai/whisper-test",
+            "enabled": True,
+        },
+    )
+    assert transcription.status_code == 200, transcription.text
+
+    images = owner_client.put(
+        "/api/v1/ai/tasks/item_images",
+        json={
+            "provider_id": provider["id"],
+            "model": "openai/gpt-image-test",
+            "enabled": True,
+        },
+    )
+    assert images.status_code == 200, images.text
+
+    audio_as_image = owner_client.put(
+        "/api/v1/ai/tasks/item_images",
+        json={
+            "provider_id": provider["id"],
+            "model": "openai/whisper-test",
+            "enabled": True,
+        },
+    )
+    assert audio_as_image.status_code == 422
+    assert audio_as_image.json()["detail"]["code"] == "model_capability_mismatch"
+
+    image_as_transcription = owner_client.put(
+        "/api/v1/ai/tasks/transcription",
+        json={
+            "provider_id": provider["id"],
+            "model": "openai/gpt-image-test",
+            "enabled": True,
+        },
+    )
+    assert image_as_transcription.status_code == 422
+    assert image_as_transcription.json()["detail"]["code"] == "transcription_model_unsupported"
+
+    text_as_transcription = owner_client.put(
+        "/api/v1/ai/tasks/transcription",
+        json={
+            "provider_id": provider["id"],
+            "model": "openai/text-chat",
+            "enabled": True,
+        },
+    )
+    assert text_as_transcription.status_code == 422
+    assert text_as_transcription.json()["detail"]["code"] == "transcription_model_unsupported"

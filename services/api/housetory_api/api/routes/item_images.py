@@ -41,7 +41,7 @@ def _search_availability():
             provider.label,
             "Reference-image search is configured, but no permitted-source download "
             "policy is set. Configure ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS on the server. "
-            "Built-in illustrations remain available.",
+            "The category icon fallback remains available.",
         )
     return True, provider.label, None
 

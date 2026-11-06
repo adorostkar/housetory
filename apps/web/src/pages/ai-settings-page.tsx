@@ -560,10 +560,11 @@ export function AiSettingsPage() {
           <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Task defaults</h2>
         </div>
         <p className="mt-1 text-[0.75rem] text-muted-foreground">
-          Choose a provider and model per task. Vision tasks require a model that advertises
-          vision capability. Voice transcription requires OpenAI audio transcriptions or a
-          Gemini model with audio input. Capability detection is conservative and can be
-          corrected by entering the exact provider model name.
+          Choose a provider and model per task. Vision requires image input; voice
+          transcription requires OpenAI/Gemini audio support or an OpenRouter STT/audio-input
+          model; item illustrations require OpenAI Images or an OpenRouter image-output model.
+          Capability detection uses provider metadata where available and validates manual IDs
+          when you save.
         </p>
         <div className="mt-5 space-y-3">
           {Object.values(tasks)
@@ -573,6 +574,35 @@ export function AiSettingsPage() {
               const providerModels = provider ? models[provider.id] ?? [] : [];
               const providerModelStatus = provider ? modelStatus[provider.id] : undefined;
               const selectedModel = providerModels.find((model) => model.id === task.model);
+              const requiredCapability =
+                task.task === "vision"
+                  ? "vision"
+                  : task.task === "transcription"
+                    ? "audio"
+                    : task.task === "item_images"
+                      ? "image"
+                      : undefined;
+              const allowedKinds =
+                requiredCapability === "audio"
+                  ? ["chat", "speech"]
+                  : requiredCapability === "image"
+                    ? ["image"]
+                    : ["chat"];
+              const selectedCompatible =
+                !selectedModel ||
+                !requiredCapability ||
+                (allowedKinds.includes(selectedModel.kind) &&
+                  selectedModel.capabilities.includes(requiredCapability));
+              const noCompatibleDiscovered = Boolean(
+                provider &&
+                  providerModels.length > 0 &&
+                  requiredCapability &&
+                  !providerModels.some(
+                    (model) =>
+                      allowedKinds.includes(model.kind) &&
+                      model.capabilities.includes(requiredCapability),
+                  ),
+              );
               return (
                 <div
                   key={task.task}
@@ -626,15 +656,7 @@ export function AiSettingsPage() {
                       value={task.model ?? ""}
                       models={providerModels}
                       disabled={!provider}
-                      requiredCapability={
-                        task.task === "vision"
-                          ? "vision"
-                          : task.task === "transcription"
-                            ? "audio"
-                            : task.task === "item_images"
-                              ? "image"
-                              : undefined
-                      }
+                      requiredCapability={requiredCapability}
                       loading={providerModelStatus?.loading}
                       error={providerModelStatus?.error}
                       cached={providerModelStatus?.cached}
@@ -670,6 +692,12 @@ export function AiSettingsPage() {
                           : "Choose a provider first"
                       }
                     />
+                    {noCompatibleDiscovered ? (
+                      <p className="mt-1 text-[0.64rem] leading-relaxed text-brass">
+                        No discovered model supports this task. Refresh models or
+                        choose another provider.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <label className="flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
@@ -689,7 +717,7 @@ export function AiSettingsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={saveTask.isPending}
+                      disabled={saveTask.isPending || !selectedCompatible}
                       onClick={() => saveTask.mutate(task)}
                     >
                       {saveTask.isPending ? <Spinner /> : <Check />}

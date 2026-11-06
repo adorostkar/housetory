@@ -19,7 +19,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   vision: "Vision",
   structured: "Structured",
   tools: "Tools",
-  audio: "Audio",
+  audio: "Audio input / transcription",
+  image: "Image output",
 };
 
 export function ModelPicker({
@@ -59,7 +60,12 @@ export function ModelPicker({
   const deferredSearch = React.useDeferredValue(search);
   const selected = models.find((model) => model.id === value);
   const allowedKinds = React.useMemo(
-    () => (requiredCapability === "audio" ? ["chat", "speech"] : ["chat"]),
+    () =>
+      requiredCapability === "audio"
+        ? ["chat", "speech"]
+        : requiredCapability === "image"
+          ? ["image"]
+          : ["chat"],
     [requiredCapability],
   );
   const chatModels = React.useMemo(
@@ -247,8 +253,8 @@ export function ModelPicker({
           ) : filtered.length === 0 ? (
             <div className="min-w-0 px-3 py-3 text-[0.72rem] text-muted-foreground">
               <p className="break-words">
-                No compatible catalog model matches “{search}”. Press Enter to use that exact
-                ID manually.
+                No compatible catalog model matches “{search}”. Press Enter to use that
+                exact ID manually; the server validates task capability when you save.
               </p>
             </div>
           ) : (

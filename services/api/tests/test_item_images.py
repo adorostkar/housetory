@@ -949,3 +949,108 @@ def test_search_is_unavailable_until_a_permitted_source_policy_is_set(owner_clie
         assert (
             db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
         )
+
+
+def test_openrouter_image_adapter_contract_and_output_validation(monkeypatch):
+    import base64
+
+    from housetory_api.services import ai
+    from housetory_api.services.ai_runtime import AiRuntimeConfig
+
+    config = AiRuntimeConfig(
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        api_key="fixture",
+        model="bytedance-seed/seedream-test",
+        task="item_images",
+        provider_id=None,
+        display_name="OpenRouter Images",
+        mode="cloud",
+        source="database",
+        enabled=True,
+        cloud_consent=True,
+        configured=True,
+    )
+    image_data = png_bytes()
+    captured = {}
+
+    def fake_request(url, payload, **kwargs):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = kwargs.get("headers")
+        return {
+            "created": 1748372400,
+            "data": [
+                {
+                    "b64_json": base64.b64encode(image_data).decode(),
+                    "media_type": "image/png",
+                }
+            ],
+            "usage": {"cost": 0.01},
+        }
+
+    monkeypatch.setattr(ai, "_request_json", fake_request)
+    assert ai.generate_image("A clean product illustration", config=config) == image_data
+    assert str(captured["url"]).endswith("/images")
+    assert not str(captured["url"]).endswith("/images/generations")
+    assert captured["payload"] == {
+        "model": "bytedance-seed/seedream-test",
+        "prompt": "A clean product illustration",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer fixture"
+    assert captured["headers"]["X-Title"] == "Housetory"
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda *_args, **_kwargs: {"data": [{"url": "https://example.com/generated.png"}]},
+    )
+    try:
+        ai.generate_image("prompt", config=config)
+    except ai.AiInvalidOutput as exc:
+        assert "URL-only" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("OpenRouter URL-only output was accepted")
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda *_args, **_kwargs: {
+            "data": [
+                {
+                    "b64_json": base64.b64encode(image_data).decode(),
+                    "media_type": "image/svg+xml",
+                }
+            ]
+        },
+    )
+    try:
+        ai.generate_image("prompt", config=config)
+    except ai.AiInvalidOutput as exc:
+        assert "unsupported image media type" in str(exc).lower()
+    else:  # pragma: no cover
+        raise AssertionError("SVG output was accepted as an item illustration")
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda *_args, **_kwargs: {"data": []},
+    )
+    try:
+        ai.generate_image("prompt", config=config)
+    except ai.AiInvalidOutput as exc:
+        assert "no generated image" in str(exc).lower()
+    else:  # pragma: no cover
+        raise AssertionError("Empty OpenRouter image output was accepted")
+
+    monkeypatch.setattr(
+        ai,
+        "_request_json",
+        lambda *_args, **_kwargs: {"data": [{"b64_json": "not-base64!"}]},
+    )
+    try:
+        ai.generate_image("prompt", config=config)
+    except ai.AiInvalidOutput as exc:
+        assert "invalid base64" in str(exc).lower()
+    else:  # pragma: no cover
+        raise AssertionError("Invalid OpenRouter base64 was accepted")

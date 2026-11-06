@@ -72,6 +72,9 @@ class DiscoveredModel:
     kind: str
     capabilities: tuple[str, ...]
     capability_source: str
+    endpoints: tuple[str, ...] = ()
+    input_modalities: tuple[str, ...] = ()
+    output_modalities: tuple[str, ...] = ()
 
 
 def _settings():
@@ -233,6 +236,11 @@ def _headers(config: AiRuntimeConfig) -> dict[str, str]:
             "anthropic-version": "2023-06-01",
         }
         return headers
+    if config.provider == AiProviderType.OPENROUTER.value:
+        headers = {"X-Title": "Housetory"}
+        if config.api_key:
+            headers["Authorization"] = f"Bearer {config.api_key}"
+        return headers
     if config.api_key:
         return {"Authorization": f"Bearer {config.api_key}"}
     return {}
@@ -241,6 +249,103 @@ def _headers(config: AiRuntimeConfig) -> dict[str, str]:
 def _url(config: AiRuntimeConfig, path: str) -> str:
     base = (config.base_url or DEFAULT_BASE_URLS.get(config.provider, "")).rstrip("/")
     return f"{base}{path}"
+
+
+OPENROUTER_CATALOG_MODALITIES = ("text", "image", "transcription")
+_OPENROUTER_METADATA_TTL_SECONDS = 300
+_OPENROUTER_METADATA_CACHE: dict[tuple[str, str, str], tuple[float, DiscoveredModel | None]] = {}
+
+
+def _entry_modalities(
+    entry: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    architecture = entry.get("architecture")
+    inputs: tuple[str, ...] = ()
+    outputs: tuple[str, ...] = ()
+    if isinstance(architecture, dict):
+        raw_inputs = architecture.get("input_modalities")
+        raw_outputs = architecture.get("output_modalities")
+        if isinstance(raw_inputs, list):
+            inputs = tuple(str(value).lower() for value in raw_inputs)
+        if isinstance(raw_outputs, list):
+            outputs = tuple(str(value).lower() for value in raw_outputs)
+    raw_endpoints = entry.get("endpoints")
+    endpoints = (
+        tuple(str(value) for value in raw_endpoints) if isinstance(raw_endpoints, list) else ()
+    )
+    return inputs, outputs, endpoints
+
+
+def _kind_from_entry(entry: dict[str, Any], fallback: str) -> str:
+    _inputs, outputs, endpoints = _entry_modalities(entry)
+    if "transcription" in outputs or "/api/v1/audio/transcriptions" in endpoints:
+        return "speech"
+    if "image" in outputs or "/api/v1/images" in endpoints:
+        return "image"
+    if outputs:
+        if "text" in outputs:
+            return "chat"
+        if "audio" in outputs:
+            return "speech"
+        return "other"
+    return fallback
+
+
+def _openrouter_model_entries(config: AiRuntimeConfig) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for modality in OPENROUTER_CATALOG_MODALITIES:
+        response = _request_json(
+            _url(
+                config,
+                f"/models?output_modalities={modality}&limit=1000",
+            ),
+            None,
+            method="GET",
+            headers=_headers(config),
+            timeout=10,
+        )
+        for entry in response.get("data") or []:
+            if not isinstance(entry, dict) or not entry.get("id"):
+                continue
+            model_id = str(entry["id"])
+            if model_id in seen:
+                continue
+            seen.add(model_id)
+            entries.append(entry)
+    return entries
+
+
+def openrouter_model_metadata(
+    config: AiRuntimeConfig,
+    model_id: str | None = None,
+    *,
+    refresh: bool = False,
+) -> DiscoveredModel | None:
+    """Return discovered OpenRouter modalities/endpoints for one model.
+
+    Catalog access is metadata-only. No household audio/image/text is sent.
+    """
+    if config.provider != AiProviderType.OPENROUTER.value:
+        return None
+    selected = model_id or config.model
+    if not selected:
+        return None
+    key = (str(config.provider_id), config.base_url, selected)
+    now = time.monotonic()
+    cached = _OPENROUTER_METADATA_CACHE.get(key)
+    if not refresh and cached and now - cached[0] < _OPENROUTER_METADATA_TTL_SECONDS:
+        return cached[1]
+    models = discover_models(config)
+    found = next((model for model in models if model.id == selected), None)
+    if found is None:
+        base = selected.split(":")[0]
+        found = next(
+            (model for model in models if model.id.split(":")[0] == base),
+            None,
+        )
+    _OPENROUTER_METADATA_CACHE[key] = (now, found)
+    return found
 
 
 def available_models(config: AiRuntimeConfig) -> list[str]:
@@ -279,6 +384,8 @@ def available_models(config: AiRuntimeConfig) -> list[str]:
             for entry in models
             if isinstance(entry, dict) and entry.get("name")
         )
+    if config.provider == AiProviderType.OPENROUTER.value:
+        return sorted(str(entry["id"]) for entry in _openrouter_model_entries(config))
     response = _request_json(
         _url(config, "/models"),
         None,
@@ -318,20 +425,33 @@ def _metadata_capabilities(
 ) -> tuple[tuple[str, ...], str]:
     capabilities = set(model_capabilities(provider, model_id))
     source = "heuristic"
+    inputs, outputs, endpoints = _entry_modalities(entry)
     architecture = entry.get("architecture")
     if isinstance(architecture, dict):
         source = "provider_metadata"
-        inputs = architecture.get("input_modalities")
-        if isinstance(inputs, list):
+        raw_inputs = architecture.get("input_modalities")
+        if isinstance(raw_inputs, list):
             capabilities.discard("vision")
             capabilities.discard("audio")
-            if any(str(value).lower() in {"image", "img", "file"} for value in inputs):
+            if "image" in inputs:
                 capabilities.add("vision")
-            if any(str(value).lower() in {"audio", "speech"} for value in inputs):
+            if "audio" in inputs:
                 capabilities.add("audio")
-        outputs = architecture.get("output_modalities")
-        if isinstance(outputs, list) and "text" not in {str(value).lower() for value in outputs}:
-            capabilities.discard("text")
+        raw_outputs = architecture.get("output_modalities")
+        if isinstance(raw_outputs, list):
+            capabilities.discard("image")
+            if "image" in outputs:
+                capabilities.add("image")
+            if "transcription" in outputs:
+                capabilities.add("audio")
+            if "text" not in outputs:
+                capabilities.discard("text")
+    if endpoints:
+        source = "provider_metadata"
+        if "/api/v1/audio/transcriptions" in endpoints:
+            capabilities.add("audio")
+        if "/api/v1/images" in endpoints:
+            capabilities.add("image")
     supported = entry.get("supported_parameters")
     if isinstance(supported, list):
         source = "provider_metadata"
@@ -351,7 +471,7 @@ def _metadata_capabilities(
             capabilities.discard("text")
     if provider == AiProviderType.GEMINI.value:
         capabilities.add("audio")
-    order = ["text", "vision", "audio", "structured", "tools"]
+    order = ["text", "vision", "audio", "image", "structured", "tools"]
     return tuple(capability for capability in order if capability in capabilities), source
 
 
@@ -443,6 +563,24 @@ def discover_models(config: AiRuntimeConfig) -> list[DiscoveredModel]:
             if not response.get("nextPageToken"):
                 break
             page_token = str(response["nextPageToken"])
+    elif config.provider == AiProviderType.OPENROUTER.value:
+        for entry in _openrouter_model_entries(config):
+            model_id = str(entry["id"])
+            inputs, outputs, endpoints = _entry_modalities(entry)
+            kind = _kind_from_entry(entry, _classify_model_kind(model_id))
+            capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
+            discovered.append(
+                DiscoveredModel(
+                    id=model_id,
+                    display_name=str(entry.get("name") or entry.get("display_name") or model_id),
+                    kind=kind,
+                    capabilities=capabilities,
+                    capability_source=source,
+                    endpoints=endpoints,
+                    input_modalities=inputs,
+                    output_modalities=outputs,
+                )
+            )
     else:
         response = _request_json(
             _url(config, "/models"),
@@ -456,7 +594,8 @@ def discover_models(config: AiRuntimeConfig) -> list[DiscoveredModel]:
             if not isinstance(entry, dict) or not entry.get("id"):
                 continue
             model_id = str(entry["id"])
-            kind = _classify_model_kind(model_id)
+            inputs, outputs, endpoints = _entry_modalities(entry)
+            kind = _kind_from_entry(entry, _classify_model_kind(model_id))
             capabilities, source = _metadata_capabilities(config.provider, model_id, entry)
             discovered.append(
                 DiscoveredModel(
@@ -465,6 +604,9 @@ def discover_models(config: AiRuntimeConfig) -> list[DiscoveredModel]:
                     kind=kind,
                     capabilities=capabilities,
                     capability_source=source,
+                    endpoints=endpoints,
+                    input_modalities=inputs,
+                    output_modalities=outputs,
                 )
             )
     deduped: dict[str, DiscoveredModel] = {}
@@ -824,42 +966,77 @@ def generate_image(
     config: AiRuntimeConfig,
     size: str = "1024x1024",
 ) -> bytes:
-    """Generate one image through the OpenAI Images API.
+    """Generate one raster image through a documented provider image API.
 
-    This is deliberately not routed through a chat/completions endpoint. Other
+    OpenAI uses the Images API. OpenRouter uses its dedicated Image API. Other
     providers are rejected until a real image-generation adapter exists for them.
     """
-    if config.provider != AiProviderType.OPENAI.value:
+    if config.provider not in {
+        AiProviderType.OPENAI.value,
+        AiProviderType.OPENROUTER.value,
+    }:
         raise AiUnavailable(
-            "Item illustration generation currently supports the OpenAI Images API."
+            "Item illustration generation supports the OpenAI Images API and OpenRouter Image API."
         )
     if not config.configured or not config.model:
         raise AiUnavailable(config.error or "Item illustration generation is not configured.")
-    payload: dict[str, Any] = {
-        "model": config.model,
-        "prompt": prompt[:4000],
-        "n": 1,
-        "size": size,
-    }
-    # GPT Image models return b64_json by default; older DALL-E models require the
-    # explicit response format. A URL-only response is not accepted as success.
-    if "gpt-image" not in config.model.lower():
-        payload["response_format"] = "b64_json"
-    response = _request_json(
-        _url(config, "/images/generations"),
-        payload,
-        headers=_headers(config),
-        timeout=get_settings().ai_timeout_seconds,
-    )
-    data = response.get("data")
-    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
-        raise AiInvalidOutput("Image provider returned no generated image.")
-    encoded = data[0].get("b64_json")
-    if not isinstance(encoded, str) or not encoded.strip():
-        raise AiInvalidOutput(
-            "Image provider did not return inline image data. A URL-only response "
-            "is not treated as a successful generation."
+    if config.provider == AiProviderType.OPENROUTER.value:
+        payload: dict[str, Any] = {
+            "model": config.model,
+            "prompt": prompt[:4000],
+        }
+        response = _request_json(
+            _url(config, "/images"),
+            payload,
+            headers=_headers(config),
+            timeout=get_settings().ai_timeout_seconds,
         )
+        data = response.get("data")
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise AiInvalidOutput("OpenRouter returned no generated image.")
+        first = data[0]
+        encoded = first.get("b64_json")
+        if not isinstance(encoded, str) or not encoded.strip():
+            if first.get("url"):
+                raise AiInvalidOutput(
+                    "OpenRouter returned a URL-only image. URL-only outputs are not "
+                    "accepted for item illustrations."
+                )
+            raise AiInvalidOutput("OpenRouter returned no inline image data.")
+        media_type = first.get("media_type")
+        if isinstance(media_type, str) and media_type.strip():
+            normalized = media_type.split(";", 1)[0].strip().lower()
+            if normalized not in {"image/png", "image/jpeg", "image/webp"}:
+                raise AiInvalidOutput(
+                    f"OpenRouter returned unsupported image media type {normalized!r}; "
+                    "item illustrations require PNG, JPEG or WebP."
+                )
+    else:
+        payload = {
+            "model": config.model,
+            "prompt": prompt[:4000],
+            "n": 1,
+            "size": size,
+        }
+        # GPT Image models return b64_json by default; older DALL-E models require
+        # the explicit response format. A URL-only response is not accepted.
+        if "gpt-image" not in config.model.lower():
+            payload["response_format"] = "b64_json"
+        response = _request_json(
+            _url(config, "/images/generations"),
+            payload,
+            headers=_headers(config),
+            timeout=get_settings().ai_timeout_seconds,
+        )
+        data = response.get("data")
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise AiInvalidOutput("Image provider returned no generated image.")
+        encoded = data[0].get("b64_json")
+        if not isinstance(encoded, str) or not encoded.strip():
+            raise AiInvalidOutput(
+                "Image provider did not return inline image data. A URL-only response "
+                "is not treated as a successful generation."
+            )
     try:
         image = base64.b64decode(encoded, validate=True)
     except (ValueError, TypeError) as exc:

@@ -804,3 +804,168 @@ def test_transcription_adapters_call_only_configured_provider(tmp_path, monkeypa
         assert "does not support audio transcription" in str(exc)
     else:  # pragma: no cover - defensive
         raise AssertionError("Unsupported transcription provider was accepted.")
+
+
+def test_openrouter_transcription_uses_stt_and_chat_audio_contracts(tmp_path, monkeypatch):
+    import base64
+    from dataclasses import replace
+
+    from housetory_api.services import transcription
+    from housetory_api.services.ai import DiscoveredModel
+
+    path = tmp_path / "note.webm"
+    path.write_bytes(b"\x1aE\xdf\xa3" + b"\x00" * 512)
+    config = replace(
+        runtime_config(
+            "transcription",
+            provider="openrouter",
+            model="openai/whisper-test",
+        ),
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+    stt_metadata = DiscoveredModel(
+        id="openai/whisper-test",
+        display_name="Whisper Test",
+        kind="speech",
+        capabilities=("audio",),
+        capability_source="provider_metadata",
+        endpoints=("/api/v1/audio/transcriptions",),
+        input_modalities=("audio",),
+        output_modalities=("transcription",),
+    )
+    monkeypatch.setattr(
+        transcription.ai,
+        "openrouter_model_metadata",
+        lambda _config: stt_metadata,
+    )
+    captured: dict[str, object] = {}
+
+    def stt_request(url, payload, **kwargs):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {"text": "  a drill in the office  ", "usage": {"seconds": 2.1}}
+
+    monkeypatch.setattr(transcription.ai, "_request_json", stt_request)
+    assert (
+        transcription.transcribe_audio(
+            config,
+            path=path,
+            content_type="audio/webm",
+            filename="note.webm",
+        )
+        == "a drill in the office"
+    )
+    assert str(captured["url"]).endswith("/audio/transcriptions")
+    stt_payload = captured["payload"]
+    assert isinstance(stt_payload, dict)
+    assert stt_payload["model"] == "openai/whisper-test"
+    assert stt_payload["response_format"] == "json"
+    input_audio = stt_payload["input_audio"]
+    assert input_audio["format"] == "webm"
+    assert not input_audio["data"].startswith("data:")
+    assert base64.b64decode(input_audio["data"]) == path.read_bytes()
+
+    chat_metadata = DiscoveredModel(
+        id="openai/audio-chat",
+        display_name="Audio Chat",
+        kind="chat",
+        capabilities=("text", "audio"),
+        capability_source="provider_metadata",
+        endpoints=("/api/v1/chat/completions",),
+        input_modalities=("text", "audio"),
+        output_modalities=("text",),
+    )
+    monkeypatch.setattr(
+        transcription.ai,
+        "openrouter_model_metadata",
+        lambda _config: chat_metadata,
+    )
+
+    def chat_request(url, payload, **kwargs):
+        captured["chat_url"] = url
+        captured["chat_payload"] = payload
+        return {
+            "choices": [
+                {
+                    "message": {"content": "a saw in the garage"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(transcription.ai, "_request_json", chat_request)
+    assert (
+        transcription.transcribe_audio(
+            replace(config, model="openai/audio-chat"),
+            path=path,
+            content_type="audio/webm",
+            filename="note.webm",
+        )
+        == "a saw in the garage"
+    )
+    assert str(captured["chat_url"]).endswith("/chat/completions")
+    chat_payload = captured["chat_payload"]
+    assert isinstance(chat_payload, dict)
+    parts = chat_payload["messages"][1]["content"]
+    assert parts[0]["type"] == "text"
+    assert parts[1]["type"] == "input_audio"
+    assert parts[1]["input_audio"]["format"] == "webm"
+    assert not parts[1]["input_audio"]["data"].startswith("data:")
+
+    monkeypatch.setattr(
+        transcription.ai,
+        "_request_json",
+        lambda *_args, **_kwargs: {
+            "choices": [
+                {
+                    "message": {"content": None, "refusal": "cannot transcribe"},
+                    "finish_reason": "stop",
+                }
+            ]
+        },
+    )
+    try:
+        transcription.transcribe_audio(
+            replace(config, model="openai/audio-chat"),
+            path=path,
+            content_type="audio/webm",
+            filename="note.webm",
+        )
+    except voice_service.ai.AiInvalidOutput as exc:
+        assert "refused" in str(exc).lower()
+    else:  # pragma: no cover - defensive
+        raise AssertionError("A refusal was accepted as a transcript.")
+
+    monkeypatch.setattr(
+        transcription.ai,
+        "openrouter_model_metadata",
+        lambda _config: DiscoveredModel(
+            id="openai/text-chat",
+            display_name="Text Chat",
+            kind="chat",
+            capabilities=("text",),
+            capability_source="provider_metadata",
+            endpoints=("/api/v1/chat/completions",),
+            input_modalities=("text",),
+            output_modalities=("text",),
+        ),
+    )
+    monkeypatch.setattr(
+        transcription.ai,
+        "_request_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Unsupported audio model must not receive household audio.")
+        ),
+    )
+    try:
+        transcription.transcribe_audio(
+            replace(config, model="openai/text-chat"),
+            path=path,
+            content_type="audio/webm",
+            filename="note.webm",
+        )
+    except voice_service.ai.AiUnavailable as exc:
+        assert "does not advertise" in str(exc)
+    else:  # pragma: no cover - defensive
+        raise AssertionError("Text-only OpenRouter model was accepted for transcription.")

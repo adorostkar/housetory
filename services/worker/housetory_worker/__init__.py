@@ -133,8 +133,12 @@ HANDLERS = {
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
-    VOICE_TRANSCRIBE_TASK: run_voice_transcription,
-    VOICE_INTERPRET_TASK: run_voice_interpretation,
+    VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(
+        payload.get("voice_note_id")
+    ),
+    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(
+        payload.get("voice_note_id")
+    ),
     ITEM_IMAGE_NEW_ITEM_TASK: run_item_image_new_item,
     ITEM_IMAGE_BATCH_TASK: lambda payload: run_item_image_batch(
         payload, uuid.UUID(str(payload["job_id"]))

@@ -28,7 +28,8 @@ test.beforeAll(async () => {
       // Drain the request body; catalog requests are GETs.
     }
     response.setHeader("Content-Type", "application/json");
-    if (request.method === "GET" && request.url?.endsWith("/models")) {
+    const requestUrl = new URL(request.url ?? "/", "http://localhost");
+    if (request.method === "GET" && requestUrl.pathname.endsWith("/models")) {
       response.end(JSON.stringify({ data: catalog }));
       return;
     }

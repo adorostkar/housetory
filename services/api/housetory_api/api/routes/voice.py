@@ -145,7 +145,7 @@ def create_voice_note(
             422,
             "transcription_not_configured",
             config.error
-            or "Choose OpenAI or Google Gemini for voice transcription in AI settings.",
+            or "Choose OpenAI, OpenRouter or Google Gemini for voice transcription in AI settings.",
         )
     if active_voice_note_count(db, auth.household.id) >= settings.voice_max_active_notes:
         raise ApiError(
