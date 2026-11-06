@@ -141,7 +141,10 @@ function renderPage(entry: string) {
 beforeEach(() => {
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
-  vi.mocked(api.get).mockResolvedValue(aiStatus);
+  vi.mocked(api.get).mockImplementation(async (path) => {
+    if (path.startsWith("/search/scopes")) return { items: [] };
+    return aiStatus;
+  });
   vi.mocked(api.post)
     .mockResolvedValueOnce(firstAnswer)
     .mockResolvedValueOnce(secondAnswer);
@@ -160,7 +163,7 @@ describe("AssistantPage", () => {
       history: [],
     });
     expect(screen.getByText("Privacy & model details")).toBeVisible();
-    expect(screen.getByText("Local AI")).toBeVisible();
+    expect(screen.getByText("Grounded across your places")).toBeVisible();
     expect(screen.queryByText("Grounded answer")).not.toBeInTheDocument();
     expect(screen.getByText("Heavy drill loan to Alex")).toBeVisible();
     expect(api.patch).not.toHaveBeenCalled();

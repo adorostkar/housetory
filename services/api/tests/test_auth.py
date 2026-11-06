@@ -6,6 +6,7 @@ def test_first_run_setup_and_session(client):
         "user": None,
         "household": None,
         "role": None,
+        "households": [],
     }
 
     response = client.post(

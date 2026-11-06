@@ -35,7 +35,7 @@ os.environ["AI_CREDENTIAL_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 from sqlalchemy import text  # noqa: E402
 
-from housetory_api.api.abuse import login_limiter  # noqa: E402
+from housetory_api.api.abuse import login_limiter, search_limiter  # noqa: E402
 from housetory_api.db import engine  # noqa: E402
 from housetory_api.main import app  # noqa: E402
 from housetory_api.services.email import reset_captured_email  # noqa: E402
@@ -95,6 +95,7 @@ def clean_state(database: None) -> Iterator[None]:
     shutil.rmtree(EXPORTS_ROOT, ignore_errors=True)
     EXPORTS_ROOT.mkdir(parents=True, exist_ok=True)
     login_limiter.reset_all()
+    search_limiter.reset_all()
     reset_captured_email()
     yield
 

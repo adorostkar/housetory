@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, buildQuery } from "@/lib/api";
+import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
 import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
@@ -36,6 +36,8 @@ import type {
   PurchaseList,
   QuickSearchResponse,
   RoomList,
+  SearchItemList,
+  SearchScopeList,
   SessionState,
   StocktakeScopeSummary,
   StocktakeReview,
@@ -86,6 +88,7 @@ export const queryKeys = {
   roomPhotos: (roomId: string) => ["photos", "room", roomId] as const,
   locationPhotos: (locationId: string) => ["photos", "location", locationId] as const,
   quickSearch: ["search", "quick"] as const,
+  searchScopes: ["search", "scopes"] as const,
   containers: ["containers"] as const,
   container: (containerId: string) => ["containers", containerId] as const,
   labelTemplates: ["labels", "templates"] as const,
@@ -107,6 +110,34 @@ export const queryKeys = {
   containerHistory: (containerId: string) =>
     ["containers", containerId, "history"] as const,
 };
+
+export function applyHouseholdSession(
+  queryClient: ReturnType<typeof useQueryClient>,
+  state: SessionState,
+) {
+  const previous = queryClient.getQueryData<SessionState>(queryKeys.session)?.household?.id;
+  setActiveHouseholdId(state.household?.id ?? null);
+  void queryClient.cancelQueries();
+  queryClient.clear();
+  queryClient.setQueryData(queryKeys.session, state);
+  try {
+    window.localStorage.removeItem("housetory-property-filter");
+    const stored = window.localStorage.getItem("housetory-search-scope");
+    if (stored) {
+      const scope = JSON.parse(stored) as { householdId?: string; propertyId?: string };
+      if (scope.householdId && scope.householdId === previous) {
+        window.localStorage.removeItem("housetory-search-scope");
+      }
+    }
+  } catch {
+    // Local remembered filters are best effort.
+  }
+}
+
+export interface SearchScopeValue {
+  householdId: string;
+  propertyId: string;
+}
 
 export interface LoanFilters {
   status?: LoanFilterStatus;
@@ -245,6 +276,57 @@ export function useSession() {
   });
 }
 
+export function useCreateHousehold() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { name: string; property_name?: string }) =>
+      api.post<SessionState>("/households", payload),
+    onSuccess: (state) => applyHouseholdSession(queryClient, state),
+  });
+}
+
+export function useSelectHousehold() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (householdId: string) =>
+      api.post<SessionState>(`/households/${householdId}/select`),
+    onSuccess: (state) => applyHouseholdSession(queryClient, state),
+  });
+}
+
+export function useSearchScopes(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.searchScopes,
+    queryFn: () => api.get<SearchScopeList>("/search/scopes"),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
+export function useAllPlacesItems(
+  filters: { q?: string; household_id?: string; property_id?: string; sort?: string },
+  limit = 30,
+  enabled = true,
+) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.items, "all-places", filters, limit],
+    queryFn: ({ pageParam }) =>
+      api.get<SearchItemList>(
+        `/search/items${buildQuery({
+          ...filters,
+          limit,
+          offset: pageParam,
+        })}`,
+      ),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.offset + lastPage.items.length;
+      return nextOffset < lastPage.total ? nextOffset : undefined;
+    },
+    enabled,
+  });
+}
+
 export function useOverview() {
   return useQuery({
     queryKey: queryKeys.overview,
@@ -332,13 +414,29 @@ export function useItems(filters: ItemFilters, limit = 24, enabled = true) {
   });
 }
 
-export function useQuickSearch(q: string, limit = 4, enabled = true) {
+export function useQuickSearch(
+  q: string,
+  limit = 4,
+  enabled = true,
+  scope?: SearchScopeValue,
+) {
   const term = q.trim();
   return useQuery({
-    queryKey: [...queryKeys.quickSearch, term, limit],
+    queryKey: [
+      ...queryKeys.quickSearch,
+      term,
+      limit,
+      scope?.householdId ?? "",
+      scope?.propertyId ?? "",
+    ],
     queryFn: ({ signal }) =>
       api.get<QuickSearchResponse>(
-        `/search/quick${buildQuery({ q: term, limit })}`,
+        `/search/quick${buildQuery({
+          q: term,
+          limit,
+          household_id: scope?.householdId,
+          property_id: scope?.propertyId,
+        })}`,
         { signal },
       ),
     enabled: enabled && term.length >= 2,

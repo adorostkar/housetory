@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from .deps import enforce_household_write_access
+from .deps import enforce_household_context, enforce_household_write_access
 from .routes import (
     accounts,
     ai,
@@ -15,6 +15,7 @@ from .routes import (
     extraction,
     health,
     household,
+    households,
     imports,
     items,
     labels,
@@ -35,10 +36,14 @@ from .routes import (
 )
 
 api_router = APIRouter()
-write_guard = [Depends(enforce_household_write_access)]
+write_guard = [
+    Depends(enforce_household_context),
+    Depends(enforce_household_write_access),
+]
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(accounts.router)
+api_router.include_router(households.router)
 api_router.include_router(household.router, dependencies=write_guard)
 api_router.include_router(overview.router)
 api_router.include_router(ownership.router)

@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..schemas.common import Name, ORMModel
+from ..schemas.households import HouseholdMembershipOut
 
 
 class SetupRequest(BaseModel):
@@ -59,6 +60,7 @@ class SessionState(BaseModel):
     user: UserOut | None = None
     household: HouseholdOut | None = None
     role: str | None = None
+    households: list[HouseholdMembershipOut] = Field(default_factory=list)
 
 
 class SetupStatus(BaseModel):

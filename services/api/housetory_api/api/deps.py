@@ -1,10 +1,11 @@
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request, Response
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
@@ -28,6 +29,7 @@ class AuthContext:
     household: Household
     role: str
     session: AuthSession
+    membership_count: int | None = None
 
 
 def _session_from_request(request: Request, db: Session) -> AuthSession | None:
@@ -87,6 +89,15 @@ def get_optional_auth(
                 HouseholdMember.household_id == auth_session.household_id,
             )
         )
+        if membership is None:
+            # The membership may have been revoked or the session may have been
+            # carried across account changes. The session-state endpoint falls
+            # back to another current membership or the no-household state.
+            raise ApiError(
+                401,
+                "household_access_revoked",
+                "Your access to the selected household changed. Refresh to continue.",
+            )
     else:
         # Compatibility for sessions created before selected-household sessions.
         membership = db.scalar(
@@ -132,6 +143,7 @@ def require_writer(auth: AuthContext = Depends(require_auth)) -> AuthContext:
 READ_ONLY_POST_SUFFIXES = (
     "/assistant/query",
     "/search/natural",
+    "/search/items",
     "/manual-questions",
     "/manual-questions/online",
 )
@@ -140,6 +152,60 @@ READ_ONLY_POST_PATTERNS = (
     re.compile(r"/evidence-exports$"),
     re.compile(r"/evidence-exports/[0-9a-f-]+/(cancel|retry)$"),
 )
+
+
+def _read_only_post(path: str) -> bool:
+    return any(path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES) or any(
+        pattern.search(path) for pattern in READ_ONLY_POST_PATTERNS
+    )
+
+
+def enforce_household_context(
+    request: Request,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AuthContext:
+    """Require an explicit, current household context for mutations.
+
+    Multi-household accounts must send ``X-Household-Id`` on unsafe requests.
+    The header must match the selected session household. This rejects a stale
+    tab that still shows the previous household after another tab switched.
+    A single-household account keeps working for existing API clients.
+    """
+    if request.method in {"GET", "HEAD", "OPTIONS"} or _read_only_post(request.url.path):
+        return auth
+    header = request.headers.get("x-household-id")
+    if header:
+        try:
+            supplied = uuid.UUID(header)
+        except ValueError:
+            raise ApiError(
+                400,
+                "invalid_household_context",
+                "The household context header is not a valid id.",
+            ) from None
+        if supplied != auth.household.id:
+            raise ApiError(
+                409,
+                "household_context_changed",
+                "The selected household changed. Reload before changing data.",
+            )
+        return auth
+    count = int(
+        db.scalar(
+            select(func.count(HouseholdMember.household_id)).where(
+                HouseholdMember.user_id == auth.user.id
+            )
+        )
+        or 0
+    )
+    if count > 1:
+        raise ApiError(
+            409,
+            "household_context_required",
+            "Choose a household for this change and retry.",
+        )
+    return auth
 
 
 def enforce_household_write_access(
@@ -156,10 +222,7 @@ def enforce_household_write_access(
         return auth
     if auth.role in {"owner", "member"}:
         return auth
-    path = request.url.path
-    if any(path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES) or any(
-        pattern.search(path) for pattern in READ_ONLY_POST_PATTERNS
-    ):
+    if _read_only_post(request.url.path):
         return auth
     raise ApiError(
         403,
@@ -168,7 +231,13 @@ def enforce_household_write_access(
     )
 
 
-def require_owner(auth: AuthContext = Depends(require_auth)) -> AuthContext:
+def require_owner(
+    request: Request,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> AuthContext:
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        enforce_household_context(request, auth, db)
     if auth.role != "owner":
         raise ApiError(403, "owner_required", "Only the household owner can do that.")
     return auth

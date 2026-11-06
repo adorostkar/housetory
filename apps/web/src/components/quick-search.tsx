@@ -17,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useRememberedSearchScope } from "@/hooks/use-search-scope";
+import { withHousehold } from "@/lib/household-links";
 import { useQuickSearch } from "@/lib/queries";
 import { looksLikeQuestion } from "@/lib/search";
 import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
@@ -40,7 +42,9 @@ function resultLabel(kind: QuickSearchKind) {
 }
 
 function contextLine(result: QuickSearchResult) {
-  const base = [result.subtitle, result.context].filter(Boolean).join(" · ");
+  const base = [result.household?.name, result.subtitle, result.context]
+    .filter(Boolean)
+    .join(" · ");
   if (!result.loan) return base;
   const borrower = result.loan.borrower_names.length
     ? result.loan.borrower_names.slice(0, 2).join(", ")
@@ -74,7 +78,13 @@ export function QuickSearch({
   const questionLike = looksLikeQuestion(term);
   const debouncedTerm = debounced.trim();
   const waiting = term.length >= 2 && term !== debouncedTerm;
-  const search = useQuickSearch(debouncedTerm, 4, focused);
+  const searchScope = useRememberedSearchScope();
+  const search = useQuickSearch(
+    debouncedTerm,
+    4,
+    focused,
+    searchScope.selection,
+  );
   const showPanel = focused && term.length > 0;
   const results =
     !waiting && search.data?.query === debouncedTerm ? search.data.results : [];
@@ -180,7 +190,7 @@ export function QuickSearch({
 
   const choose = (result: QuickSearchResult) => {
     setFocused(false);
-    navigate(result.url);
+    navigate(withHousehold(result.url, result.household?.id));
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -251,7 +261,7 @@ export function QuickSearch({
                 aria-live="polite"
               >
                 <Loader2 className="size-4 animate-spin" />
-                Searching your home…
+                Searching your places…
               </div>
             ) : results.length === 0 ? (
               <div
@@ -329,6 +339,7 @@ export function QuickSearch({
                   <span className="text-[0.65rem] text-muted-foreground">
                     {results.length} quick match{results.length === 1 ? "" : "es"}
                     {questionLike ? " · question detected" : ""}
+                    {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}
                   </span>
                   <div className="flex items-center gap-1">
                     {questionLike && (

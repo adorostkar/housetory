@@ -24,7 +24,7 @@ from ...schemas.ai import (
 )
 from ...schemas.items import ItemSummary
 from ...services import ai as ai_service
-from ...services import storage
+from ...services import global_assistant, global_search, storage
 from ...services.ai_tools import document_relations
 from ...services.assistant import answer_question, natural_search
 from ...services.documents import get_document
@@ -34,6 +34,7 @@ from ...services.recognition import (
     enqueue_recognition,
     serialize_recognition,
 )
+from ..abuse import enforce_search_limit
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -77,12 +78,29 @@ def assistant_query(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AssistantResponse:
-    return answer_question(
+    enforce_search_limit(auth.user.id)
+    scope = global_search.resolve_search_scope(
         db,
-        auth.household.id,
-        payload,
-        household_reminder_days=auth.household.warranty_reminder_days,
+        auth.user.id,
+        household_id=payload.household_id,
+        property_id=payload.property_id,
     )
+    if len(scope.households) == 1 and scope.property is None:
+        household, _role = scope.households[0]
+        response = answer_question(
+            db,
+            household.id,
+            payload,
+            household_reminder_days=household.warranty_reminder_days,
+        )
+        return response.model_copy(
+            update={
+                "scope_label": household.name,
+                "households": global_search.scope_households(scope),
+                "property": global_search.scope_property(scope.property),
+            }
+        )
+    return global_assistant.answer_all_places(db, scope, payload)
 
 
 @router.post("/search/natural", response_model=NaturalSearchResponse)
@@ -91,11 +109,33 @@ def natural_search_route(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> NaturalSearchResponse:
-    return natural_search(
+    enforce_search_limit(auth.user.id)
+    scope = global_search.resolve_search_scope(
         db,
-        auth.household.id,
+        auth.user.id,
+        household_id=payload.household_id,
+        property_id=payload.property_id,
+    )
+    if len(scope.households) == 1 and scope.property is None:
+        household, _role = scope.households[0]
+        response = natural_search(
+            db,
+            household.id,
+            payload.question,
+            household_reminder_days=household.warranty_reminder_days,
+            limit=payload.limit,
+        )
+        return response.model_copy(
+            update={
+                "scope_label": household.name,
+                "households": global_search.scope_households(scope),
+                "property": global_search.scope_property(scope.property),
+            }
+        )
+    return global_assistant.natural_search_all_places(
+        db,
+        scope,
         payload.question,
-        household_reminder_days=auth.household.warranty_reminder_days,
         limit=payload.limit,
     )
 

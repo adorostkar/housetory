@@ -18,16 +18,20 @@ import type { NaturalSearchResponse, QuickSearchResult } from "@/lib/types";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
+import { SearchScopeSelect } from "@/components/search-scope-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { useItems, useQuickSearch } from "@/lib/queries";
+import { useSearchScope } from "@/hooks/use-search-scope";
+import { useAllPlacesItems, useQuickSearch } from "@/lib/queries";
+import { withHousehold } from "@/lib/household-links";
 import { looksLikeQuestion } from "@/lib/search";
 import { pluralize } from "@/lib/utils";
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { selection, label: scopeLabel } = useSearchScope(true);
   const qParam = searchParams.get("q") ?? "";
   const askMode =
     searchParams.get("ask") === "1" || searchParams.get("mode") === "smart";
@@ -39,18 +43,37 @@ export function SearchPage() {
     qParam,
     8,
     hasQuery && !askMode,
+    selection,
   );
-  const searchQuery = useItems(
-    { q: qParam || undefined },
+  const searchQuery = useAllPlacesItems(
+    {
+      q: qParam || undefined,
+      household_id: selection.householdId || undefined,
+      property_id: selection.propertyId || undefined,
+    },
     30,
     qParam.trim().length > 0 && !askMode,
   );
   const naturalQuery = useQuery({
-    queryKey: ["search", "natural", qParam, 40],
+    queryKey: [
+      "search",
+      "natural",
+      qParam,
+      40,
+      selection.householdId,
+      selection.propertyId,
+    ],
     queryFn: ({ signal }) =>
       api.post<NaturalSearchResponse>(
         "/search/natural",
-        { question: qParam, limit: 40 },
+        {
+          question: qParam,
+          limit: 40,
+          ...(selection.householdId
+            ? { household_id: selection.householdId }
+            : {}),
+          ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
+        },
         { signal },
       ),
     enabled: askMode && qParam.trim().length >= 2,
@@ -142,7 +165,8 @@ export function SearchPage() {
         description="Search names, brands, serial numbers, tags, rooms and storage places — or ask a question about your inventory."
       />
 
-      <div className="mx-auto mb-3 flex max-w-3xl justify-center">
+      <div className="mx-auto mb-3 flex max-w-3xl flex-wrap items-center justify-center gap-2">
+        <SearchScopeSelect compact />
         <div className="inline-flex rounded-full border border-border/70 bg-card/60 p-1">
           <button
             type="button"
@@ -193,7 +217,7 @@ export function SearchPage() {
       </div>
 
       <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[0.72rem] text-muted-foreground">
-        <p>Search for an item or ask a question.</p>
+        <p>{scopeLabel}</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => submit(false)}>
             <SearchIcon /> Search
@@ -264,6 +288,7 @@ export function SearchPage() {
           ) : answer ? (
             <AnswerResults
               answer={answer}
+              scopeLabel={scopeLabel}
               onAskAgain={() => void naturalQuery.refetch()}
               onKeyword={() => setAskMode(false)}
             />
@@ -312,7 +337,7 @@ export function SearchPage() {
                 {results.length > 0
                   ? pluralize(total, "result")
                   : pluralize(placeResults.length, "matching place")}{" "}
-                for “{qParam}”
+                for “{qParam}” in {scopeLabel}
               </p>
               {interpretedQuery && (
                 <p className="text-[0.7rem] text-muted-foreground">
@@ -362,10 +387,12 @@ export function SearchPage() {
 
 function AnswerResults({
   answer,
+  scopeLabel,
   onAskAgain,
   onKeyword,
 }: {
   answer: NaturalSearchResponse;
+  scopeLabel: string;
   onAskAgain: () => void;
   onKeyword: () => void;
 }) {
@@ -454,7 +481,7 @@ function AnswerResults({
               {pluralize(answer.total, "matching item")}
             </h2>
             <p className="text-[0.7rem] text-muted-foreground">
-              Current household records only.
+              {answer.scope_label ?? scopeLabel}
             </p>
           </div>
           <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
@@ -474,34 +501,36 @@ function AnswerResults({
 }
 
 function contextualFilterLink(answer: NaturalSearchResponse): string | null {
+  if ((answer.households?.length ?? 0) > 1 || answer.property) return null;
+  let path: string | null = null;
   if (answer.tool === "find_missing_information") {
     const criterion = String(answer.facts.criterion ?? "");
-    if (criterion === "missing_purchase") {
-      return "/items?purchase_info=missing";
+    if (criterion === "missing_purchase") path = "/items?purchase_info=missing";
+    else if (criterion === "missing_purchase_date") {
+      path = "/items?purchase_info=missing_date";
+    } else if (criterion === "missing_purchase_price") {
+      path = "/items?purchase_info=missing_price";
+    } else if (criterion === "purchase_unknown") {
+      path = "/items?purchase_info=unknown";
+    } else if (criterion === "purchase_not_applicable") {
+      path = "/items?purchase_info=not_applicable";
+    } else {
+      path = "/items";
     }
-    if (criterion === "missing_purchase_date") {
-      return "/items?purchase_info=missing_date";
-    }
-    if (criterion === "missing_purchase_price") {
-      return "/items?purchase_info=missing_price";
-    }
-    if (criterion === "purchase_unknown") {
-      return "/items?purchase_info=unknown";
-    }
-    if (criterion === "purchase_not_applicable") {
-      return "/items?purchase_info=not_applicable";
-    }
-    return "/items";
-  }
-  if (answer.tool === "list_outstanding_loans") return "/loans";
-  if (answer.tool === "locate_item" && answer.facts.whereabouts) {
+  } else if (answer.tool === "list_outstanding_loans") {
+    path = "/loans";
+  } else if (answer.tool === "locate_item" && answer.facts.whereabouts) {
     const whereabouts = answer.facts.whereabouts as { item_id?: string };
-    if (whereabouts.item_id) return `/items/${whereabouts.item_id}`;
+    if (whereabouts.item_id) path = `/items/${whereabouts.item_id}`;
+  } else if (answer.tool === "get_warranty_status") {
+    path = "/warranties";
+  } else if (answer.tool === "search_documents") {
+    path = "/documents";
+  } else if (answer.tool === "get_purchase_history") {
+    path = "/purchases";
   }
-  if (answer.tool === "get_warranty_status") return "/warranties";
-  if (answer.tool === "search_documents") return "/documents";
-  if (answer.tool === "get_purchase_history") return "/purchases";
-  return null;
+  if (!path) return null;
+  return withHousehold(path, answer.households?.[0]?.id);
 }
 
 function PlaceResult({ result }: { result: QuickSearchResult }) {
@@ -509,7 +538,7 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
   const label = result.kind === "container" ? "Container" : "Location";
   return (
     <Link
-      to={result.url}
+      to={withHousehold(result.url, result.household?.id)}
       className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-secondary/40"
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
@@ -526,7 +555,9 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
           </Badge>
         </span>
         <span className="mt-0.5 block truncate text-[0.7rem] text-muted-foreground">
-          {[result.subtitle, result.context].filter(Boolean).join(" · ") || "Housetory"}
+          {[result.household?.name, result.subtitle, result.context]
+            .filter(Boolean)
+            .join(" · ") || "Housetory"}
         </span>
       </span>
     </Link>

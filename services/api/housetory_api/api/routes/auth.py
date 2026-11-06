@@ -25,29 +25,11 @@ def _session_state(
     setup_needed = auth_service.setup_required(db)
     if account is None:
         return SessionState(authenticated=False, setup_required=setup_needed)
-    membership = None
-    if account.session.household_id is not None:
-        membership = auth_service.get_membership(db, account.user.id, account.session.household_id)
-    else:
-        primary = auth_service.get_primary_membership(db, account.user)
-        membership = primary
-    if membership is None:
-        return SessionState(
-            authenticated=True,
-            setup_required=False,
-            user=account.user,
-            household=None,
-            role=None,
-        )
-    household, role = (
-        membership if isinstance(membership[1], str) else (membership[0], membership[1].role)
-    )
-    return SessionState(
-        authenticated=True,
-        setup_required=False,
+    return auth_service.build_session_state(
+        db,
         user=account.user,
-        household=household,
-        role=role,
+        session=account.session,
+        setup_needed_override=setup_needed,
     )
 
 
@@ -89,12 +71,14 @@ def setup(
     )
     db.commit()
     set_session_cookie(response, token, settings)
-    return SessionState(
-        authenticated=True,
-        setup_required=False,
+    session = auth_service.get_session_by_token(db, token)
+    if session is None:  # pragma: no cover - the token was just created
+        raise ApiError(500, "session_creation_failed", "Could not start a session.")
+    return auth_service.build_session_state(
+        db,
         user=user,
-        household=household,
-        role="owner",
+        session=session,
+        setup_needed_override=False,
     )
 
 
@@ -131,12 +115,14 @@ def login(
     )
     db.commit()
     set_session_cookie(response, token, settings)
-    return SessionState(
-        authenticated=True,
-        setup_required=False,
+    session = auth_service.get_session_by_token(db, token)
+    if session is None:  # pragma: no cover - the token was just created
+        raise ApiError(500, "session_creation_failed", "Could not start a session.")
+    return auth_service.build_session_state(
+        db,
         user=user,
-        household=household,
-        role=role,
+        session=session,
+        setup_needed_override=False,
     )
 
 

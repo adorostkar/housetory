@@ -19,6 +19,7 @@ from ..models import (
 )
 from ..schemas.common import ItemReference
 from ..schemas.documents import DocumentBrief, DocumentOut, DocumentPageOut, ScanAdjustments
+from ..schemas.households import HouseholdBrief
 from ..schemas.imports import ImportSourceBrief
 from ..schemas.items import (
     CategoryBrief,
@@ -338,6 +339,11 @@ def item_summary(
         condition=item.condition,
         is_archived=item.is_archived,
         room=RoomBrief(id=item.room.id, name=item.room.name) if item.room else None,
+        household=(
+            HouseholdBrief(id=item.household.id, name=item.household.name)
+            if item.household is not None
+            else None
+        ),
         property=(
             PropertyBrief(
                 id=property_record.id,

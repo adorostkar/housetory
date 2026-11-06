@@ -15,6 +15,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
+import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PropertiesSettings } from "@/components/properties-settings";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
@@ -162,7 +163,9 @@ export function SettingsPage() {
             Household
           </h2>
           <p className="mt-1 text-[0.78rem] text-muted-foreground">
-            The name that appears across your home.
+            This is the current editable household. Your account can belong to
+            several households with a different role in each; search and the
+            assistant default to all your current places.
           </p>
           <form
             className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end"
@@ -219,6 +222,9 @@ export function SettingsPage() {
             </Button>
           </form>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
+          <div className="max-w-sm">
+            <HouseholdSwitcher />
+          </div>
           {isOwner ? (
             <Button variant="outline" size="sm" className="mt-4" asChild>
               <Link to="/settings/members">
@@ -374,7 +380,7 @@ export function SettingsPage() {
               <dl className="divide-y divide-border/60 rounded-xl border border-border/60">
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Provider</dt>
-                  <dd className="min-w-0 break-words text-right">
+                  <dd className="min-w-0 break-all text-right">
                     {aiStatus.data.provider_label ??
                       (aiStatus.data.mode === "disabled"
                         ? "Not configured"
@@ -383,19 +389,19 @@ export function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Selected model</dt>
-                  <dd className="min-w-0 break-words text-right">
+                  <dd className="min-w-0 break-all text-right">
                     {aiStatus.data.model ?? "None"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Processing</dt>
-                  <dd className="min-w-0 break-words text-right">
+                  <dd className="min-w-0 break-all text-right">
                     {processingLabel(aiStatus.data.mode)}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
                   <dt className="text-muted-foreground">Data consent</dt>
-                  <dd className="min-w-0 break-words text-right">
+                  <dd className="min-w-0 break-all text-right">
                     {consentLabel(aiStatus.data)}
                   </dd>
                 </div>

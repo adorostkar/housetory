@@ -49,12 +49,39 @@ export interface Household {
   warranty_reminder_days: number;
 }
 
+export interface HouseholdMembership extends Household {
+  role: MemberRole;
+  property_count: number;
+  is_current: boolean;
+}
+
 export interface SessionState {
   authenticated: boolean;
   setup_required: boolean;
   user: User | null;
   household: Household | null;
   role: MemberRole | null;
+  households?: HouseholdMembership[];
+}
+
+export interface SearchHousehold {
+  id: UUID;
+  name: string;
+  role: MemberRole;
+}
+
+export interface SearchProperty {
+  id: UUID;
+  name: string;
+  is_archived: boolean;
+}
+
+export interface SearchScopeHousehold extends SearchHousehold {
+  properties: SearchProperty[];
+}
+
+export interface SearchScopeList {
+  items: SearchScopeHousehold[];
 }
 
 export interface HouseholdMember {
@@ -678,6 +705,7 @@ export interface ItemSummary {
   condition: ItemCondition;
   is_archived: boolean;
   room: RoomBrief | null;
+  household?: { id: UUID; name: string } | null;
   property?: PropertyBrief | null;
   location: LocationBrief | null;
   location_path: LocationBrief[];
@@ -1248,6 +1276,8 @@ export interface AssistantReference {
   title: string;
   subtitle: string | null;
   url: string;
+  household_id?: UUID | null;
+  household_name?: string | null;
 }
 
 export interface AssistantResponse {
@@ -1264,6 +1294,8 @@ export interface AssistantResponse {
     document_date: string | null;
     items: string[];
     url: string;
+    household_id?: string;
+    household_name?: string;
   }>;
   locations: Array<{
     id: string;
@@ -1272,11 +1304,16 @@ export interface AssistantResponse {
     url: string;
     room?: string | null;
     item_count?: number;
+    household_id?: string;
+    household_name?: string;
   }>;
   references: AssistantReference[];
   notices: string[];
   facts: Record<string, unknown>;
   ai_status: AiStatus;
+  scope_label?: string;
+  households?: SearchHousehold[];
+  property?: SearchProperty | null;
 }
 
 export interface NaturalSearchFilters {
@@ -1325,6 +1362,9 @@ export interface NaturalSearchResponse {
   references: AssistantReference[];
   needs_assistant: boolean;
   suggested_question: string | null;
+  scope_label?: string;
+  households?: SearchHousehold[];
+  property?: SearchProperty | null;
 }
 
 export type QuickSearchKind = "item" | "container" | "location";
@@ -1342,6 +1382,7 @@ export interface QuickSearchResult {
   subtitle: string | null;
   context: string | null;
   url: string;
+  household?: SearchHousehold | null;
   loan: QuickSearchLoan | null;
 }
 
@@ -1350,6 +1391,21 @@ export interface QuickSearchResponse {
   effective_query: string | null;
   question_like: boolean;
   results: QuickSearchResult[];
+  scope_label?: string;
+  households?: SearchHousehold[];
+  property?: SearchProperty | null;
+  notices?: string[];
+}
+
+export interface SearchItemList {
+  items: ItemSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  scope_label?: string;
+  households?: SearchHousehold[];
+  property?: SearchProperty | null;
+  notices?: string[];
 }
 
 export interface DocumentRelationSuggestion {

@@ -259,6 +259,26 @@ export function ItemDetailPage() {
                 icon={MapPin}
                 label={onLoan > 0 ? "Usual home location" : "Place"}
               >
+                {item.household && (
+                  <>
+                    <span className="font-medium text-foreground/80">
+                      {item.household.name}
+                    </span>
+                    {((item.property ?? item.room) && (
+                      <ChevronRight className="size-3 text-muted-foreground/50" />
+                    ))}
+                  </>
+                )}
+                {item.property && (
+                  <>
+                    <span className="font-medium text-foreground/80">
+                      {item.property.name}
+                    </span>
+                    {item.room && (
+                      <ChevronRight className="size-3 text-muted-foreground/50" />
+                    )}
+                  </>
+                )}
                 {item.room ? (
                   <span className="flex flex-wrap items-center gap-1">
                     {roomTrail.length > 0 ? (

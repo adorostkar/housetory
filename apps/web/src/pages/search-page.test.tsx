@@ -159,8 +159,9 @@ beforeEach(() => {
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.get).mockImplementation(async (path) => {
+    if (path.startsWith("/search/scopes")) return { items: [] };
     if (path.startsWith("/search/quick")) return quickResponse;
-    if (path.startsWith("/items")) return itemList;
+    if (path.startsWith("/search/items")) return itemList;
     throw new Error(`Unexpected GET ${path}`);
   });
   vi.mocked(api.post).mockResolvedValue(naturalResponse);
@@ -175,7 +176,7 @@ describe("SearchPage unified entry", () => {
       }),
     ).toHaveValue("PS5");
     expect(await screen.findByText("Heavy drill")).toBeVisible();
-    expect(screen.getByText("Search for an item or ask a question.")).toBeVisible();
+    expect(screen.getByLabelText("Search scope")).toHaveValue("all");
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -186,7 +187,7 @@ describe("SearchPage unified entry", () => {
     expect(
       await screen.findByText(/Alex has 1 of your 2 units/),
     ).toBeVisible();
-    expect(screen.getByText("Search for an item or ask a question.")).toBeVisible();
+    expect(screen.getByLabelText("Search scope")).toHaveValue("all");
     expect(screen.queryByText("Grounded answer")).not.toBeInTheDocument();
     expect(screen.queryByText(/item: heavy drill/)).not.toBeInTheDocument();
     expect(screen.getByText(/Due 15 Nov 2026/)).toBeVisible();

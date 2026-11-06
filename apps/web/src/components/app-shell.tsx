@@ -16,6 +16,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { AccountMenu } from "@/components/account-menu";
 import { AddItemsButton, AddItemsProvider } from "@/components/add-items";
 import { BrandMark } from "@/components/brand-mark";
+import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -91,7 +92,9 @@ function AppShellLayout() {
           <ThemeToggle className="-mr-2" />
         </div>
 
-        <AddItemsButton className="mt-8 w-full justify-start pl-4" />
+        <HouseholdSwitcher />
+
+        <AddItemsButton className="mt-4 w-full justify-start pl-4" />
 
         <QuickSearch className="mt-3" variant="sidebar" />
 

@@ -101,9 +101,11 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
             else None
         )
         room_name = getattr(item.room, "name", None)
+        household = item.household
     else:
         property_name = item.property.name if item.property else None
         room_name = item.room.name if item.room else None
+        household = item.household
     subtitle = " / ".join(part for part in (property_name, room_name) if part) or None
     return AssistantReference(
         type="item",
@@ -111,6 +113,8 @@ def _item_reference(item: ItemSummary | Item) -> AssistantReference:
         title=item.name,
         subtitle=subtitle,
         url=f"/items/{item.id}",
+        household_id=household.id if household is not None else None,
+        household_name=household.name if household is not None else None,
     )
 
 
@@ -342,6 +346,15 @@ def search_inventory(
         Item.household_id == household_id,
         Item.is_archived.is_(False),
     ]
+    if filters.property_id is not None:
+        conditions.append(
+            or_(
+                Item.room.has(Room.property_id == filters.property_id),
+                Item.storage_location.has(
+                    StorageLocation.room.has(Room.property_id == filters.property_id)
+                ),
+            )
+        )
     room = _resolve_room(db, household_id, room_id=filters.room_id, name=filters.room_name)
     if filters.room_id and room is None:
         return [], 0
@@ -381,31 +394,34 @@ def search_inventory(
     if filters.tag:
         conditions.append(Item.tags.any(Tag.name.ilike(f"%{filters.tag}%")))
     if filters.q:
-        search = f"%{filters.q.strip()}%"
-        conditions.append(
-            or_(
-                Item.name.ilike(search),
-                Item.description.ilike(search),
-                Item.brand.ilike(search),
-                Item.model.ilike(search),
-                Item.serial_number.ilike(search),
-                Item.category.has(Category.name.ilike(search)),
-                Item.room.has(Room.name.ilike(search)),
-                Item.storage_location.has(
-                    or_(
-                        StorageLocation.name.ilike(search),
-                        StorageLocation.identifier.ilike(search),
-                    )
-                ),
-                Item.tags.any(Tag.name.ilike(search)),
-                Item.documents.any(
-                    or_(
-                        Document.title.ilike(search),
-                        Document.extracted_text.ilike(search),
-                    )
-                ),
+        term_conditions = []
+        for value in search_term_variants(filters.q.strip()):
+            search = f"%{value}%"
+            term_conditions.append(
+                or_(
+                    Item.name.ilike(search),
+                    Item.description.ilike(search),
+                    Item.brand.ilike(search),
+                    Item.model.ilike(search),
+                    Item.serial_number.ilike(search),
+                    Item.category.has(Category.name.ilike(search)),
+                    Item.room.has(Room.name.ilike(search)),
+                    Item.storage_location.has(
+                        or_(
+                            StorageLocation.name.ilike(search),
+                            StorageLocation.identifier.ilike(search),
+                        )
+                    ),
+                    Item.tags.any(Tag.name.ilike(search)),
+                    Item.documents.any(
+                        or_(
+                            Document.title.ilike(search),
+                            Document.extracted_text.ilike(search),
+                        )
+                    ),
+                )
             )
-        )
+        conditions.append(or_(*term_conditions))
     if filters.purchase_info_status:
         conditions.append(purchase_info_filter_clause(filters.purchase_info_status))
     if filters.missing_purchase:
@@ -483,6 +499,7 @@ def tool_search_items(
 ) -> ToolResult:
     filters = NaturalSearchFilters(
         q=str(args.get("q") or "").strip() or None,
+        property_id=args.get("property_id"),
         room_name=str(args.get("room_name") or "").strip() or None,
         location_name=str(args.get("location_name") or "").strip() or None,
         exclude_room_id=args.get("exclude_room_id"),
@@ -588,10 +605,14 @@ def tool_search_locations(
     household_reminder_days: int,
 ) -> ToolResult:
     query = str(args.get("q") or "").strip()
-    rooms = db.scalars(select(Room).where(Room.household_id == household_id)).all()
-    locations = db.scalars(
-        select(StorageLocation).where(StorageLocation.household_id == household_id)
-    ).all()
+    property_id = args.get("property_id")
+    room_conditions = [Room.household_id == household_id]
+    location_conditions = [StorageLocation.household_id == household_id]
+    if property_id is not None:
+        room_conditions.append(Room.property_id == property_id)
+        location_conditions.append(StorageLocation.room.has(Room.property_id == property_id))
+    rooms = db.scalars(select(Room).where(*room_conditions)).all()
+    locations = db.scalars(select(StorageLocation).where(*location_conditions)).all()
     room_map = {room.id: room for room in rooms}
     if query:
         lowered = query.lower()
@@ -662,6 +683,8 @@ def tool_list_room_contents(
     )
     if room is None:
         raise ValueError("Room not found")
+    if args.get("property_id") is not None and room.property_id != args["property_id"]:
+        raise ValueError("Room not found in the selected property")
     rooms = db.scalars(select(Room).where(Room.household_id == household_id)).all()
     children = {room.id}
     changed = True
@@ -738,6 +761,12 @@ def tool_get_container_contents(
         )
     if location is None:
         raise ValueError("Container not found")
+    if (
+        args.get("property_id") is not None
+        and location.room is not None
+        and location.room.property_id != args["property_id"]
+    ):
+        raise ValueError("Container not found in the selected property")
     items = load_container_items(db, household_id, location.id)
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days
@@ -806,6 +835,17 @@ def tool_search_documents(
     query = str(args.get("q") or "").strip()
     item_id = args.get("item_id")
     conditions = [Document.household_id == household_id]
+    if args.get("property_id") is not None:
+        conditions.append(
+            Document.items.any(
+                or_(
+                    Item.room.has(Room.property_id == args["property_id"]),
+                    Item.storage_location.has(
+                        StorageLocation.room.has(Room.property_id == args["property_id"])
+                    ),
+                )
+            )
+        )
     if item_id:
         conditions.append(Document.items.any(Item.id == uuid.UUID(str(item_id))))
     if query:
@@ -860,6 +900,17 @@ def tool_get_purchase_history(
     household_reminder_days: int,
 ) -> ToolResult:
     conditions = [Purchase.household_id == household_id]
+    if args.get("property_id") is not None:
+        conditions.append(
+            Purchase.items.any(
+                or_(
+                    Item.room.has(Room.property_id == args["property_id"]),
+                    Item.storage_location.has(
+                        StorageLocation.room.has(Room.property_id == args["property_id"])
+                    ),
+                )
+            )
+        )
     if args.get("merchant"):
         conditions.append(Purchase.vendor.ilike(f"%{args['merchant']}%"))
     if args.get("item_id"):
@@ -919,7 +970,21 @@ def tool_get_warranty_status(
     status_filter = args.get("status")
     today = date.today()
     rows = []
+    property_id = args.get("property_id")
     for warranty in warranties:
+        if property_id is not None and warranty.item is not None:
+            item = warranty.item
+            item_property_id = (
+                item.room.property_id
+                if item.room is not None
+                else (
+                    item.storage_location.room.property_id
+                    if item.storage_location is not None and item.storage_location.room is not None
+                    else None
+                )
+            )
+            if item_property_id != property_id:
+                continue
         effective = warranty.reminder_days or household_reminder_days
         status, days = warranty_status(warranty.end_date, reminder_days=effective)
         if status_filter == "active" and status == WarrantyStatus.EXPIRED:
@@ -971,6 +1036,61 @@ def tool_get_inventory_summary(
     *,
     household_reminder_days: int,
 ) -> ToolResult:
+    property_id = args.get("property_id")
+    if property_id is not None:
+        property_condition = or_(
+            Item.room.has(Room.property_id == property_id),
+            Item.storage_location.has(StorageLocation.room.has(Room.property_id == property_id)),
+        )
+        item_count = int(
+            db.scalar(
+                select(func.count(Item.id)).where(
+                    Item.household_id == household_id,
+                    Item.is_archived.is_(False),
+                    property_condition,
+                )
+            )
+            or 0
+        )
+        total_quantity = int(
+            db.scalar(
+                select(func.coalesce(func.sum(Item.quantity), 0)).where(
+                    Item.household_id == household_id,
+                    Item.is_archived.is_(False),
+                    property_condition,
+                )
+            )
+            or 0
+        )
+        property_item_ids = select(Item.id).where(
+            Item.household_id == household_id,
+            property_condition,
+        )
+        on_loan = int(
+            db.scalar(
+                select(func.coalesce(func.sum(Loan.quantity - Loan.returned_quantity), 0)).where(
+                    Loan.household_id == household_id,
+                    Loan.status.in_({"outstanding", "partially_returned"}),
+                    Loan.item_id.in_(property_item_ids),
+                )
+            )
+            or 0
+        )
+        return ToolResult(
+            tool="get_inventory_summary",
+            summary=(
+                f"This property has {item_count} active item records with "
+                f"{total_quantity} units. {on_loan} units are currently on loan."
+            ),
+            facts={
+                "item_count": item_count,
+                "total_quantity": total_quantity,
+                "on_loan_quantity": on_loan,
+                "items_missing_purchase_count": 0,
+                "warranties": {"active": 0, "expiring": 0, "expired": 0},
+                "property_id": str(property_id),
+            },
+        )
     financial = financial_overview(
         db,
         household_id,
@@ -1034,7 +1154,6 @@ def tool_list_outstanding_loans(
     *,
     household_reminder_days: int,
 ) -> ToolResult:
-    del args
     today = date.today()
     result = list_loans(
         db,
@@ -1044,6 +1163,26 @@ def tool_list_outstanding_loans(
         limit=50,
         offset=0,
     )
+    property_id = args.get("property_id")
+    property_item_ids: set[uuid.UUID] | None = None
+    if property_id is not None:
+        property_item_ids = set(
+            db.scalars(
+                select(Item.id).where(
+                    Item.household_id == household_id,
+                    or_(
+                        Item.room.has(Room.property_id == property_id),
+                        Item.storage_location.has(
+                            StorageLocation.room.has(Room.property_id == property_id)
+                        ),
+                    ),
+                )
+            ).all()
+        )
+        result.items = [loan for loan in result.items if loan.item_id in property_item_ids]
+        result.outstanding_count = sum(1 for loan in result.items if loan.outstanding_quantity > 0)
+        result.on_loan_quantity = sum(loan.outstanding_quantity for loan in result.items)
+        result.overdue_count = sum(1 for loan in result.items if loan.overdue)
     item_ids = [loan.item_id for loan in result.items if loan.item_id]
     items = (
         list(
@@ -1109,6 +1248,15 @@ def tool_find_missing_information(
 ) -> ToolResult:
     field = str(args.get("field") or "purchase")
     conditions = [Item.household_id == household_id, Item.is_archived.is_(False)]
+    if args.get("property_id") is not None:
+        conditions.append(
+            or_(
+                Item.room.has(Room.property_id == args["property_id"]),
+                Item.storage_location.has(
+                    StorageLocation.room.has(Room.property_id == args["property_id"])
+                ),
+            )
+        )
     criterion = None
     if field in {"purchase", "purchase_info"}:
         conditions.append(missing_purchase_info_clause())
@@ -1171,10 +1319,26 @@ def tool_find_missing_information(
     )
 
 
-def _locate_candidates(db: Session, household_id: uuid.UUID, subject: str) -> list[Item]:
+def _locate_candidates(
+    db: Session,
+    household_id: uuid.UUID,
+    subject: str,
+    *,
+    property_id: uuid.UUID | None = None,
+) -> list[Item]:
     cleaned = clean_subject(subject) or subject.strip()
     if not cleaned:
         return []
+    property_conditions = []
+    if property_id is not None:
+        property_conditions.append(
+            or_(
+                Item.room.has(Room.property_id == property_id),
+                Item.storage_location.has(
+                    StorageLocation.room.has(Room.property_id == property_id)
+                ),
+            )
+        )
     exact = list(
         db.scalars(
             select(Item)
@@ -1182,6 +1346,7 @@ def _locate_candidates(db: Session, household_id: uuid.UUID, subject: str) -> li
             .where(
                 Item.household_id == household_id,
                 Item.is_archived.is_(False),
+                *property_conditions,
                 func.lower(Item.name) == cleaned.lower(),
             )
             .limit(12)
@@ -1231,6 +1396,7 @@ def _locate_candidates(db: Session, household_id: uuid.UUID, subject: str) -> li
             .where(
                 Item.household_id == household_id,
                 Item.is_archived.is_(False),
+                *property_conditions,
                 and_(*token_conditions),
             )
             .order_by(func.lower(Item.name))
@@ -1250,9 +1416,24 @@ def tool_locate_item(
     item_id = args.get("item_id")
     if item_id:
         item = get_item(db, household_id, uuid.UUID(str(item_id)))
-        candidates = [item]
+        property_id = args.get("property_id")
+        if property_id is not None:
+            property_rooms = {
+                row[0]
+                for row in db.execute(
+                    select(Room.id).where(
+                        Room.household_id == household_id,
+                        Room.property_id == property_id,
+                    )
+                ).all()
+            }
+            candidates = [] if item.room_id not in property_rooms else [item]
+        else:
+            candidates = [item]
     else:
-        candidates = _locate_candidates(db, household_id, query)
+        candidates = _locate_candidates(
+            db, household_id, query, property_id=args.get("property_id")
+        )
     if not candidates:
         return ToolResult(
             tool="locate_item",
@@ -1365,7 +1546,11 @@ def tool_count_items(
         return tool_get_inventory_summary(
             db, household_id, args, household_reminder_days=household_reminder_days
         )
-    filters = NaturalSearchFilters(q=subject, sort="name_asc")
+    filters = NaturalSearchFilters(
+        q=subject,
+        property_id=args.get("property_id"),
+        sort="name_asc",
+    )
     items, total = search_inventory(
         db,
         household_id,

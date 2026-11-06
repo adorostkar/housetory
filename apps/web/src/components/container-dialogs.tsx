@@ -68,7 +68,15 @@ export function ContainerCreateDialog({
     setQuantity(1);
     setName("");
     setDescription("");
-  }, [open, defaultRoomId, defaultParentId, rooms]);
+    // Opening the dialog is the reset boundary. Refetching rooms after creating
+    // a container must not reset a quantity the user has already typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultRoomId, defaultParentId]);
+
+  React.useEffect(() => {
+    if (!open || roomId || !rooms[0]) return;
+    setRoomId(rooms[0].id);
+  }, [open, roomId, rooms]);
 
   const create = useMutation({
     mutationFn: () => {

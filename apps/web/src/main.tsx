@@ -6,12 +6,13 @@ import { BrowserRouter } from "react-router-dom";
 import App from "@/App";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ApiError } from "@/lib/api";
+import { ApiError, householdScopedQueryHash } from "@/lib/api";
 import "@/styles/globals.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      queryKeyHashFn: householdScopedQueryHash,
       staleTime: 30_000,
       retry: (failureCount, error) => {
         if (error instanceof ApiError && error.status >= 400 && error.status < 500) {

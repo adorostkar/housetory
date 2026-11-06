@@ -1,4 +1,5 @@
-import { ChevronUp, LogOut, Settings, UserRound, Users } from "lucide-react";
+import { Check, ChevronUp, LogOut, Plus, Settings, UserRound, Users } from "lucide-react";
+import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -10,16 +11,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HouseholdCreateDialog } from "@/components/household-switcher";
 import { getApiErrorMessage } from "@/lib/api";
-import { useLogout, useSession } from "@/lib/queries";
+import { useLogout, useSelectHousehold, useSession } from "@/lib/queries";
 import { cn, initials } from "@/lib/utils";
 
 export function AccountMenu({ compact = false }: { compact?: boolean }) {
   const { data: session } = useSession();
   const navigate = useNavigate();
   const logout = useLogout();
+  const selectHousehold = useSelectHousehold();
+  const [createOpen, setCreateOpen] = React.useState(false);
   const user = session?.user;
   const household = session?.household;
+  const households = session?.households ?? [];
 
   const onLogout = () => {
     logout.mutate(undefined, {
@@ -70,6 +75,40 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuLabel className="normal-case tracking-normal">
+          Households
+        </DropdownMenuLabel>
+        {households.map((entry) => (
+          <DropdownMenuItem
+            key={entry.id}
+            disabled={selectHousehold.isPending}
+            onSelect={() => {
+              if (entry.is_current) return;
+              selectHousehold.mutate(entry.id, {
+                onSuccess: () => {
+                  toast.success(`Switched to ${entry.name}`);
+                  navigate("/", { replace: true });
+                },
+                onError: (error) => toast.error(getApiErrorMessage(error)),
+              });
+            }}
+          >
+            <span className="flex size-4 items-center justify-center">
+              {entry.is_current ? <Check className="size-3.5 text-sage" /> : null}
+            </span>
+            <span className="min-w-0 flex-1 truncate">
+              {entry.name}
+              <span className="ml-1 text-[0.65rem] capitalize text-muted-foreground">
+                {entry.role}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem onSelect={() => setCreateOpen(true)}>
+          <Plus />
+          Create household
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate("/settings")}>
           <Settings />
           Settings
@@ -90,6 +129,7 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           {logout.isPending ? "Signing out…" : "Sign out"}
         </DropdownMenuItem>
       </DropdownMenuContent>
+      <HouseholdCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
     </DropdownMenu>
   );
 }

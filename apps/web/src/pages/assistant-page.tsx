@@ -15,11 +15,14 @@ import { toast } from "sonner";
 
 import { AddItemsButton } from "@/components/add-items";
 import { PageHeader } from "@/components/page-header";
+import { SearchScopeSelect } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useSearchScope } from "@/hooks/use-search-scope";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useAiStatus } from "@/lib/queries";
+import { withHousehold } from "@/lib/household-links";
+import { useAiStatus, useSession } from "@/lib/queries";
 import type { AssistantResponse } from "@/lib/types";
 import { itemContainer, locationLabel } from "@/lib/utils";
 
@@ -40,6 +43,8 @@ interface Message {
 
 export function AssistantPage() {
   const aiStatus = useAiStatus();
+  const session = useSession();
+  const { selection, scopesQuery } = useSearchScope(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [question, setQuestion] = React.useState("");
@@ -55,6 +60,10 @@ export function AssistantPage() {
       return api.post<AssistantResponse>("/assistant/query", {
         question: value,
         history,
+        ...(selection.householdId
+          ? { household_id: selection.householdId }
+          : {}),
+        ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
       });
     },
     onSuccess: (response, value) => {
@@ -70,6 +79,7 @@ export function AssistantPage() {
 
   React.useEffect(() => {
     const value = searchParams.get("q")?.trim() ?? "";
+    if (scopesQuery.isPending) return;
     if (value.length < 2 || autoAskedRef.current === value) return;
     autoAskedRef.current = value;
     ask.mutate(value);
@@ -84,7 +94,7 @@ export function AssistantPage() {
     // The URL is the handoff trigger; ask.mutate uses the current messages at
     // the moment the handoff occurs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, scopesQuery.isPending]);
 
   React.useEffect(() => {
     if (typeof endRef.current?.scrollIntoView === "function") {
@@ -105,14 +115,33 @@ export function AssistantPage() {
   };
 
   const status = aiStatus.data;
+  const lastResponse = [...messages]
+    .reverse()
+    .find((message) => message.response)?.response;
+  const workspaceHouseholdId = session.data?.household?.id;
+  const aiScope =
+    Boolean(selection.householdId) &&
+    selection.householdId === workspaceHouseholdId &&
+    !selection.propertyId;
+  const lastScope = lastResponse
+    ? {
+        mode: lastResponse.mode,
+        ai_status: lastResponse.ai_status,
+        scope_label: lastResponse.scope_label,
+      }
+    : null;
+  const displayStatus = aiScope ? status : lastScope?.ai_status;
+  const allPlacesScope = !selection.householdId || Boolean(selection.propertyId);
   const modeLabel =
-    status?.mode === "local"
-      ? "Local AI"
-      : status?.mode === "private"
-        ? "Private-network AI"
-        : status?.mode === "cloud"
-          ? "Remote AI"
-          : "Grounded mode";
+    allPlacesScope || lastScope?.mode === "deterministic"
+      ? "Grounded across your places"
+      : displayStatus?.mode === "local"
+        ? "Local AI"
+        : displayStatus?.mode === "private"
+          ? "Private-network AI"
+          : displayStatus?.mode === "cloud"
+            ? "Remote AI"
+            : "Grounded mode";
 
   return (
     <div className="animate-fade-up">
@@ -132,6 +161,15 @@ export function AssistantPage() {
           </>
         }
       />
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <SearchScopeSelect compact />
+        <p className="text-[0.72rem] text-muted-foreground">
+          {allPlacesScope
+            ? "Read-only retrieval across every current membership. AI is not sent across households."
+            : "This answer may use the selected household's own provider and consent."}
+        </p>
+      </div>
 
       <section className="surface p-3.5 sm:p-4">
         <form onSubmit={submit}>
@@ -164,24 +202,29 @@ export function AssistantPage() {
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[0.68rem] text-muted-foreground">
           <Badge
             variant={
-              status?.mode === "local"
+              allPlacesScope
                 ? "sage"
-                : status?.mode === "private" || status?.mode === "cloud"
-                  ? "brass"
-                  : "outline"
+                : displayStatus?.mode === "local"
+                  ? "sage"
+                  : displayStatus?.mode === "private" ||
+                      displayStatus?.mode === "cloud"
+                    ? "brass"
+                    : "outline"
             }
           >
             <Sparkles className="size-3" />
             {modeLabel}
           </Badge>
           <span>
-            {status?.available
-              ? "Provider available"
-              : status?.configured
-                ? "Provider configured; deterministic answers still work"
-                : "No model configured; grounded answers stay available"}
+            {allPlacesScope
+              ? "Deterministic answers across current memberships"
+              : displayStatus?.available
+                ? "Provider available for this household"
+                : displayStatus?.configured
+                  ? "Provider configured; deterministic answers still work"
+                  : "No model configured; grounded answers stay available"}
           </span>
-          {status?.data_leaves_server && (
+          {!allPlacesScope && displayStatus?.data_leaves_server && (
             <Badge variant="brass">Remote transmission enabled with consent</Badge>
           )}
           <details className="ml-auto">
@@ -190,8 +233,10 @@ export function AssistantPage() {
             </summary>
             <div className="mt-2 max-w-xl space-y-1.5 rounded-lg border border-border/60 bg-background/50 p-3 text-[0.7rem] leading-relaxed">
               <p>
-                {status?.privacy_note ??
-                  "The assistant executes read-only household tools and answers from real records."}
+                {allPlacesScope
+                  ? "All-my-places answers execute read-only deterministic tools in each current household. No household's records are sent to another household's AI provider."
+                  : (displayStatus?.privacy_note ??
+                    "The assistant executes read-only household tools and answers from real records.")}
               </p>
               {status?.model && (
                 <p>
@@ -252,7 +297,7 @@ export function AssistantPage() {
           {ask.isPending && (
             <div className="surface flex items-center gap-3 p-5 text-[0.82rem] text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Retrieving current household records…
+              Retrieving current records across your places…
             </div>
           )}
         </section>
@@ -263,26 +308,26 @@ export function AssistantPage() {
 }
 
 function contextualLink(response: AssistantResponse): string | null {
+  let path: string | null = null;
   if (response.tool === "find_missing_information") {
     const criterion = String(response.facts.criterion ?? "");
-    if (criterion === "missing_purchase") return "/items?purchase_info=missing";
-    if (criterion === "missing_purchase_date") {
-      return "/items?purchase_info=missing_date";
-    }
-    if (criterion === "missing_purchase_price") {
-      return "/items?purchase_info=missing_price";
-    }
-    if (criterion === "purchase_unknown") return "/items?purchase_info=unknown";
-    if (criterion === "purchase_not_applicable") {
-      return "/items?purchase_info=not_applicable";
-    }
-    return "/items";
-  }
-  if (response.tool === "list_outstanding_loans") return "/loans";
-  if (response.tool === "get_warranty_status") return "/warranties";
-  if (response.tool === "search_documents") return "/documents";
-  if (response.tool === "get_purchase_history") return "/purchases";
-  return null;
+    if (criterion === "missing_purchase") path = "/items?purchase_info=missing";
+    else if (criterion === "missing_purchase_date") {
+      path = "/items?purchase_info=missing_date";
+    } else if (criterion === "missing_purchase_price") {
+      path = "/items?purchase_info=missing_price";
+    } else if (criterion === "purchase_unknown") {
+      path = "/items?purchase_info=unknown";
+    } else if (criterion === "purchase_not_applicable") {
+      path = "/items?purchase_info=not_applicable";
+    } else path = "/items";
+  } else if (response.tool === "list_outstanding_loans") path = "/loans";
+  else if (response.tool === "get_warranty_status") path = "/warranties";
+  else if (response.tool === "search_documents") path = "/documents";
+  else if (response.tool === "get_purchase_history") path = "/purchases";
+  if (!path) return null;
+  if ((response.households?.length ?? 0) > 1 || response.property) return null;
+  return withHousehold(path, response.households?.[0]?.id);
 }
 
 function AssistantAnswer({
@@ -302,10 +347,20 @@ function AssistantAnswer({
         <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Housetory
         </span>
+        <Badge variant="outline">
+          {response?.scope_label ?? "All my places"}
+        </Badge>
       </div>
       <div className="mt-3 whitespace-pre-line text-[0.86rem] leading-[1.8] text-foreground/85">
         {text}
       </div>
+      {response && response.notices.length > 0 && (
+        <ul className="mt-3 space-y-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+          {response.notices.map((notice) => (
+            <li key={notice}>• {notice}</li>
+          ))}
+        </ul>
+      )}
       {response && response.items.length > 0 && (
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           {response.items.slice(0, 8).map((item) => {
@@ -324,7 +379,7 @@ function AssistantAnswer({
             return (
               <Link
                 key={item.id}
-                to={`/items/${item.id}`}
+                to={withHousehold(`/items/${item.id}`, item.household?.id)}
                 className="flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-[0.76rem] transition-colors hover:bg-secondary/40"
               >
                 <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
@@ -346,7 +401,13 @@ function AssistantAnswer({
       {response && response.documents.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {response.documents.slice(0, 5).map((document) => (
-            <Link key={document.id} to={document.url}>
+            <Link
+              key={document.id}
+              to={withHousehold(
+                String(document.url),
+                document.household_id ? String(document.household_id) : null,
+              )}
+            >
               <Badge variant="secondary" className="gap-1 hover:bg-secondary/70">
                 <FileText className="size-3" />
                 {document.title}
@@ -362,7 +423,10 @@ function AssistantAnswer({
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {response.references.slice(0, 12).map((reference) => (
-              <Link key={`${reference.type}-${reference.id}`} to={reference.url}>
+              <Link
+                key={`${reference.type}-${reference.id}`}
+                to={withHousehold(reference.url, reference.household_id)}
+              >
                 <Badge variant="outline" className="hover:bg-secondary">
                   {reference.title}
                 </Badge>

@@ -2,6 +2,7 @@ import { ClipboardCheck, HandCoins, ImageOff, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
+import { withHousehold } from "@/lib/household-links";
 import type { ItemSummary } from "@/lib/types";
 import {
   cn,
@@ -35,7 +36,7 @@ export function ItemCard({
 
   const card = (
     <Link
-      to={`/items/${item.id}`}
+      to={withHousehold(`/items/${item.id}`, item.household?.id)}
       className={cn(
         "group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/85 shadow-soft transition-[transform,border-color,box-shadow] duration-300 ease-smooth hover:-translate-y-0.5 hover:border-border hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         selection?.selected && "border-sage/60 shadow-lift ring-2 ring-sage/45",
@@ -143,6 +144,10 @@ export function ItemCard({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.72rem] text-muted-foreground">
+            {item.household && <span className="truncate">{item.household.name}</span>}
+            {item.household && (item.property || item.room || container || item.location) && (
+              <span className="text-border">/</span>
+            )}
             {item.property && <span className="truncate">{item.property.name}</span>}
             {item.property && (item.room || container || item.location) && (
               <span className="text-border">/</span>
@@ -226,6 +231,7 @@ export function ItemRow({
   const path =
     item.location_path.length > 0
       ? [
+          item.household?.name,
           item.property?.name,
           item.room?.name,
           ...item.location_path.map((entry) => locationLabel(entry)),
@@ -233,6 +239,7 @@ export function ItemRow({
           .filter(Boolean)
           .join(" / ")
       : [
+          item.household?.name,
           item.property?.name,
           item.room?.name,
           item.location ? locationLabel(item.location) : null,
@@ -241,7 +248,7 @@ export function ItemRow({
           .join(" / ");
   const row = (
     <Link
-      to={`/items/${item.id}`}
+      to={withHousehold(`/items/${item.id}`, item.household?.id)}
       className={cn(
         "group flex min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-secondary/60",
         selection?.selected && "bg-sage-soft/45 ring-1 ring-sage/35",

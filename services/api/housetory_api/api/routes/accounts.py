@@ -61,13 +61,15 @@ def _email_configured() -> bool:
     return email_service.email_configured(get_settings())
 
 
-def _session_state(user: User, household, role: str) -> SessionState:
-    return SessionState(
-        authenticated=True,
-        setup_required=False,
+def _session_state(db: Session, user: User, token: str) -> SessionState:
+    session = auth_service.get_session_by_token(db, token)
+    if session is None:  # pragma: no cover - the token was just created
+        raise ApiError(500, "session_creation_failed", "Could not start a session.")
+    return auth_service.build_session_state(
+        db,
         user=user,
-        household=household,
-        role=role,
+        session=session,
+        setup_needed_override=False,
     )
 
 
@@ -246,7 +248,7 @@ def accept_invitation(
     )
     db.commit()
     set_session_cookie(response, session_token, settings)
-    return _session_state(user, household, role)
+    return _session_state(db, user, session_token)
 
 
 @router.post("/auth/password-reset/request", response_model=SimpleMessage)

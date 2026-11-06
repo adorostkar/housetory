@@ -214,7 +214,7 @@ describe("QuickSearch", () => {
     renderSearch();
     const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Blue box");
-    expect(await screen.findByText("Searching your home…")).toBeVisible();
+    expect(await screen.findByText("Searching your places…")).toBeVisible();
     await userEvent.keyboard("{Enter}");
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
@@ -271,7 +271,7 @@ describe("QuickSearch", () => {
     expect(await screen.findByRole("option", { name: /Old camera/ })).toBeVisible();
     await userEvent.type(input, "era");
     await waitFor(() =>
-      expect(screen.getByText("Searching your home…")).toBeVisible(),
+      expect(screen.getByText("Searching your places…")).toBeVisible(),
     );
     expect(screen.queryByRole("option", { name: /Old camera/ })).not.toBeInTheDocument();
     await waitFor(() => expect(resolveCamera).toBeDefined());

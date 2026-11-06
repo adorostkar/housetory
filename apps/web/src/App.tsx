@@ -6,13 +6,26 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
+  useSearchParams,
 } from "react-router-dom";
+import { toast } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
 import { BootError, BootScreen } from "@/components/boot-screen";
 import { Toaster } from "@/components/toaster";
-import { UNAUTHORIZED_EVENT } from "@/lib/api";
-import { queryKeys, useCanWrite, useSession } from "@/lib/queries";
+import {
+  HOUSEHOLD_CONTEXT_EVENT,
+  UNAUTHORIZED_EVENT,
+  getApiErrorMessage,
+  setActiveHouseholdId,
+} from "@/lib/api";
+import {
+  queryKeys,
+  useCanWrite,
+  useSelectHousehold,
+  useSession,
+} from "@/lib/queries";
 import type { SessionState } from "@/lib/types";
 import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { InvitationPage } from "@/pages/invitation-page";
@@ -128,6 +141,79 @@ const NotFoundPage = React.lazy(() =>
 export default function App() {
   const session = useSession();
   const queryClient = useQueryClient();
+  const selectHousehold = useSelectHousehold();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const attemptedHouseholdLink = React.useRef<string | null>(null);
+
+  const state = session.data;
+
+  // Keep the API client and query hashes aligned with the rendered session.
+  setActiveHouseholdId(state?.household?.id ?? null);
+
+  React.useEffect(() => {
+    const onHouseholdContext = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "session",
+      });
+    };
+    window.addEventListener(HOUSEHOLD_CONTEXT_EVENT, onHouseholdContext);
+    return () =>
+      window.removeEventListener(HOUSEHOLD_CONTEXT_EVENT, onHouseholdContext);
+  }, [queryClient]);
+
+  React.useEffect(() => {
+    if (!state?.authenticated) return;
+    const target = searchParams.get("household_id");
+    if (
+      target &&
+      (location.pathname === "/search" || location.pathname === "/assistant")
+    ) {
+      return;
+    }
+    if (!target || target === state.household?.id) {
+      if (target) {
+        const next = new URLSearchParams(searchParams);
+        next.delete("household_id");
+        navigate(
+          { pathname: window.location.pathname, search: next.toString() },
+          { replace: true },
+        );
+      }
+      return;
+    }
+    if (selectHousehold.isPending || attemptedHouseholdLink.current === target) return;
+    attemptedHouseholdLink.current = target;
+    selectHousehold.mutate(target, {
+      onSuccess: () => {
+        toast.success("Opened the result's household");
+        const next = new URLSearchParams(searchParams);
+        next.delete("household_id");
+        navigate(
+          { pathname: window.location.pathname, search: next.toString() },
+          { replace: true },
+        );
+      },
+      onError: (error) => {
+        toast.error(getApiErrorMessage(error));
+        const next = new URLSearchParams(searchParams);
+        next.delete("household_id");
+        navigate(
+          { pathname: window.location.pathname, search: next.toString() },
+          { replace: true },
+        );
+      },
+    });
+  }, [
+    state?.authenticated,
+    state?.household?.id,
+    searchParams,
+    selectHousehold,
+    navigate,
+    location.pathname,
+  ]);
 
   React.useEffect(() => {
     const onUnauthorized = () => {
@@ -154,8 +240,7 @@ export default function App() {
   if (session.isError) {
     return <BootError onRetry={() => void session.refetch()} />;
   }
-
-  const state = session.data;
+  if (!state) return <BootScreen />;
 
   return (
     <>

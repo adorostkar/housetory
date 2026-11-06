@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 from ..domain import ItemCondition
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.documents import DocumentList, DocumentOut
+from ..schemas.households import HouseholdBrief
 from ..schemas.imports import ImportSourceBrief
 from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseIn, PurchaseOut
@@ -130,6 +131,7 @@ class ItemSummary(ORMModel):
     condition: str
     is_archived: bool
     room: RoomBrief | None
+    household: HouseholdBrief | None = None
     property: PropertyBrief | None = None
     location: LocationBrief | None
     location_path: list[LocationBrief] = Field(default_factory=list)

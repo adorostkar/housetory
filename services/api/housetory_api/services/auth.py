@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..models import AuthSession, Household, HouseholdMember, Property, User
+from ..schemas.auth import HouseholdOut, SessionState, UserOut
+from ..schemas.households import HouseholdMembershipOut
 from ..security import (
     dummy_verify,
     generate_session_token,
@@ -84,6 +86,97 @@ def get_primary_membership(db: Session, user: User) -> tuple[Household, str] | N
     return household, membership.role
 
 
+def list_memberships(
+    db: Session, user_id: uuid.UUID
+) -> list[tuple[Household, HouseholdMember, int]]:
+    rows = db.execute(
+        select(
+            Household,
+            HouseholdMember,
+            func.count(Property.id),
+        )
+        .join(HouseholdMember, HouseholdMember.household_id == Household.id)
+        .outerjoin(Property, Property.household_id == Household.id)
+        .where(HouseholdMember.user_id == user_id)
+        .group_by(
+            Household.id,
+            HouseholdMember.household_id,
+            HouseholdMember.user_id,
+            HouseholdMember.role,
+            HouseholdMember.created_at,
+        )
+        .order_by(HouseholdMember.created_at, func.lower(Household.name))
+    ).all()
+    return [
+        (household, membership, int(property_count or 0))
+        for household, membership, property_count in rows
+    ]
+
+
+def membership_count(db: Session, user_id: uuid.UUID) -> int:
+    return int(
+        db.scalar(
+            select(func.count(HouseholdMember.household_id)).where(
+                HouseholdMember.user_id == user_id
+            )
+        )
+        or 0
+    )
+
+
+def build_session_state(
+    db: Session,
+    *,
+    user: User,
+    session: AuthSession,
+    setup_needed_override: bool | None = None,
+) -> SessionState:
+    setup_needed = (
+        setup_needed_override if setup_needed_override is not None else setup_required(db)
+    )
+    memberships = list_memberships(db, user.id)
+    chosen: tuple[Household, HouseholdMember, int] | None = None
+    if session.household_id is not None:
+        chosen = next(
+            (entry for entry in memberships if entry[0].id == session.household_id),
+            None,
+        )
+    if chosen is None and memberships:
+        chosen = memberships[0]
+        if session.household_id != chosen[0].id:
+            session.household_id = chosen[0].id
+            db.commit()
+    elif chosen is None and not memberships and session.household_id is not None:
+        session.household_id = None
+        db.commit()
+    return SessionState(
+        authenticated=True,
+        setup_required=setup_needed,
+        user=UserOut.model_validate(user),
+        household=(
+            HouseholdOut(
+                id=chosen[0].id,
+                name=chosen[0].name,
+                warranty_reminder_days=chosen[0].warranty_reminder_days,
+            )
+            if chosen is not None
+            else None
+        ),
+        role=chosen[1].role if chosen is not None else None,
+        households=[
+            HouseholdMembershipOut(
+                id=household.id,
+                name=household.name,
+                role=membership.role,
+                warranty_reminder_days=household.warranty_reminder_days,
+                property_count=property_count,
+                is_current=chosen is not None and household.id == chosen[0].id,
+            )
+            for household, membership, property_count in memberships
+        ],
+    )
+
+
 def authenticate(db: Session, *, email: str, password: str) -> User | None:
     user = db.scalar(select(User).where(User.email == email))
     if user is None or not user.is_active:
@@ -120,6 +213,10 @@ def create_session(
         )
     )
     return token
+
+
+def get_session_by_token(db: Session, token: str) -> AuthSession | None:
+    return db.scalar(select(AuthSession).where(AuthSession.token_hash == hash_session_token(token)))
 
 
 def revoke_session(db: Session, token: str | None) -> None:

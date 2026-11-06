@@ -100,6 +100,55 @@ beforeEach(() => {
 });
 
 describe("container dialogs", () => {
+  it("keeps a typed bulk quantity when room data refetches while open", async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      items: [container, { ...container, id: "box-2" }, { ...container, id: "box-3" }],
+      identifiers: ["BOX-001", "BOX-002", "BOX-003"],
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(
+      wrapper(
+        <ContainerCreateDialog
+          open
+          onOpenChange={() => undefined}
+          rooms={rooms}
+          locations={[]}
+          defaultRoomId={rooms[0]!.id}
+        />,
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("How many?"), {
+      target: { value: "3" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Create 3 containers" }),
+    ).toBeVisible();
+
+    rerender(
+      wrapper(
+        <ContainerCreateDialog
+          open
+          onOpenChange={() => undefined}
+          rooms={[...rooms]}
+          locations={[]}
+          defaultRoomId={rooms[0]!.id}
+        />,
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Create 3 containers" }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Create 3 containers" }),
+    );
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/containers/bulk",
+        expect.objectContaining({ quantity: 3, room_id: "room-1" }),
+      ),
+    );
+  });
+
   it("creates an unnamed container in one request", async () => {
     vi.mocked(api.post).mockResolvedValue(container);
     const user = userEvent.setup();

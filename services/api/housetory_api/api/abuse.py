@@ -91,3 +91,54 @@ def enforce_login_limit(keys: list[str]) -> None:
             f"Too many sign-in attempts. Try again in {retry} seconds.",
             headers={"Retry-After": str(retry)},
         )
+
+
+class RequestLimiter:
+    """Simple bounded request-rate guard for expensive read fanout.
+
+    This is deliberately in-process like the credential limiter. It is a
+    usability and abuse bound, not a security boundary.
+    """
+
+    def __init__(self, *, max_requests: int, window_seconds: int) -> None:
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._requests: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def check(self, key: str) -> None:
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        with self._lock:
+            requests = self._requests[key]
+            while requests and requests[0] < cutoff:
+                requests.popleft()
+            if len(requests) >= self.max_requests:
+                retry = max(1, int(requests[0] + self.window_seconds - now) + 1)
+                raise ApiError(
+                    429,
+                    "too_many_requests",
+                    f"Too many search requests. Try again in {retry} seconds.",
+                    headers={"Retry-After": str(retry)},
+                )
+            requests.append(now)
+            if len(self._requests) > 5_000:
+                for existing in list(self._requests):
+                    if existing == key:
+                        continue
+                    values = self._requests[existing]
+                    while values and values[0] < cutoff:
+                        values.popleft()
+                    if not values:
+                        self._requests.pop(existing, None)
+
+    def reset_all(self) -> None:
+        with self._lock:
+            self._requests.clear()
+
+
+search_limiter = RequestLimiter(max_requests=300, window_seconds=60)
+
+
+def enforce_search_limit(user_id) -> None:  # noqa: ANN001
+    search_limiter.check(f"search:{user_id}")

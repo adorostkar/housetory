@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..domain import PurchaseInfoFilter
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.items import ItemSummary
+from ..schemas.search import SearchHousehold, SearchProperty
 
 AssistantTool = Literal[
     "search_items",
@@ -151,6 +152,8 @@ class AssistantHistoryMessage(BaseModel):
 class AssistantRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
     history: list[AssistantHistoryMessage] = Field(default_factory=list, max_length=20)
+    household_id: uuid.UUID | None = None
+    property_id: uuid.UUID | None = None
 
 
 class AssistantPlan(BaseModel):
@@ -167,10 +170,14 @@ class AssistantReference(BaseModel):
     title: str
     subtitle: str | None = None
     url: str
+    household_id: uuid.UUID | None = None
+    household_name: str | None = None
 
 
 class NaturalSearchFilters(BaseModel):
     q: str | None = None
+    household_id: uuid.UUID | None = None
+    property_id: uuid.UUID | None = None
     room_id: uuid.UUID | None = None
     room_name: str | None = None
     exclude_room_id: uuid.UUID | None = None
@@ -230,6 +237,8 @@ class AiSearchPlan(BaseModel):
 class NaturalSearchRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     limit: int = Field(default=30, ge=1, le=100)
+    household_id: uuid.UUID | None = None
+    property_id: uuid.UUID | None = None
 
 
 class NaturalSearchResponse(BaseModel):
@@ -248,6 +257,9 @@ class NaturalSearchResponse(BaseModel):
     references: list[AssistantReference] = Field(default_factory=list)
     needs_assistant: bool = False
     suggested_question: str | None = None
+    scope_label: str = "All my places"
+    households: list[SearchHousehold] = Field(default_factory=list)
+    property: SearchProperty | None = None
 
 
 class AssistantResponse(BaseModel):
@@ -262,6 +274,9 @@ class AssistantResponse(BaseModel):
     notices: list[str] = Field(default_factory=list)
     facts: dict[str, Any] = Field(default_factory=dict)
     ai_status: AiStatus
+    scope_label: str = "All my places"
+    households: list[SearchHousehold] = Field(default_factory=list)
+    property: SearchProperty | None = None
 
 
 class DocumentRelationSuggestion(BaseModel):

@@ -3,6 +3,25 @@ import type { ApiFieldErrors } from "@/lib/types";
 const API_PREFIX = "/api/v1";
 
 export const UNAUTHORIZED_EVENT = "housetory:unauthorized";
+export const HOUSEHOLD_CONTEXT_EVENT = "housetory:household-context";
+
+let activeHouseholdId: string | null = null;
+
+export function setActiveHouseholdId(householdId: string | null) {
+  activeHouseholdId = householdId;
+}
+
+export function getActiveHouseholdId() {
+  return activeHouseholdId;
+}
+
+export function householdScopedQueryHash(queryKey: readonly unknown[]) {
+  return `${activeHouseholdId ?? "none"}:${JSON.stringify(queryKey)}`;
+}
+
+function withHouseholdContext(headers: Headers) {
+  if (activeHouseholdId) headers.set("X-Household-Id", activeHouseholdId);
+}
 
 interface ErrorPayload {
   detail?: {
@@ -59,6 +78,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     requestHeaders.set("Content-Type", "application/json");
     payload = JSON.stringify(body);
   }
+  withHouseholdContext(requestHeaders);
 
   let response: Response;
   try {
@@ -78,7 +98,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     const error = await parseError(response);
-    if (error.status === 401 && !skipUnauthorizedEvent) {
+    if (
+      error.code === "household_context_changed" ||
+      error.code === "household_context_required" ||
+      error.code === "household_access_revoked"
+    ) {
+      window.dispatchEvent(new Event(HOUSEHOLD_CONTEXT_EVENT));
+    } else if (error.status === 401 && !skipUnauthorizedEvent) {
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
     throw error;
@@ -100,6 +126,7 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
     requestHeaders.set("Content-Type", "application/json");
     payload = JSON.stringify(body);
   }
+  withHouseholdContext(requestHeaders);
   let response: Response;
   try {
     response = await fetch(`${API_PREFIX}${path}`, {
@@ -117,7 +144,13 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
   }
   if (!response.ok) {
     const error = await parseError(response);
-    if (error.status === 401 && !skipUnauthorizedEvent) {
+    if (
+      error.code === "household_context_changed" ||
+      error.code === "household_context_required" ||
+      error.code === "household_access_revoked"
+    ) {
+      window.dispatchEvent(new Event(HOUSEHOLD_CONTEXT_EVENT));
+    } else if (error.status === 401 && !skipUnauthorizedEvent) {
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
     throw error;
