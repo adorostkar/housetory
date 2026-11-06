@@ -21,7 +21,9 @@ from ..schemas.system import (
     JobStatusOut,
     ReadinessComponent,
     ReleaseStatus,
+    SystemStatusIssue,
     SystemStatusOut,
+    SystemStatusSummaryOut,
     TaskStatusOut,
 )
 from . import ai, item_image_search, manual_web
@@ -247,6 +249,108 @@ def _external_services(db: Session, household_id: uuid.UUID) -> list[ExternalSer
             source="environment" if settings.email_configured else "none",
         ),
     ]
+
+
+def _failed_job_count(db: Session, household_id: uuid.UUID) -> int:
+    return int(
+        db.scalar(
+            select(func.count(Job.id)).where(
+                _job_scope(household_id),
+                Job.status == JobStatus.FAILED.value,
+            )
+        )
+        or 0
+    )
+
+
+def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusSummaryOut:
+    readiness = _readiness(db)
+    tasks = _tasks(db, household_id)
+    external_services = _external_services(db, household_id)
+    failed_jobs = _failed_job_count(db, household_id)
+    issues: list[SystemStatusIssue] = []
+    for component in readiness:
+        if component.status == "ok":
+            continue
+        issues.append(
+            SystemStatusIssue(
+                kind="core",
+                label=f"{component.name} readiness",
+                detail=component.detail or f"{component.name} is {component.status}.",
+            )
+        )
+    if failed_jobs:
+        issues.append(
+            SystemStatusIssue(
+                kind="core",
+                label="Worker jobs",
+                detail=(
+                    f"{failed_jobs} failed job(s) recorded. Review the job details "
+                    "and retry after fixing the cause."
+                ),
+                settings_path="/settings/system-status",
+            )
+        )
+    for task in tasks:
+        if not task.enabled:
+            continue
+        if not task.configured:
+            issues.append(
+                SystemStatusIssue(
+                    kind="configured_feature",
+                    label=task.label,
+                    detail=(task.error or "This task is enabled but has no usable provider/model."),
+                    settings_path="/settings/ai",
+                )
+            )
+            continue
+        failure = None
+        if task.last_test_status == "failed":
+            failure = task.last_test_error or "The last live task test failed."
+        elif task.error:
+            failure = task.error
+        elif task.compatibility in {"incompatible", "adapter_unavailable"}:
+            failure = "The selected model/provider combination is not usable for this task."
+        if failure:
+            issues.append(
+                SystemStatusIssue(
+                    kind="configured_feature",
+                    label=task.label,
+                    detail=failure,
+                    settings_path="/settings/ai",
+                )
+            )
+    for service in external_services:
+        if service.status != "partial":
+            continue
+        issues.append(
+            SystemStatusIssue(
+                kind="configured_feature",
+                label=service.name,
+                detail=service.detail,
+                settings_path=service.settings_path or "/settings#online-search",
+            )
+        )
+    optional: list[str] = []
+    settings = get_settings()
+    if not settings.email_configured:
+        optional.append("Email delivery")
+    for service in external_services:
+        if service.status == "not_configured" and service.name not in optional:
+            optional.append(service.name)
+    if not any(task.configured for task in tasks):
+        optional.append("AI tasks")
+    core_count = sum(1 for issue in issues if issue.kind == "core")
+    configured_count = sum(1 for issue in issues if issue.kind == "configured_feature")
+    return SystemStatusSummaryOut(
+        status="attention" if issues else "healthy",
+        attention_count=len(issues),
+        core_issue_count=core_count,
+        configured_feature_issue_count=configured_count,
+        optional_not_configured=optional,
+        issues=issues,
+        generated_at=datetime.now(UTC),
+    )
 
 
 def system_status(db: Session, household_id: uuid.UUID) -> SystemStatusOut:

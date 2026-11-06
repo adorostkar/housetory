@@ -198,7 +198,13 @@ function BulkTestStatus({ entry }: { entry: BulkTestProgress }) {
   );
 }
 
-export function SystemStatusPanel({ isOwner }: { isOwner: boolean }) {
+export function SystemStatusPanel({
+  isOwner,
+  title = "System status",
+}: {
+  isOwner: boolean;
+  title?: string;
+}) {
   const queryClient = useQueryClient();
   const statusQuery = useSystemStatus(isOwner);
   const retry = useMutation({
@@ -208,6 +214,9 @@ export function SystemStatusPanel({ isOwner }: { isOwner: boolean }) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatus });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.systemStatusSummary,
+      });
       toast.success("Job queued for retry");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
@@ -314,6 +323,9 @@ export function SystemStatusPanel({ isOwner }: { isOwner: boolean }) {
       if (mountedRef.current) {
         setBulkRunning(false);
         await queryClient.invalidateQueries({ queryKey: queryKeys.systemStatus });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.systemStatusSummary,
+        });
         const skipped = plan.filter((entry) => entry.state === "skipped").length;
         const summary = `${passed} passed, ${failed} failed, ${unsupported} unsupported, ${skipped} skipped.`;
         if (failed || unsupported) {
@@ -337,7 +349,7 @@ export function SystemStatusPanel({ isOwner }: { isOwner: boolean }) {
             className="flex items-center gap-2 font-display text-[1.35rem] font-normal tracking-[-0.02em]"
           >
             <Activity className="size-4 text-muted-foreground" strokeWidth={1.7} />
-            System status
+            {title}
           </h2>
           <p className="mt-1 max-w-2xl text-[0.76rem] leading-relaxed text-muted-foreground">
             Release identity, local readiness, worker jobs and task readiness.{" "}

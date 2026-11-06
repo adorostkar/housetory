@@ -4,11 +4,23 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ...db import get_db
-from ...schemas.system import JobRetryOut, SystemStatusOut
-from ...services.system_status import retry_job, system_status
+from ...schemas.system import (
+    JobRetryOut,
+    SystemStatusOut,
+    SystemStatusSummaryOut,
+)
+from ...services.system_status import retry_job, system_status, system_status_summary
 from ..deps import AuthContext, require_owner
 
 router = APIRouter(prefix="/system", tags=["system"])
+
+
+@router.get("/status/summary", response_model=SystemStatusSummaryOut)
+def read_system_status_summary(
+    auth: AuthContext = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> SystemStatusSummaryOut:
+    return system_status_summary(db, auth.household.id)
 
 
 @router.get("/status", response_model=SystemStatusOut)

@@ -83,6 +83,17 @@ function mockApi(status: () => AiStatus) {
   vi.mocked(api.get).mockImplementation(((path: string) => {
     if (path === "/auth/session") return Promise.resolve(session);
     if (path === "/overview") return Promise.resolve(overview);
+    if (path === "/system/status/summary") {
+      return Promise.resolve({
+        status: "healthy",
+        attention_count: 0,
+        core_issue_count: 0,
+        configured_feature_issue_count: 0,
+        optional_not_configured: ["Email delivery", "AI tasks"],
+        issues: [],
+        generated_at: "2026-11-06T12:30:00Z",
+      });
+    }
     if (path.startsWith("/ai/status")) {
       calls.status += 1;
       return Promise.resolve(status());
@@ -120,6 +131,10 @@ describe("SettingsPage Intelligence summary", () => {
       "href",
       "/settings/ai",
     );
+    expect(await screen.findByText("Healthy")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Open System status" }),
+    ).toHaveAttribute("href", "/settings/system-status");
     expect(screen.queryByText("Available models")).not.toBeInTheDocument();
     expect(screen.queryByText(catalog[499]!)).not.toBeInTheDocument();
     expect(screen.queryByText(catalog[0]!)).not.toBeInTheDocument();

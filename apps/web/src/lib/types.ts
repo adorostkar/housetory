@@ -1835,6 +1835,23 @@ export interface SystemExternalService {
   settings_path?: string | null;
 }
 
+export interface SystemStatusIssue {
+  kind: "core" | "configured_feature";
+  label: string;
+  detail: string;
+  settings_path: string | null;
+}
+
+export interface SystemStatusSummary {
+  status: "healthy" | "attention";
+  attention_count: number;
+  core_issue_count: number;
+  configured_feature_issue_count: number;
+  optional_not_configured: string[];
+  issues: SystemStatusIssue[];
+  generated_at: string;
+}
+
 export interface SystemStatus {
   release: {
     version: string;

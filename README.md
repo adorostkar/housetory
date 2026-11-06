@@ -818,7 +818,10 @@ provider shows the domain verified and a test message is delivered.
 
 Account settings are under **Settings → Account settings**. Household settings
 and member administration remain separate under Settings and **Members &
-invitations**.
+invitations**. Main Settings shows only a compact owner health summary; detailed
+release identity, readiness, worker jobs and AI task diagnostics live on the
+dedicated **Settings → System status** page. Optional services that are not
+configured are reported separately and do not count as core outages.
 
 ## Camera, AI Scan Items and hierarchical imports
 

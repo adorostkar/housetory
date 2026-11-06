@@ -46,6 +46,7 @@ import type {
   PlaceTransferPreview,
   SessionState,
   SystemStatus,
+  SystemStatusSummary,
   StocktakeScopeSummary,
   StocktakeReview,
   StocktakeSessionDetail,
@@ -93,6 +94,7 @@ export const queryKeys = {
     roomId: string,
     locationId: string,
   ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
+  systemStatusSummary: ["system", "status-summary"] as const,
   systemStatus: ["system", "status"] as const,
   householdMembers: ["household", "members"] as const,
   householdInvitations: ["household", "invitations"] as const,
@@ -848,6 +850,15 @@ export function useOnlineSearchSettings(enabled = true) {
   return useQuery({
     queryKey: queryKeys.onlineSearchSettings,
     queryFn: () => api.get<OnlineSearchSettings>("/settings/online-search"),
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useSystemStatusSummary(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.systemStatusSummary,
+    queryFn: () => api.get<SystemStatusSummary>("/system/status/summary"),
     enabled,
     staleTime: 10_000,
   });

@@ -139,6 +139,11 @@ const MembersSettingsPage = React.lazy(() =>
     default: module.MembersSettingsPage,
   })),
 );
+const SystemStatusPage = React.lazy(() =>
+  import("@/pages/system-status-page").then((module) => ({
+    default: module.SystemStatusPage,
+  })),
+);
 const NotFoundPage = React.lazy(() =>
   import("@/pages/not-found-page").then((module) => ({ default: module.NotFoundPage })),
 );
@@ -316,6 +321,7 @@ export default function App() {
             <Route path="settings/account" element={<AccountSettingsPage />} />
             <Route path="settings/members" element={<MembersSettingsPage />} />
             <Route path="settings/ai" element={<AiSettingsPage />} />
+            <Route path="settings/system-status" element={<SystemStatusPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>

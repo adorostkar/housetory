@@ -137,7 +137,7 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
     await route.fulfill({ status: 200, json: payload });
   });
 
-  await page.goto("/settings");
+  await page.goto("/settings/system-status");
   const systemStatus = page.locator(
     'section[aria-labelledby="system-status-heading"]',
   );

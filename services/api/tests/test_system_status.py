@@ -6,7 +6,13 @@ from sqlalchemy import select
 
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
-from housetory_api.models import HouseholdMember, Job, User, WorkerHeartbeat
+from housetory_api.models import (
+    AiTaskSetting,
+    HouseholdMember,
+    Job,
+    User,
+    WorkerHeartbeat,
+)
 from housetory_api.security import hash_password
 from housetory_api.services import ai_task_test
 from housetory_api.services.task_capabilities import model_task_state, model_task_states
@@ -289,3 +295,176 @@ def test_system_status_release_readiness_jobs_retry_and_scoping(
         assert retried.attempts == 0
         assert retried.last_error is None
     assert owner_client.post(f"/api/v1/system/jobs/{job_id}/retry").status_code == 409
+
+
+def _healthy_heartbeat() -> None:
+    with SessionLocal() as db:
+        db.merge(
+            WorkerHeartbeat(
+                worker_id="summary-worker",
+                version="0.1.0",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+
+def test_system_status_summary_keeps_optional_configuration_out_of_attention(
+    owner_client,
+):
+    _healthy_heartbeat()
+    summary = owner_client.get("/api/v1/system/status/summary")
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["status"] == "healthy"
+    assert body["attention_count"] == 0
+    assert body["core_issue_count"] == 0
+    assert body["configured_feature_issue_count"] == 0
+    assert body["issues"] == []
+    assert body["generated_at"]
+    optional = set(body["optional_not_configured"])
+    assert {
+        "Email delivery",
+        "Online manual search",
+        "Reference-image search",
+        "AI tasks",
+    } <= optional
+
+
+def test_system_status_summary_distinguishes_core_and_configured_feature_issues(
+    owner_client,
+):
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    _healthy_heartbeat()
+    with SessionLocal() as db:
+        db.add(
+            Job(
+                queue="default",
+                task="fixture.summary.failed",
+                payload={"household_id": str(household_id)},
+                status="failed",
+                attempts=2,
+                max_attempts=3,
+                last_error="fixture summary failure",
+                finished_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "openai",
+            "display_name": "Summary fixture",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "gpt-test",
+            "api_key": "sk-summary-test-secret",
+            "enabled": True,
+            "cloud_consent": True,
+        },
+    )
+    assert provider.status_code == 201, provider.text
+    provider_id = provider.json()["id"]
+    saved = owner_client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={
+            "provider_id": provider_id,
+            "model": "gpt-test",
+            "enabled": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    with SessionLocal() as db:
+        setting = db.scalar(
+            select(AiTaskSetting).where(
+                AiTaskSetting.household_id == household_id,
+                AiTaskSetting.task == "assistant",
+            )
+        )
+        assert setting is not None
+        setting.last_test_status = "failed"
+        setting.last_test_error = "Fixture live test failed."
+        db.commit()
+
+    summary = owner_client.get("/api/v1/system/status/summary")
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["status"] == "attention"
+    assert body["attention_count"] >= 2
+    assert body["core_issue_count"] >= 1
+    assert body["configured_feature_issue_count"] == 1
+    issues = {issue["label"]: issue for issue in body["issues"]}
+    assert "Worker jobs" in issues
+    assert issues["Worker jobs"]["kind"] == "core"
+    assert issues["Worker jobs"]["settings_path"] == "/settings/system-status"
+    assert "Assistant" in issues
+    assert issues["Assistant"]["kind"] == "configured_feature"
+    assert issues["Assistant"]["settings_path"] == "/settings/ai"
+    assert "Fixture live test failed." in issues["Assistant"]["detail"]
+    assert "AI tasks" not in body["optional_not_configured"]
+
+
+def test_system_status_summary_reports_missing_worker_as_core_and_is_owner_only(
+    owner_client, anon_client, monkeypatch
+):
+    viewer_token = None
+    state = owner_client.get("/api/v1/auth/session").json()
+    household_id = uuid.UUID(state["household"]["id"])
+    with SessionLocal() as db:
+        user = User(
+            name="Summary Viewer",
+            email="summary-viewer@example.com",
+            password_hash=hash_password("summary-viewer-password-2026"),
+        )
+        db.add(user)
+        db.flush()
+        db.add(
+            HouseholdMember(
+                household_id=household_id,
+                user_id=user.id,
+                role="viewer",
+            )
+        )
+        from housetory_api.services.auth import create_session
+
+        viewer_token = create_session(
+            db,
+            user=user,
+            settings=get_settings(),
+            user_agent="summary-viewer",
+            ip_address="127.0.0.1",
+            household_id=household_id,
+        )
+        db.commit()
+    assert anon_client.get("/api/v1/system/status/summary").status_code == 401
+    viewer = {"Cookie": f"housetory_session={viewer_token}"}
+    assert owner_client.get("/api/v1/system/status/summary", headers=viewer).status_code == 403
+
+    summary = owner_client.get("/api/v1/system/status/summary")
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["status"] == "attention"
+    worker = next(issue for issue in body["issues"] if issue["label"] == "Worker readiness")
+    assert worker["kind"] == "core"
+    assert "No worker heartbeat" in worker["detail"]
+
+
+def test_system_status_summary_counts_configured_online_search_partial(owner_client, monkeypatch):
+    from housetory_api.config import get_settings
+
+    _healthy_heartbeat()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "brave_search_api_key", "summary-env-key")
+    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "")
+    monkeypatch.setattr(settings, "manual_search_url", "")
+    monkeypatch.setattr(settings, "manual_search_provider", "auto")
+    monkeypatch.setattr(settings, "item_image_search_provider", "auto")
+
+    summary = owner_client.get("/api/v1/system/status/summary")
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    issue = next(issue for issue in body["issues"] if issue["label"] == "Reference-image search")
+    assert issue["kind"] == "configured_feature"
+    assert issue["settings_path"] == "/settings#online-search"
+    assert "permitted source domains" in issue["detail"]
+    assert "Online manual search" not in body["optional_not_configured"]

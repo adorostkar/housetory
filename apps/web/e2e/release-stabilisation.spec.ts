@@ -77,15 +77,16 @@ test("status screen shows real readiness and task states; optional features are 
   request,
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/settings");
+  await page.goto("/settings/system-status");
   await expect(
-    page.getByRole("heading", { name: "Settings", level: 1 }),
+    page.getByRole("heading", { name: "System status", level: 1 }),
   ).toBeVisible();
-  const status = page
-    .locator("section")
-    .filter({ has: page.getByRole("heading", { name: "System status" }) });
+  await expect(
+    page.getByRole("link", { name: "Back to Settings" }),
+  ).toBeVisible();
+  const status = page.locator('section[aria-labelledby="system-status-heading"]');
   await status.scrollIntoViewIfNeeded();
-  await expect(status.getByText("System status")).toBeVisible();
+  await expect(status.getByText("Detailed status")).toBeVisible();
   await expect(
     status.getByText(new RegExp(process.env.E2E_RELEASE_COMMIT ?? "abc123release")),
   ).toBeVisible();

@@ -18,7 +18,7 @@ import { PageHeader } from "@/components/page-header";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { OnlineSearchSettingsCard } from "@/components/online-search-settings";
 import { PropertiesSettings } from "@/components/properties-settings";
-import { SystemStatusPanel } from "@/components/system-status-panel";
+import { SystemHealthSummary } from "@/components/system-health-summary";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -566,7 +566,7 @@ export function SettingsPage() {
 
         <OnlineSearchSettingsCard isOwner={isOwner} />
 
-        <SystemStatusPanel isOwner={isOwner} />
+        <SystemHealthSummary isOwner={isOwner} />
 
         <section className="surface p-5 sm:p-6">
           <div className="flex items-center gap-2">

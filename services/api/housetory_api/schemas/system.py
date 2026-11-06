@@ -62,6 +62,23 @@ class ExternalServiceStatus(BaseModel):
     settings_path: str | None = None
 
 
+class SystemStatusIssue(BaseModel):
+    kind: Literal["core", "configured_feature"]
+    label: str
+    detail: str
+    settings_path: str | None = None
+
+
+class SystemStatusSummaryOut(BaseModel):
+    status: Literal["healthy", "attention"]
+    attention_count: int = 0
+    core_issue_count: int = 0
+    configured_feature_issue_count: int = 0
+    optional_not_configured: list[str] = Field(default_factory=list)
+    issues: list[SystemStatusIssue] = Field(default_factory=list)
+    generated_at: datetime
+
+
 class SystemStatusOut(BaseModel):
     release: ReleaseStatus
     readiness: list[ReadinessComponent]
@@ -84,6 +101,8 @@ __all__ = [
     "JobStatusOut",
     "ReadinessComponent",
     "ReleaseStatus",
+    "SystemStatusIssue",
     "SystemStatusOut",
+    "SystemStatusSummaryOut",
     "TaskStatusOut",
 ]

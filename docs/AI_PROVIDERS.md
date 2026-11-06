@@ -70,7 +70,13 @@ or falls back to another provider. Individual Test buttons remain available.
 
 ## System status
 
-Settings → System status shows the deployed release commit/build/channel/identity,
+Main **Settings** shows a compact, owner-only system-health summary. It counts
+core readiness problems, failed worker jobs and failures in features that are
+actually configured. Optional services that are not configured are listed
+separately and do not count as outages. The summary links to the dedicated
+**Settings → System status** page.
+
+The detailed page shows the deployed release commit/build/channel/identity,
 database/storage/worker readiness, job counts and recent failures with explicit
 retry, per-task configured/compatible/live-tested state and last error/time, plus
 configured/not-configured optional external services. **Refresh status** is passive:
