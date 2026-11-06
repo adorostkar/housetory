@@ -1941,8 +1941,10 @@ Worked on `codex/release-stabilisation`; main is not merged or pushed.
 - [x] Added owner-only `GET /system/status` and `POST /system/jobs/{id}/retry` with
   release version/commit/build/channel/identity, DB/storage/worker readiness, job
   counts/recent failures, per-task configured/compatibility/live-tested state and
-  optional external-service configuration. Job payloads, keys, prompts and borrower
-  data are never returned; non-owners receive an access note.
+  optional external-service configuration. Job counts/recent failures are scoped to
+  the current household plus household-neutral maintenance tasks, and retry enforces
+  the same scope/IDOR rejection. Job payloads, keys, prompts and borrower data are
+  never returned; non-owners receive an access note.
 - [x] Added append-only migration `f2b4d6c8a0e1`: bounded last-test columns/constraint
   on `ai_task_settings` and a PostgreSQL `worker_heartbeats` table. The worker writes
   a 15-second DB heartbeat; the status screen shows stale/unknown honestly.
