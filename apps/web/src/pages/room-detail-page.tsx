@@ -5,13 +5,15 @@ import {
   ChevronRight,
   Download,
   MoreHorizontal,
+  MoveRight,
   Pencil,
   Plus,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import {
@@ -20,6 +22,12 @@ import {
   useRegisterAddItemsContext,
 } from "@/components/add-items";
 import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
+import {
+  BulkItemActionBar,
+  BulkSelectionControls,
+  BulkSelectionNotice,
+  useBulkSelection,
+} from "@/components/bulk-item-selection";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
@@ -28,6 +36,10 @@ import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
 import { PageHeader } from "@/components/page-header";
+import {
+  PlaceTransferDialog,
+  type PlaceTransferSource,
+} from "@/components/place-transfer-dialog";
 import { RoomDialog } from "@/components/room-dialog";
 import { RoomPropertyMoveDialog } from "@/components/room-property-move-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
@@ -41,8 +53,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
 import {
   useCanWrite,
   useInvalidateInventory,
@@ -60,21 +76,38 @@ import {
   roomPath,
 } from "@/lib/utils";
 
+const ROOM_ITEM_SORTS = {
+  created_desc: "Newest first",
+  name_asc: "Name A–Z",
+  name_desc: "Name Z–A",
+  updated_desc: "Recently updated",
+} as const;
+
 export function RoomDetailPage() {
   const canWrite = useCanWrite();
   const { roomId = "" } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const invalidate = useInvalidateInventory();
   const roomsQuery = useRooms();
   const locationsQuery = useLocations(roomId);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedLocationId = searchParams.get("location_id");
+  const scope = searchParams.get("scope") === "direct" ? "direct" : "nested";
+  const qParam = searchParams.get("q") ?? "";
+  const sortParam = searchParams.get("sort");
+  const sort = sortParam && sortParam in ROOM_ITEM_SORTS
+    ? (sortParam as keyof typeof ROOM_ITEM_SORTS)
+    : "created_desc";
+  const [search, setSearch] = useState(qParam);
+  const debouncedSearch = useDebouncedValue(search, 300);
   const itemsQuery = useItems(
     {
+      q: qParam || undefined,
       room_id: roomId || undefined,
       location_id: requestedLocationId ?? undefined,
-      include_descendants: true,
-      sort: "created_desc",
+      include_descendants: scope === "nested",
+      sort,
     },
     24,
   );
@@ -87,6 +120,10 @@ export function RoomDetailPage() {
   const [deletingLocation, setDeletingLocation] = useState<StorageLocation | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [propertyMoveOpen, setPropertyMoveOpen] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<{
+    source: PlaceTransferSource;
+    mode: "move" | "delete";
+  } | null>(null);
   const propertiesQuery = useProperties();
 
   const rooms = roomsQuery.data?.items ?? [];
@@ -100,6 +137,24 @@ export function RoomDetailPage() {
   const selectedLocation = locations.find((location) => location.id === requestedLocationId);
   const selectedLocationId = selectedLocation?.id ?? null;
   const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const totalItems = itemsQuery.data?.pages[0]?.total ?? 0;
+  const filterSignature = JSON.stringify([
+    roomId,
+    selectedLocationId,
+    scope,
+    qParam,
+    sort,
+  ]);
+  const selection = useBulkSelection({
+    items,
+    enabled: canWrite,
+    scopeKey: filterSignature,
+  });
+  const originLabel = selectedLocation
+    ? selectedLocation.identifier ?? selectedLocation.name
+    : room?.name ?? "room";
+  const origin = itemOrigin(`${location.pathname}${location.search}`, originLabel);
+  useRestoreListScroll(items.length > 0, origin);
   const { openAddItems } = useAddItems();
   const addItemsContext = room
     ? {
@@ -124,6 +179,33 @@ export function RoomDetailPage() {
     );
   };
 
+  const updateItemsParam = (key: string, value: string) => {
+    selection.clearSelection("Selection cleared because the view changed.");
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    const trimmed = debouncedSearch.trim();
+    if (trimmed === qParam) return;
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (trimmed) next.set("q", trimmed);
+        else next.delete("q");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [debouncedSearch, qParam, setSearchParams]);
+
   useEffect(() => {
     if (
       requestedLocationId &&
@@ -141,6 +223,14 @@ export function RoomDetailPage() {
       toast.success("Room deleted");
       navigate("/rooms", { replace: true });
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "room_not_empty") {
+        setDeleteRoomOpen(false);
+        setTransferTarget({ source: roomTransferSource, mode: "delete" });
+        return;
+      }
+      toast.error(getApiErrorMessage(error));
+    },
   });
 
   const deleteLocation = useMutation({
@@ -149,6 +239,22 @@ export function RoomDetailPage() {
     onSuccess: () => {
       invalidate();
       toast.success("Place deleted");
+      setDeletingLocation(null);
+    },
+    onError: (error) => {
+      if (
+        error instanceof ApiError &&
+        error.code === "location_not_empty" &&
+        deletingLocation
+      ) {
+        setDeletingLocation(null);
+        setTransferTarget({
+          source: locationTransferSource(deletingLocation),
+          mode: "delete",
+        });
+        return;
+      }
+      toast.error(getApiErrorMessage(error));
     },
   });
 
@@ -177,21 +283,52 @@ export function RoomDetailPage() {
     );
   }
 
+  const roomTransferSource: PlaceTransferSource = {
+    kind: "room",
+    id: room.id,
+    label: room.name,
+    roomId: room.id,
+    propertyId: room.property_id ?? "",
+  };
+
   const attemptRoomDelete = () => {
-    if (room.item_count > 0 || room.location_count > 0 || childRooms.length > 0) {
-      toast.error("Move or remove everything in this room first.");
+    if (
+      room.total_item_count > 0 ||
+      room.total_location_count > 0 ||
+      childRooms.length > 0
+    ) {
+      setTransferTarget({ source: roomTransferSource, mode: "delete" });
       return;
     }
     setDeleteRoomOpen(true);
   };
 
+  const moveRoomContents = () => {
+    setTransferTarget({ source: roomTransferSource, mode: "move" });
+  };
+
+  const locationTransferSource = (location: StorageLocation): PlaceTransferSource => ({
+    kind: "location",
+    id: location.id,
+    label: location.identifier ?? location.name,
+    roomId: room.id,
+    propertyId: room.property_id ?? "",
+  });
+
   const attemptLocationDelete = (location: StorageLocation) => {
     const hasChildren = locations.some((entry) => entry.parent_id === location.id);
-    if (location.item_count > 0 || hasChildren) {
-      toast.error("Remove the items and nested places inside this one first.");
+    if (location.total_item_count > 0 || hasChildren) {
+      setTransferTarget({
+        source: locationTransferSource(location),
+        mode: "delete",
+      });
       return;
     }
     setDeletingLocation(location);
+  };
+
+  const moveLocationContents = (location: StorageLocation) => {
+    setTransferTarget({ source: locationTransferSource(location), mode: "move" });
   };
 
   return (
@@ -259,6 +396,14 @@ export function RoomDetailPage() {
                   <Plus />
                   Add a sub-room
                 </DropdownMenuItem>
+                {(room.total_item_count > 0 ||
+                  room.total_location_count > 0 ||
+                  childRooms.length > 0) && (
+                  <DropdownMenuItem onSelect={moveRoomContents}>
+                    <MoveRight />
+                    Move contents
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={attemptRoomDelete}>
                   <Trash2 />
@@ -397,6 +542,10 @@ export function RoomDetailPage() {
                                 <Plus />
                                 Add nested place
                               </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => moveLocationContents(location)}>
+                                <MoveRight />
+                                Move contents
+                              </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 destructive
@@ -479,9 +628,83 @@ export function RoomDetailPage() {
               )}
             </div>
             <p className="text-[0.75rem] text-muted-foreground">
-              {itemsQuery.data ? pluralize(itemsQuery.data.pages[0]?.total ?? 0, "item") : ""}
+              {itemsQuery.data ? pluralize(totalItems, "item") : ""}
             </p>
           </div>
+
+          <div className="surface mb-4 p-3.5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    selection.clearSelection(
+                      "Selection cleared because the search changed.",
+                    );
+                  }}
+                  placeholder="Search in this room or place"
+                  aria-label="Search in this room or place"
+                  className="pl-10"
+                />
+              </div>
+              <div
+                className="inline-flex rounded-full border border-border/70 bg-background/50 p-1"
+                role="group"
+                aria-label="Contents scope"
+              >
+                {(["nested", "direct"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={scope === value}
+                    onClick={() =>
+                      updateItemsParam("scope", value === "direct" ? "direct" : "")
+                    }
+                    className={
+                      scope === value
+                        ? "rounded-full bg-primary px-3 py-1.5 text-[0.7rem] font-medium text-primary-foreground"
+                        : "rounded-full px-3 py-1.5 text-[0.7rem] font-medium text-muted-foreground"
+                    }
+                  >
+                    {value === "nested" ? "Include nested" : "Direct only"}
+                  </button>
+                ))}
+              </div>
+              <Select
+                aria-label="Sort items in this room or place"
+                value={sort}
+                onChange={(event) =>
+                  updateItemsParam(
+                    "sort",
+                    event.target.value === "created_desc" ? "" : event.target.value,
+                  )
+                }
+                className="h-9 rounded-lg text-[0.8rem] lg:max-w-44"
+              >
+                {Object.entries(ROOM_ITEM_SORTS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="mt-3 border-t border-border/60 pt-3">
+              <BulkSelectionControls
+                selection={selection}
+                showing={items.length}
+                total={totalItems}
+              />
+            </div>
+          </div>
+
+          <BulkSelectionNotice selection={selection} />
+          <BulkItemActionBar
+            items={selection.selectedItems}
+            onClear={() => selection.clearSelection()}
+            onNotice={selection.showNotice}
+          />
 
           {itemsQuery.isPending ? (
             <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-3">
@@ -496,11 +719,23 @@ export function RoomDetailPage() {
             />
           ) : items.length === 0 ? (
             <EmptyState
-              title={selectedLocation ? "Nothing here yet." : "This room is waiting."}
+              title={
+                selectedLocation
+                  ? scope === "direct"
+                    ? "No direct items here."
+                    : "Nothing here yet."
+                  : scope === "direct"
+                    ? "No direct items in this room."
+                    : "This room is waiting."
+              }
               description={
                 selectedLocation
-                  ? `No items are stored in ${selectedLocation.name}. Add something, or choose another place.`
-                  : "Add the first item to this room and give it a precise place to live."
+                  ? scope === "direct"
+                    ? "Nested places may still contain items. Switch to Include nested to see them."
+                    : `No items are stored in ${selectedLocation.name}. Add something, or choose another place.`
+                  : scope === "direct"
+                    ? "Sub-rooms and nested places may still contain items. Switch to Include nested to see them."
+                    : "Add the first item to this room and give it a precise place to live."
               }
               actionLabel="Add items"
               onAction={() => openAddItems(addItemsContext)}
@@ -510,7 +745,20 @@ export function RoomDetailPage() {
             <>
               <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
                 {items.map((item) => (
-                  <ItemCard key={item.id} item={item} />
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    origin={origin}
+                    selection={
+                      canWrite
+                        ? {
+                            selected: selection.selected.has(item.id),
+                            onToggle: () => selection.toggleItem(item.id),
+                            disabled: item.is_archived,
+                          }
+                        : undefined
+                    }
+                  />
                 ))}
               </div>
               {itemsQuery.hasNextPage && (
@@ -584,13 +832,31 @@ export function RoomDetailPage() {
           if (!open) setDeletingLocation(null);
         }}
         title={`Delete ${deletingLocation?.name ?? "place"}?`}
-        description="This storage place is empty and can be safely removed."
+        description="This storage place is empty and can be safely removed. Attached place photos, if any, are deleted with it. This cannot be undone."
         confirmLabel="Delete place"
         onConfirm={async () => {
           if (!deletingLocation) return;
           await deleteLocation.mutateAsync(deletingLocation.id);
           if (selectedLocationId === deletingLocation.id) selectLocation(null);
           setDeletingLocation(null);
+        }}
+      />
+
+      <PlaceTransferDialog
+        open={transferTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setTransferTarget(null);
+        }}
+        source={transferTarget?.source ?? null}
+        mode={transferTarget?.mode ?? "move"}
+        onCompleted={(result) => {
+          if (result.deleted) {
+            if (result.source_kind === "room") {
+              navigate("/rooms", { replace: true });
+            } else if (selectedLocationId === result.source_id) {
+              selectLocation(null);
+            }
+          }
         }}
       />
     </div>

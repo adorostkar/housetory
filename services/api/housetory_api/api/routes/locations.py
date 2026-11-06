@@ -12,7 +12,7 @@ from ...schemas.locations import (
     StorageLocationOut,
     StorageLocationUpdate,
 )
-from ...services.containers import household_hierarchy_lock
+from ...services.containers import delete_location_safely, household_hierarchy_lock
 from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -267,24 +267,11 @@ def delete_location(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> Response:
-    household_hierarchy_lock(db, auth.household.id)
-    location = _get_location(db, auth.household.id, location_id)
-    has_children = (
-        db.scalar(
-            select(StorageLocation.id).where(StorageLocation.parent_id == location.id).limit(1)
-        )
-        is not None
-    )
-    has_items = (
-        db.scalar(select(Item.id).where(Item.storage_location_id == location.id).limit(1))
-        is not None
-    )
-    if has_children or has_items:
-        raise ApiError(
-            409,
-            "location_not_empty",
-            "This location still has nested locations or items.",
-        )
-    db.delete(location)
-    db.commit()
+    try:
+        location = _get_location(db, auth.household.id, location_id)
+        delete_location_safely(db, auth.household.id, location)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return Response(status_code=204)

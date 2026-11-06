@@ -1602,6 +1602,85 @@ export interface ContainerBulkResult {
   identifiers: string[];
 }
 
+export interface PlaceDestination {
+  property_id: UUID | null;
+  property_name: string | null;
+  room_id: UUID;
+  room_name: string;
+  location_id: UUID | null;
+  location_name: string | null;
+  location_identifier: string | null;
+  path: string[];
+}
+
+export interface PlacePreviewItem {
+  id: UUID;
+  name: string;
+  quantity: number;
+  is_archived: boolean;
+  place_label: string;
+  on_loan_quantity: number;
+}
+
+export interface PlacePreviewLocation {
+  id: UUID;
+  name: string;
+  identifier: string | null;
+  kind: LocationKind;
+  is_container: boolean;
+  total_item_count: number;
+  total_quantity: number;
+}
+
+export interface PlacePreviewRoom {
+  id: UUID;
+  name: string;
+  total_item_count: number;
+}
+
+export interface PlaceTransferPreview {
+  source_kind: "location" | "room";
+  source_id: UUID;
+  source_label: string;
+  source_path: string[];
+  destination: PlaceDestination | null;
+  direct_item_count: number;
+  nested_item_count: number;
+  total_item_count: number;
+  total_quantity: number;
+  archived_item_count: number;
+  on_loan_quantity: number;
+  nested_place_count: number;
+  child_room_count: number;
+  borrowed_record_count: number;
+  source_photo_count: number;
+  items_preview: PlacePreviewItem[];
+  nested_places_preview: PlacePreviewLocation[];
+  child_rooms_preview: PlacePreviewRoom[];
+  blockers: string[];
+  warnings: string[];
+  can_proceed: boolean;
+  fingerprint: string;
+}
+
+export interface PlaceTransferResult {
+  request_id: UUID;
+  history_event_id: UUID;
+  source_kind: "location" | "room";
+  source_id: UUID;
+  source_label: string;
+  deleted: boolean;
+  direct_items_moved: number;
+  nested_items_moved: number;
+  total_items_preserved: number;
+  total_quantity: number;
+  nested_places_moved: number;
+  child_rooms_moved: number;
+  borrowed_records_moved: number;
+  on_loan_quantity: number;
+  destination: PlaceDestination;
+}
+
 export interface ContainerQrConfig {
   base_url: string;
   warning: string | null;

@@ -35,6 +35,7 @@ from ...services.containers import (
     assign_identifier,
     convert_location,
     create_containers,
+    delete_location_safely,
     deterministic_summary,
     get_location,
     load_container_items,
@@ -300,6 +301,22 @@ def move_existing_container(
         raise
     location = _get(db, auth.household.id, location_id)
     return serialize_container_detail(db, auth.household.id, location)
+
+
+@router.delete("/{location_id}", status_code=204)
+def delete_empty_container(
+    location_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        location = _get(db, auth.household.id, location_id)
+        delete_location_safely(db, auth.household.id, location)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return Response(status_code=204)
 
 
 @router.post("/{location_id}/identifier", response_model=ContainerOut)

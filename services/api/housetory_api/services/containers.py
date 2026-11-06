@@ -13,8 +13,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload
 
 from ..api.errors import ApiError
-from ..domain import ContainerType, prefix_for_container_type, prefix_for_location_kind
+from ..domain import ContainerType, LoanStatus, prefix_for_container_type, prefix_for_location_kind
 from ..models import (
+    BorrowedRecord,
     Document,
     Item,
     LocationIdentifierCounter,
@@ -691,12 +692,30 @@ def delete_location_safely(db: Session, household_id: uuid.UUID, location: Stora
     has_children = db.scalar(
         select(StorageLocation.id).where(StorageLocation.parent_id == location.id).limit(1)
     )
-    has_items = db.scalar(select(Item.id).where(Item.storage_location_id == location.id).limit(1))
-    if has_children or has_items:
+    has_items = db.scalar(
+        select(Item.id)
+        .where(
+            Item.household_id == household_id,
+            Item.storage_location_id == location.id,
+        )
+        .limit(1)
+    )
+    has_borrowed = db.scalar(
+        select(BorrowedRecord.id)
+        .where(
+            BorrowedRecord.household_id == household_id,
+            BorrowedRecord.status.in_(
+                [LoanStatus.OUTSTANDING.value, LoanStatus.PARTIALLY_RETURNED.value]
+            ),
+            BorrowedRecord.storage_location_id == location.id,
+        )
+        .limit(1)
+    )
+    if has_children or has_items or has_borrowed:
         raise ApiError(
             409,
             "location_not_empty",
-            "This location still has nested locations or items.",
+            "This location still has nested locations, items or active borrowed placements.",
         )
     db.delete(location)
     db.flush()

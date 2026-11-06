@@ -18,7 +18,7 @@ import {
   Trash2,
   Wallet,
 } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
@@ -57,6 +57,7 @@ import {
   WARRANTY_STATUS_TONE,
   warrantyRemainingLabel,
 } from "@/lib/labels";
+import { appendOrigin, readOrigin } from "@/lib/navigation";
 import {
   CONDITION_LABELS,
   cn,
@@ -71,6 +72,8 @@ import { useState } from "react";
 
 export function ItemDetailPage() {
   const { itemId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const origin = readOrigin(searchParams);
   const itemQuery = useItem(itemId);
   const roomsQuery = useRooms();
   const locationsQuery = useLocations(itemQuery.data?.item.room?.id);
@@ -135,8 +138,8 @@ export function ItemDetailPage() {
           item.description ||
           undefined
         }
-        backTo="/items"
-        backLabel="All items"
+        backTo={origin?.path ?? "/items"}
+        backLabel={origin ? `Back to ${origin.label}` : "All items"}
         actionsPlacement="title"
         titleAddon={
           loanSummary ? (
@@ -170,7 +173,7 @@ export function ItemDetailPage() {
                   </Button>
                 )}
                 <Button variant="outline" asChild>
-                  <Link to={`/items/${item.id}/edit`}>
+                  <Link to={appendOrigin(`/items/${item.id}/edit`, origin)}>
                     <Pencil />
                     Edit
                   </Link>

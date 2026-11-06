@@ -49,6 +49,10 @@ ACTION_LABELS = {
     ActivityAction.LOAN_CREATION_UNDONE.value: "Loan creation undone",
     ActivityAction.LOAN_RETURN_UNDONE.value: "Return undone",
     ActivityAction.ROOM_MOVED.value: "Room moved",
+    ActivityAction.PLACE_CONTENTS_MOVED.value: "Place contents moved",
+    ActivityAction.PLACE_CONTENTS_MOVED_AND_DELETED.value: "Place emptied and deleted",
+    ActivityAction.ROOM_CONTENTS_MOVED.value: "Room contents moved",
+    ActivityAction.ROOM_CONTENTS_MOVED_AND_DELETED.value: "Room emptied and deleted",
 }
 
 

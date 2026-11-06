@@ -239,6 +239,10 @@ class ActivityAction(StrEnum):
     BORROWED_PHOTO_REMOVED = "borrowed.photo_removed"
     STOCKTAKE_QUANTITY_CORRECTED = "stocktake.quantity_corrected"
     ROOM_MOVED = "room.moved"
+    PLACE_CONTENTS_MOVED = "place.contents_moved"
+    PLACE_CONTENTS_MOVED_AND_DELETED = "place.contents_moved_and_deleted"
+    ROOM_CONTENTS_MOVED = "room.contents_moved"
+    ROOM_CONTENTS_MOVED_AND_DELETED = "room.contents_moved_and_deleted"
 
 
 class ImportEntityType(StrEnum):

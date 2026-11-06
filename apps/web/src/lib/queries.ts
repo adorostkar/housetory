@@ -43,6 +43,7 @@ import type {
   SearchItemList,
   SearchScopeList,
   OnlineSearchSettings,
+  PlaceTransferPreview,
   SessionState,
   SystemStatus,
   StocktakeScopeSummary,
@@ -86,6 +87,12 @@ export const queryKeys = {
   aiStatus: ["ai", "status"] as const,
   aiSettings: ["ai", "settings"] as const,
   onlineSearchSettings: ["settings", "online-search"] as const,
+  placeTransferPreview: (
+    kind: "location" | "room",
+    id: string,
+    roomId: string,
+    locationId: string,
+  ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
   systemStatus: ["system", "status"] as const,
   householdMembers: ["household", "members"] as const,
   householdInvitations: ["household", "invitations"] as const,
@@ -779,6 +786,35 @@ export function useContainer(containerId: string | undefined) {
     queryKey: queryKeys.container(containerId ?? ""),
     queryFn: () => api.get<ContainerDetail>(`/containers/${containerId}`),
     enabled: Boolean(containerId),
+  });
+}
+
+export function usePlaceTransferPreview(
+  kind: "location" | "room",
+  id: string | undefined,
+  destinationRoomId: string,
+  destinationLocationId: string,
+  enabled = true,
+) {
+  const params = new URLSearchParams();
+  if (destinationRoomId) params.set("destination_room_id", destinationRoomId);
+  if (destinationLocationId) params.set("destination_location_id", destinationLocationId);
+  const query = params.toString();
+  return useQuery({
+    queryKey: queryKeys.placeTransferPreview(
+      kind,
+      id ?? "",
+      destinationRoomId,
+      destinationLocationId,
+    ),
+    queryFn: () =>
+      api.get<PlaceTransferPreview>(
+        `/place-management/${kind === "room" ? "rooms" : "locations"}/${id}/preview${
+          query ? `?${query}` : ""
+        }`,
+      ),
+    enabled: Boolean(id) && enabled,
+    staleTime: 0,
   });
 }
 

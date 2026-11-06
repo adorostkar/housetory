@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...db import get_db
-from ...models import Item, Room, StorageLocation
+from ...domain import LoanStatus
+from ...models import BorrowedRecord, Item, Room, StorageLocation
 from ...schemas.properties import (
     RoomPropertyMovePreview,
     RoomPropertyMoveRequest,
@@ -336,11 +337,27 @@ def delete_room(
         is not None
     )
     has_items = db.scalar(select(Item.id).where(Item.room_id == room.id).limit(1)) is not None
-    if has_children or has_locations or has_items:
+    has_borrowed = (
+        db.scalar(
+            select(BorrowedRecord.id)
+            .where(
+                BorrowedRecord.household_id == auth.household.id,
+                BorrowedRecord.status.in_(
+                    [LoanStatus.OUTSTANDING.value, LoanStatus.PARTIALLY_RETURNED.value]
+                ),
+                BorrowedRecord.room_id == room.id,
+                BorrowedRecord.storage_location_id.is_(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+    if has_children or has_locations or has_items or has_borrowed:
         raise ApiError(
             409,
             "room_not_empty",
-            "This room still has sub-rooms, storage locations, or items.",
+            "This room still has sub-rooms, storage locations, items or active "
+            "borrowed placements.",
         )
     db.delete(room)
     db.commit()

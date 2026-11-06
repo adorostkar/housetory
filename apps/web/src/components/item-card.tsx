@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import { CategoryIcon } from "@/components/category-icon";
 import { Badge } from "@/components/ui/badge";
-import { withHousehold } from "@/lib/household-links";
+import { itemHref, rememberListScroll, type ItemOrigin } from "@/lib/navigation";
 import type { ItemSummary } from "@/lib/types";
 import {
   cn,
@@ -24,10 +24,12 @@ export function ItemCard({
   item,
   className,
   selection,
+  origin,
 }: {
   item: ItemSummary;
   className?: string;
   selection?: ItemSelection;
+  origin?: ItemOrigin | null;
 }) {
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
@@ -38,7 +40,8 @@ export function ItemCard({
 
   const card = (
     <Link
-      to={withHousehold(`/items/${item.id}`, item.household?.id)}
+      to={itemHref(item.id, origin, item.household?.id)}
+      onClick={() => rememberListScroll(origin ?? null)}
       className={cn(
         "group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/85 shadow-soft transition-[transform,border-color,box-shadow] duration-300 ease-smooth hover:-translate-y-0.5 hover:border-border hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         selection?.selected && "border-sage/60 shadow-lift ring-2 ring-sage/45",
@@ -249,9 +252,11 @@ export function ItemCard({
 export function ItemRow({
   item,
   selection,
+  origin,
 }: {
   item: ItemSummary;
   selection?: ItemSelection;
+  origin?: ItemOrigin | null;
 }) {
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
@@ -276,7 +281,8 @@ export function ItemRow({
           .join(" / ");
   const row = (
     <Link
-      to={withHousehold(`/items/${item.id}`, item.household?.id)}
+      to={itemHref(item.id, origin, item.household?.id)}
+      onClick={() => rememberListScroll(origin ?? null)}
       className={cn(
         "group flex min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-secondary/60",
         selection?.selected && "bg-sage-soft/45 ring-1 ring-sage/35",

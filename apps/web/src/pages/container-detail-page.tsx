@@ -9,11 +9,14 @@ import {
   Printer,
   QrCode,
   Download,
+  MoveRight,
+  Search,
   Sparkles,
+  Trash2,
   Truck,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
@@ -24,6 +27,13 @@ import {
 } from "@/components/add-items";
 import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
 import {
+  BulkItemActionBar,
+  BulkSelectionControls,
+  BulkSelectionNotice,
+  useBulkSelection,
+} from "@/components/bulk-item-selection";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import {
   ContainerMoveDialog,
   ContainerQrDialog,
 } from "@/components/container-dialogs";
@@ -32,6 +42,10 @@ import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
+import {
+  PlaceTransferDialog,
+  type PlaceTransferSource,
+} from "@/components/place-transfer-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -49,16 +63,19 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { api, getApiErrorMessage } from "@/lib/api";
+import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
   useCanWrite,
   useContainer,
   useContainerHistory,
   useInvalidateInventory,
+  useItems,
   useLocations,
   useRooms,
 } from "@/lib/queries";
+import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { Container, ContainerType } from "@/lib/types";
 import {
   CONTAINER_TYPE_LABELS,
@@ -69,10 +86,18 @@ import {
 } from "@/lib/utils";
 
 const TYPES: ContainerType[] = ["box", "bin", "crate", "suitcase", "bag", "other"];
+const ITEM_SORTS = {
+  name_asc: "Name A–Z",
+  created_desc: "Newest first",
+  updated_desc: "Recently updated",
+} as const;
 
 export function ContainerDetailPage() {
   const canWrite = useCanWrite();
   const { containerId = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const containerQuery = useContainer(containerId);
   const historyQuery = useContainerHistory(containerId);
   const roomsQuery = useRooms();
@@ -84,6 +109,17 @@ export function ContainerDetailPage() {
   const [editOpen, setEditOpen] = React.useState(false);
   const [summaryEditing, setSummaryEditing] = React.useState(false);
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
+  const [emptyDeleteOpen, setEmptyDeleteOpen] = React.useState(false);
+  const [transferMode, setTransferMode] = React.useState<"move" | "delete" | null>(null);
+  const scope = searchParams.get("scope") === "direct" ? "direct" : "nested";
+  const sort = searchParams.get("sort") === "created_desc"
+    ? "created_desc"
+    : searchParams.get("sort") === "updated_desc"
+      ? "updated_desc"
+      : "name_asc";
+  const qParam = searchParams.get("q") ?? "";
+  const [search, setSearch] = React.useState(qParam);
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [editName, setEditName] = React.useState("");
   const [editDescription, setEditDescription] = React.useState("");
   const [editType, setEditType] = React.useState<ContainerType>("box");
@@ -93,6 +129,38 @@ export function ContainerDetailPage() {
   const container = containerQuery.data;
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
+  const itemsQuery = useItems(
+    {
+      q: qParam || undefined,
+      location_id: containerId || undefined,
+      include_descendants: scope === "nested",
+      sort,
+    },
+    24,
+    Boolean(containerId),
+  );
+  const items = itemsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const totalItems = itemsQuery.data?.pages[0]?.total ?? 0;
+  const filterSignature = JSON.stringify([containerId, scope, qParam, sort]);
+  const selection = useBulkSelection({
+    items,
+    enabled: canWrite,
+    scopeKey: filterSignature,
+  });
+  const origin = itemOrigin(
+    `${location.pathname}${location.search}`,
+    container?.identifier ?? container?.name ?? "container",
+  );
+  useRestoreListScroll(items.length > 0, origin);
+  const transferSource: PlaceTransferSource | null = container
+    ? {
+        kind: "location",
+        id: container.id,
+        label: container.identifier ?? container.name,
+        roomId: container.room_id,
+        propertyId: container.property?.id ?? "",
+      }
+    : null;
   const { openAddItems } = useAddItems();
   const addItemsContext = React.useMemo(
     () =>
@@ -108,6 +176,20 @@ export function ContainerDetailPage() {
     [container],
   );
   useRegisterAddItemsContext(addItemsContext ?? null);
+
+  React.useEffect(() => {
+    const trimmed = debouncedSearch.trim();
+    if (trimmed === qParam) return;
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (trimmed) next.set("q", trimmed);
+        else next.delete("q");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [debouncedSearch, qParam, setSearchParams]);
 
   React.useEffect(() => {
     if (!container) return;
@@ -138,6 +220,23 @@ export function ContainerDetailPage() {
       toast.success("Container updated");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const deleteEmpty = useMutation({
+    mutationFn: () => api.delete<void>(`/containers/${containerId}`),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Container deleted");
+      navigate("/containers", { replace: true });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "location_not_empty") {
+        setEmptyDeleteOpen(false);
+        setTransferMode("delete");
+        return;
+      }
+      toast.error(getApiErrorMessage(error));
+    },
   });
 
   const regenerate = useMutation({
@@ -230,6 +329,28 @@ export function ContainerDetailPage() {
               <Button variant="outline" onClick={() => setMoveOpen(true)}>
                 <Truck />
                 Move
+              </Button>
+            )}
+            {canWrite &&
+              (detail.total_item_count > 0 || detail.child_count > 0) && (
+                <Button variant="outline" onClick={() => setTransferMode("move")}>
+                  <MoveRight />
+                  Move contents
+                </Button>
+              )}
+            {canWrite && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (detail.total_item_count === 0 && detail.child_count === 0) {
+                    setEmptyDeleteOpen(true);
+                  } else {
+                    setTransferMode("delete");
+                  }
+                }}
+              >
+                <Trash2 />
+                Delete
               </Button>
             )}
             <AddItemsButton context={addItemsContext} />
@@ -373,42 +494,173 @@ export function ContainerDetailPage() {
       </section>
 
       <section className="mt-8">
-        <div className="mb-4 flex items-end justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
               Inside {identifier}
             </h2>
             <p className="mt-1 text-[0.75rem] text-muted-foreground">
-              Direct and nested items, including quantities and photos.
+              {scope === "direct"
+                ? "Only items assigned directly to this place."
+                : "Direct and nested items, including quantities and photos."}
             </p>
           </div>
-          <AddItemsButton
-            context={addItemsContext}
-            variant="outline"
-            size="sm"
-          />
+          <AddItemsButton context={addItemsContext} variant="outline" size="sm" />
         </div>
-        {detail.items.length === 0 ? (
+
+        <div className="surface mb-4 p-3.5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  selection.clearSelection(
+                    "Selection cleared because the search changed.",
+                  );
+                }}
+                placeholder="Search inside this place"
+                aria-label="Search inside this place"
+                className="pl-10"
+              />
+            </div>
+            <div
+              className="inline-flex rounded-full border border-border/70 bg-background/50 p-1"
+              role="group"
+              aria-label="Contents scope"
+            >
+              {(["nested", "direct"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={scope === value}
+                  onClick={() => {
+                    selection.clearSelection("Selection cleared because the scope changed.");
+                    setSearchParams(
+                      (previous) => {
+                        const next = new URLSearchParams(previous);
+                        if (value === "direct") next.set("scope", "direct");
+                        else next.delete("scope");
+                        return next;
+                      },
+                      { replace: true },
+                    );
+                  }}
+                  className={
+                    scope === value
+                      ? "rounded-full bg-primary px-3 py-1.5 text-[0.7rem] font-medium text-primary-foreground"
+                      : "rounded-full px-3 py-1.5 text-[0.7rem] font-medium text-muted-foreground"
+                  }
+                >
+                  {value === "nested" ? "Include nested" : "Direct only"}
+                </button>
+              ))}
+            </div>
+            <Select
+              aria-label="Sort items inside this place"
+              value={sort}
+              onChange={(event) => {
+                selection.clearSelection("Selection cleared because the sort changed.");
+                setSearchParams(
+                  (previous) => {
+                    const next = new URLSearchParams(previous);
+                    if (event.target.value === "name_asc") next.delete("sort");
+                    else next.set("sort", event.target.value);
+                    return next;
+                  },
+                  { replace: true },
+                );
+              }}
+              className="h-9 rounded-lg text-[0.8rem] lg:max-w-44"
+            >
+              {Object.entries(ITEM_SORTS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="mt-3 border-t border-border/60 pt-3">
+            <BulkSelectionControls
+              selection={selection}
+              showing={items.length}
+              total={totalItems}
+            />
+          </div>
+        </div>
+
+        <BulkSelectionNotice selection={selection} />
+        <BulkItemActionBar
+          items={selection.selectedItems}
+          onClear={() => selection.clearSelection()}
+          onNotice={selection.showNotice}
+        />
+
+        {itemsQuery.isPending ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <Skeleton className="h-52 rounded-2xl" />
+            <Skeleton className="h-52 rounded-2xl" />
+          </div>
+        ) : itemsQuery.isError ? (
+          <ErrorState
+            message="We couldn't load the items in this place."
+            onRetry={() => void itemsQuery.refetch()}
+          />
+        ) : items.length === 0 ? (
           <EmptyState
-            title="This container is empty."
-            description="Add an item and assign it here, or move an existing item into this container from its detail page."
+            title={
+              scope === "direct" ? "No direct items here." : "This container is empty."
+            }
+            description={
+              scope === "direct"
+                ? "Nested places may still contain items. Switch to Include nested to see them."
+                : "Add an item and assign it here, or move an existing item into this place."
+            }
             actionLabel="Add items"
             onAction={() => openAddItems(addItemsContext)}
           />
         ) : (
-          <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {detail.items.map((item) => (
-              <div key={item.id} className="min-w-0">
-                <ItemCard item={item} />
-                {item.location?.id !== detail.id && item.location && (
-                  <p className="mt-1.5 flex items-center gap-1 px-1 text-[0.66rem] text-muted-foreground">
-                    <MapPin className="size-3" />
-                    {itemContainer(item)?.identifier ?? item.location.name}
-                  </p>
-                )}
+          <>
+            <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {items.map((item) => (
+                <div key={item.id} className="min-w-0">
+                  <ItemCard
+                    item={item}
+                    origin={origin}
+                    selection={
+                      canWrite
+                        ? {
+                            selected: selection.selected.has(item.id),
+                            onToggle: () => selection.toggleItem(item.id),
+                            disabled: item.is_archived,
+                          }
+                        : undefined
+                    }
+                  />
+                  {scope === "nested" &&
+                    item.location?.id !== detail.id &&
+                    item.location && (
+                      <p className="mt-1.5 flex items-center gap-1 px-1 text-[0.66rem] text-muted-foreground">
+                        <MapPin className="size-3" />
+                        {itemContainer(item)?.identifier ?? item.location.name}
+                      </p>
+                    )}
+                </div>
+              ))}
+            </div>
+            {itemsQuery.hasNextPage && (
+              <div className="mt-6 flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => void itemsQuery.fetchNextPage()}
+                  disabled={itemsQuery.isFetchingNextPage}
+                >
+                  {itemsQuery.isFetchingNextPage ? "Loading…" : "Load more items"}
+                </Button>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </section>
 
@@ -634,6 +886,33 @@ export function ContainerDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={emptyDeleteOpen}
+        onOpenChange={setEmptyDeleteOpen}
+        title={`Delete ${identifier}?`}
+        description="This place is empty and can be removed. Attached place photos, if any, are deleted with it. This cannot be undone."
+        confirmLabel="Delete place"
+        onConfirm={async () => {
+          await deleteEmpty.mutateAsync();
+        }}
+      />
+
+      <PlaceTransferDialog
+        open={transferMode !== null}
+        onOpenChange={(open) => {
+          if (!open) setTransferMode(null);
+        }}
+        source={transferSource}
+        mode={transferMode ?? "move"}
+        onCompleted={(result) => {
+          if (result.deleted) {
+            navigate("/containers", { replace: true });
+          } else {
+            refreshContainer();
+          }
+        }}
+      />
     </div>
   );
 }

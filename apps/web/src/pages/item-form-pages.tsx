@@ -1,6 +1,7 @@
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { ErrorState } from "@/components/error-state";
+import { appendOrigin, readOrigin } from "@/lib/navigation";
 import { ItemForm } from "@/components/item-form";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,6 +35,9 @@ export function ItemNewPage() {
 
 export function ItemEditPage() {
   const { itemId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const origin = readOrigin(searchParams);
+  const itemDetailPath = appendOrigin(`/items/${itemId}`, origin);
   const itemQuery = useItem(itemId);
 
   if (itemQuery.isPending) {
@@ -64,10 +68,14 @@ export function ItemEditPage() {
         eyebrow="Edit item"
         title={item.name}
         description="Update the details, placement, purchase or warranty."
-        backTo={`/items/${item.id}`}
+        backTo={itemDetailPath}
         backLabel="Back to item"
       />
-      <ItemForm item={item} />
+      <ItemForm
+        item={item}
+        returnTo={itemDetailPath}
+        cancelTo={itemDetailPath}
+      />
     </div>
   );
 }

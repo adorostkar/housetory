@@ -4,14 +4,17 @@ import {
   ArrowRight,
   Boxes,
   MapPin,
+  MoveRight,
   Printer,
   QrCode,
   Search,
+  Trash2,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   ContainerConvertDialog,
   ContainerCreateDialog,
@@ -19,6 +22,10 @@ import {
   ContainerQrDialog,
 } from "@/components/container-dialogs";
 import { EmptyState } from "@/components/empty-state";
+import {
+  PlaceTransferDialog,
+  type PlaceTransferSource,
+} from "@/components/place-transfer-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +34,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePropertyFilter } from "@/hooks/use-property-filter";
-import { api, getApiErrorMessage } from "@/lib/api";
+import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import {
   queryKeys,
   useCanWrite,
@@ -63,6 +70,11 @@ export function ContainersPage() {
   const [moveTarget, setMoveTarget] = React.useState<Container | null>(null);
   const [qrTarget, setQrTarget] = React.useState<Container | null>(null);
   const [convertTarget, setConvertTarget] = React.useState<Container | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<Container | null>(null);
+  const [transferTarget, setTransferTarget] = React.useState<{
+    source: PlaceTransferSource;
+    mode: "move" | "delete";
+  } | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
@@ -132,6 +144,68 @@ export function ContainersPage() {
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
+
+  const deleteEmpty = useMutation({
+    mutationFn: (containerId: string) =>
+      api.delete<void>(`/containers/${containerId}`),
+    onSuccess: () => {
+      invalidate();
+      setDeleteTarget(null);
+      toast.success("Container deleted");
+    },
+    onError: (error) => {
+      if (
+        error instanceof ApiError &&
+        error.code === "location_not_empty" &&
+        deleteTarget
+      ) {
+        setTransferTarget({
+          source: {
+            kind: "location",
+            id: deleteTarget.id,
+            label: deleteTarget.identifier ?? deleteTarget.name,
+            roomId: deleteTarget.room_id,
+            propertyId: deleteTarget.property?.id ?? "",
+          },
+          mode: "delete",
+        });
+        setDeleteTarget(null);
+        return;
+      }
+      toast.error(getApiErrorMessage(error));
+    },
+  });
+
+  const requestDelete = (container: Container) => {
+    const label = container.identifier ?? container.name;
+    if (container.total_item_count === 0 && container.child_count === 0) {
+      setDeleteTarget(container);
+      return;
+    }
+    setTransferTarget({
+      source: {
+        kind: "location",
+        id: container.id,
+        label,
+        roomId: container.room_id,
+        propertyId: container.property?.id ?? "",
+      },
+      mode: "delete",
+    });
+  };
+
+  const requestMoveContents = (container: Container) => {
+    setTransferTarget({
+      source: {
+        kind: "location",
+        id: container.id,
+        label: container.identifier ?? container.name,
+        roomId: container.room_id,
+        propertyId: container.property?.id ?? "",
+      },
+      mode: "move",
+    });
+  };
 
   const toggleSelected = (id: string) => {
     setSelected((current) => {
@@ -341,6 +415,8 @@ export function ContainersPage() {
                 onQr={() => setQrTarget(container)}
                 onConvert={() => setConvertTarget(container)}
                 onAssignIdentifier={() => assignIdentifier.mutate(container.id)}
+                onDelete={() => requestDelete(container)}
+                onMoveContents={() => requestMoveContents(container)}
                 busy={convert.isPending || assignIdentifier.isPending}
               />
             ))}
@@ -394,6 +470,27 @@ export function ContainersPage() {
           if (convertTarget) convert.mutate({ locationId: convertTarget.id, containerType });
         }}
       />
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={`Delete ${deleteTarget?.identifier ?? deleteTarget?.name ?? "container"}?`}
+        description="This container or fixed place is empty and can be removed. This cannot be undone."
+        confirmLabel="Delete container"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await deleteEmpty.mutateAsync(deleteTarget.id);
+        }}
+      />
+      <PlaceTransferDialog
+        open={transferTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setTransferTarget(null);
+        }}
+        source={transferTarget?.source ?? null}
+        mode={transferTarget?.mode ?? "move"}
+      />
     </div>
   );
 }
@@ -407,6 +504,8 @@ function ContainerCard({
   onQr,
   onConvert,
   onAssignIdentifier,
+  onDelete,
+  onMoveContents,
   busy,
 }: {
   container: Container;
@@ -417,6 +516,8 @@ function ContainerCard({
   onQr: () => void;
   onConvert: () => void;
   onAssignIdentifier: () => void;
+  onDelete: () => void;
+  onMoveContents: () => void;
   busy: boolean;
 }) {
   const identifier = container.identifier ?? container.name;
@@ -513,6 +614,26 @@ function ContainerCard({
               </Link>
             </Button>
           )}
+          {(container.total_item_count > 0 || container.child_count > 0) && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onMoveContents}
+              aria-label={`Move contents of ${identifier}`}
+              title="Move all contents out without deleting"
+            >
+              <MoveRight className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDelete}
+            aria-label={`Delete ${identifier}`}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
           <Button variant="ghost" size="icon" asChild aria-label={`Open ${identifier}`}>
             <Link to={`/containers/${container.id}`}>
               <ArrowRight className="size-4" />

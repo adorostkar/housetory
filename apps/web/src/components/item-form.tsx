@@ -78,12 +78,16 @@ export function ItemForm({
   defaultRoomId,
   defaultLocationId,
   defaultName,
+  returnTo,
+  cancelTo,
 }: {
   item?: ItemDetail;
   defaultPropertyId?: string;
   defaultRoomId?: string;
   defaultLocationId?: string;
   defaultName?: string;
+  returnTo?: string;
+  cancelTo?: string;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -220,7 +224,10 @@ export function ItemForm({
     onSuccess: (response) => {
       invalidate();
       toast.success(item ? "Item updated" : "Item added");
-      navigate(`/items/${response.item.id}`, { replace: !item });
+      navigate(
+        item && returnTo ? returnTo : `/items/${response.item.id}`,
+        { replace: !item },
+      );
     },
   });
 
@@ -863,7 +870,13 @@ export function ItemForm({
         <div className="flex flex-col-reverse items-stretch gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-end">
           <Button
             variant="ghost"
-            onClick={() => navigate(item ? `/items/${item.id}` : "/items")}
+            onClick={() =>
+              navigate(
+                item
+                  ? cancelTo ?? `/items/${item.id}`
+                  : cancelTo ?? "/items",
+              )
+            }
           >
             Cancel
           </Button>
