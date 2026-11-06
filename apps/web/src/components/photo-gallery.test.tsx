@@ -89,6 +89,21 @@ describe("PhotoGallery", () => {
     expect(screen.queryByLabelText("Add photographs")).not.toBeInTheDocument();
   });
 
+  it("bounds the actual-photo gallery and shows the whole image without cropping", () => {
+    renderGallery({
+      ...baseItem,
+      photos: [photo],
+      primary_photo: photo,
+    });
+    const frame = screen.getByTestId("photo-gallery-frame");
+    expect(frame).toHaveClass("h-[240px]", "sm:h-[320px]", "xl:h-[340px]");
+    const image = screen.getByAltText("Heavy drill photograph");
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
+    expect(image).not.toHaveClass("size-full");
+    expect(screen.getByRole("button", { name: /View Heavy drill photograph full screen/ })).toBeVisible();
+  });
+
   it("fits a representative image inside a padded frame without cropping", () => {
     renderGallery(baseItem, {
       id: "image-ref",

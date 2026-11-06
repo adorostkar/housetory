@@ -94,8 +94,8 @@ describe("ItemCard", () => {
     expect(screen.getByText("SHELF-001 · Coffee Shelf")).toBeInTheDocument();
     const photo = screen.getByRole("img", { name: "Espresso Machine" });
     expect(photo).toHaveAttribute("src", item.primary_photo?.thumbnail_url);
-    expect(photo).toHaveClass("object-cover");
-    expect(photo).not.toHaveClass("object-contain");
+    expect(photo).toHaveClass("object-contain");
+    expect(photo).not.toHaveClass("object-cover");
   });
 
   it("shows a simple category icon when no photograph exists", () => {
@@ -145,6 +145,17 @@ describe("ItemCard image sources", () => {
     expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
     expect(screen.getByText("Reference")).toBeVisible();
+  });
+
+  it("fits actual photos inside compact list thumbnails without cropping", () => {
+    render(
+      <MemoryRouter>
+        <ItemRow item={item} />
+      </MemoryRouter>,
+    );
+    const image = screen.getByRole("link").querySelector("img");
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
   });
 
   it("fits representative images inside compact list thumbnails without cropping", () => {

@@ -141,28 +141,31 @@ export function PhotoGallery({
   return (
     <section aria-label="Photographs">
       <div
+        data-testid="photo-gallery-frame"
         className={cn(
           "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
-          active ? "aspect-[4/3]" : "min-h-[150px]",
+          active
+            ? "h-[240px] sm:h-[320px] xl:h-[340px]"
+            : "min-h-[150px]",
         )}
       >
         {active ? (
           <button
             type="button"
             onClick={() => setLightboxOpen(true)}
-            className="size-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+            className="flex size-full cursor-zoom-in items-center justify-center bg-secondary/30 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 sm:p-4"
             aria-label={`View ${item.name} photograph full screen`}
           >
             <img
               src={active.url}
               alt={`${item.name} photograph`}
-              className="size-full object-cover"
+              className="max-h-full max-w-full object-contain"
             />
           </button>
         ) : representative ? (
           <>
             {representative.url ? (
-              <div className="flex size-full min-h-[150px] items-center justify-center bg-secondary/30 p-6">
+              <div className="flex size-full items-center justify-center bg-secondary/30 p-6">
                 <img
                   src={representative.thumbnail_url ?? representative.url}
                   alt={`${item.name} ${representative.label.toLowerCase()}`}

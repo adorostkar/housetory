@@ -47,12 +47,14 @@ export function ItemCard({
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-secondary/60">
         {photo ? (
-          <img
-            src={photo.thumbnail_url}
-            alt={item.name}
-            loading="lazy"
-            className="size-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-[1.025]"
-          />
+          <div className="flex size-full items-center justify-center bg-secondary/30 p-4">
+            <img
+              src={photo.thumbnail_url}
+              alt={item.name}
+              loading="lazy"
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
         ) : representative?.thumbnail_url || representative?.url ? (
           <div className="flex size-full items-center justify-center bg-secondary/30 p-4">
             <img
@@ -286,7 +288,7 @@ export function ItemRow({
             src={photo.thumbnail_url}
             alt=""
             loading="lazy"
-            className="size-full object-cover"
+            className="size-full bg-secondary/30 object-contain p-1.5"
           />
         ) : representative?.thumbnail_url || representative?.url ? (
           <img
