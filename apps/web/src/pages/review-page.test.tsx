@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
@@ -220,17 +220,29 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-function renderPage() {
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
+
+function renderPage(initialEntry = "/review") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/review"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <ReviewPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function originFromHref(href: string) {
+  const from = new URL(href, "http://test").searchParams.get("from");
+  expect(from).toBeTruthy();
+  return new URL(from!, "http://test").searchParams;
 }
 
 beforeEach(() => {
@@ -298,6 +310,105 @@ describe("ReviewPage", () => {
         }),
       ),
     );
+  });
+
+  it("round-trips URL-backed pending status, type and search through item origins", async () => {
+    renderPage(
+      "/review?scope_type=household&status=pending&suggestion_type=category&q=Tools",
+    );
+    expect(screen.getByLabelText("Filter suggestions by status")).toHaveValue(
+      "pending",
+    );
+    expect(screen.getByLabelText("Filter suggestions by type")).toHaveValue(
+      "category",
+    );
+    expect(screen.getByLabelText("Search suggestions")).toHaveValue("Tools");
+
+    const itemLink = screen.getAllByRole("link", { name: "Cordless drill" })[0]!;
+    const from = originFromHref(itemLink.getAttribute("href")!);
+    expect(from.get("scope_type")).toBe("household");
+    expect(from.get("status")).toBe("pending");
+    expect(from.get("suggestion_type")).toBe("category");
+    expect(from.get("q")).toBe("Tools");
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Filter suggestions by status"),
+      "accepted",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        "status=accepted",
+      ),
+    );
+    const acceptedLink = screen.getAllByRole("link", { name: "Cordless drill" })[0]!;
+    expect(originFromHref(acceptedLink.getAttribute("href")!).get("status")).toBe(
+      "accepted",
+    );
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Filter suggestions by type"),
+      "name",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        "suggestion_type=name",
+      ),
+    );
+    await userEvent.clear(screen.getByLabelText("Search suggestions"));
+    await userEvent.type(screen.getByLabelText("Search suggestions"), "Bench");
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("location-search")).toHaveTextContent("q=Bench"),
+      { timeout: 1500 },
+    );
+  });
+
+  it("resets filters to validated defaults without losing scope", async () => {
+    renderPage(
+      "/review?scope_type=room&scope_id=room-1&status=not-a-status&suggestion_type=not-a-type&q=stale",
+    );
+    expect(screen.getByLabelText("Filter suggestions by status")).toHaveValue(
+      "pending",
+    );
+    expect(screen.getByLabelText("Filter suggestions by type")).toHaveValue("");
+    await userEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).not.toHaveTextContent("status="),
+    );
+    const search = screen.getByTestId("location-search").textContent ?? "";
+    expect(search).not.toContain("suggestion_type=");
+    expect(search).not.toContain("q=");
+    expect(search).toContain("scope_type=room");
+    expect(search).toContain("scope_id=room-1");
+    expect(screen.getByLabelText("Search suggestions")).toHaveValue("");
+  });
+
+  it("preserves selected-item scope and queue filters in comparison links", async () => {
+    suggestions = [duplicateSuggestion];
+    renderPage(
+      "/review?scope_type=items&item_ids=item-drill,item-copy&status=pending&suggestion_type=possible_duplicate&q=Cordless",
+    );
+    expect(screen.getByLabelText("Review scope type")).toHaveValue("items");
+    const duplicateCard = screen
+      .getByText("Possible duplicate: Cordless drill")
+      .closest("li");
+    expect(duplicateCard).not.toBeNull();
+    await userEvent.click(
+      within(duplicateCard!).getByRole("button", { name: "Compare" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    const comparisonLinks = within(dialog).getAllByRole("link", {
+      name: "Open item",
+    });
+    expect(comparisonLinks).toHaveLength(2);
+    for (const link of comparisonLinks) {
+      const from = originFromHref(link.getAttribute("href")!);
+      expect(from.get("scope_type")).toBe("items");
+      expect(from.get("item_ids")).toBe("item-drill,item-copy");
+      expect(from.get("status")).toBe("pending");
+      expect(from.get("suggestion_type")).toBe("possible_duplicate");
+      expect(from.get("q")).toBe("Cordless");
+    }
   });
 
   it("keeps viewers read-only while still showing the queue", () => {

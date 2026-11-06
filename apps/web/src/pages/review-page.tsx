@@ -10,7 +10,7 @@ import {
   Undo2,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -33,7 +33,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { appendOrigin, itemOrigin } from "@/lib/navigation";
+import {
+  appendOrigin,
+  itemOrigin,
+  rememberListScroll,
+  useRestoreListScroll,
+} from "@/lib/navigation";
 import {
   queryKeys,
   useAiStatus,
@@ -94,6 +99,15 @@ const STATUS_VARIANTS: Record<
   stale: "destructive",
   reverted: "outline",
 };
+
+const STATUS_VALUES: ReviewSuggestionStatus[] = [
+  "pending",
+  "accepted",
+  "dismissed",
+  "stale",
+  "reverted",
+];
+const TYPE_VALUES = Object.keys(TYPE_LABELS) as ReviewSuggestionType[];
 
 function stringField(
   record: Record<string, unknown>,
@@ -167,6 +181,7 @@ function ItemReference({
   return (
     <Link
       to={appendOrigin(`/items/${item.id}`, origin)}
+      onClick={() => rememberListScroll(origin ?? null)}
       className="min-w-0 break-words font-medium underline-offset-4 hover:underline"
     >
       {label ?? item.name}
@@ -292,7 +307,6 @@ function ItemPickerDialog({
 
 export function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
   const canWrite = useCanWrite();
   const session = useSession();
   const isOwner = session.data?.role === "owner";
@@ -328,10 +342,20 @@ export function ReviewPage() {
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [lastRun, setLastRun] = React.useState<ReviewRun | null>(null);
   const [runError, setRunError] = React.useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = React.useState("pending");
-  const [typeFilter, setTypeFilter] = React.useState("");
-  const [suggestionSearch, setSuggestionSearch] = React.useState("");
-  const debouncedSuggestionSearch = useDebouncedValue(suggestionSearch, 250);
+  const rawStatusFilter = searchParams.get("status");
+  const statusFilter: ReviewSuggestionStatus = STATUS_VALUES.includes(
+    rawStatusFilter as ReviewSuggestionStatus,
+  )
+    ? (rawStatusFilter as ReviewSuggestionStatus)
+    : "pending";
+  const rawTypeFilter = searchParams.get("suggestion_type");
+  const typeFilter: ReviewSuggestionType | "" =
+    rawTypeFilter && TYPE_VALUES.includes(rawTypeFilter as ReviewSuggestionType)
+      ? (rawTypeFilter as ReviewSuggestionType)
+      : "";
+  const qParam = (searchParams.get("q") ?? "").slice(0, 160);
+  const [suggestionSearch, setSuggestionSearch] = React.useState(qParam);
+  const debouncedQuery = useDebouncedValue(qParam, 250);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<Set<string>>(
     new Set(),
   );
@@ -359,10 +383,22 @@ export function ReviewPage() {
     if (nextScopeId) setScopeId(nextScopeId);
   }, [searchParams]);
 
+  React.useEffect(() => {
+    setSuggestionSearch(qParam);
+  }, [qParam]);
+
+  const queueFilterSignature = `${statusFilter}|${typeFilter}|${qParam}`;
+  const previousQueueFilterSignature = React.useRef(queueFilterSignature);
+  React.useEffect(() => {
+    if (previousQueueFilterSignature.current === queueFilterSignature) return;
+    previousQueueFilterSignature.current = queueFilterSignature;
+    setSelectedSuggestionIds(new Set());
+  }, [queueFilterSignature]);
+
   const suggestionsQuery = useReviewSuggestions({
     status: statusFilter,
     suggestion_type: typeFilter || undefined,
-    q: debouncedSuggestionSearch.trim() || undefined,
+    q: debouncedQuery.trim() || undefined,
     limit: 75,
   });
   const scopeItemsQuery = useReviewScopeItems(
@@ -388,7 +424,17 @@ export function ReviewPage() {
     containerLabel: selectedLocationLabel,
     selectedCount: selectedItemIds.length,
   });
-  const origin = itemOrigin(`${location.pathname}${location.search}`, "Review");
+  const originParams = new URLSearchParams();
+  originParams.set("scope_type", scopeType);
+  originParams.set("status", statusFilter);
+  if (typeFilter) originParams.set("suggestion_type", typeFilter);
+  if (qParam) originParams.set("q", qParam);
+  if (scopeType === "items" && selectedItemIds.length) {
+    originParams.set("item_ids", selectedItemIds.join(","));
+  } else if (scopeType !== "household" && scopeType !== "items" && scopeId) {
+    originParams.set("scope_id", scopeId);
+  }
+  const origin = itemOrigin(`/review?${originParams.toString()}`, "Review");
   const aiReady = Boolean(aiStatus.data?.configured);
   const aiProvider = aiReady
     ? aiStatus.data?.provider_label ??
@@ -410,6 +456,25 @@ export function ReviewPage() {
       },
       { replace: true },
     );
+  };
+
+  const updateQueueFilter = (
+    key: "status" | "suggestion_type",
+    value: string,
+  ) => {
+    setSelectedSuggestionIds(new Set());
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (
+        (key === "status" && value === "pending") ||
+        (key === "suggestion_type" && !value)
+      ) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+      return next;
+    });
   };
 
   const refreshReview = () => {
@@ -526,6 +591,23 @@ export function ReviewPage() {
   });
 
   const suggestions = suggestionsQuery.data?.items ?? [];
+  useRestoreListScroll(suggestions.length > 0, origin);
+  const actionableIds = new Set(
+    suggestions
+      .filter(
+        (suggestion) =>
+          suggestion.status === "pending" &&
+          suggestion.action_kind !== "advisory",
+      )
+      .map((suggestion) => suggestion.id),
+  );
+  const actionableIdsKey = [...actionableIds].sort().join("|");
+  React.useEffect(() => {
+    setSelectedSuggestionIds((current) => {
+      const next = new Set([...current].filter((id) => actionableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [actionableIdsKey]);
   const actionableSuggestions = suggestions.filter(
     (suggestion) =>
       suggestion.status === "pending" && suggestion.action_kind !== "advisory",
@@ -822,10 +904,9 @@ export function ReviewPage() {
             <Select
               aria-label="Filter suggestions by status"
               value={statusFilter}
-              onChange={(event) => {
-                setStatusFilter(event.target.value);
-                setSelectedSuggestionIds(new Set());
-              }}
+              onChange={(event) =>
+                updateQueueFilter("status", event.target.value)
+              }
             >
               <option value="pending">Pending</option>
               <option value="accepted">Accepted</option>
@@ -839,10 +920,9 @@ export function ReviewPage() {
             <Select
               aria-label="Filter suggestions by type"
               value={typeFilter}
-              onChange={(event) => {
-                setTypeFilter(event.target.value);
-                setSelectedSuggestionIds(new Set());
-              }}
+              onChange={(event) =>
+                updateQueueFilter("suggestion_type", event.target.value)
+              }
             >
               <option value="">All types</option>
               {Object.entries(TYPE_LABELS).map(([value, label]) => (
@@ -856,7 +936,21 @@ export function ReviewPage() {
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={suggestionSearch}
-              onChange={(event) => setSuggestionSearch(event.target.value)}
+              maxLength={160}
+              onChange={(event) => {
+                const value = event.target.value.slice(0, 160);
+                setSuggestionSearch(value);
+                setSelectedSuggestionIds(new Set());
+                setSearchParams(
+                  (previous) => {
+                    const next = new URLSearchParams(previous);
+                    if (value) next.set("q", value);
+                    else next.delete("q");
+                    return next;
+                  },
+                  { replace: true },
+                );
+              }}
               placeholder="Search suggestions"
               aria-label="Search suggestions"
               className="pl-10"
@@ -867,9 +961,15 @@ export function ReviewPage() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              setTypeFilter("");
-              setStatusFilter("pending");
+              setSelectedSuggestionIds(new Set());
               setSuggestionSearch("");
+              setSearchParams((previous) => {
+                const next = new URLSearchParams(previous);
+                next.delete("status");
+                next.delete("suggestion_type");
+                next.delete("q");
+                return next;
+              });
             }}
           >
             <Filter />
@@ -1078,7 +1178,10 @@ export function ReviewPage() {
                         )}
                       {suggestion.item && (
                         <Button size="sm" variant="ghost" asChild>
-                          <Link to={appendOrigin(`/items/${suggestion.item.id}`, origin)}>
+                          <Link
+                            to={appendOrigin(`/items/${suggestion.item.id}`, origin)}
+                            onClick={() => rememberListScroll(origin ?? null)}
+                          >
                             Open item
                             <ArrowRight />
                           </Link>
@@ -1240,7 +1343,12 @@ export function ReviewPage() {
                   <div>Category: {item.category?.name ?? "Uncategorised"}</div>
                 </dl>
                 <Button size="sm" variant="outline" asChild className="mt-3">
-                  <Link to={appendOrigin(`/items/${item.id}`, origin)}>Open item</Link>
+                  <Link
+                    to={appendOrigin(`/items/${item.id}`, origin)}
+                    onClick={() => rememberListScroll(origin ?? null)}
+                  >
+                    Open item
+                  </Link>
                 </Button>
               </div>
             ))}

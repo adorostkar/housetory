@@ -113,9 +113,27 @@ applied/skipped/stale/unsupported outcomes.
 - `POST /inventory-review/suggestions/bulk-accept`
 
 
+## Queue context and navigation
+
+Review queue filters are URL-backed. `scope_type`, `scope_id`, `item_ids`,
+`status`, `suggestion_type` and `q` are validated and retained through reload,
+deep links and back/forward navigation. Defaults are pending status, all types
+and an empty search. **Reset filters** clears the queue filters without losing the
+selected scope.
+
+Item links, duplicate comparison links and **Open item** actions carry a safe
+same-app Review origin containing the scope and active queue filters. Item edit
+Save, Cancel and Back return to the same filtered Review context even after a
+rename or move. External/arbitrary return URLs continue to be rejected by the
+existing origin helper. Scroll restoration is best effort. Bulk suggestions are
+cleared when queue filters or actionable results change; they are not retained
+across a changed queue.
+
+
 ## Walkthrough screenshots
 
 - [Suggestion queue and review scope](walkthrough/inventory-review/01-suggestion-queue.png)
 - [Accepted change with undo](walkthrough/inventory-review/02-accepted-with-undo.png)
 - [Advisory duplicate comparison](walkthrough/inventory-review/03-duplicate-compare.png)
 - [Selected-items scope from the Items bulk action](walkthrough/inventory-review/04-selected-items-scope.png)
+- [Queue filters and item edit roundtrip](walkthrough/inventory-review/05-filter-context-roundtrip.png)

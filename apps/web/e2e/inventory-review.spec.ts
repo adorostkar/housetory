@@ -180,6 +180,152 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   ).toHaveCount(0);
 });
 
+test("Review item origins preserve scope, queue filters, search and edit roundtrips", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  const id = suffix();
+  const room = await createRoom(request, `Context room ${id}`);
+  const category = await createCategory(request, `Context tools ${id}`);
+  await createItem(request, `Context drill ${id}`, room.id, {
+    category_id: category.id,
+  });
+  await createItem(request, `Context drill ${id}`, room.id);
+  await createItem(request, `Context camera ${id}`, room.id, {
+    brand: "Sony",
+    model: "CTX-1",
+    category_id: category.id,
+  });
+  await createItem(request, `Context camera ${id}`, room.id, {
+    brand: "Sony",
+    model: "CTX-1",
+    category_id: category.id,
+  });
+
+  await page.goto("/review");
+  await clickFindSuggestions(page);
+  await page.getByLabel("Filter suggestions by status").selectOption("pending");
+  await page.getByLabel("Filter suggestions by type").selectOption("category");
+  await page.getByLabel("Search suggestions").fill(`Context tools ${id}`);
+  await expect(
+    page.getByRole("link", { name: new RegExp(`Context drill ${id}`) }).first(),
+  ).toBeVisible();
+  await page
+    .getByRole("link", { name: new RegExp(`Context drill ${id}`) })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("link", { name: "Back to Review" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/from=/);
+
+  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
+  await page.getByLabel("Item name").fill(`Renamed context drill ${id}`);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("heading", { name: `Renamed context drill ${id}` }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Back to Review" }).click();
+  await expect(page).toHaveURL(/status=pending/);
+  await expect(page).toHaveURL(/suggestion_type=category/);
+  await expect(page).toHaveURL(new RegExp(`q=Context\\+tools\\+${id}`));
+  await expect(page.getByLabel("Filter suggestions by status")).toHaveValue(
+    "pending",
+  );
+  await expect(page.getByLabel("Filter suggestions by type")).toHaveValue(
+    "category",
+  );
+  await expect(page.getByLabel("Search suggestions")).toHaveValue(
+    `Context tools ${id}`,
+  );
+  await expect(page.getByText("Item updated")).toBeHidden({ timeout: 10_000 });
+  await page.waitForTimeout(450);
+  await page.screenshot({
+    path: "../../docs/walkthrough/inventory-review/05-filter-context-roundtrip.png",
+    fullPage: false,
+  });
+
+  // Cancel also returns to the same item detail and preserves the queue origin.
+  await page
+    .getByRole("link", { name: new RegExp(`Renamed context drill ${id}`) })
+    .first()
+    .click();
+  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
+  await page.getByLabel("Item name").fill(`Discarded context name ${id}`);
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: `Renamed context drill ${id}` }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Back to Review" }).click();
+  await expect(page.getByLabel("Search suggestions")).toHaveValue(
+    `Context tools ${id}`,
+  );
+
+  // Browser Back from item detail returns to the filtered Review URL.
+  await page
+    .getByRole("link", { name: new RegExp(`Renamed context drill ${id}`) })
+    .first()
+    .click();
+  await page.goBack();
+  await expect(page).toHaveURL(/status=pending/);
+  await expect(page).toHaveURL(/suggestion_type=category/);
+  await expect(page.getByLabel("Search suggestions")).toHaveValue(
+    `Context tools ${id}`,
+  );
+
+  // Deep links validate and retain the queue filters.
+  await page.goto(
+    `/review?scope_type=household&status=accepted&suggestion_type=category&q=NoSuchQueue`,
+  );
+  await expect(page.getByLabel("Filter suggestions by status")).toHaveValue(
+    "accepted",
+  );
+  await expect(page.getByLabel("Filter suggestions by type")).toHaveValue(
+    "category",
+  );
+  await expect(page.getByLabel("Search suggestions")).toHaveValue("NoSuchQueue");
+
+  // Reset removes queue filters but keeps the selected scope.
+  await page.goto(
+    `/review?scope_type=household&status=pending&suggestion_type=category&q=Context`,
+  );
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(page.getByLabel("Filter suggestions by status")).toHaveValue(
+    "pending",
+  );
+  await expect(page.getByLabel("Filter suggestions by type")).toHaveValue("");
+  await expect(page.getByLabel("Search suggestions")).toHaveValue("");
+  await expect(page).toHaveURL(/scope_type=household/);
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page).not.toHaveURL(/suggestion_type=/);
+
+  // Duplicate comparison links carry the same queue context.
+  await page.getByLabel("Filter suggestions by type").selectOption(
+    "possible_duplicate",
+  );
+  await page.getByLabel("Search suggestions").fill(`Context camera ${id}`);
+  const contextDuplicateCard = page
+    .locator("li")
+    .filter({ hasText: `Possible duplicate: Context camera ${id}` })
+    .first();
+  await expect(contextDuplicateCard).toBeVisible();
+  await contextDuplicateCard.getByRole("button", { name: "Compare" }).click();
+  const compareDialog = page.getByRole("dialog");
+  await compareDialog.getByRole("link", { name: "Open item" }).first().click();
+  await expect(
+    page.getByRole("link", { name: "Back to Review" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Back to Review" }).click();
+  await expect(page).toHaveURL(/suggestion_type=possible_duplicate/);
+  await expect(page.getByLabel("Search suggestions")).toHaveValue(
+    `Context camera ${id}`,
+  );
+});
+
 test("selected-items review is reachable from the Items bulk action", async ({
   page,
   request,
