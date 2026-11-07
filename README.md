@@ -18,7 +18,9 @@ Tailscale is optional.
 
 - First-run owner setup, Argon2id passwords and session authentication.
 - A responsive React application with light/dark modes, designed for desktop and
-  iPhone.
+  iPhone. Mobile text controls stay at a Safari-safe 16px minimum, Settings has
+  no 320px overflow, and a five-tab bar plus More menu replaces the crowded
+  eight-tab navigation. See [`docs/RESPONSIVE_MOBILE.md`](docs/RESPONSIVE_MOBILE.md).
 - Rooms with optional nesting; shelves, cabinets, drawers and boxes with
   unlimited nesting.
 - Movable containers (boxes, plastic bins, crates, suitcases and bags) with
@@ -373,7 +375,7 @@ stack, not just unit mocks:
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
 - 214 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 72 checked-in Playwright workflows (71 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 77 checked-in Playwright workflows (76 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -391,7 +393,9 @@ stack, not just unit mocks:
   destinations, manual upload/attach/answer citations and a fixture Brave
   provider exercised through the real adapter for gated search/review/save at
   mobile width, item selection, evidence preview, PDF/CSV/ZIP generation and
-  downloads, cancellation/error states and mobile package preview, and the
+  downloads, cancellation/error states and mobile package preview, mobile
+  focus-font/overflow/navigation/More-menu/software-keyboard-viewport checks and
+  schedule/add/lend/return dialog fit, and the
   stocktake start → mark → refresh/resume → review/apply → complete flow with
   partial completion, keyboard close, failed-save recovery, abandonment,
   light/dark desktop/mobile screenshots, and two-household creation, switching,

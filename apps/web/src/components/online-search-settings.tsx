@@ -392,7 +392,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         <summary className="cursor-pointer font-medium text-foreground/80">
           Installation fallback and advanced gateway
         </summary>
-        <p className="mt-2">
+        <p className="mt-2 [&_code]:break-all">
           If no household online-search settings have been saved, the installation
           environment can supply <code>BRAVE_SEARCH_API_KEY</code>, its enable flags
           and an optional <code>ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS</code> restriction.

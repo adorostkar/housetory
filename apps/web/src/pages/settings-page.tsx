@@ -180,7 +180,7 @@ export function SettingsPage() {
         description="Your account, household and the way Housetory looks."
       />
 
-      <div className="grid max-w-4xl gap-6">
+      <div className="grid min-w-0 max-w-4xl gap-6">
         <section className="surface p-5 sm:p-6">
           <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
             Household
@@ -447,9 +447,9 @@ export function SettingsPage() {
         </section>
 
         <section className="surface p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Sparkles className="size-4 shrink-0 text-brass" strokeWidth={1.7} />
               <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
                 Intelligence
               </h2>

@@ -5,9 +5,11 @@ import {
   FileText,
   HandCoins,
   House,
+  MoreHorizontal,
   Package,
   ReceiptText,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -22,6 +24,14 @@ import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -40,14 +50,28 @@ const primaryNav = [
 
 const mobileNav = [
   { to: "/", label: "Home", icon: House, end: true },
-  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
   { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
   { to: "/loans", label: "Loans", icon: HandCoins, end: false },
-  { to: "/documents", label: "Docs", icon: FileText, end: false },
-  { to: "/containers", label: "Boxes", icon: Boxes, end: false },
-  { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
 ] as const;
+
+const mobileMoreNav = [
+  { to: "/rooms", label: "Rooms", icon: DoorOpen },
+  { to: "/documents", label: "Documents", icon: FileText },
+  { to: "/purchases", label: "Purchases", icon: ReceiptText },
+  { to: "/warranties", label: "Warranties", icon: ShieldCheck },
+  { to: "/containers", label: "Containers", icon: Boxes },
+  { to: "/assistant", label: "Assistant", icon: Sparkles },
+  { to: "/search", label: "Search", icon: Search },
+  { to: "/settings", label: "Settings", icon: Settings },
+] as const;
+
+function mobileTabClass(active: boolean) {
+  return cn(
+    "relative flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[0.72rem] font-medium tracking-[0.01em] transition-colors",
+    active ? "text-foreground" : "text-muted-foreground",
+  );
+}
 
 export function AppShell() {
   return (
@@ -61,6 +85,12 @@ function AppShellLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
+  const softwareKeyboardOpen = useSoftwareKeyboardOpen();
+  const moreActive = mobileMoreNav.some(
+    (item) =>
+      location.pathname === item.to ||
+      location.pathname.startsWith(`${item.to}/`),
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -178,42 +208,80 @@ function AppShellLayout() {
           </div>
         </main>
 
-        <nav
-          className="glass safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border/60 px-3 pt-2 lg:hidden"
-          aria-label="Primary"
-        >
-          <div className="mx-auto flex max-w-md items-stretch justify-around">
-            {mobileNav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    "relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1.5 py-2 text-[0.59rem] font-medium tracking-[0.01em] transition-colors",
-                    isActive ? "text-foreground" : "text-muted-foreground",
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <item.icon
-                      className="size-[1.25rem]"
-                      strokeWidth={isActive ? 2 : 1.7}
-                    />
-                    {item.label}
+        {!softwareKeyboardOpen && (
+          <nav
+            className="glass safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border/60 px-3 pt-2 lg:hidden"
+            aria-label="Primary"
+            data-testid="mobile-bottom-nav"
+          >
+            <div className="mx-auto flex max-w-md items-stretch justify-around">
+              {mobileNav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => mobileTabClass(isActive)}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon
+                        className="size-[1.25rem]"
+                        strokeWidth={isActive ? 2 : 1.7}
+                      />
+                      {item.label}
+                      <span
+                        className={cn(
+                          "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
+                          isActive ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                    </>
+                  )}
+                </NavLink>
+              ))}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={mobileTabClass(moreActive)}
+                    aria-label="More destinations"
+                    data-active={moreActive}
+                  >
+                    <MoreHorizontal className="size-[1.25rem]" strokeWidth={1.8} />
+                    More
                     <span
                       className={cn(
-                        "absolute -bottom-[5px] h-1 w-1 rounded-full bg-sage transition-opacity",
-                        isActive ? "opacity-100" : "opacity-0",
+                        "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
+                        moreActive ? "opacity-100" : "opacity-0",
                       )}
                     />
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </div>
-        </nav>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="end"
+                  sideOffset={10}
+                  data-testid="mobile-more-menu"
+                  className="max-h-[min(70dvh,26rem)] w-60 overflow-y-auto"
+                >
+                  <DropdownMenuLabel className="normal-case tracking-normal">
+                    More destinations
+                  </DropdownMenuLabel>
+                  {mobileMoreNav.map((item) => (
+                    <DropdownMenuItem
+                      key={item.to}
+                      className="min-h-11 cursor-pointer gap-2.5 px-3 text-[0.9rem]"
+                      onSelect={() => navigate(item.to)}
+                    >
+                      <item.icon className="size-4" />
+                      {item.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </nav>
+        )}
       </div>
     </div>
   );

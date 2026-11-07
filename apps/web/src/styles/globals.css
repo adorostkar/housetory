@@ -68,6 +68,8 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom));
   }
 
   body {
@@ -151,7 +153,7 @@
 
 @layer components {
   .surface {
-    @apply rounded-2xl border border-border/80 bg-card/90 shadow-soft backdrop-blur-[2px];
+    @apply min-w-0 rounded-2xl border border-border/80 bg-card/90 shadow-soft backdrop-blur-[2px];
   }
 
   .eyebrow {
@@ -215,6 +217,27 @@
 
   .safe-top {
     padding-top: env(safe-area-inset-top);
+  }
+
+  .dialog-safe-bottom {
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  @media (min-width: 640px) {
+    .dialog-safe-bottom {
+      padding-bottom: max(1.75rem, env(safe-area-inset-bottom));
+    }
+  }
+
+  /* iOS Safari zooms a focused text control below 16px. Keep mobile and
+     coarse-pointer controls at a readable size without disabling page zoom. */
+  @media (max-width: 1023px), (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]),
+    textarea,
+    select,
+    [contenteditable="true"] {
+      font-size: max(1rem, 16px) !important;
+    }
   }
 
   .no-scrollbar {
