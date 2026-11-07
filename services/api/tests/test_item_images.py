@@ -38,6 +38,18 @@ def png_bytes(color=(30, 90, 140), size=(720, 520)):
     return output.getvalue()
 
 
+def avif_bytes(color=(90, 50, 140), size=(720, 520)):
+    output = io.BytesIO()
+    Image.new("RGB", size, color).save(output, format="AVIF")
+    return output.getvalue()
+
+
+def gif_bytes(color=(140, 90, 30), size=(720, 520)):
+    output = io.BytesIO()
+    Image.new("RGB", size, color).save(output, format="GIF")
+    return output.getvalue()
+
+
 def create_room(client, name="Workshop"):
     response = client.post("/api/v1/rooms", json={"name": name})
     assert response.status_code == 201, response.text
@@ -1116,7 +1128,8 @@ def test_reference_download_rejects_oversized_and_malformed_images(owner_client,
     )
     rejected = owner_client.post(f"/api/v1/items/{malformed['id']}/image/find", json={})
     assert rejected.status_code == 422, rejected.text
-    assert rejected.json()["detail"]["code"] == "invalid_image"
+    assert rejected.json()["detail"]["code"] == "image_download_failed"
+    assert "invalid or corrupt image" in rejected.json()["detail"]["message"]
 
     oversized = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
     settings = get_settings()
@@ -1132,8 +1145,9 @@ def test_reference_download_rejects_oversized_and_malformed_images(owner_client,
         ),
     )
     rejected_large = owner_client.post(f"/api/v1/items/{oversized['id']}/image/find", json={})
-    assert rejected_large.status_code == 413, rejected_large.text
-    assert rejected_large.json()["detail"]["code"] == "image_too_large"
+    assert rejected_large.status_code == 422, rejected_large.text
+    assert rejected_large.json()["detail"]["code"] == "image_download_failed"
+    assert "size limit" in rejected_large.json()["detail"]["message"]
 
 
 def test_reference_lookup_is_offline_when_disabled_or_without_a_key(owner_client, monkeypatch):
@@ -1155,3 +1169,270 @@ def test_reference_lookup_is_offline_when_disabled_or_without_a_key(owner_client
         assert (
             db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
         )
+
+
+def test_reference_lookup_falls_through_unsupported_candidate_to_valid_image(
+    owner_client, monkeypatch
+):
+    room = create_room(owner_client, "Fallback format room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    gif_candidate = replace(
+        lg_candidate(title="LG OLED TV 77 inch animated product image"),
+        page_url="https://public-images.example/lg-77-gif",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/lg-77.gif",
+    )
+    png_candidate = replace(
+        lg_candidate(title="LG OLED TV 77 inch product photo"),
+        page_url="https://other-public.example/lg-77",
+        source_domain="other-public.example",
+        image_url="https://cdn.other-public.example/lg-77.png",
+    )
+
+    def download(candidate, **_kwargs):
+        if candidate.image_url.endswith(".gif"):
+            return gif_bytes(), candidate.image_url, "original"
+        return png_bytes(), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[gif_candidate, png_candidate],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_page_url"] == png_candidate.page_url
+    assert selected["permission_basis"] == "public_web"
+    with SessionLocal() as db:
+        rows = list(
+            db.scalars(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))).all()
+        )
+        assert len(rows) == 1
+        assert rows[0].source_page_url == png_candidate.page_url
+        assert rows[0].content_type in {"image/jpeg", "image/png"}
+
+
+def test_reference_lookup_accepts_real_avif_and_reencodes_it(owner_client, monkeypatch):
+    room = create_room(owner_client, "AVIF room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    avif_candidate = replace(
+        lg_candidate(title="LG OLED TV 77 inch AVIF product photo"),
+        page_url="https://public-images.example/lg-77-avif",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/lg-77.avif",
+    )
+    provider(
+        monkeypatch,
+        candidates=[avif_candidate],
+        permitted_domains="",
+        download=lambda candidate, **_kwargs: (
+            avif_bytes(),
+            candidate.image_url,
+            "original",
+        ),
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["source_page_url"] == avif_candidate.page_url
+    with SessionLocal() as db:
+        stored = db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"])))
+        assert stored is not None
+        assert stored.content_type in {"image/jpeg", "image/png"}
+        assert stored.storage_key is not None and stored.storage_key.endswith((".jpg", ".png"))
+
+
+def test_reference_lookup_skips_failed_candidates_and_reports_bounded_exhaustion(
+    owner_client, monkeypatch
+):
+    from housetory_api.api.errors import ApiError
+
+    room = create_room(owner_client, "Candidate fallback room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    forbidden = replace(
+        lg_candidate(title="LG OLED TV 77 inch forbidden"),
+        page_url="https://public-images.example/lg-forbidden",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/forbidden.png",
+    )
+    html = replace(
+        lg_candidate(title="LG OLED TV 77 inch html"),
+        page_url="https://public-images.example/lg-html",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/page.html",
+    )
+    corrupt = replace(
+        lg_candidate(title="LG OLED TV 77 inch corrupt"),
+        page_url="https://public-images.example/lg-corrupt",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/corrupt.png",
+    )
+    oversized = replace(
+        lg_candidate(title="LG OLED TV 77 inch oversized"),
+        page_url="https://public-images.example/lg-large",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/large.png",
+    )
+    private_redirect = replace(
+        lg_candidate(title="LG OLED TV 77 inch private redirect"),
+        page_url="https://public-images.example/lg-private",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/private.png",
+    )
+    valid = replace(
+        lg_candidate(title="LG OLED TV 77 inch final valid image"),
+        page_url="https://other-public.example/lg-valid",
+        source_domain="other-public.example",
+        image_url="https://cdn.other-public.example/lg-valid.png",
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "item_image_max_download_mb", 1)
+
+    def download(candidate, **_kwargs):
+        url = candidate.image_url
+        if url.endswith("forbidden.png"):
+            raise ApiError(502, "image_download_failed", "Image source returned HTTP 403.")
+        if url.endswith("page.html"):
+            return b"<html>not an image</html>", url, "original"
+        if url.endswith("corrupt.png"):
+            return b"not-an-image", url, "original"
+        if url.endswith("large.png"):
+            return b"x" * (settings.item_image_max_download_bytes + 1), url, "original"
+        if url.endswith("private.png"):
+            raise ApiError(
+                422,
+                "image_download_failed",
+                "Image source resolves to a private or internal address.",
+            )
+        return png_bytes(), url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[forbidden, html, corrupt, oversized, private_redirect, valid],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["source_page_url"] == valid.page_url
+
+    failing_item = create_item(
+        owner_client, "LG television 77 inch", room["id"], description="OLED 77 inch"
+    )
+    provider(
+        monkeypatch,
+        candidates=[html, corrupt],
+        permitted_domains="",
+        download=download,
+    )
+    exhausted = owner_client.post(f"/api/v1/items/{failing_item['id']}/image/find", json={})
+    assert exhausted.status_code == 422, exhausted.text
+    detail = exhausted.json()["detail"]
+    assert detail["code"] == "image_download_failed"
+    assert "after trying 2 compatible public candidate" in detail["message"]
+    assert "invalid or corrupt image" in detail["message"]
+    assert "Item images must be" not in detail["message"]
+    with SessionLocal() as db:
+        assert (
+            db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(failing_item["id"])))
+            is None
+        )
+
+
+def test_ps5_empty_box_alias_prefers_packaging_not_console(owner_client, monkeypatch):
+    room = create_room(owner_client, "PS5 box room")
+    item = create_item(owner_client, "PS5 empty box", room["id"])
+    with SessionLocal() as db:
+        stored = db.get(Item, uuid.UUID(item["id"]))
+        assert stored is not None
+        profile = build_product_profile(stored)
+        assert profile.brand == "sony"
+        assert profile.brand_source == "inferred"
+        assert profile.item_type == "box"
+        assert "ps5" in profile.brand_terms
+        console = replace(
+            lg_candidate(title="Sony PlayStation 5 console product photo"),
+            page_url="https://public-shop.example/ps5-console",
+            source_domain="public-shop.example",
+            image_url="https://cdn.public-shop.example/ps5-console.png",
+        )
+        box = replace(
+            lg_candidate(title="PS5 empty box packaging photo"),
+            page_url="https://public-shop.example/ps5-box",
+            source_domain="public-shop.example",
+            image_url="https://cdn.public-shop.example/ps5-box.png",
+        )
+        ranked = rank_candidates(stored, [console, box])
+        assert ranked
+        assert ranked[0].candidate.page_url == box.page_url
+
+    provider(
+        monkeypatch,
+        candidates=[console, box],
+        permitted_domains="",
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_page_url"] == box.page_url
+    assert selected["exact_model_confirmed"] is False
+
+
+def test_actual_photo_added_during_download_aborts_without_reference_artifact(
+    owner_client, monkeypatch
+):
+    from housetory_api.models import ItemPhoto
+
+    room = create_room(owner_client, "Concurrent photo room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    added = {"done": False}
+
+    def download(candidate, **_kwargs):
+        if not added["done"]:
+            added["done"] = True
+            with SessionLocal() as db:
+                db.add(
+                    ItemPhoto(
+                        item_id=uuid.UUID(item["id"]),
+                        storage_key=f"test/actual-{uuid.uuid4().hex}.jpg",
+                        original_filename="actual.jpg",
+                        content_type="image/jpeg",
+                        byte_size=10,
+                        width=10,
+                        height=10,
+                    )
+                )
+                db.commit()
+        return png_bytes(), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[lg_candidate()],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "actual_photo_exists"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(ItemImage).where(
+                    ItemImage.item_id == uuid.UUID(item["id"]),
+                    ItemImage.source_type == "reference",
+                )
+            )
+            is None
+        )
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        image_dir = (
+            get_settings().resolved_uploads_dir
+            / "households"
+            / str(stored_item.household_id)
+            / "items"
+            / str(stored_item.id)
+            / "images"
+        )
+        assert not image_dir.exists() or not any(image_dir.iterdir())

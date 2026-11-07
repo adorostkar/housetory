@@ -69,7 +69,16 @@ An explicit **Find image** action, or the household's opt-in
 and selects a suitable image automatically. The user does not approve a
 candidate list in the normal flow.
 
-Selection is deterministic and conservative:
+Selection is deterministic and conservative, and it does not stop at the first
+ranked URL. It makes a bounded loop over up to six compatible public candidates.
+A candidate that returns HTTP failure, private-address/redirect failure, HTML,
+corrupt bytes, unsupported format or oversized content is skipped; the next
+candidate is tried. A successful candidate is fully decoded, dimension-checked
+and re-encoded into a private JPEG/PNG derivative before selection. AVIF is
+accepted from public sources when Pillow's decoder is available because the
+stored derivative is always re-encoded; unsupported formats such as GIF are
+skipped. If every attempt fails, the error reports the bounded attempt count and
+actual reasons rather than a user-upload format message.
 
 - only results with a recorded public page/image URL are considered;
 - well-known stock/watermark domains are rejected;
@@ -97,7 +106,10 @@ gate.
 The user specifically approved relaxing the full-model gate for images. A name
 such as “LG TV” plus a description such as “OLED77inch” is enough to build a
 query-only profile and select a compatible representative image even when the
-structured brand field is blank. **Manual and model-specific instructions still
+structured brand field is blank. A deliberately small alias mapping handles
+“PS5” as Sony PlayStation 5 while retaining the item’s existing type word: a
+“PS5 empty box” is matched as packaging, so a console-only candidate is rejected
+rather than being presented as the actual box. **Manual and model-specific instructions still
 require the complete confirmed manufacturer/model gate**; that relaxation
 applies only to images.
 
@@ -306,8 +318,10 @@ Brave image response parsing/ranking, name-only brand and description-attribute
 inference without persisted item facts, screen-size/technology/variant conflict
 rejection, vague/brandless fallback, unknown-attribute representative labels,
 exact-model token boundaries (`A1` vs `A10`/`A1X`), manufacturer registrable-domain
-provenance, deceptive brand hosts, stock-host rejection, configured permitted
-source policy vs unknown rights, provider license evidence, lookup reuse,
+provenance, deceptive brand hosts, stock-host rejection, bounded candidate
+fallback (HTTP/private/HTML/corrupt/oversized/unsupported then valid), real AVIF
+re-encoding, PS5 empty-box packaging alias, public-web vs optional restriction
+provenance, provider license evidence, lookup reuse,
 evidence exclusion, AI preview/accept/reject, hard caps, batch
 preview/dedupe/cancel, permission/IDOR, the OpenAI Images adapter contract and
 the OpenRouter Image API contract including URL-only/SVG/invalid-data rejection.
@@ -324,7 +338,7 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **403 PostgreSQL backend tests**, **214 Vitest tests**
+Final local verification: **408 PostgreSQL backend tests**, **214 Vitest tests**
 and **69 disposable-stack Playwright workflows** (68 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup

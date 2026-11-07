@@ -442,7 +442,7 @@ in the main column.
 
 ## Verification
 
-- **403 PostgreSQL-backed backend tests** pass, including household online-search
+- **408 PostgreSQL-backed backend tests** pass, including household online-search
   credential lifecycle/fallback/domain tests plus manual attachment,
   identity-gate, citation, idempotency, duplicate, provider-output and SSRF tests.
 - **214 Vitest frontend tests** pass, including the write-only online-search

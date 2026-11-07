@@ -42,6 +42,14 @@ BRAVE_IMAGE_SEARCH_PATH = "/res/v1/images/search"
 MAX_SEARCH_RESPONSE_BYTES = 1_000_000
 MAX_QUERY_CHARS = 400
 MAX_QUERY_WORDS = 50
+MAX_REFERENCE_IMAGE_ATTEMPTS = 6
+SKIPPABLE_IMAGE_ERRORS = {
+    "empty_image",
+    "invalid_image",
+    "unsupported_image_type",
+    "image_dimensions",
+    "image_too_large",
+}
 
 STOCK_OR_WATERMARK_HOSTS = {
     "shutterstock.com",
@@ -131,6 +139,12 @@ DEFAULT_KNOWN_BRANDS: tuple[str, ...] = (
 # product type.
 CONTEXT_BRANDS = {"apple", "sharp"}
 CONTEXT_BRAND_TYPES = {"tv", "laptop", "camera"}
+
+# A deliberately small, deterministic alias map for common product-family names.
+# It never asserts an exact model; the item type must still match.
+PRODUCT_BRAND_ALIASES: dict[str, tuple[str, ...]] = {
+    "sony": ("ps5", "playstation 5", "playstation5"),
+}
 
 DEFAULT_MANUFACTURER_DOMAINS: dict[str, tuple[str, ...]] = {
     "lg": ("lg.com",),
@@ -366,6 +380,7 @@ class ProductProfile:
     brand: str | None
     brand_source: Literal["structured", "inferred"] | None
     brand_ambiguous: bool
+    brand_terms: frozenset[str]
     item_type: str | None
     sizes: frozenset[int]
     tech_families: frozenset[str]
@@ -676,14 +691,39 @@ def build_product_profile(item: Item) -> ProductProfile:
     brand = (item.brand or "").strip() or None
     brand_source: Literal["structured", "inferred"] | None = "structured" if brand else None
     brand_ambiguous = False
+    if brand is not None:
+        compact_brand = _compact(brand)
+        if compact_brand in PRODUCT_BRAND_ALIASES:
+            brand = compact_brand
+        else:
+            for canonical, aliases in PRODUCT_BRAND_ALIASES.items():
+                if compact_brand in {_compact(alias) for alias in aliases}:
+                    brand = canonical
+                    break
     if brand is None:
-        brand, brand_ambiguous = _infer_brand(name, description, item_type)
-        if brand is not None:
-            brand_source = "inferred"
+        for canonical, aliases in PRODUCT_BRAND_ALIASES.items():
+            if any(
+                _phrase_present(_word_tokens(combined), _word_tokens(alias)) for alias in aliases
+            ):
+                brand = canonical
+                brand_source = "inferred"
+                break
+        if brand is None:
+            brand, brand_ambiguous = _infer_brand(name, description, item_type)
+            if brand is not None:
+                brand_source = "inferred"
+    brand_terms = {_normalized(brand)} if brand else set()
+    if brand:
+        for canonical, aliases in PRODUCT_BRAND_ALIASES.items():
+            if _compact(brand) == _compact(canonical):
+                for alias in aliases:
+                    if _phrase_present(_word_tokens(combined), _word_tokens(alias)):
+                        brand_terms.add(_normalized(alias))
     return ProductProfile(
         brand=brand,
         brand_source=brand_source,
         brand_ambiguous=brand_ambiguous,
+        brand_terms=frozenset(term for term in brand_terms if term),
         item_type=item_type,
         sizes=sizes,
         tech_families=technologies,
@@ -859,7 +899,10 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
                 image_host,
             ]
         )
-        brand_in_title = _phrase_present(_word_tokens(candidate.title), _word_tokens(profile.brand))
+        brand_in_title = any(
+            _phrase_present(_word_tokens(candidate.title), _word_tokens(term))
+            for term in profile.brand_terms
+        )
         manufacturer_verified = _manufacturer_verified(profile.brand, page_host)
         if not brand_in_title and not manufacturer_verified:
             continue
@@ -1233,6 +1276,20 @@ def _reuse_household_reference(
     return image
 
 
+def _image_attempt_reason(exc: ApiError) -> str:
+    if exc.code == "unsupported_image_type":
+        return "unsupported image format"
+    if exc.code == "invalid_image":
+        return "invalid or corrupt image"
+    if exc.code == "image_too_large":
+        return "image exceeded the size limit"
+    if exc.code == "image_dimensions":
+        return "unsupported image dimensions"
+    if exc.code == "empty_image":
+        return "empty image response"
+    return exc.message
+
+
 def find_and_select_reference(
     db: Session,
     household_id: uuid.UUID,
@@ -1277,8 +1334,11 @@ def find_and_select_reference(
         raise ApiError(
             422,
             "image_description_required",
-            "Add a recognizable product brand and type before finding a reference image. "
-            "The category icon fallback remains available.",
+            "This item does not have enough recognizable brand/product-type context for "
+            "an automatic public image search. Add a brand or a clearer product name. "
+            "For packaging or an empty box, keep the word “box” so a product image is "
+            "not mistaken for the actual item. The category icon fallback remains "
+            "available.",
         )
     query = _query(item, profile)
     if not query.strip():
@@ -1316,56 +1376,106 @@ def find_and_select_reference(
             "No suitable compatible image source was found. The category icon "
             "fallback remains available.",
         )
-    chosen, permission = permitted[0]
-    content, final_url, _kind = _download_candidate(
-        chosen.candidate,
-        permission=permission,
-        provider=provider,
-    )
-    # Recheck after the network call so a real photo/change cannot be overwritten.
+    selected: tuple[RankedImage, SourcePermission, str, storage.StoredItemImage] | None = None
+    attempt_errors: list[str] = []
+    attempted = 0
+    for candidate_rank, permission in permitted[:MAX_REFERENCE_IMAGE_ATTEMPTS]:
+        attempted += 1
+        try:
+            content, final_url, _kind = _download_candidate(
+                candidate_rank.candidate,
+                permission=permission,
+                provider=provider,
+            )
+        except ApiError as exc:
+            attempt_errors.append(
+                f"{candidate_rank.candidate.source_domain or 'public source'}: {exc.message}"
+            )
+            continue
+        # Recheck after the network call so a real photo cannot be overwritten.
+        db.refresh(item, attribute_names=["photos", "updated_at"])
+        if item.photos:
+            raise ApiError(
+                409,
+                "actual_photo_exists",
+                "A real photo was added while the reference image was downloading; "
+                "it takes priority.",
+            )
+        try:
+            stored = storage.store_item_image_bytes(
+                household_id,
+                item.id,
+                content,
+                source_type="reference",
+                filename=(
+                    f"{_compact(profile.brand) or 'reference'}."
+                    f"{candidate_rank.candidate.image_url.rsplit('.', 1)[-1][:5]}"
+                ),
+            )
+        except ApiError as exc:
+            if exc.code not in SKIPPABLE_IMAGE_ERRORS:
+                raise
+            attempt_errors.append(
+                f"{candidate_rank.candidate.source_domain or 'public source'}: "
+                f"{_image_attempt_reason(exc)}"
+            )
+            continue
+        selected = (candidate_rank, permission, final_url, stored)
+        break
+
+    if selected is None:
+        detail = (
+            f"No downloadable reference image was found after trying {attempted} "
+            "compatible public candidate(s)."
+        )
+        unique_errors = list(dict.fromkeys(attempt_errors))
+        if unique_errors:
+            detail += " " + "; ".join(unique_errors[:3]) + "."
+        detail += " The category icon fallback remains available."
+        raise ApiError(422, "image_download_failed", detail)
+
+    chosen, permission, final_url, stored = selected
+    # Recheck after normalization/storage too. A concurrent real photo always wins.
     db.refresh(item, attribute_names=["photos", "updated_at"])
     if item.photos:
+        storage.delete_key(stored.storage_key)
+        storage.delete_key(stored.thumbnail_key)
         raise ApiError(
             409,
             "actual_photo_exists",
             "A real photo was added while the reference image was downloading; it takes priority.",
         )
-    stored = storage.store_item_image_bytes(
-        household_id,
-        item.id,
-        content,
-        source_type="reference",
-        filename=(
-            f"{_compact(profile.brand) or 'reference'}."
-            f"{chosen.candidate.image_url.rsplit('.', 1)[-1][:5]}"
-        ),
-    )
-    clear_active_images(db, item.id)
-    image = ItemImage(
-        household_id=household_id,
-        item_id=item.id,
-        created_by_user_id=actor_user_id,
-        source_type="reference",
-        status="active",
-        storage_key=stored.storage_key,
-        thumbnail_key=stored.thumbnail_key,
-        original_filename=stored.original_filename,
-        content_type=stored.content_type,
-        byte_size=stored.byte_size,
-        width=stored.width,
-        height=stored.height,
-        source_url=final_url or chosen.candidate.image_url,
-        source_name=chosen.candidate.source_domain or chosen.candidate.title,
-        source_page_url=chosen.candidate.page_url,
-        license_note=permission.note(),
-        license_name=chosen.candidate.license_name,
-        license_url=chosen.candidate.license_url,
-        permission_basis=permission.kind,
-        retrieved_at=datetime.now(UTC),
-        exact_model_confirmed=chosen.exact_model_confirmed,
-        model_label=profile.model if chosen.exact_model_confirmed else None,
-        search_fingerprint=fingerprint,
-    )
-    db.add(image)
-    db.flush()
+    try:
+        clear_active_images(db, item.id)
+        image = ItemImage(
+            household_id=household_id,
+            item_id=item.id,
+            created_by_user_id=actor_user_id,
+            source_type="reference",
+            status="active",
+            storage_key=stored.storage_key,
+            thumbnail_key=stored.thumbnail_key,
+            original_filename=stored.original_filename,
+            content_type=stored.content_type,
+            byte_size=stored.byte_size,
+            width=stored.width,
+            height=stored.height,
+            source_url=final_url or chosen.candidate.image_url,
+            source_name=chosen.candidate.source_domain or chosen.candidate.title,
+            source_page_url=chosen.candidate.page_url,
+            license_note=permission.note(),
+            license_name=chosen.candidate.license_name,
+            license_url=chosen.candidate.license_url,
+            permission_basis=permission.kind,
+            retrieved_at=datetime.now(UTC),
+            exact_model_confirmed=chosen.exact_model_confirmed,
+            model_label=profile.model if chosen.exact_model_confirmed else None,
+            search_fingerprint=fingerprint,
+        )
+        db.add(image)
+        db.flush()
+    except Exception:
+        storage.delete_key(stored.storage_key)
+        storage.delete_key(stored.thumbnail_key)
+        raise
     return image

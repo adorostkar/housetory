@@ -38,6 +38,9 @@ PHOTO_FORMATS = {
     "HEIF": ("image/heic", "heic"),
     "HEIC": ("image/heic", "heic"),
 }
+# Downloaded reference/AI images may use decoders that are safe to re-encode even
+# when the original web format is not accepted for user photo uploads.
+DOWNLOAD_IMAGE_FORMATS = {*PHOTO_FORMATS, "AVIF"}
 
 SCAN_IMAGE_TYPES = {
     "image/jpeg",
@@ -678,11 +681,11 @@ def store_item_image_bytes(
             "invalid_image",
             "The downloaded or generated file is not a readable image.",
         ) from exc
-    if image_format not in PHOTO_FORMATS:
+    if image_format not in DOWNLOAD_IMAGE_FORMATS:
         raise ApiError(
             422,
             "unsupported_image_type",
-            "Item images must be JPEG, PNG, WebP, or HEIC.",
+            "Item images must be JPEG, PNG, WebP, AVIF, or HEIC.",
         )
     if width < 1 or height < 1 or width * height > 40_000_000:
         raise ApiError(422, "image_dimensions", "The image dimensions are not supported.")
