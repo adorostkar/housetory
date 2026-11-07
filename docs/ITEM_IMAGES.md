@@ -15,7 +15,10 @@ photographs, change inventory facts, or count as a stocktake/evidence observatio
 The detail page always uses the actual photo gallery first. Non-photographic
 imagery is shown only when no actual photo exists, with an explicit
 `Reference image` or `AI illustration` label. The item card/list thumbnail
-follows the same priority.
+follows the same priority. Both actual photos and representative reference/AI
+images use the same bounded responsive frame (240 px phone, 320 px tablet,
+340 px desktop) with `object-contain`; placeholders stay compact at 150 px.
+Reference/AI images cannot stretch the frame through intrinsic height or flex.
 
 Users can **Change image**, **Remove** a stored reference/AI image, or
 **Use icon** to clear a selected non-photo image and return to the simple
@@ -94,6 +97,14 @@ actual reasons rather than a user-upload format message.
 - exact-model confirmation requires whole model tokens and the same known
   variant set. `A1` never matches `A10` or `A1X`; a guessed model is never
   stored or labelled as exact;
+- clean product-photo terms and URL/title signals are preferred; dimension
+  drawings, specification/measurement sheets, installation diagrams, collages,
+  text-heavy marketing images and box/packaging-only shots for product items
+  receive a metadata-only penalty. Manufacturer authority still contributes to
+  the score, but an official infographic does not automatically beat a cleaner
+  usable product photo;
+- items that are intentionally diagrams/documents are exempt from that
+  infographic penalty;
 - otherwise a representative image may be accepted but is labelled
   **“exact model not confirmed”**.
 
@@ -335,18 +346,24 @@ Vitest covers category-icon/reference/actual card priority, source controls and
 preview acceptance. Disposable Playwright covers category-icon fallback, a mocked
 automatic reference flow with source labels, actual-photo priority, manual AI
 preview/accept, unconfigured states, household setting toggles and batch
-cancellation. Screenshots are in
+cancellation. Reference/AI gallery bounds are checked with real landscape,
+portrait, square and AI fixture images at phone/tablet/desktop widths:
+[landscape reference](walkthrough/photo-sizing/07-reference-landscape-desktop.png),
+[portrait reference](walkthrough/photo-sizing/08-reference-portrait-desktop.png),
+[square reference](walkthrough/photo-sizing/09-reference-square-desktop.png) and
+[AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
+Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **408 PostgreSQL backend tests**, **214 Vitest tests**
-and **69 disposable-stack Playwright workflows** (68 passed, 1 fixture-dependent
+Final local verification: **410 PostgreSQL backend tests**, **214 Vitest tests**
+and **70 disposable-stack Playwright workflows** (69 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and
 exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
 existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task
-choices. The real household has no item-image rows and both automation settings
-remain off by default. No optional source-domain restriction is needed for
+choices. Tests use disposable households and do not modify real inventory,
+uploads or credentials. No optional source-domain restriction is needed for
 public-web reference lookup; the household still controls the explicit enable
 toggle and Brave key.
 

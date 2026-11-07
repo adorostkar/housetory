@@ -301,7 +301,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 408 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 410 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -358,12 +358,14 @@ stack, not just unit mocks:
   ranking/actual-photo priority, query-only attribute inference, size/technology/variant conflicts, exact-model
   token boundaries, manufacturer/deceptive-host provenance, public-web
   provenance/unknown-permission honesty, optional source restriction, bounded
-  candidate format/HTTP fallback, AVIF re-encoding, PS5 empty-box packaging
-  alias and license evidence, evidence exclusion, AI preview/accept/reject,
+  candidate format/HTTP fallback, AVIF re-encoding, clean-photo vs
+  spec/dimension infographic ranking, PS5 empty-box packaging alias, bounded
+  reference/AI gallery frames and license evidence, evidence exclusion, AI
+  preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
 - 214 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 69 checked-in Playwright workflows (68 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 70 checked-in Playwright workflows (69 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

@@ -253,3 +253,132 @@ test("inventory grid and compact list fit complete actual photos without croppin
     fullPage: false,
   });
 });
+
+test("reference and AI images stay inside the same bounded gallery frame", async ({
+  page,
+  request,
+}) => {
+  await fs.mkdir("../../docs/walkthrough/photo-sizing", { recursive: true });
+  const id = suffix();
+  const home = await property(request);
+  const room = await createRoom(request, `Representative sizing room ${id}`, home.id);
+  const itemName = `Reference sizing item ${id}`;
+  const item = await createItem(request, itemName, room.id);
+  const detailResponse = await request.get(`/api/v1/items/${item.item.id}`);
+  expect(detailResponse.ok()).toBeTruthy();
+  const detail = (await detailResponse.json()) as {
+    item: Record<string, unknown>;
+  };
+
+  const variants = [
+    { file: "landscape-3x2.png", label: "Reference image", sourceType: "reference", key: "reference-landscape" },
+    { file: "portrait-2x3.png", label: "Reference image", sourceType: "reference", key: "reference-portrait" },
+    { file: "square-1x1.png", label: "Reference image", sourceType: "reference", key: "reference-square" },
+    { file: "portrait-2x3.png", label: "AI illustration", sourceType: "ai", key: "ai-portrait" },
+  ] as const;
+  let representative: Record<string, unknown> | null = null;
+  await page.route(
+    new RegExp(`/api/v1/items/${item.item.id}(?:\\?.*)?$`),
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        json: {
+          ...detail,
+          item: { ...detail.item, representative_image: representative },
+        },
+      });
+    },
+  );
+
+  for (const variant of variants) {
+    const fileBuffer = await fs.readFile(path.join(fixtureDir, variant.file));
+    const dataUrl = `data:image/png;base64,${fileBuffer.toString("base64")}`;
+    representative = {
+      id: `representative-${variant.key}`,
+      source_type: variant.sourceType,
+      label: variant.label,
+      status: "active",
+      url: dataUrl,
+      thumbnail_url: dataUrl,
+      width: variant.file === "landscape-3x2.png" ? 900 : variant.file === "portrait-2x3.png" ? 600 : 700,
+      height: variant.file === "portrait-2x3.png" ? 900 : variant.file === "square-1x1.png" ? 700 : 600,
+      source_name: "Fixture public source",
+      source_url: null,
+      source_page_url: null,
+      license_note: "Fixture provenance; no reuse permission asserted.",
+      retrieved_at: "2026-01-01T00:00:00Z",
+      exact_model_confirmed: false,
+      model_label: null,
+      provider_label: null,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+
+    for (const viewport of viewports) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.goto(`/items/${item.item.id}`);
+      await expect(
+        page.getByRole("heading", { name: itemName, level: 1 }),
+      ).toBeVisible();
+      const frame = page.getByTestId("photo-gallery-frame");
+      const frameBox = await frame.boundingBox();
+      expect(frameBox).not.toBeNull();
+      expect(Math.abs((frameBox?.height ?? 0) - viewport.frameHeight)).toBeLessThan(1.5);
+
+      const image = page.getByAltText(`${itemName} ${variant.label.toLowerCase()}`);
+      await expect
+        .poll(async () =>
+          image.evaluate((element) => {
+            const img = element as HTMLImageElement;
+            return img.complete ? img.naturalWidth : 0;
+          }),
+        )
+        .toBeGreaterThan(0);
+      const metrics = await image.evaluate((element) => {
+        const img = element as HTMLImageElement;
+        const box = img.getBoundingClientRect();
+        return {
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          width: box.width,
+          height: box.height,
+          objectFit: window.getComputedStyle(img).objectFit,
+        };
+      });
+      expect(metrics.objectFit).toBe("contain");
+      expect(metrics.width).toBeLessThanOrEqual((frameBox?.width ?? 0) + 0.5);
+      expect(metrics.height).toBeLessThanOrEqual((frameBox?.height ?? 0) + 0.5);
+      expect(metrics.width / metrics.height).toBeCloseTo(
+        metrics.naturalWidth / metrics.naturalHeight,
+        1,
+      );
+      if (viewport.width === 1440 && variant.key === "reference-landscape") {
+        await page.screenshot({
+          path: "../../docs/walkthrough/photo-sizing/07-reference-landscape-desktop.png",
+          fullPage: false,
+        });
+      }
+      if (viewport.width === 1440 && variant.key === "reference-portrait") {
+        await page.screenshot({
+          path: "../../docs/walkthrough/photo-sizing/08-reference-portrait-desktop.png",
+          fullPage: false,
+        });
+      }
+      if (viewport.width === 1440 && variant.key === "reference-square") {
+        await page.screenshot({
+          path: "../../docs/walkthrough/photo-sizing/09-reference-square-desktop.png",
+          fullPage: false,
+        });
+      }
+      if (viewport.width === 390 && variant.key === "ai-portrait") {
+        await page.screenshot({
+          path: "../../docs/walkthrough/photo-sizing/10-ai-portrait-mobile.png",
+          fullPage: false,
+        });
+      }
+    }
+  }
+});

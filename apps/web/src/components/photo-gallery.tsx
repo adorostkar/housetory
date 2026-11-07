@@ -144,7 +144,7 @@ export function PhotoGallery({
         data-testid="photo-gallery-frame"
         className={cn(
           "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
-          active
+          active || representative?.url
             ? "h-[240px] sm:h-[320px] xl:h-[340px]"
             : "min-h-[150px]",
         )}
@@ -165,7 +165,7 @@ export function PhotoGallery({
         ) : representative ? (
           <>
             {representative.url ? (
-              <div className="flex size-full items-center justify-center bg-secondary/30 p-6">
+              <div className="flex size-full items-center justify-center bg-secondary/30 p-3 sm:p-4">
                 <img
                   src={representative.thumbnail_url ?? representative.url}
                   alt={`${item.name} ${representative.label.toLowerCase()}`}

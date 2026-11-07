@@ -1436,3 +1436,81 @@ def test_actual_photo_added_during_download_aborts_without_reference_artifact(
             / "images"
         )
         assert not image_dir.exists() or not any(image_dir.iterdir())
+
+
+def test_clean_product_photo_outranks_specification_infographic(owner_client, monkeypatch):
+    room = create_room(owner_client, "Image quality room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"], model="A1")
+    with SessionLocal() as db:
+        stored = db.get(Item, uuid.UUID(item["id"]))
+        assert stored is not None
+        clean = replace(
+            lg_candidate(title="LG OLED TV 77 inch A1 product photo"),
+            page_url="https://retailer.example/lg-oled-a1",
+            source_domain="retailer.example",
+            image_url="https://cdn.retailer.example/lg-oled-a1.png",
+        )
+        dimensions = replace(
+            lg_candidate(title="LG OLED TV 77 inch A1 dimension drawing measurements"),
+            page_url="https://www.lg.com/support/dimensions/a1",
+            source_domain="lg.com",
+            image_url="https://www.lg.com/support/dimensions/a1.png",
+        )
+        wrong_size = replace(
+            lg_candidate(title="LG OLED TV 65 inch A1 product photo"),
+            page_url="https://retailer.example/lg-oled-65",
+            source_domain="retailer.example",
+            image_url="https://cdn.retailer.example/lg-oled-65.png",
+        )
+        wrong_model = replace(
+            lg_candidate(title="LG OLED TV 77 inch A10 product photo"),
+            page_url="https://retailer.example/lg-oled-a10",
+            source_domain="retailer.example",
+            image_url="https://cdn.retailer.example/lg-oled-a10.png",
+        )
+        box_only = replace(
+            lg_candidate(title="LG OLED TV 77 inch A1 empty box packaging"),
+            page_url="https://retailer.example/lg-oled-box",
+            source_domain="retailer.example",
+            image_url="https://cdn.retailer.example/lg-oled-box.png",
+        )
+        ranked = rank_candidates(
+            stored,
+            [dimensions, wrong_size, wrong_model, box_only, clean],
+        )
+        assert ranked
+        assert ranked[0].candidate.page_url == clean.page_url
+        assert all(entry.candidate.page_url != wrong_size.page_url for entry in ranked)
+        assert all(entry.candidate.page_url != wrong_model.page_url for entry in ranked)
+        assert all(entry.candidate.page_url != box_only.page_url for entry in ranked)
+
+    provider(
+        monkeypatch,
+        candidates=[dimensions, wrong_size, wrong_model, box_only, clean],
+        permitted_domains="",
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["source_page_url"] == clean.page_url
+
+
+def test_intentional_diagram_item_does_not_penalize_diagram_candidates(owner_client):
+    room = create_room(owner_client, "Intentional diagram room")
+    created = create_item(
+        owner_client,
+        "LG OLED TV 77 inch wiring diagram",
+        room["id"],
+        brand="LG",
+    )
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(created["id"]))
+        assert item is not None
+        diagram = replace(
+            lg_candidate(title="LG OLED TV 77 inch wiring diagram schematic"),
+            page_url="https://www.lg.com/support/wiring-diagram",
+            source_domain="lg.com",
+            image_url="https://www.lg.com/support/wiring-diagram.png",
+        )
+        ranked = rank_candidates(item, [diagram])
+        assert ranked
+        assert ranked[0].candidate.page_url == diagram.page_url

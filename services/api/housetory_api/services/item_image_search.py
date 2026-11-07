@@ -51,6 +51,75 @@ SKIPPABLE_IMAGE_ERRORS = {
     "image_too_large",
 }
 
+INFOGRAPHIC_TERMS = (
+    "dimension",
+    "dimensions",
+    "measurement",
+    "measurements",
+    "size chart",
+    "what's in the box",
+    "whats in the box",
+    "what is in the box",
+    "in the box",
+    "spec sheet",
+    "specification",
+    "specifications",
+    "specs",
+    "installation",
+    "manual",
+    "diagram",
+    "drawing",
+    "schematic",
+    "blueprint",
+    "collage",
+    "comparison",
+    "chart",
+    "guide",
+    "package contents",
+    "packaging",
+    "ports",
+    "remote control",
+    "cables included",
+    "wall mount",
+)
+PACKAGING_TERMS = (
+    "box",
+    "packaging",
+    "package",
+    "unboxing",
+    "open box",
+    "retail box",
+    "empty box",
+    "contents",
+    "what's in the box",
+    "whats in the box",
+    "what is in the box",
+    "in the box",
+    "package contents",
+)
+CLEAN_PRODUCT_TERMS = (
+    "product photo",
+    "product image",
+    "official image",
+    "front view",
+    "rear view",
+    "white background",
+    "transparent background",
+    "isolated",
+    "studio",
+    "clean product",
+)
+DIAGRAM_ITEM_TERMS = (
+    "diagram",
+    "document",
+    "manual",
+    "spec sheet",
+    "drawing",
+    "schematic",
+    "blueprint",
+    "infographic",
+)
+
 STOCK_OR_WATERMARK_HOSTS = {
     "shutterstock.com",
     "istockphoto.com",
@@ -969,6 +1038,59 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
             ratio = candidate.width / max(candidate.height, 1)
             if 0.5 <= ratio <= 2.0:
                 score += 2
+
+        # Prefer usable product photography over specification sheets,
+        # measurement diagrams, text-heavy marketing collages and packaging
+        # shots when the item is the product itself. This is metadata-only and
+        # does not depend on an AI provider.
+        item_text = " ".join(
+            part
+            for part in [
+                item.name,
+                item.description,
+                item.category.name if item.category else "",
+            ]
+            if part
+        )
+        item_tokens = _word_tokens(item_text)
+        diagram_item = any(
+            _phrase_present(item_tokens, _word_tokens(term))
+            for term in DIAGRAM_ITEM_TERMS
+        )
+        if not diagram_item:
+            image_text = " ".join(
+                [
+                    candidate.title,
+                    urlparse(candidate.page_url).path,
+                    urlparse(candidate.image_url).path,
+                    candidate.source_domain,
+                ]
+            )
+            image_tokens = _word_tokens(image_text)
+            info_terms = INFOGRAPHIC_TERMS
+            if profile.item_type == "box":
+                info_terms = tuple(
+                    term for term in INFOGRAPHIC_TERMS if term not in PACKAGING_TERMS
+                )
+            info_hits = sum(
+                1
+                for term in info_terms
+                if _phrase_present(image_tokens, _word_tokens(term))
+            )
+            clean_hits = sum(
+                1
+                for term in CLEAN_PRODUCT_TERMS
+                if _phrase_present(image_tokens, _word_tokens(term))
+            )
+            score += clean_hits * 4
+            score -= info_hits * 8
+            if profile.item_type != "box":
+                packaging_hits = sum(
+                    1
+                    for term in PACKAGING_TERMS
+                    if _phrase_present(image_tokens, _word_tokens(term))
+                )
+                score -= packaging_hits * 10
         if score < 12:
             continue
         ranked.append(

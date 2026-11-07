@@ -124,10 +124,13 @@ describe("PhotoGallery", () => {
       provider_label: null,
       created_at: "2026-01-01T00:00:00Z",
     });
+    const frame = screen.getByTestId("photo-gallery-frame");
+    expect(frame).toHaveClass("h-[240px]", "sm:h-[320px]", "xl:h-[340px]");
+    expect(frame).not.toHaveClass("min-h-[150px]");
     const image = screen.getByRole("img", { name: /Reference image/i });
     expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
-    expect(image.parentElement).toHaveClass("bg-secondary/30", "p-6");
+    expect(image.parentElement).toHaveClass("bg-secondary/30", "p-3", "sm:p-4");
     expect(screen.queryByText("No photograph yet")).not.toBeInTheDocument();
   });
 
