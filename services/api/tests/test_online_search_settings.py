@@ -263,7 +263,7 @@ def test_write_only_key_lifecycle_and_household_authority(owner_client, monkeypa
 def test_environment_fallback_is_used_only_without_a_household_row(owner_client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "brave_search_api_key", "environment-brave-key")
-    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "lg.com")
+    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "")
     monkeypatch.setattr(settings, "manual_search_url", "")
     monkeypatch.setattr(settings, "manual_search_provider", "auto")
     monkeypatch.setattr(settings, "item_image_search_provider", "auto")
@@ -300,7 +300,7 @@ def test_environment_fallback_is_used_only_without_a_household_row(owner_client,
         assert "disabled in Settings" in (image.reason or "")
 
 
-def test_permitted_domains_and_reference_prerequisites(owner_client, monkeypatch):
+def test_optional_domain_restriction_and_reference_enablement(owner_client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "brave_search_api_key", "")
     monkeypatch.setattr(settings, "item_image_permitted_source_domains", "")
@@ -311,8 +311,11 @@ def test_permitted_domains_and_reference_prerequisites(owner_client, monkeypatch
         SETTINGS_URL,
         json={"reference_enabled": True},
     )
-    assert no_domains.status_code == 422
-    assert no_domains.json()["detail"]["code"] == "online_search_domains_required"
+    assert no_domains.status_code == 200, no_domains.text
+    assert no_domains.json()["permitted_source_domains"] == []
+    assert no_domains.json()["reference"]["configured"] is True
+    assert no_domains.json()["reference"]["policy_configured"] is True
+    assert no_domains.json()["reference"]["reason"] is None
 
     invalid_values = [
         "https://example.com/path",
@@ -370,7 +373,7 @@ def test_permitted_domains_and_reference_prerequisites(owner_client, monkeypatch
                 "tenant.github.io",
             }
         )
-        assert item_image_search.permitted_source_policy_configured(image) is True
+        assert item_image_search.source_restriction_enabled(image) is True
 
 
 def test_shared_brave_credential_and_worker_pick_up_changes_immediately(owner_client, monkeypatch):
@@ -639,3 +642,24 @@ def test_credential_rotation_and_undecryptable_key_fail_closed(owner_client, mon
     finally:
         settings.ai_credential_key = old_key
         settings.ai_credential_key_previous = ""
+
+
+def test_system_status_summary_updates_after_saving_public_web_settings(owner_client, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "brave_search_api_key", "")
+    monkeypatch.setattr(settings, "item_image_permitted_source_domains", "")
+
+    saved = _save(
+        owner_client,
+        key="brave-summary-refresh-key",
+        manual=True,
+        reference=True,
+        domains=[],
+    )
+    assert saved["reference"]["configured"] is True
+    summary = owner_client.get("/api/v1/system/status/summary")
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert "Online manual search" not in body["optional_not_configured"]
+    assert "Reference-image search" not in body["optional_not_configured"]
+    assert all(issue["label"] != "Reference-image search" for issue in body["issues"])

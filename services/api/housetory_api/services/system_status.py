@@ -201,9 +201,8 @@ def _external_services(db: Session, household_id: uuid.UUID) -> list[ExternalSer
     settings = get_settings()
     manual = manual_web.resolve_search_provider(db, household_id)
     image = item_image_search.resolve_image_search_provider(db, household_id)
-    image_policy = item_image_search.permitted_source_policy_configured(image)
     manual_configured = manual.kind != "none"
-    image_configured = image.configured and image_policy
+    image_configured = image.configured
     return [
         ExternalServiceStatus(
             name="Online manual search",
@@ -220,20 +219,19 @@ def _external_services(db: Session, household_id: uuid.UUID) -> list[ExternalSer
         ExternalServiceStatus(
             name="Reference-image search",
             configured=image_configured,
-            status=(
-                "configured"
-                if image_configured
-                else "partial"
-                if image.configured
-                else "not_configured"
-            ),
+            status="configured" if image_configured else "not_configured",
             detail=(
-                f"Configured via {_source_label(image.source)} with "
-                f"{len(image.permitted_domains)} permitted source domain(s) (not probed)."
+                (
+                    f"Configured via {_source_label(image.source)} for public-web "
+                    "reference-image lookup"
+                    + (
+                        f" with an optional restriction to {len(image.permitted_domains)} domain(s)"
+                        if image.permitted_domains
+                        else ""
+                    )
+                    + " (not probed)."
+                )
                 if image_configured
-                else "Search provider is configured, but no permitted source domains "
-                "are set in Settings → Online search."
-                if image.configured
                 else image.reason or "Not configured."
             ),
             source=image.source,

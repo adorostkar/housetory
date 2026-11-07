@@ -35,14 +35,6 @@ def _search_availability(db: Session, household_id: uuid.UUID):
     provider = image_search.resolve_image_search_provider(db, household_id)
     if not provider.configured:
         return False, provider.label, provider.reason
-    if not image_search.permitted_source_policy_configured(provider):
-        return (
-            False,
-            provider.label,
-            "Reference-image search is enabled, but no permitted source domains are "
-            "configured. Add at least one domain in Settings → Online search. The "
-            "category icon fallback remains available.",
-        )
     return True, provider.label, None
 
 

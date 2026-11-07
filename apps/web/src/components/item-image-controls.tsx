@@ -344,9 +344,10 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
               </p>
               <p className="mt-1.5 text-muted-foreground">
                 This is separate from AI generation. The household owner can enable
-                reference-image lookup and add permitted source domains in Online
-                search settings. An AI provider key does not enable online lookup, and
-                downloads remain limited to permitted sources.
+                reference-image lookup in Online search settings. It searches public
+                websites by default and automatically selects one suitable image; an
+                optional domain restriction can narrow sources. An AI provider key
+                does not enable online lookup.
               </p>
               <Button className="mt-2" size="sm" variant="outline" asChild>
                 <Link to="/settings#online-search">Open online search settings</Link>

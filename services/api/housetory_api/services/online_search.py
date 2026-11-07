@@ -21,10 +21,6 @@ MAX_PERMITTED_DOMAINS = 50
 MANUAL_DISABLED_REASON = "Online manual search is disabled in Settings → Online search."
 REFERENCE_DISABLED_REASON = "Reference-image search is disabled in Settings → Online search."
 NO_KEY_REASON = "Add a Brave Search API key in Settings → Online search."
-NO_DOMAINS_REASON = (
-    "Add at least one permitted source domain in Settings → Online search before "
-    "downloading reference images."
-)
 MULTI_PART_SUFFIXES = {
     "co.uk",
     "co.jp",

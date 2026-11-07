@@ -47,9 +47,12 @@ manual discovery, plus the installation country/language, base-URL and timeout
 settings. No custom gateway is required for images. Manual document search
 remains a separate feature with its own enable control.
 
-The owner can enable **Reference-image search** independently of manual search
-and must provide at least one permitted source domain in the same Settings card.
-Changes apply on the next API or worker request without a restart. If no
+The owner can enable **Reference-image search** independently of manual search.
+No domain allowlist is required: the default is public-web lookup across suitable
+public websites, with automatic single-image selection. An optional advanced
+source restriction can narrow downloads to registrable domains if the owner
+deliberately wants that. Changes apply on the next API or worker request without
+a restart. If no
 household online-search row exists, `ITEM_IMAGE_SEARCH_PROVIDER` (`auto`,
 `brave` or `none`) and `BRAVE_SEARCH_API_KEY` act as an operator-only
 installation fallback. Saving the household row, explicitly disabling the
@@ -85,6 +88,12 @@ Selection is deterministic and conservative:
 - otherwise a representative image may be accepted but is labelled
   **“exact model not confirmed”**.
 
+The automatic flow is still a single selection, not a mandatory candidate chooser
+or per-domain approval step. Exact make/model is not required for a representative
+reference image; a name such as “LG TV” plus “OLED 77 inch” is sufficient. Manual
+and model-specific manual discovery keep the full confirmed manufacturer/model
+gate.
+
 The user specifically approved relaxing the full-model gate for images. A name
 such as “LG TV” plus a description such as “OLED77inch” is enough to build a
 query-only profile and select a compatible representative image even when the
@@ -98,47 +107,55 @@ An official manufacturer is recognised only when the page host is the brand's
 verified registrable domain (for example `lg.com` or `media.lg.com` for `lg`).
 Brand text in an arbitrary hostname is not manufacturer provenance. Deceptive
 hosts such as `lg.com.evil.example` or `lg-deals.example` are rejected. A
-retailer candidate can still rank, but is marked non-manufacturer and must pass
-the source-permission policy. Administrators can add or override
-`brand=domain|domain` entries with `ITEM_IMAGE_MANUFACTURER_DOMAINS`.
+retailer candidate can still rank, but is marked non-manufacturer. It can still
+be selected from the public web when the owner has not set an optional domain
+restriction. Administrators can add or override `brand=domain|domain` entries with
+`ITEM_IMAGE_MANUFACTURER_DOMAINS`.
 
-### Source permission policy
+### Source provenance and optional restriction
 
-A search hit is not permission to download or reuse an image. Automatic local
-saves are **default deny**:
+Public-web lookup is the default. It does **not** require a user-maintained
+domain allowlist and does not ask for per-domain approval:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| **Settings → Online search → permitted source domains** | empty | Structured registrable source domains whose terms the household owner has reviewed and permits for automatic reference downloads. Subdomains are included; schemes, paths, ports, wildcards and IP addresses are rejected. Empty keeps automatic downloads disabled and the category icon fallback available. |
-| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Operator-only installation fallback when no household online-search row exists. Comma-separated registrable domains; empty disables automatic downloads. |
-| `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence. The current documented Brave Image Search response does not include license metadata, so a domain policy is normally required. |
+| **Settings → Online search → optional source restriction (advanced)** | empty | Empty means public websites. A non-empty list is a deliberate optional restriction to registrable domains; subdomains are included. Schemes, paths, ports, wildcards and IP addresses are rejected. |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Optional operator-only legacy restriction when no household online-search row exists. Empty means public-web lookup, not disabled. |
+| `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence when present. |
 | `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional operator `brand=domain|domain` additions or overrides for provenance checks. |
 | `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional operator extra brand names for conservative query-only inference. |
 
-Before a candidate can be downloaded, its source page and asset host must match a
-permitted domain, or it must carry explicit provider license metadata with an
-allowed license identifier and evidence URL. If a compatible image has unknown
-reuse rights, the app returns a `no_permitted_image_candidate` state and shows
-the category icon fallback; it does not invent a license note or silently
-download. The stored note records the policy basis or provider license plus the
-evidence URL and says explicitly that this is not a legal determination or
-permission guarantee. Housetory does not provide legal advice, does not claim
-vendor terms are satisfied, and does not bypass hotlink restrictions, watermarks
-or paywalls.
+With no restriction, a compatible public result is downloaded with
+`permission_basis = public_web`. The stored note records the public source page,
+retrieval time and that no license metadata or reuse permission was established;
+it explicitly says this is not a legal determination or permission guarantee and
+that the image is a reference, not a user photo. If the optional restriction is
+set, candidates and redirected asset hosts must stay inside it (or carry explicit
+provider license evidence with an allowed identifier and evidence URL).
+
+Unknown reuse permission is allowed for public-web references with an honest
+note; it is not fabricated into a license. Housetory does not provide legal
+advice, does not claim vendor terms are satisfied, and does not bypass hotlink
+restrictions, watermarks, paywalls or access controls. If a result cannot be
+downloaded or decoded, the category-icon fallback remains and the error states
+the actual failure rather than asking for a domain setup that is no longer
+required.
 
 Online search Settings walkthrough:
 [not configured](walkthrough/online-search/01-not-configured.png),
 [saved write-only key](walkthrough/online-search/02-saved-write-only-key.png),
-[test confirmation](walkthrough/online-search/03-test-confirmation.png) and
-[bounded test result](walkthrough/online-search/04-test-result.png).
+[test confirmation](walkthrough/online-search/03-test-confirmation.png),
+[bounded test result](walkthrough/online-search/04-test-result.png), and
+[public-web readiness reflected in system health](walkthrough/online-search/05-public-web-ready-summary.png).
 
 If no suitable candidate is found, the category icon fallback remains.
-The result is downloaded through the same public-DNS/private-address/redirect/
-byte/time limits as manual retrieval, then decoded and re-encoded into a private
-derivative. Original EXIF/metadata is not copied into the derivative. Source URLs
-are kept only as provenance. Redirected asset URLs are rechecked against the
-same permitted-domain policy as the original asset; a thumbnail from an
-unpermitted host is never downloaded as a fallback.
+The result is downloaded through public DNS resolution, private/link-local/
+metadata-address rejection, pinned connections, bounded redirects, byte/time
+limits and the same SSRF checks as manual retrieval. It is then decoded and
+re-encoded into a private derivative; malformed or unsupported images are
+rejected and original EXIF/metadata is not copied. Source URLs are kept only as
+provenance. Redirected asset URLs are revalidated on every hop; if an optional
+domain restriction is set, the asset host must remain inside it.
 
 ### Reuse and deduplication
 
@@ -294,7 +311,11 @@ source policy vs unknown rights, provider license evidence, lookup reuse,
 evidence exclusion, AI preview/accept/reject, hard caps, batch
 preview/dedupe/cancel, permission/IDOR, the OpenAI Images adapter contract and
 the OpenRouter Image API contract including URL-only/SVG/invalid-data rejection.
-They use fixture responses and never make live search/generation calls.
+They use fixture responses and never make live search/generation calls. Public-web
+coverage verifies no-domain readiness, automatic single-image selection outside
+any preexisting allowlist, `public_web` provenance/unknown-permission wording,
+optional legacy restriction behavior, private/non-image/oversized/malformed
+rejection, actual-photo priority and household/viewer boundaries.
 
 Vitest covers category-icon/reference/actual card priority, source controls and
 preview acceptance. Disposable Playwright covers category-icon fallback, a mocked
@@ -303,16 +324,17 @@ preview/accept, unconfigured states, household setting toggles and batch
 cancellation. Screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **400 PostgreSQL backend tests**, **212 Vitest tests**
-and **68 disposable-stack Playwright workflows** (67 passed, 1 fixture-dependent
+Final local verification: **403 PostgreSQL backend tests**, **214 Vitest tests**
+and **69 disposable-stack Playwright workflows** (68 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and
 exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
 existing 51 items, 1 loan, 1 household/property, IDs, files and existing AI task
 choices. The real household has no item-image rows and both automation settings
-remain off by default. No permitted source domain is configured, so automatic
-downloads remain disabled until the operator reviews and sets a policy.
+remain off by default. No optional source-domain restriction is needed for
+public-web reference lookup; the household still controls the explicit enable
+toggle and Brave key.
 
 Remaining live validation (not performed here): a real Brave Image Search
 subscription/key, a real OpenAI Images key/model, and a real OpenRouter

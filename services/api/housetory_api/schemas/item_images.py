@@ -20,7 +20,9 @@ class ItemImageOut(BaseModel):
     license_note: str | None = None
     license_name: str | None = None
     license_url: str | None = None
-    permission_basis: Literal["configured_source_policy", "provider_license"] | None = None
+    permission_basis: (
+        Literal["public_web", "configured_source_policy", "provider_license"] | None
+    ) = None
     retrieved_at: datetime | None = None
     exact_model_confirmed: bool = False
     model_label: str | None = None

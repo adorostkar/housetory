@@ -318,7 +318,7 @@ def test_brave_image_contract_ranking_conflicts_and_representative_selection(
     assert state["selected"]["label"] == "Reference image"
     assert state["selected"]["exact_model_confirmed"] is False
     assert state["selected"]["source_page_url"] == "https://www.lg.com/us/tvs/oled-tv"
-    assert "configured permitted-source policy" in state["selected"]["license_note"]
+    assert "optional source-domain restriction" in state["selected"]["license_note"]
     assert "not a legal determination" in state["selected"]["license_note"]
     assert state["selected"]["permission_basis"] == "configured_source_policy"
     assert state["selected"]["license_name"] is None
@@ -695,7 +695,7 @@ def test_name_only_brand_and_description_attributes_are_query_only(owner_client,
     assert selected["exact_model_confirmed"] is False
     assert selected["model_label"] is None
     assert selected["permission_basis"] == "configured_source_policy"
-    assert "configured permitted-source policy" in selected["license_note"]
+    assert "optional source-domain restriction" in selected["license_note"]
     assert "not a legal determination" in selected["license_note"]
 
     # Inference is query-only: no brand/model/description facts were written.
@@ -865,7 +865,7 @@ def test_manufacturer_provenance_uses_official_registrable_domains(owner_client)
         ranked = rank_candidates(item, [retailer])
         assert ranked
         assert ranked[0].manufacturer_verified is False
-        assert source_permission(retailer) is None
+        assert source_permission(retailer).kind == "public_web"
 
 
 def test_downloads_require_permitted_policy_or_license_evidence(owner_client, monkeypatch):
@@ -942,20 +942,41 @@ def test_downloads_require_permitted_policy_or_license_evidence(owner_client, mo
     assert unknown_response.json()["detail"]["code"] == "no_permitted_image_candidate"
 
 
-def test_search_is_unavailable_until_a_permitted_source_policy_is_set(owner_client, monkeypatch):
-    room = create_room(owner_client, "No policy room")
-    item = create_item(owner_client, "LG TV", room["id"], description="OLED 77 inch")
-    provider(monkeypatch, candidates=[lg_candidate()], permitted_domains="")
+def test_public_web_search_selects_one_image_without_a_domain_allowlist(owner_client, monkeypatch):
+    room = create_room(owner_client, "Public web room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    first = replace(
+        lg_candidate(title="LG OLED TV 77 inch product photo"),
+        page_url="https://public-shop.example/lg-oled-77",
+        source_domain="public-shop.example",
+        image_url="https://cdn.public-shop.example/lg-oled-77.png",
+    )
+    second = replace(
+        lg_candidate(title="LG TV 77 inch accessories listing"),
+        page_url="https://other-public.example/lg-tv",
+        source_domain="other-public.example",
+        image_url="https://cdn.other-public.example/lg-tv.png",
+    )
+    calls = provider(monkeypatch, candidates=[first, second], permitted_domains="")
     state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
-    assert state["search_configured"] is False
-    assert "Settings → Online search" in state["search_reason"]
-    blocked = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
-    assert blocked.status_code == 503, blocked.text
-    assert blocked.json()["detail"]["code"] == "image_search_policy_unconfigured"
+    assert state["search_configured"] is True
+    assert state["search_reason"] is None
+    selected = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert selected.status_code == 200, selected.text
+    body = selected.json()["selected"]
+    assert body["permission_basis"] == "public_web"
+    assert body["source_page_url"] == first.page_url
+    assert body["license_name"] is None
+    assert "public web result" in body["license_note"]
+    assert "No license metadata or reuse permission" in body["license_note"]
+    assert "not a user photo" in body["license_note"]
+    assert calls["count"] == 1
     with SessionLocal() as db:
-        assert (
-            db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
+        rows = list(
+            db.scalars(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))).all()
         )
+        assert len(rows) == 1
+        assert rows[0].permission_basis == "public_web"
 
 
 def test_openrouter_image_adapter_contract_and_output_validation(monkeypatch):
@@ -1078,3 +1099,59 @@ def test_representative_thumbnail_preserves_aspect_without_cropping(upload_root)
         assert thumbnail.size[0] == 640
         assert abs((thumbnail.width / thumbnail.height) - 3.0) < 0.02
     assert (upload_root / stored.storage_key).is_file()
+
+
+def test_reference_download_rejects_oversized_and_malformed_images(owner_client, monkeypatch):
+    room = create_room(owner_client, "Unsafe image room")
+    malformed = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    provider(
+        monkeypatch,
+        candidates=[lg_candidate()],
+        permitted_domains="",
+        download=lambda candidate, **_kwargs: (
+            b"not-an-image",
+            candidate.image_url,
+            "original",
+        ),
+    )
+    rejected = owner_client.post(f"/api/v1/items/{malformed['id']}/image/find", json={})
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["detail"]["code"] == "invalid_image"
+
+    oversized = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    settings = get_settings()
+    monkeypatch.setattr(settings, "item_image_max_download_mb", 1)
+    provider(
+        monkeypatch,
+        candidates=[lg_candidate()],
+        permitted_domains="",
+        download=lambda candidate, **_kwargs: (
+            b"x" * (settings.item_image_max_download_bytes + 1),
+            candidate.image_url,
+            "original",
+        ),
+    )
+    rejected_large = owner_client.post(f"/api/v1/items/{oversized['id']}/image/find", json={})
+    assert rejected_large.status_code == 413, rejected_large.text
+    assert rejected_large.json()["detail"]["code"] == "image_too_large"
+
+
+def test_reference_lookup_is_offline_when_disabled_or_without_a_key(owner_client, monkeypatch):
+    from housetory_api.config import get_settings
+
+    room = create_room(owner_client, "Offline image room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    settings = get_settings()
+    monkeypatch.setattr(settings, "item_image_search_provider", "none")
+
+    state = owner_client.get(f"/api/v1/items/{item['id']}/image")
+    assert state.status_code == 200, state.text
+    assert state.json()["search_configured"] is False
+    assert state.json()["selected"] is None
+    blocked = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert blocked.status_code == 503, blocked.text
+    assert blocked.json()["detail"]["code"] == "image_search_unconfigured"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"]))) is None
+        )

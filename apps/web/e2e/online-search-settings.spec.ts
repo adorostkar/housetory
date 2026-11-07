@@ -102,8 +102,7 @@ test("owner can configure online search without env vars or plaintext key exposu
         permitted_source_domains:
           body.permitted_source_domains ?? current.permitted_source_domains,
         policy_configured: Boolean(
-          body.permitted_source_domains?.length ??
-            current.permitted_source_domains.length,
+          (body.reference_enabled ?? current.reference_enabled) && hasKey,
         ),
       },
       updated_at: new Date().toISOString(),
@@ -145,19 +144,17 @@ test("owner can configure online search without env vars or plaintext key exposu
     .fill("fixture-brave-key-not-a-real-credential");
   await card.getByLabel("Enable online manual search").check();
   await card.getByLabel("Enable reference-image search").check();
-  await card
-    .getByLabel("Permitted reference-image source domains")
-    .fill("lg.com\nexample.com");
   await card.getByRole("button", { name: "Save online search" }).click();
 
-  await expect(card.getByText(/Key saved · v1/)).toBeVisible();
+  await expect(card.getByText(/Key saved · v\d+/)).toBeVisible();
+  await expect(card.getByText("Ready")).toHaveCount(2);
+  await expect(card.getByText(/Needs domains/)).toHaveCount(0);
   await expect(card.getByLabel("Replace Brave Search API key")).toHaveValue("");
   await expect(card.getByText("fixture-brave-key-not-a-real-credential")).toHaveCount(
     0,
   );
-  await page.screenshot({
+  await card.screenshot({
     path: "../../docs/walkthrough/online-search/02-saved-write-only-key.png",
-    fullPage: false,
   });
 
   await card.getByRole("button", { name: "Test connection" }).click();
@@ -176,5 +173,49 @@ test("owner can configure online search without env vars or plaintext key exposu
   await page.screenshot({
     path: "../../docs/walkthrough/online-search/04-test-result.png",
     fullPage: false,
+  });
+});
+
+test("saved public-web settings refresh the system health summary without a domain list", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  await page.goto("/settings");
+  const card = page.locator("#online-search");
+  await card.scrollIntoViewIfNeeded();
+  const key = card.getByLabel(/Brave Search API key|Replace Brave Search API key/);
+  await key.fill("fixture-public-web-key-not-a-real-credential");
+  await card.getByLabel("Enable online manual search").check();
+  await card.getByLabel("Enable reference-image search").check();
+  await card.getByRole("button", { name: "Save online search" }).click();
+  await expect(card.getByText(/Key saved · v\d+/)).toBeVisible();
+  await expect(card.getByText("Ready")).toHaveCount(2);
+  await expect(card.getByText(/Needs domains/)).toHaveCount(0);
+
+  const summary = page.getByText(/Optional, not configured:/);
+  await expect(summary).toBeVisible();
+  await expect(summary).not.toContainText("Online manual search");
+  await expect(summary).not.toContainText("Reference-image search");
+  await summary.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(350);
+  await page.screenshot({
+    path: "../../docs/walkthrough/online-search/05-public-web-ready-summary.png",
+    fullPage: false,
+  });
+
+  const session = await request.get("/api/v1/auth/session");
+  const household = (await session.json()) as { household: { id: string } };
+  await request.put("/api/v1/settings/online-search", {
+    headers: { "X-Household-Id": household.household.id },
+    data: {
+      manual_enabled: false,
+      reference_enabled: false,
+      clear_api_key: true,
+      permitted_source_domains: [],
+    },
   });
 });

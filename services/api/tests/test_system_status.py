@@ -449,7 +449,7 @@ def test_system_status_summary_reports_missing_worker_as_core_and_is_owner_only(
     assert "No worker heartbeat" in worker["detail"]
 
 
-def test_system_status_summary_counts_configured_online_search_partial(owner_client, monkeypatch):
+def test_system_status_summary_does_not_require_reference_domains(owner_client, monkeypatch):
     from housetory_api.config import get_settings
 
     _healthy_heartbeat()
@@ -463,8 +463,13 @@ def test_system_status_summary_counts_configured_online_search_partial(owner_cli
     summary = owner_client.get("/api/v1/system/status/summary")
     assert summary.status_code == 200, summary.text
     body = summary.json()
-    issue = next(issue for issue in body["issues"] if issue["label"] == "Reference-image search")
-    assert issue["kind"] == "configured_feature"
-    assert issue["settings_path"] == "/settings#online-search"
-    assert "permitted source domains" in issue["detail"]
+    assert body["status"] == "healthy"
+    assert all(issue["label"] != "Reference-image search" for issue in body["issues"])
     assert "Online manual search" not in body["optional_not_configured"]
+    assert "Reference-image search" not in body["optional_not_configured"]
+    status = owner_client.get("/api/v1/system/status").json()
+    reference = next(
+        entry for entry in status["external_services"] if entry["name"] == "Reference-image search"
+    )
+    assert reference["configured"] is True
+    assert "public-web" in reference["detail"]

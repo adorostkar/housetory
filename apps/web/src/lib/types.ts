@@ -701,7 +701,11 @@ export interface ItemImage {
   license_note: string | null;
   license_name?: string | null;
   license_url?: string | null;
-  permission_basis?: "configured_source_policy" | "provider_license" | null;
+  permission_basis?:
+    | "public_web"
+    | "configured_source_policy"
+    | "provider_license"
+    | null;
   retrieved_at: string | null;
   exact_model_confirmed: boolean;
   model_label: string | null;

@@ -139,9 +139,9 @@ const status: SystemStatus = {
     },
     {
       name: "Reference-image search",
-      configured: false,
-      status: "partial",
-      detail: "Search provider is configured, but no permitted source domains are set.",
+      configured: true,
+      status: "configured",
+      detail: "Configured via Installation environment fallback for public-web reference-image lookup (not probed).",
       source: "environment",
       settings_path: "/settings#online-search",
     },

@@ -43,10 +43,11 @@ membership again. A session stores the selected household id, not a global role.
   same minimized text and requires the household Item illustrations task and
   provider consent. Online-search settings and the encrypted Brave credential
   are owner-only, household-scoped and write-only; members and viewers cannot
-  read or change them. Automatic reference downloads are default-deny and
-  require an owner-configured permitted-source domain policy or explicit
-  provider license evidence. Non-photographic images are excluded from evidence,
-  recognition and stocktake physical evidence.
+  read or change them. Automatic reference downloads use public websites by
+  default with public-address/redirect validation and image re-encoding; an
+  optional advanced domain restriction can narrow sources. Unknown reuse
+  permission is recorded honestly. Non-photographic images are excluded from
+  evidence, recognition and stocktake physical evidence.
 - `enforce_household_context` requires a current `X-Household-Id` on unsafe
   requests for accounts with more than one membership and rejects a stale id with
   `409 household_context_changed`. The frontend sends the id of the workspace it

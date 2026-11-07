@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OnlineSearchSettingsCard } from "@/components/online-search-settings";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/queries";
 import type { OnlineSearchSettings } from "@/lib/types";
 
 const baseSettings: OnlineSearchSettings = {
@@ -90,6 +91,7 @@ function renderCard(isOwner = true) {
       <OnlineSearchSettingsCard isOwner={isOwner} />
     </QueryClientProvider>,
   );
+  return client;
 }
 
 beforeEach(() => {
@@ -115,7 +117,7 @@ describe("OnlineSearchSettingsCard", () => {
       screen.getByRole("checkbox", { name: "Enable reference-image search" }),
     );
     const domains = screen.getByLabelText(
-      "Permitted reference-image source domains",
+      "Optional source restriction (advanced)",
     );
     await userEvent.clear(domains);
     await userEvent.type(domains, "lg.com{enter}example.com");
@@ -132,6 +134,49 @@ describe("OnlineSearchSettingsCard", () => {
           permitted_source_domains: ["lg.com", "example.com"],
         },
       ),
+    );
+  });
+
+  it("is ready for public-web lookup without requiring a domain list", async () => {
+    settings = {
+      ...baseSettings,
+      permitted_source_domains: [],
+      reference: {
+        ...baseSettings.reference,
+        permitted_source_domains: [],
+        policy_configured: true,
+      },
+    };
+    renderCard();
+    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Needs domains/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Add at least one permitted source domain/),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save online search" }),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.put)).toHaveBeenCalledWith(
+        "/settings/online-search",
+        expect.objectContaining({
+          permitted_source_domains: [],
+          reference_enabled: true,
+        }),
+      ),
+    );
+  });
+
+  it("invalidates system health after saving online search settings", async () => {
+    const client = renderCard();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save online search" }),
+    );
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: queryKeys.systemStatusSummary,
+      }),
     );
   });
 

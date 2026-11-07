@@ -1,9 +1,11 @@
-"""Brave Image Search adapter with conservative, provenance-gated selection.
+"""Brave Image Search adapter with public-web provenance and automatic selection.
 
 The matcher builds a temporary, query-only product profile from the item. It
 never writes inferred brands, dimensions, technologies or model guesses back to
 inventory records. Candidate selection requires compatible known attributes and
-an explicit source-permission policy before any automatic local download.
+a public HTTP(S) destination with pinned DNS, bounded redirects/downloads and a
+decodable re-encoded image. An optional legacy source-domain restriction can
+narrow candidates; an empty restriction means the public web.
 """
 
 from __future__ import annotations
@@ -325,7 +327,7 @@ class RankedImage:
 
 @dataclass(frozen=True)
 class SourcePermission:
-    kind: Literal["configured_source_policy", "provider_license"]
+    kind: Literal["public_web", "configured_source_policy", "provider_license"]
     label: str
     evidence_url: str | None
 
@@ -337,10 +339,18 @@ class SourcePermission:
                 "This is recorded evidence, not an independent legal determination "
                 "or a guarantee that the source's terms permit reuse."
             )
+        if self.kind == "public_web":
+            return (
+                f"Selected automatically from a public web result for {self.label}. "
+                "No license metadata or reuse permission was established by the search "
+                "result. Source page and retrieval time are recorded; review the "
+                "source's terms before reuse. This is a reference image, not a user "
+                "photo, and is not a legal determination."
+            )
         return (
-            f"Download allowed by the server's configured permitted-source policy "
+            f"Download allowed by the server's optional source-domain restriction "
             f"for {self.label}. Source page and retrieval time are recorded. This "
-            "records an operator policy, not a legal determination or permission "
+            "records an operator restriction, not a legal determination or permission "
             "guarantee; review the source's terms before reuse."
         )
 
@@ -954,10 +964,8 @@ def _permitted_license_names() -> frozenset[str]:
     return frozenset(_compact(entry) for entry in entries if _compact(entry))
 
 
-def permitted_source_policy_configured(
-    provider: ImageSearchProvider | None = None,
-) -> bool:
-    """The Brave adapter has no license metadata; it needs an explicit domain policy."""
+def source_restriction_enabled(provider: ImageSearchProvider | None = None) -> bool:
+    """Whether an optional legacy source-domain restriction is active."""
     return bool(_permitted_source_domains(provider))
 
 
@@ -967,7 +975,7 @@ def _asset_host_permitted(
 ) -> bool:
     domains = _permitted_source_domains(provider)
     if not domains:
-        return False
+        return True
     _page_host, image_host, thumbnail_host = _candidate_hosts(candidate)
     asset_host = image_host or thumbnail_host
     return bool(asset_host and _registrable_domain(asset_host) in domains)
@@ -988,11 +996,14 @@ def source_permission(
         )
     page_host, _image_host, _thumbnail_host = _candidate_hosts(candidate)
     domain = _registrable_domain(page_host)
-    if (
-        domain
-        and domain in _permitted_source_domains(provider)
-        and _asset_host_permitted(candidate, provider)
-    ):
+    domains = _permitted_source_domains(provider)
+    if not domains:
+        return SourcePermission(
+            kind="public_web",
+            label=domain or candidate.source_domain or "public web",
+            evidence_url=candidate.page_url,
+        )
+    if domain and domain in domains and _asset_host_permitted(candidate, provider):
         return SourcePermission(
             kind="configured_source_policy",
             label=domain,
@@ -1008,7 +1019,7 @@ def _url_permitted(
 ) -> bool:
     if not url:
         return False
-    if permission.kind == "provider_license":
+    if permission.kind in {"provider_license", "public_web"}:
         return True
     host = (urlparse(url).hostname or "").lower()
     return bool(host and _registrable_domain(host) in _permitted_source_domains(provider))
@@ -1150,12 +1161,13 @@ def _download_candidate(
             last_error = ManualFetchError("The candidate was not an image response.")
             continue
         return body, final_url, label
-    raise ApiError(
-        422,
-        "image_download_failed",
+    detail = (
         "The selected image could not be downloaded safely; the category icon "
-        "fallback remains available.",
-    ) from last_error
+        "fallback remains available."
+    )
+    if last_error is not None:
+        detail = f"{detail[:-1]} ({str(last_error)[:240]})."
+    raise ApiError(422, "image_download_failed", detail) from last_error
 
 
 def _reuse_household_reference(
@@ -1260,17 +1272,6 @@ def find_and_select_reference(
         raise ApiError(
             503, "image_search_unconfigured", provider.reason or "Image search is not configured."
         )
-    # The current documented Brave Image Search response carries no license
-    # metadata, so this adapter requires an explicit domain policy. An adapter
-    # that later supplies license evidence can pass source_permission instead.
-    if provider.kind == "brave" and not permitted_source_policy_configured(provider):
-        raise ApiError(
-            503,
-            "image_search_policy_unconfigured",
-            "Reference-image downloads require at least one permitted source domain. "
-            "Add domains in Settings → Online search. The category icon fallback "
-            "remains available.",
-        )
     profile = build_product_profile(item)
     if profile.brand_ambiguous or not profile.brand or not profile.item_type:
         raise ApiError(
@@ -1294,13 +1295,20 @@ def find_and_select_reference(
         if permission is not None:
             permitted.append((entry, permission))
     if not permitted and ranked:
-        raise ApiError(
-            422,
-            "no_permitted_image_candidate",
-            "A compatible image was found, but its reuse permission is not established "
-            "by the configured permitted-source policy or provider license evidence. "
-            "The category icon fallback remains available.",
-        )
+        if source_restriction_enabled(provider):
+            detail = (
+                "A compatible public image was found, but it falls outside your "
+                "optional source-domain restriction. Clear or adjust that restriction "
+                "in Settings → Online search; the category icon fallback remains "
+                "available."
+            )
+        else:
+            detail = (
+                "A compatible image was found, but its source provenance or license "
+                "evidence could not be verified. The category icon fallback remains "
+                "available."
+            )
+        raise ApiError(422, "no_permitted_image_candidate", detail)
     if not permitted:
         raise ApiError(
             422,

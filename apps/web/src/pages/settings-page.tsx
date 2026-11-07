@@ -272,9 +272,10 @@ export function SettingsPage() {
                 >
                   Online search
                 </Link>
-                : add one Brave Search key and at least one permitted source domain.
-                AI provider credentials do not enable online lookup, and Housetory only
-                downloads from the permitted sources.
+                : add one Brave Search key. Reference-image lookup searches public
+                websites automatically by default; an optional advanced source
+                restriction can narrow downloads. AI provider credentials do not enable
+                online lookup.
               </p>
             </div>
             <div className="mt-2 rounded-lg border border-border/60 bg-background/30 p-3">

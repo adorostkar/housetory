@@ -44,7 +44,7 @@ class ItemImage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("byte_size IS NULL OR byte_size > 0", name="byte_size_positive"),
         CheckConstraint(
             "permission_basis IS NULL OR permission_basis in "
-            "('configured_source_policy', 'provider_license')",
+            "('public_web', 'configured_source_policy', 'provider_license')",
             name="valid_permission_basis",
         ),
         Index("ix_item_images_item_status", "item_id", "status"),

@@ -104,15 +104,14 @@ Tailscale is optional.
   priority, followed by labelled reference images, accepted AI illustrations and
   a compact category-icon fallback. Built-in line-art shapes and their chooser
   have been removed; legacy built-in rows are retained but retired from display.
-  Optional Brave Image Search automatically selects a
-  compatible permitted-source reference without a candidate-approval dialog,
-  using conservative query-only brand/type/size/technology inference when the
-  structured brand is blank, whole-token exact-model matching and verified
-  manufacturer registrable domains. It records source/provenance and honestly
-  labels representative images as “exact model not confirmed.” Automatic
-  downloads are default-deny until the household owner adds at least one
-  permitted source domain in **Settings → Online search** (or explicit provider
-  license evidence exists). Optional
+  Optional Brave Image Search automatically selects a compatible public-web
+  reference without a candidate-approval dialog, using conservative query-only
+  brand/type/size/technology inference when the structured brand is blank,
+  whole-token exact-model matching and verified manufacturer registrable domains.
+  It records source/provenance, keeps unknown reuse permission honest, and labels
+  representative images as “exact model not confirmed.” Public-web lookup needs
+  only the household enable toggle and Brave key; an optional advanced domain
+  restriction can narrow downloads. Optional
   OpenAI Images task generation is manual
   preview/accept/reject by default, with a separate default-off new-item setting,
   hard daily count caps and an explicit batch action. Non-photographic imagery is
@@ -302,7 +301,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 400 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 403 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -357,12 +356,13 @@ stack, not just unit mocks:
   cross-household ambiguity/property isolation and per-household AI provider
   selection, item-image category-icon fallback/legacy-row retirement/reference
   ranking/actual-photo priority, query-only attribute inference, size/technology/variant conflicts, exact-model
-  token boundaries, manufacturer/deceptive-host provenance, default-deny source
-  permission and license evidence, evidence exclusion, AI preview/accept/reject,
+  token boundaries, manufacturer/deceptive-host provenance, public-web
+  provenance/unknown-permission honesty, optional source restriction and license
+  evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 212 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 68 checked-in Playwright workflows (67 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 214 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 69 checked-in Playwright workflows (68 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -650,7 +650,7 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
 | `ITEM_IMAGE_SEARCH_PROVIDER` | `auto` | Operator fallback when no household online-search row exists: `auto`, `brave` or `none` |
-| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Operator-only fallback domain policy; the owner normally sets structured domains in Settings → Online search. Empty disables automatic downloads |
+| `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Optional operator-only legacy source restriction when no household row exists. Empty means public-web lookup, not disabled |
 | `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider license identifiers accepted as explicit download evidence |
 | `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional `brand=domain|domain` manufacturer provenance additions/overrides |
 | `ITEM_IMAGE_KNOWN_BRANDS` | empty | Optional extra brand names for query-only matching |

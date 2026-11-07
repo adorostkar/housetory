@@ -78,6 +78,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.onlineSearchSettings });
     void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatus });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatusSummary });
     void queryClient.invalidateQueries({ queryKey: ["items"] });
   };
 
@@ -152,15 +153,12 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
     );
   }
 
-  const domains = domainList(domainsText);
   const hasKeyAfterSave = settings.has_api_key || Boolean(apiKey.trim());
   const keyMissing =
     (manualEnabled || referenceEnabled) && !hasKeyAfterSave;
-  const domainsMissing = referenceEnabled && domains.length === 0;
   const saveDisabled =
     save.isPending ||
     keyMissing ||
-    domainsMissing ||
     (Boolean(apiKey.trim()) && !settings.credential_storage_ready);
 
   return (
@@ -253,23 +251,15 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         <div className="rounded-xl border border-border/65 bg-background/35 p-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-[0.86rem] font-medium">Reference-image search</h3>
-            <Badge
-              variant={
-                settings.reference.configured && settings.reference.policy_configured
-                  ? "sage"
-                  : "outline"
-              }
-            >
-              {settings.reference.configured && settings.reference.policy_configured
-                ? "Ready"
-                : settings.reference.configured
-                  ? "Needs domains"
-                  : "Not configured"}
+            <Badge variant={settings.reference.configured ? "sage" : "outline"}>
+              {settings.reference.configured ? "Ready" : "Not configured"}
             </Badge>
           </div>
           <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
-            Look up a product image for review. Downloads happen only from your
-            permitted source domains and still require manual acceptance.
+            Searches public websites and automatically selects one suitable product
+            image from the item name, brand or description. Exact model is not
+            required for a representative image. Actual photos always take priority;
+            a selected reference can be replaced or removed.
           </p>
           <label className="mt-3 flex items-start gap-2.5 text-[0.76rem]">
             <input
@@ -337,21 +327,23 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         </Field>
 
         <Field
-          label="Permitted reference-image source domains"
+          label="Optional source restriction (advanced)"
           htmlFor="online-search-domains"
-          hint="One per line; subdomains included"
+          hint="Leave blank for the public web"
         >
           <Textarea
             id="online-search-domains"
             className="min-h-28 font-mono text-[0.74rem]"
             value={domainsText}
             onChange={(event) => setDomainsText(event.target.value)}
-            placeholder={"example.com\nmanufacturer.com"}
+            placeholder={"Leave blank to search public websites\nexample.com (optional)"}
           />
           <p className="mt-2 text-[0.66rem] leading-relaxed text-muted-foreground">
-            Required before automatic reference-image downloads. Enter registrable
-            domains only; schemes, paths, ports and wildcards are rejected. Source
-            pages and license evidence are still recorded for every accepted image.
+            Empty is the default and allows suitable images from public websites.
+            Enter registrable domains only if you deliberately want to narrow
+            downloads to those sites. Source page, retrieval time and any known
+            license metadata are recorded; unknown reuse permission is labelled
+            honestly.
           </p>
         </Field>
       </div>
@@ -383,11 +375,6 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
           Enter a Brave key before enabling manual or reference-image search.
         </p>
       )}
-      {domainsMissing && (
-        <p className="mt-2 text-[0.7rem] text-brass">
-          Add at least one permitted source domain before enabling reference-image search.
-        </p>
-      )}
       {formError && <div className="mt-3"><FormError message={formError} /></div>}
       {testResult && (
         <p
@@ -408,14 +395,15 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         <p className="mt-2">
           If no household online-search settings have been saved, the installation
           environment can supply <code>BRAVE_SEARCH_API_KEY</code>, its enable flags
-          and <code>ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS</code>. Saving this card makes
-          household settings authoritative, including explicit disable and key
-          removal. The advanced <code>MANUAL_SEARCH_URL</code> gateway remains an
-          operator-only installation fallback and is not edited here.
+          and an optional <code>ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS</code> restriction.
+          Saving this card makes household settings authoritative, including explicit
+          disable and key removal. The advanced <code>MANUAL_SEARCH_URL</code> gateway
+          remains an operator-only installation fallback and is not edited here.
         </p>
         <p className="mt-1">
-          Existing Brave image permission, license, SSRF and download limits continue
-          to apply. This card cannot widen them.
+          Public-address/redirect validation, byte/dimension limits, decodable-image
+          re-encoding and source attribution continue to apply independently of any
+          optional domain restriction.
         </p>
       </details>
 
@@ -433,7 +421,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         open={removeOpen}
         onOpenChange={setRemoveOpen}
         title="Remove the Brave Search key?"
-        description="Manual and reference-image search will be disabled for this household. Permitted source domains are kept, and installation fallback will not reactivate because household settings remain authoritative."
+        description="Manual and reference-image search will be disabled for this household. The optional source restriction is kept, and installation fallback will not reactivate because household settings remain authoritative."
         confirmLabel="Remove key"
         onConfirm={async () => {
           await removeKey.mutateAsync();

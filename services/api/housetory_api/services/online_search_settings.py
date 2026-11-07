@@ -33,19 +33,17 @@ def _channel_for_manual(provider: manual_web.SearchProviderConfig) -> OnlineSear
 def _channel_for_reference(
     provider: item_image_search.ImageSearchProvider,
 ) -> OnlineSearchReferenceChannelOut:
-    policy = bool(provider.permitted_domains)
-    reason = provider.reason
-    if provider.configured and not policy:
-        reason = online_search.NO_DOMAINS_REASON
     return OnlineSearchReferenceChannelOut(
         enabled=False,
         configured=provider.configured,
         source=provider.source,
         provider=provider.kind if provider.kind != "none" else None,
         provider_label=provider.label,
-        reason=reason,
+        reason=provider.reason,
         permitted_source_domains=sorted(provider.permitted_domains),
-        policy_configured=policy,
+        # Public-web lookup is the default. A non-empty list is an optional
+        # advanced restriction, not a readiness prerequisite.
+        policy_configured=provider.configured,
     )
 
 
@@ -95,7 +93,7 @@ def serialize_settings(db: Session, household_id: uuid.UUID) -> OnlineSearchSett
         manual=manual_channel,
         reference=reference_channel,
         environment_manual_available=env_manual.kind != "none",
-        environment_reference_available=bool(env_image.configured and env_image.permitted_domains),
+        environment_reference_available=env_image.configured,
         updated_at=updated_at,
         warning=warning,
     )
@@ -129,7 +127,6 @@ def update_settings(
         if payload.reference_enabled is not None
         else row.reference_enabled
     )
-    domains_after = domains if domains is not None else list(row.permitted_source_domains or [])
     if payload.clear_api_key and (manual_after or reference_after):
         raise ApiError(
             422,
@@ -142,13 +139,6 @@ def update_settings(
             "online_search_key_required",
             "Add a Brave Search API key before enabling manual or reference-image search.",
         )
-    if reference_after and not domains_after:
-        raise ApiError(
-            422,
-            "online_search_domains_required",
-            "Add at least one permitted source domain before enabling reference-image search.",
-        )
-
     if payload.manual_enabled is not None:
         row.manual_enabled = payload.manual_enabled
     if payload.reference_enabled is not None:
@@ -178,8 +168,6 @@ def _combined_reason(
         reasons.append(f"Manual: {manual.reason}")
     if reference.kind == "none" and reference.reason:
         reasons.append(f"Reference: {reference.reason}")
-    if reference.configured and not reference.permitted_domains:
-        reasons.append(f"Reference: {online_search.NO_DOMAINS_REASON}")
     return " ".join(reasons) or "No Brave online search features are enabled."
 
 
@@ -227,17 +215,13 @@ def test_connection(db: Session, household_id: uuid.UUID, *, confirm: bool) -> O
 
     if reference.configured:
         testable = True
-        if not reference.permitted_domains:
+        try:
+            item_image_search.brave_image_connection_test(reference)
+            reference_ok = True
+            parts.append("Reference-image search connected.")
+        except ApiError as exc:
             reference_ok = False
-            parts.append(online_search.NO_DOMAINS_REASON)
-        else:
-            try:
-                item_image_search.brave_image_connection_test(reference)
-                reference_ok = True
-                parts.append("Reference-image search connected.")
-            except ApiError as exc:
-                reference_ok = False
-                parts.append(exc.message)
+            parts.append(exc.message)
     elif reference.reason:
         parts.append(f"Reference image search: {reference.reason}")
 
