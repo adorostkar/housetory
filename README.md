@@ -301,7 +301,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 410 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 417 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -358,9 +358,10 @@ stack, not just unit mocks:
   ranking/actual-photo priority, query-only attribute inference, size/technology/variant conflicts, exact-model
   token boundaries, manufacturer/deceptive-host provenance, public-web
   provenance/unknown-permission honesty, optional source restriction, bounded
-  candidate format/HTTP fallback, AVIF re-encoding, clean-photo vs
-  spec/dimension infographic ranking, PS5 empty-box packaging alias, bounded
-  reference/AI gallery frames and license evidence, evidence exclusion, AI
+  candidate format/HTTP fallback, AVIF re-encoding, decoded resolution and
+  original-vs-thumbnail quality fallback, clean-photo vs spec/dimension
+  infographic ranking, PS5 empty-box packaging alias, bounded reference/AI
+  gallery frames and license evidence, evidence exclusion, AI
   preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.

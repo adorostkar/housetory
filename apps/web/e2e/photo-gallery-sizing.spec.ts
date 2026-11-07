@@ -271,10 +271,51 @@ test("reference and AI images stay inside the same bounded gallery frame", async
   };
 
   const variants = [
-    { file: "landscape-3x2.png", label: "Reference image", sourceType: "reference", key: "reference-landscape" },
-    { file: "portrait-2x3.png", label: "Reference image", sourceType: "reference", key: "reference-portrait" },
-    { file: "square-1x1.png", label: "Reference image", sourceType: "reference", key: "reference-square" },
-    { file: "portrait-2x3.png", label: "AI illustration", sourceType: "ai", key: "ai-portrait" },
+    {
+      file: "landscape-3x2.png",
+      width: 900,
+      height: 600,
+      label: "Reference image",
+      sourceType: "reference",
+      key: "reference-landscape",
+      screenshot: "07-reference-landscape-desktop.png",
+    },
+    {
+      file: "portrait-2x3.png",
+      width: 600,
+      height: 900,
+      label: "Reference image",
+      sourceType: "reference",
+      key: "reference-portrait",
+      screenshot: "08-reference-portrait-desktop.png",
+    },
+    {
+      file: "square-1x1.png",
+      width: 700,
+      height: 700,
+      label: "Reference image",
+      sourceType: "reference",
+      key: "reference-square",
+      screenshot: "09-reference-square-desktop.png",
+    },
+    {
+      file: "product-800-1x1.png",
+      width: 800,
+      height: 800,
+      label: "Reference image",
+      sourceType: "reference",
+      key: "reference-product-800",
+      screenshot: "11-reference-product-800-desktop.png",
+    },
+    {
+      file: "portrait-2x3.png",
+      width: 600,
+      height: 900,
+      label: "AI illustration",
+      sourceType: "ai",
+      key: "ai-portrait",
+      screenshot: null,
+    },
   ] as const;
   let representative: Record<string, unknown> | null = null;
   await page.route(
@@ -304,8 +345,8 @@ test("reference and AI images stay inside the same bounded gallery frame", async
       status: "active",
       url: dataUrl,
       thumbnail_url: dataUrl,
-      width: variant.file === "landscape-3x2.png" ? 900 : variant.file === "portrait-2x3.png" ? 600 : 700,
-      height: variant.file === "portrait-2x3.png" ? 900 : variant.file === "square-1x1.png" ? 700 : 600,
+      width: variant.width,
+      height: variant.height,
       source_name: "Fixture public source",
       source_url: null,
       source_page_url: null,
@@ -355,21 +396,9 @@ test("reference and AI images stay inside the same bounded gallery frame", async
         metrics.naturalWidth / metrics.naturalHeight,
         1,
       );
-      if (viewport.width === 1440 && variant.key === "reference-landscape") {
+      if (viewport.width === 1440 && variant.screenshot) {
         await page.screenshot({
-          path: "../../docs/walkthrough/photo-sizing/07-reference-landscape-desktop.png",
-          fullPage: false,
-        });
-      }
-      if (viewport.width === 1440 && variant.key === "reference-portrait") {
-        await page.screenshot({
-          path: "../../docs/walkthrough/photo-sizing/08-reference-portrait-desktop.png",
-          fullPage: false,
-        });
-      }
-      if (viewport.width === 1440 && variant.key === "reference-square") {
-        await page.screenshot({
-          path: "../../docs/walkthrough/photo-sizing/09-reference-square-desktop.png",
+          path: `../../docs/walkthrough/photo-sizing/${variant.screenshot}`,
           fullPage: false,
         });
       }

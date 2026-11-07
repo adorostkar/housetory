@@ -641,18 +641,12 @@ def delete_import_key(storage_key: str | None) -> None:
             break
 
 
-def store_item_image_bytes(
-    household_id: uuid.UUID,
-    item_id: uuid.UUID,
-    content: bytes,
-    *,
-    source_type: Literal["reference", "ai"],
-    filename: str | None = None,
-) -> StoredItemImage:
-    """Normalize an untrusted downloaded/generated image into a private derivative.
+def inspect_item_image_bytes(content: bytes) -> tuple[str, int, int, bool]:
+    """Validate downloaded/generated image bytes without touching storage.
 
-    Only a re-encoded image is stored; source metadata and volatile EXIF are not
-    copied into the derivative. Actual user photos use a separate table and path.
+    Returns ``(format, width, height, has_alpha)`` after a real decode and
+    dimension check. Callers use this before selecting an image so malformed,
+    unsupported or undersized candidates can be skipped.
     """
     settings = get_settings()
     max_bytes = settings.item_image_max_download_bytes
@@ -689,6 +683,23 @@ def store_item_image_bytes(
         )
     if width < 1 or height < 1 or width * height > 40_000_000:
         raise ApiError(422, "image_dimensions", "The image dimensions are not supported.")
+    return image_format, width, height, has_alpha
+
+
+def store_item_image_bytes(
+    household_id: uuid.UUID,
+    item_id: uuid.UUID,
+    content: bytes,
+    *,
+    source_type: Literal["reference", "ai"],
+    filename: str | None = None,
+) -> StoredItemImage:
+    """Normalize an untrusted downloaded/generated image into a private derivative.
+
+    Only a re-encoded image is stored; source metadata and volatile EXIF are not
+    copied into the derivative. Actual user photos use a separate table and path.
+    """
+    _image_format, width, height, has_alpha = inspect_item_image_bytes(content)
 
     base_dir = _root() / "households" / str(household_id) / "items" / str(item_id) / "images"
     image_id = uuid.uuid4()

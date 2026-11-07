@@ -105,6 +105,21 @@ actual reasons rather than a user-upload format message.
   usable product photo;
 - items that are intentionally diagrams/documents are exempt from that
   infographic penalty;
+- Brave's original/full-size `properties.url` is requested before its search
+  thumbnail. If the original decodes below the quality floor, the thumbnail may
+  be tried only when that image itself passes the same decoded check. Nothing is
+  upscaled to pretend a small source is adequate;
+- image dimensions and area are validated after a real decode, not from search
+  metadata. The quality floor is a 256 px short side and 65,536 px area, with a
+  bounded thin-product exception (at least 120 px short side, 600 px long side,
+  120,000 px area and 2.5:1 aspect). Metadata resolution only affects ranking
+  order; the decoder is authoritative;
+- undersized, malformed or unsupported downloads are treated like other failed
+  candidates and fall through within the existing six-attempt cap. Existing
+  active/household-reused references are only reused when their stored
+  dimensions pass the same floor. If no candidate passes, the lookup returns
+  an explicit quality failure and does not report an existing undersized image
+  as a successful update;
 - otherwise a representative image may be accepted but is labelled
   **“exact model not confirmed”**.
 
@@ -340,7 +355,11 @@ They use fixture responses and never make live search/generation calls. Public-w
 coverage verifies no-domain readiness, automatic single-image selection outside
 any preexisting allowlist, `public_web` provenance/unknown-permission wording,
 optional legacy restriction behavior, private/non-image/oversized/malformed
-rejection, actual-photo priority and household/viewer boundaries.
+rejection, actual-photo priority and household/viewer boundaries. The decoded
+resolution suite covers Brave-shaped original/thumbnail parsing, original-first
+download, tiny-original-to-adequate-thumbnail fallback, deceptive 800×800
+metadata over a real 90×90 payload, all-undersized rejection without storage,
+and clean-product-photo preference over tiny banners and specification graphics.
 
 Vitest covers category-icon/reference/actual card priority, source controls and
 preview acceptance. Disposable Playwright covers category-icon fallback, a mocked
@@ -350,12 +369,13 @@ cancellation. Reference/AI gallery bounds are checked with real landscape,
 portrait, square and AI fixture images at phone/tablet/desktop widths:
 [landscape reference](walkthrough/photo-sizing/07-reference-landscape-desktop.png),
 [portrait reference](walkthrough/photo-sizing/08-reference-portrait-desktop.png),
-[square reference](walkthrough/photo-sizing/09-reference-square-desktop.png) and
-[AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
+[square reference](walkthrough/photo-sizing/09-reference-square-desktop.png),
+[800×800 product reference](walkthrough/photo-sizing/11-reference-product-800-desktop.png)
+and [AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
 Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **410 PostgreSQL backend tests**, **214 Vitest tests**
+Final local verification: **417 PostgreSQL backend tests**, **214 Vitest tests**
 and **70 disposable-stack Playwright workflows** (69 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup

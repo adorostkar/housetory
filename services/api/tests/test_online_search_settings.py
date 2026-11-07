@@ -104,7 +104,7 @@ def _save(
 
 def _png_bytes() -> bytes:
     output = io.BytesIO()
-    Image.new("RGB", (320, 180), (40, 90, 150)).save(output, format="PNG")
+    Image.new("RGB", (640, 360), (40, 90, 150)).save(output, format="PNG")
     return output.getvalue()
 
 

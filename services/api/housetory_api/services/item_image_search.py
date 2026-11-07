@@ -43,6 +43,12 @@ MAX_SEARCH_RESPONSE_BYTES = 1_000_000
 MAX_QUERY_CHARS = 400
 MAX_QUERY_WORDS = 50
 MAX_REFERENCE_IMAGE_ATTEMPTS = 6
+REFERENCE_MIN_SHORT_SIDE = 256
+REFERENCE_MIN_AREA = 65_536
+REFERENCE_THIN_MIN_SHORT_SIDE = 120
+REFERENCE_THIN_MIN_LONG_SIDE = 600
+REFERENCE_THIN_MIN_AREA = 120_000
+REFERENCE_THIN_MIN_RATIO = 2.5
 SKIPPABLE_IMAGE_ERRORS = {
     "empty_image",
     "invalid_image",
@@ -1038,6 +1044,22 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
             ratio = candidate.width / max(candidate.height, 1)
             if 0.5 <= ratio <= 2.0:
                 score += 2
+            candidate_short = min(candidate.width, candidate.height)
+            candidate_long = max(candidate.width, candidate.height)
+            candidate_area = candidate.width * candidate.height
+            if candidate_short >= REFERENCE_MIN_SHORT_SIDE and candidate_area >= REFERENCE_MIN_AREA:
+                score += 5
+            elif (
+                candidate_short >= REFERENCE_THIN_MIN_SHORT_SIDE
+                and candidate_long >= REFERENCE_THIN_MIN_LONG_SIDE
+                and candidate_area >= REFERENCE_THIN_MIN_AREA
+                and candidate_long / max(candidate_short, 1) >= REFERENCE_THIN_MIN_RATIO
+            ):
+                score += 2
+            else:
+                # Metadata may be deceptive; this only affects ordering.
+                # Decoded dimensions are validated before any store.
+                score -= 6
 
         # Prefer usable product photography over specification sheets,
         # measurement diagrams, text-heavy marketing collages and packaging
@@ -1290,11 +1312,26 @@ def _brave_image_results(provider: ImageSearchProvider, query: str) -> list[Imag
     return parse_brave_image_results(payload)
 
 
+def _reference_dimensions_ok(width: int, height: int) -> bool:
+    short = min(width, height)
+    long = max(width, height)
+    area = width * height
+    if short >= REFERENCE_MIN_SHORT_SIDE and area >= REFERENCE_MIN_AREA:
+        return True
+    return bool(
+        short >= REFERENCE_THIN_MIN_SHORT_SIDE
+        and long >= REFERENCE_THIN_MIN_LONG_SIDE
+        and area >= REFERENCE_THIN_MIN_AREA
+        and long / max(short, 1) >= REFERENCE_THIN_MIN_RATIO
+    )
+
+
 def _download_candidate(
     candidate: ImageCandidate,
     *,
     permission: SourcePermission | None = None,
     provider: ImageSearchProvider | None = None,
+    require_reference_quality: bool = False,
 ) -> tuple[bytes, str, str]:
     settings = get_settings()
     max_bytes = settings.item_image_max_download_bytes
@@ -1325,6 +1362,18 @@ def _download_candidate(
         if content_type and not content_type.startswith("image/"):
             last_error = ManualFetchError("The candidate was not an image response.")
             continue
+        if require_reference_quality:
+            try:
+                _image_format, width, height, _has_alpha = storage.inspect_item_image_bytes(body)
+            except ApiError as exc:
+                last_error = ManualFetchError(_image_attempt_reason(exc))
+                continue
+            if not _reference_dimensions_ok(width, height):
+                last_error = ManualFetchError(
+                    f"decoded image is only {width}x{height}, below the minimum "
+                    "reference-image quality"
+                )
+                continue
         return body, final_url, label
     detail = (
         "The selected image could not be downloaded safely; the category icon "
@@ -1354,7 +1403,13 @@ def _reuse_household_reference(
         .order_by(ItemImage.created_at.desc())
         .limit(1)
     )
-    if existing is None or existing.storage_key is None:
+    if (
+        existing is None
+        or existing.storage_key is None
+        or existing.width is None
+        or existing.height is None
+        or not _reference_dimensions_ok(existing.width, existing.height)
+    ):
         return None
     try:
         content = storage.resolve_key(existing.storage_key).read_bytes()
@@ -1441,6 +1496,9 @@ def find_and_select_reference(
             current is not None
             and current.source_type == "reference"
             and current.search_fingerprint == fingerprint
+            and current.width is not None
+            and current.height is not None
+            and _reference_dimensions_ok(current.width, current.height)
         ):
             return current
         reused = _reuse_household_reference(db, item, fingerprint, actor_user_id)
@@ -1508,10 +1566,31 @@ def find_and_select_reference(
                 candidate_rank.candidate,
                 permission=permission,
                 provider=provider,
+                require_reference_quality=True,
             )
         except ApiError as exc:
             attempt_errors.append(
                 f"{candidate_rank.candidate.source_domain or 'public source'}: {exc.message}"
+            )
+            continue
+        # The decoder is authoritative. Metadata dimensions and the downloaded
+        # URL's apparent role are not enough: tiny search thumbnails and
+        # deceptive full-size claims are rejected before anything is stored.
+        try:
+            _image_format, decoded_width, decoded_height, _has_alpha = (
+                storage.inspect_item_image_bytes(content)
+            )
+        except ApiError as exc:
+            attempt_errors.append(
+                f"{candidate_rank.candidate.source_domain or 'public source'}: "
+                f"{_image_attempt_reason(exc)}"
+            )
+            continue
+        if not _reference_dimensions_ok(decoded_width, decoded_height):
+            attempt_errors.append(
+                f"{candidate_rank.candidate.source_domain or 'public source'}: "
+                f"decoded image is only {decoded_width}x{decoded_height}, below "
+                "the minimum reference-image quality"
             )
             continue
         # Recheck after the network call so a real photo cannot be overwritten.

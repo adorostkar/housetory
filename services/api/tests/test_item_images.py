@@ -30,6 +30,7 @@ from housetory_api.services.item_image_search import (
     reference_search_ready,
     source_permission,
 )
+from housetory_api.services.item_images import image_search_fingerprint
 
 
 def png_bytes(color=(30, 90, 140), size=(720, 520)):
@@ -1514,3 +1515,304 @@ def test_intentional_diagram_item_does_not_penalize_diagram_candidates(owner_cli
         ranked = rank_candidates(item, [diagram])
         assert ranked
         assert ranked[0].candidate.page_url == diagram.page_url
+
+
+def test_brave_original_800_is_preferred_over_90_thumbnail(owner_client, monkeypatch):
+    room = create_room(owner_client, "Original image room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    candidate = replace(
+        lg_candidate(title="LG OLED TV 77 inch product photo"),
+        page_url="https://public-shop.example/lg-oled-77",
+        source_domain="public-shop.example",
+        image_url="https://cdn.public-shop.example/lg-oled-77-original.png",
+        thumbnail_url="https://cdn.public-shop.example/lg-oled-77-thumb.png",
+        width=800,
+        height=800,
+    )
+    requested: list[str] = []
+
+    def download(candidate, **_kwargs):
+        requested.append(candidate.image_url)
+        if candidate.image_url.endswith("thumb.png"):
+            return png_bytes(size=(90, 90)), candidate.image_url, "thumbnail"
+        return png_bytes(size=(800, 800)), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[candidate],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["source_url"] == candidate.image_url
+    assert requested == [candidate.image_url]
+    with SessionLocal() as db:
+        stored = db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"])))
+        assert stored is not None
+        assert (stored.width, stored.height) == (800, 800)
+
+
+def test_deceptive_metadata_tiny_original_is_skipped_for_adequate_candidate(
+    owner_client, monkeypatch
+):
+    room = create_room(owner_client, "Decoded quality room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    tiny = replace(
+        lg_candidate(title="LG OLED TV 77 inch tiny banner"),
+        page_url="https://public-images.example/tiny-banner",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/tiny-banner.png",
+        thumbnail_url="https://cdn.public-images.example/tiny-banner-thumb.png",
+        width=800,
+        height=800,
+    )
+    adequate = replace(
+        lg_candidate(title="LG OLED TV 77 inch product photo"),
+        page_url="https://other-public.example/lg-77-photo",
+        source_domain="other-public.example",
+        image_url="https://cdn.other-public.example/lg-77-photo.png",
+        thumbnail_url="https://cdn.other-public.example/lg-77-photo-thumb.png",
+        width=800,
+        height=800,
+    )
+
+    def download(candidate, **_kwargs):
+        if candidate.image_url.startswith("https://cdn.public-images.example/"):
+            return png_bytes(size=(90, 90)), candidate.image_url, "original"
+        return png_bytes(size=(800, 800)), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[tiny, adequate],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["source_page_url"] == adequate.page_url
+    with SessionLocal() as db:
+        stored = db.scalar(select(ItemImage).where(ItemImage.item_id == uuid.UUID(item["id"])))
+        assert stored is not None
+        assert (stored.width, stored.height) == (800, 800)
+
+
+def test_all_undersized_images_fail_without_storing_junk(owner_client, monkeypatch):
+    room = create_room(owner_client, "All tiny room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    tiny_one = replace(
+        lg_candidate(title="LG OLED TV 77 inch Serie de OLED marketing banner"),
+        page_url="https://public-images.example/tiny-one",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/tiny-one.png",
+        width=800,
+        height=800,
+    )
+    tiny_two = replace(
+        lg_candidate(title="LG OLED TV 77 inch tiny alternate"),
+        page_url="https://public-images.example/tiny-two",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/tiny-two.png",
+        width=800,
+        height=800,
+    )
+
+    def download(candidate, **_kwargs):
+        return png_bytes(size=(90, 90)), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[tiny_one, tiny_two],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "image_download_failed"
+    assert "below the minimum reference-image quality" in detail["message"]
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        assert (
+            db.scalar(
+                select(ItemImage).where(
+                    ItemImage.item_id == stored_item.id,
+                    ItemImage.source_type == "reference",
+                )
+            )
+            is None
+        )
+        image_dir = (
+            get_settings().resolved_uploads_dir
+            / "households"
+            / str(stored_item.household_id)
+            / "items"
+            / str(stored_item.id)
+            / "images"
+        )
+        assert not image_dir.exists() or not any(image_dir.iterdir())
+
+
+def test_clean_product_photo_beats_tiny_banner_and_dimension_graphic(owner_client, monkeypatch):
+    room = create_room(owner_client, "Combined visual quality room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    banner = replace(
+        lg_candidate(title="LG OLED TV 77 inch Serie de OLED marketing banner"),
+        page_url="https://public-images.example/banner",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/banner.png",
+        width=800,
+        height=800,
+    )
+    dimensions = replace(
+        lg_candidate(title="LG OLED TV 77 inch dimensions drawing measurements"),
+        page_url="https://www.lg.com/support/dimensions",
+        source_domain="lg.com",
+        image_url="https://www.lg.com/support/dimensions.png",
+        width=1200,
+        height=1200,
+    )
+    clean = replace(
+        lg_candidate(title="LG OLED TV 77 inch product photo"),
+        page_url="https://retailer.example/lg-77-photo",
+        source_domain="retailer.example",
+        image_url="https://cdn.retailer.example/lg-77-photo.png",
+        width=800,
+        height=800,
+    )
+
+    def download(candidate, **_kwargs):
+        if candidate.image_url.endswith("banner.png"):
+            return png_bytes(size=(90, 90)), candidate.image_url, "original"
+        return png_bytes(size=(800, 800)), candidate.image_url, "original"
+
+    provider(
+        monkeypatch,
+        candidates=[banner, dimensions, clean],
+        permitted_domains="",
+        download=download,
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_page_url"] == clean.page_url
+    assert selected["width"] == 800 and selected["height"] == 800
+
+
+def test_brave_shaped_result_uses_full_url_and_thumbnail_separately():
+    payload = {
+        "results": [
+            {
+                "title": "LG OLED TV 77 inch product photo",
+                "url": "https://www.lg.com/us/tvs/oled-77",
+                "source": "lg.com",
+                "thumbnail": {
+                    "src": "https://imgs.search.brave.com/tiny-thumb",
+                    "width": 90,
+                    "height": 90,
+                },
+                "properties": {
+                    "url": "https://media.lg.com/full/oled-77.png",
+                    "width": 800,
+                    "height": 800,
+                },
+            }
+        ]
+    }
+    parsed = parse_brave_image_results(payload)
+    assert len(parsed) == 1
+    assert parsed[0].image_url == "https://media.lg.com/full/oled-77.png"
+    assert parsed[0].thumbnail_url == "https://imgs.search.brave.com/tiny-thumb"
+    assert (parsed[0].width, parsed[0].height) == (800, 800)
+
+
+def test_download_tries_original_then_uses_adequate_thumbnail(monkeypatch):
+    candidate = replace(
+        lg_candidate(),
+        image_url="https://media.lg.com/product/oled77.png",
+        thumbnail_url="https://imgs.search.brave.com/oled77.jpg",
+    )
+    requested: list[str] = []
+
+    def fake_request(url, **_kwargs):
+        requested.append(url)
+        if url == candidate.image_url:
+            return 200, {"content-type": "image/png"}, png_bytes(size=(90, 90)), url
+        return 200, {"content-type": "image/png"}, png_bytes(size=(800, 800)), url
+
+    monkeypatch.setattr(item_image_search, "_request_following_redirects", fake_request)
+    content, final_url, kind = item_image_search._download_candidate(
+        candidate,
+        require_reference_quality=True,
+    )
+    assert requested == [candidate.image_url, candidate.thumbnail_url]
+    assert final_url == candidate.thumbnail_url
+    assert kind == "thumbnail"
+    with Image.open(io.BytesIO(content)) as stored:
+        assert stored.size == (800, 800)
+
+
+def test_undersized_existing_reference_is_not_reported_as_a_successful_update(
+    owner_client, monkeypatch
+):
+    room = create_room(owner_client, "Old tiny reference room")
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"])
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        db.add(
+            ItemImage(
+                household_id=stored_item.household_id,
+                item_id=stored_item.id,
+                source_type="reference",
+                status="active",
+                width=90,
+                height=90,
+                source_name="old-public.example",
+                source_url="https://old-public.example/old-tiny.png",
+                source_page_url="https://old-public.example/old-tiny",
+                license_note="Old reference with unknown permission.",
+                permission_basis="public_web",
+                search_fingerprint=image_search_fingerprint(stored_item),
+            )
+        )
+        db.commit()
+
+    tiny = replace(
+        lg_candidate(title="LG OLED TV 77 inch tiny replacement banner"),
+        page_url="https://public-images.example/replacement",
+        source_domain="public-images.example",
+        image_url="https://cdn.public-images.example/replacement.png",
+        width=800,
+        height=800,
+    )
+    provider(
+        monkeypatch,
+        candidates=[tiny],
+        permitted_domains="",
+        download=lambda candidate, **_kwargs: (
+            png_bytes(size=(90, 90)),
+            candidate.image_url,
+            "original",
+        ),
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "image_download_failed"
+    assert "minimum reference-image quality" in response.json()["detail"]["message"]
+
+    state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
+    assert state["selected"] is not None
+    assert state["selected"]["width"] == 90
+    assert state["selected"]["height"] == 90
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(ItemImage).where(
+                    ItemImage.item_id == uuid.UUID(item["id"]),
+                    ItemImage.source_type == "reference",
+                )
+            )
+            is not None
+        )
