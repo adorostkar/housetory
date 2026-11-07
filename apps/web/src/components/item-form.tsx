@@ -41,6 +41,7 @@ import {
   CONDITION_LABELS,
   flattenLocations,
   flattenRoomTree,
+  formatCurrency,
   LOCATION_KIND_LABELS,
   locationLabel,
   locationPath,
@@ -162,6 +163,12 @@ export function ItemForm({
   const [currentValueCurrency, setCurrentValueCurrency] = React.useState(
     item?.current_value_currency ?? "USD",
   );
+  const [currentValueBasis, setCurrentValueBasis] = React.useState<
+    "per_unit" | "legacy_record_total"
+  >(
+    item?.current_value_basis ??
+      (item?.current_value_cents != null ? "legacy_record_total" : "per_unit"),
+  );
 
   const [warrantyProvider, setWarrantyProvider] = React.useState(item?.warranty?.provider ?? "");
   const [warrantyStart, setWarrantyStart] = React.useState(item?.warranty?.start_date ?? "");
@@ -196,6 +203,22 @@ export function ItemForm({
     (localCurrentValueCents === null ||
       !Number.isFinite(localCurrentValueCents) ||
       localCurrentValueCents < 0);
+  const parsedQuantity = /^\d+$/.test(quantity) ? Number(quantity) : 0;
+  const currentValueTotalCents =
+    localCurrentValueCents == null
+      ? null
+      : currentValueBasis === "per_unit"
+        ? localCurrentValueCents * parsedQuantity
+        : localCurrentValueCents;
+  const convertLegacyToPerUnit = () => {
+    if (localCurrentValueCents == null || parsedQuantity <= 0) {
+      setCurrentValueBasis("per_unit");
+      return;
+    }
+    const unitCents = Math.round(localCurrentValueCents / parsedQuantity);
+    setCurrentValue((unitCents / 100).toFixed(2));
+    setCurrentValueBasis("per_unit");
+  };
   const durationNumber = warrantyDuration.trim() ? Number(warrantyDuration) : null;
   const durationInvalid =
     warrantyDuration.trim().length > 0 &&
@@ -313,6 +336,7 @@ export function ItemForm({
         : null,
       current_value_cents: localCurrentValueCents,
       current_value_currency: currentValueCurrency,
+      current_value_basis: currentValueBasis,
     };
     save.mutate(payload);
   };
@@ -431,12 +455,14 @@ export function ItemForm({
 
             <FormSection
               title="Purchase"
-              description="A price and a receipt trail, when you have one."
+              description="The original transaction total and receipt trail. This is not a per-unit price."
             >
               {item?.purchase?.is_shared && (
                 <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
-                  This purchase is shared by {item.purchase.item_count} items. Editing
-                  the amount or merchant here updates the single shared record.
+                  This purchase is shared by {item.purchase.item_count} items. The
+                  amount is the purchase transaction total, not a per-unit price, and
+                  is not multiplied by quantity. Editing it updates the single shared
+                  record; reviewed item allocations remain separate.
                 </div>
               )}
               <Field
@@ -486,7 +512,12 @@ export function ItemForm({
                 </Field>
               </div>
               <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
-                <Field label="Price" htmlFor="purchase-price" optional>
+                <Field
+                  label="Purchase total"
+                  htmlFor="purchase-price"
+                  optional
+                  hint="Transaction total, including all linked units/items when shared."
+                >
                   <Input
                     id="purchase-price"
                     type="number"
@@ -550,13 +581,41 @@ export function ItemForm({
 
             <FormSection
               title="Current value"
-              description="An optional estimate of what this item is worth today. It is kept separate from the purchase price."
+              description="An optional estimate of what one owned unit is worth today. It is kept separate from the original purchase transaction total."
             >
               {currentValueInvalid && (
                 <FormError message="Enter a valid current value, such as 129.00." />
               )}
+              {currentValueBasis === "legacy_record_total" && (
+                <div className="rounded-xl border border-brass/25 bg-brass-soft/45 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+                  <p className="font-medium text-foreground/85">Legacy recorded total</p>
+                  <p className="mt-1">
+                    This older value was saved as one amount for the whole item record,
+                    not as a per-unit estimate. It is reported once and is not
+                    multiplied by quantity. Review it and convert to a per-unit
+                    estimate when you are ready.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2.5"
+                    onClick={convertLegacyToPerUnit}
+                  >
+                    Convert to per-unit
+                  </Button>
+                </div>
+              )}
               <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
-                <Field label="Estimated current value" htmlFor="current-value" optional>
+                <Field
+                  label={
+                    currentValueBasis === "legacy_record_total"
+                      ? "Legacy recorded total"
+                      : "Estimated current value per unit"
+                  }
+                  htmlFor="current-value"
+                  optional
+                >
                   <Input
                     id="current-value"
                     type="number"
@@ -582,6 +641,41 @@ export function ItemForm({
                   </Select>
                 </Field>
               </div>
+              {localCurrentValueCents != null && (
+                <div
+                  data-testid="current-value-preview"
+                  className="rounded-lg border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
+                >
+                  {currentValueBasis === "per_unit" ? (
+                    <>
+                      {quantityInvalid ? (
+                        <p className="text-muted-foreground">
+                          Enter a valid owned quantity to compute the extended total.
+                        </p>
+                      ) : (
+                        <p className="font-medium">
+                          {parsedQuantity} owned{" "}
+                          {parsedQuantity === 1 ? "unit" : "units"} ×{" "}
+                          {formatCurrency(localCurrentValueCents, currentValueCurrency)} ={" "}
+                          {formatCurrency(currentValueTotalCents ?? 0, currentValueCurrency)}
+                        </p>
+                      )}
+                      <p className="mt-1 text-muted-foreground">
+                        Loaned owned units remain included. Borrowed items are not owned
+                        and never enter this total. Leave blank if the value is unknown;
+                        missing is not zero.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Reported as one legacy record total of{" "}
+                      {formatCurrency(localCurrentValueCents, currentValueCurrency)}. It
+                      does not change when quantity changes. Convert above to review a
+                      per-unit estimate.
+                    </p>
+                  )}
+                </div>
+              )}
             </FormSection>
 
             <FormSection

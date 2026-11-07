@@ -75,8 +75,12 @@ class EvidenceItemPreview(BaseModel):
     purchase_info_status: str
     purchase_currency: str | None = None
     item_allocation_cents: int | None = None
-    current_value_cents: int | None = None
+    current_value_unit_cents: int | None = None
+    current_value_quantity: int = 0
+    current_value_total_cents: int | None = None
     current_value_currency: str | None = None
+    current_value_basis: str | None = None
+    current_value_estimated_at: datetime | None = None
     photo_count: int
     document_count: int
 
@@ -103,7 +107,7 @@ class EvidenceDocumentPreview(BaseModel):
 class EvidenceCurrencyTotal(BaseModel):
     currency: str
     selected_allocated_purchase_cents: int
-    current_value_cents: int
+    current_value_total_cents: int
     allocated_item_count: int
     current_value_item_count: int
 

@@ -250,7 +250,7 @@ def test_cross_room_move_preserves_identity_contents_and_derived_views(owner_cli
 
     financial = owner_client.get("/api/v1/financial-overview").json()
     attic_value = [row for row in financial["value_by_room"] if row["name"] == "Attic"]
-    assert attic_value and attic_value[0]["current_value_cents"] == 4500
+    assert attic_value and attic_value[0]["current_value_total_cents"] == 4500
 
     inventory = owner_client.get("/api/v1/exports/inventory.csv").text
     rows = list(csv.DictReader(io.StringIO(inventory)))

@@ -72,6 +72,7 @@ class ItemCreate(BaseModel):
     warranty: WarrantyIn | None = None
     current_value_cents: int | None = Field(default=None, ge=0, le=10**12)
     current_value_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    current_value_basis: Literal["per_unit"] | None = None
 
     @model_validator(mode="after")
     def _one_purchase_source(self) -> "ItemCreate":
@@ -98,6 +99,7 @@ class ItemUpdate(BaseModel):
     warranty: WarrantyIn | None = None
     current_value_cents: int | None = Field(default=None, ge=0, le=10**12)
     current_value_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    current_value_basis: Literal["per_unit", "legacy_record_total"] | None = None
     is_archived: bool | None = None
 
     @model_validator(mode="after")
@@ -148,6 +150,9 @@ class ItemSummary(ORMModel):
     warranty: WarrantyOut | None
     current_value_cents: int | None
     current_value_currency: str
+    current_value_basis: Literal["per_unit", "legacy_record_total"] | None = None
+    current_value_total_cents: int | None = None
+    current_value_estimated_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     last_verified: LastVerifiedOut | None = None

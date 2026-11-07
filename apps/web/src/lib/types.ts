@@ -805,6 +805,9 @@ export interface ItemSummary {
   warranty: Warranty | null;
   current_value_cents: number | null;
   current_value_currency: string;
+  current_value_basis: "per_unit" | "legacy_record_total" | null;
+  current_value_total_cents: number | null;
+  current_value_estimated_at: string | null;
   created_at: string;
   updated_at: string;
   last_verified?: LastVerified | null;
@@ -884,7 +887,7 @@ export interface CurrencyTotal {
 export interface CurrencyOwnership {
   currency: string;
   purchase_total_cents: number;
-  current_value_cents: number;
+  current_value_total_cents: number;
   purchase_item_count: number;
   current_value_item_count: number;
 }
@@ -893,7 +896,7 @@ export interface ValueBreakdownRow {
   name: string;
   currency: string;
   purchase_total_cents: number;
-  current_value_cents: number;
+  current_value_total_cents: number;
   item_count: number;
 }
 
@@ -902,6 +905,7 @@ export interface ValuableItem {
   value_cents: number;
   currency: string;
   value_kind: "current" | "purchase";
+  value_basis: "per_unit" | "legacy_record_total" | null;
 }
 
 export interface FinancialOverview {
@@ -979,6 +983,7 @@ export interface ItemInput {
   warranty?: WarrantyInput | null;
   current_value_cents?: number | null;
   current_value_currency?: string;
+  current_value_basis?: "per_unit" | "legacy_record_total" | null;
   is_archived?: boolean;
 }
 
@@ -2647,8 +2652,12 @@ export interface EvidenceItemPreview {
   purchase_info_status: string;
   purchase_currency: string | null;
   item_allocation_cents: number | null;
-  current_value_cents: number | null;
+  current_value_unit_cents: number | null;
+  current_value_quantity: number;
+  current_value_total_cents: number | null;
   current_value_currency: string | null;
+  current_value_basis: "per_unit" | "legacy_record_total" | null;
+  current_value_estimated_at: string | null;
   photo_count: number;
   document_count: number;
 }
@@ -2675,7 +2684,7 @@ export interface EvidenceDocumentPreview {
 export interface EvidenceCurrencyTotal {
   currency: string;
   selected_allocated_purchase_cents: number;
-  current_value_cents: number;
+  current_value_total_cents: number;
   allocated_item_count: number;
   current_value_item_count: number;
 }

@@ -445,8 +445,9 @@ export function EvidenceExportDialog({
                 <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-[0.7rem]">
                   <p className="font-medium">Value semantics</p>
                   <p className="mt-1 text-muted-foreground">
-                    Currencies stay separate. Selected-item allocations are not the same as
-                    shared purchase totals or current estimates.
+                    Currencies stay separate. Current estimate totals multiply per-unit
+                    estimates by owned quantity; legacy record totals count once. Selected
+                    allocations are not shared purchase transaction totals.
                   </p>
                 </div>
               </div>
@@ -458,7 +459,7 @@ export function EvidenceExportDialog({
                       <tr className="border-b border-border/60 text-left text-muted-foreground">
                         <th className="py-1.5 pr-3 font-medium">Currency</th>
                         <th className="py-1.5 pr-3 font-medium">Selected allocations</th>
-                        <th className="py-1.5 font-medium">Current estimates</th>
+                        <th className="py-1.5 font-medium">Current estimate totals</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -475,7 +476,7 @@ export function EvidenceExportDialog({
                             </span>
                           </td>
                           <td className="py-1.5 tabular-nums">
-                            {formatCurrency(entry.current_value_cents, entry.currency)}{" "}
+                            {formatCurrency(entry.current_value_total_cents, entry.currency)}{" "}
                             <span className="text-muted-foreground">
                               ({pluralize(entry.current_value_item_count, "item")})
                             </span>

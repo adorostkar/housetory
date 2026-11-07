@@ -102,7 +102,7 @@ def overview(
             if entry.purchase_item_count > 0
         ],
         current_value_by_currency=[
-            CurrencyTotal(currency=entry.currency, total_cents=entry.current_value_cents)
+            CurrencyTotal(currency=entry.currency, total_cents=entry.current_value_total_cents)
             for entry in financial.currency_totals
             if entry.current_value_item_count > 0
         ],

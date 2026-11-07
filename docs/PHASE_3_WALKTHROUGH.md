@@ -83,7 +83,11 @@ not shipped as production data.
 ### Ownership overview
 
 - Total purchase value, counted once per shared purchase.
-- Estimated current value, kept separate from purchase value.
+- Estimated current value per owned unit, extended by owned quantity and kept
+  separate from the original purchase transaction total. Loaned owned units
+  remain included; borrowed items are excluded.
+- Legacy record-total estimates stay explicit and are never silently multiplied
+  or converted into per-unit values.
 - Value by category and room.
 - Most valuable items.
 - Items missing purchase information.

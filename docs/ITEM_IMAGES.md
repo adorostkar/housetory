@@ -375,8 +375,8 @@ and [AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
 Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **417 PostgreSQL backend tests**, **214 Vitest tests**
-and **70 disposable-stack Playwright workflows** (69 passed, 1 fixture-dependent
+Final local verification: **423 PostgreSQL backend tests**, **214 Vitest tests**
+and **72 disposable-stack Playwright workflows** (71 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and

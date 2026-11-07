@@ -219,6 +219,7 @@ class LoanStatus(StrEnum):
 
 class ActivityAction(StrEnum):
     ITEM_MOVED = "item.moved"
+    ITEM_VALUE_UPDATED = "item.value_updated"
     ITEMS_BULK_MOVED = "items.bulk_moved"
     ITEMS_BULK_TAGGED = "items.bulk_tagged"
     ITEMS_BULK_CATEGORISED = "items.bulk_categorised"

@@ -409,18 +409,57 @@ export function ItemDetailPage() {
               )}
 
               <InfoRow icon={Wallet} label="Current value">
-                {item.current_value_cents != null ? (
-                  <span>
-                    {formatCurrency(
-                      item.current_value_cents,
-                      item.current_value_currency,
-                    )}
-                    <span className="ml-1.5 text-[0.68rem] text-muted-foreground">
-                      estimate
+                {item.current_value_cents == null ? (
+                  <span className="text-muted-foreground">
+                    Not estimated
+                    <span className="ml-1.5 text-[0.68rem]">
+                      (unknown, not zero)
+                    </span>
+                  </span>
+                ) : item.current_value_basis === "legacy_record_total" ? (
+                  <span className="block">
+                    <span className="block">
+                      Legacy record total{" "}
+                      {formatCurrency(
+                        item.current_value_cents,
+                        item.current_value_currency,
+                      )}
+                    </span>
+                    <span className="mt-1 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                      Per-unit value was not recorded. This total is reported once and
+                      is not multiplied by quantity.
                     </span>
                   </span>
                 ) : (
-                  <span className="text-muted-foreground">Not estimated</span>
+                  <span className="block">
+                    <span className="block">
+                      {formatCurrency(
+                        item.current_value_cents,
+                        item.current_value_currency,
+                      )}{" "}
+                      <span className="text-[0.68rem] text-muted-foreground">
+                        per unit
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                      {item.quantity} owned{" "}
+                      {item.quantity === 1 ? "unit" : "units"} ×{" "}
+                      {formatCurrency(
+                        item.current_value_cents,
+                        item.current_value_currency,
+                      )}{" "}
+                      ={" "}
+                      <span className="font-medium text-foreground/80">
+                        {formatCurrency(
+                          item.current_value_total_cents ??
+                            item.current_value_cents * item.quantity,
+                          item.current_value_currency,
+                        )}{" "}
+                        total
+                      </span>
+                      {onLoan > 0 && ` (includes ${onLoan} on loan)`}
+                    </span>
+                  </span>
                 )}
               </InfoRow>
 
@@ -527,13 +566,23 @@ export function ItemDetailPage() {
             {item.purchase ? (
               <>
                 {item.purchase.price_cents != null && (
-                  <p className="font-display text-[2rem] leading-none tracking-[-0.03em] tabular-nums">
-                    {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
-                  </p>
+                  <>
+                    <p className="text-[0.62rem] uppercase tracking-[0.1em] text-muted-foreground">
+                      Purchase total
+                    </p>
+                    <p className="mt-1 font-display text-[2rem] leading-none tracking-[-0.03em] tabular-nums">
+                      {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
+                    </p>
+                    <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+                      Original transaction total, not a per-unit price.
+                    </p>
+                  </>
                 )}
                 {item.purchase.is_shared && (
                   <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
-                    This amount is the shared purchase total, not a per-item price.
+                    This transaction includes {item.purchase.item_count} linked items;
+                    it is not multiplied by quantity. Reviewed item allocations are
+                    shown separately.
                   </p>
                 )}
                 {(() => {

@@ -5,6 +5,7 @@ so validation, purchase/warranty handling and relationship rules cannot drift.
 """
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..models import Category, Item, Purchase, Room, StorageLocation, Tag, Warranty
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
+from . import current_value as current_value_service
 from . import history, lending
 from .purchase_info import explicit_status_value
 from .purchases import get_purchase, prune_orphan_purchases, validate_receipt
@@ -156,6 +158,105 @@ def apply_warranty(db: Session, item: Item, payload: WarrantyIn, *, replace: boo
         )
 
 
+def _current_value_total(value_cents: int | None, basis: str | None, quantity: int) -> int | None:
+    if value_cents is None or basis is None:
+        return None
+    if basis == current_value_service.PER_UNIT:
+        return value_cents * max(quantity, 0)
+    return value_cents
+
+
+def _apply_current_value_update(
+    item: Item, payload: ItemUpdate, fields: set[str]
+) -> dict[str, Any] | None:
+    previous = {
+        "value_cents": item.current_value_cents,
+        "basis": current_value_service.effective_basis(item),
+        "currency": item.current_value_currency,
+        "quantity": item.quantity,
+    }
+    previous_total = _current_value_total(
+        previous["value_cents"], previous["basis"], previous["quantity"]
+    )
+    new_value = (
+        payload.current_value_cents if "current_value_cents" in fields else item.current_value_cents
+    )
+    new_currency = (
+        payload.current_value_currency
+        if "current_value_currency" in fields and payload.current_value_currency is not None
+        else item.current_value_currency
+    )
+    existing_basis = current_value_service.effective_basis(item)
+    requested_basis = payload.current_value_basis if "current_value_basis" in fields else None
+
+    if new_value is None:
+        new_basis: str | None = None
+    elif requested_basis == current_value_service.LEGACY_RECORD_TOTAL:
+        if existing_basis != current_value_service.LEGACY_RECORD_TOTAL:
+            raise ApiError(
+                422,
+                "current_value_basis_conflict",
+                "Only a value already recorded as a legacy record total can keep "
+                "that basis. Enter a per-unit estimate for a current value.",
+            )
+        new_basis = current_value_service.LEGACY_RECORD_TOTAL
+    elif requested_basis == current_value_service.PER_UNIT:
+        if (
+            existing_basis == current_value_service.LEGACY_RECORD_TOTAL
+            and "current_value_cents" not in fields
+        ):
+            raise ApiError(
+                422,
+                "current_value_unit_required",
+                "Enter a per-unit value when converting a legacy record total.",
+            )
+        new_basis = current_value_service.PER_UNIT
+    elif "current_value_cents" in fields:
+        # Editing a legacy amount keeps its truthful record-total basis. Any new
+        # value, or a per-unit value being corrected, remains per unit.
+        new_basis = (
+            current_value_service.LEGACY_RECORD_TOTAL
+            if existing_basis == current_value_service.LEGACY_RECORD_TOTAL
+            else current_value_service.PER_UNIT
+        )
+    else:
+        new_basis = existing_basis
+
+    new_quantity = payload.quantity if payload.quantity is not None else item.quantity
+    current_value_service.validate_current_value(new_value, new_quantity, new_basis)
+
+    changed = (
+        previous["value_cents"],
+        previous["basis"],
+        previous["currency"],
+    ) != (new_value, new_basis, new_currency)
+    item.current_value_cents = new_value
+    item.current_value_basis = new_basis
+    item.current_value_currency = new_currency
+    if new_value is None:
+        item.current_value_estimated_at = None
+    elif changed:
+        item.current_value_estimated_at = datetime.now(UTC)
+    if not changed:
+        return None
+    return {
+        "from": {
+            "basis": previous["basis"],
+            "value_cents": previous["value_cents"],
+            "currency": previous["currency"],
+            "quantity": previous["quantity"],
+            "total_cents": previous_total,
+        },
+        "to": {
+            "basis": new_basis,
+            "value_cents": new_value,
+            "currency": new_currency,
+            "quantity": new_quantity,
+            "total_cents": _current_value_total(new_value, new_basis, new_quantity),
+        },
+    }
+
+
 def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate) -> Item:
     room_id, location_record = resolve_location(
         db, household_id, payload.room_id, payload.storage_location_id
@@ -164,6 +265,11 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         category(db, household_id, payload.category_id) if payload.category_id else None
     )
     tag_records = tags(db, household_id, payload.tag_ids)
+    current_value_service.validate_current_value(
+        payload.current_value_cents,
+        payload.quantity,
+        current_value_service.PER_UNIT if payload.current_value_cents is not None else None,
+    )
 
     item = Item(
         household_id=household_id,
@@ -179,6 +285,12 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         category_id=category_record.id if category_record else None,
         current_value_cents=payload.current_value_cents,
         current_value_currency=payload.current_value_currency,
+        current_value_basis=(
+            current_value_service.PER_UNIT if payload.current_value_cents is not None else None
+        ),
+        current_value_estimated_at=(
+            datetime.now(UTC) if payload.current_value_cents is not None else None
+        ),
         purchase_info_status=explicit_status_value(payload.purchase_info_status),
     )
     item.tags = tag_records
@@ -277,10 +389,16 @@ def update_item_record(
     if payload.is_archived is not None:
         item.is_archived = payload.is_archived
 
-    if "current_value_cents" in fields:
-        item.current_value_cents = payload.current_value_cents
-    if "current_value_currency" in fields and payload.current_value_currency is not None:
-        item.current_value_currency = payload.current_value_currency
+    value_change: dict[str, Any] | None = None
+    if fields & {"current_value_cents", "current_value_currency", "current_value_basis"}:
+        value_change = _apply_current_value_update(item, payload, fields)
+    # A quantity-only change can still make a per-unit estimate exceed the safe
+    # extended total (for example, a large quantity on an expensive unit).
+    current_value_service.validate_current_value(
+        item.current_value_cents,
+        item.quantity,
+        current_value_service.effective_basis(item),
+    )
 
     if "purchase_info_status" in fields:
         item.purchase_info_status = explicit_status_value(payload.purchase_info_status)
@@ -308,6 +426,28 @@ def update_item_record(
             item.warranty = None
         else:
             apply_warranty(db, item, payload.warranty, replace=item.warranty is None)
+
+    if value_change is not None:
+        converted = (
+            value_change["from"]["basis"] == current_value_service.LEGACY_RECORD_TOTAL
+            and value_change["to"]["basis"] == current_value_service.PER_UNIT
+        )
+        history.record_event(
+            db,
+            household_id,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
+            action="item.value_updated",
+            entity_type="item",
+            entity_id=item.id,
+            item_id=item.id,
+            summary=(
+                "Legacy current value converted to per-unit estimate"
+                if converted
+                else "Current value updated"
+            ),
+            details=value_change,
+        )
 
     db.flush()
     current_room = str(item.room_id) if item.room_id else None

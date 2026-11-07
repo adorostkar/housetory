@@ -55,6 +55,13 @@ A client `request_id` makes package creation idempotent. Repeating the same requ
 returns the same package; reusing it for a different scope, options or fingerprint
 returns `409 export_request_conflict`.
 
+Snapshot format `inventory-evidence-v2` records each current value as a per-unit
+amount, owned quantity, extended total, currency, basis and estimate date where
+available. A previously generated `inventory-evidence-v1` package keeps its stored
+v1 snapshot and is rendered as a legacy record total: the amount is reported once
+and is never converted into a per-unit value or multiplied by quantity. New
+per-unit estimates do not retroactively change historical packages.
+
 ## PDF report
 
 The PDF is always generated, even when no AI is configured. It uses ReportLab
@@ -68,8 +75,11 @@ Contents:
 1. **Cover summary** — household name, generated timestamp with timezone, export
    ID, format version, scope, selected item/unit counts, at-home and on-loan unit
    counts, evidence counts, archived and missing-purchase counts.
-2. **Value summary** — selected-item purchase allocations and current estimates by
-   currency, with a statement that shared purchase totals are listed separately.
+2. **Value summary** — selected-item purchase allocations and current estimate
+   totals by currency. Each current estimate is `unit value × owned quantity`;
+   loaned owned units remain included and borrowed items are excluded. Legacy
+   record totals are included once and are not multiplied. Shared purchase
+   transaction totals are listed separately and are never multiplied across items.
 3. **Referenced purchase records** — each purchase total once, selected item count
    versus all items in the purchase, selected allocation, and unallocated amount.
    Shared totals are labelled; legacy purchases without reviewed allocations are
@@ -78,12 +88,14 @@ Contents:
    data, legacy allocations and size/exclusion warnings.
 5. **Inventory items** — grouped by full location path; name, quantity, owned/at-home/
    on-loan amounts, brand/model/serial, condition, category, tags, purchase status,
-   purchase merchant/date/currency, selected allocation if any, current estimate,
-   description, property path, evidence references and, where an exact completed stocktake
-   observation exists, a last-checked date/status/quantity. A changed item is
-   labelled as changed since that check rather than claimed as verified now. Up to
-   three photos per item are embedded (global PDF photo cap), with a clear
-   missing-photo warning if a stored file cannot be read.
+   purchase merchant/date/currency, selected allocation if any, explicit current
+   value unit amount, owned quantity and extended total, description, property path,
+   evidence references and, where an exact completed stocktake observation exists,
+   a last-checked date/status/quantity. A legacy record total is labelled as such
+   and is not given a fabricated per-unit amount. A missing estimate is reported as
+   unknown, not zero. A changed item is labelled as changed since that check rather
+   than claimed as verified now. Up to three photos per item are embedded (global
+   PDF photo cap), with a clear missing-photo warning if a stored file cannot be read.
 6. **Evidence index** — reference (`E-001` etc.), title, type, source/date and bundle
    note. Shared-document warnings are repeated. No external URLs or active content
    are embedded.
@@ -107,7 +119,9 @@ columns:
 `full_location_path`, `archived`, `purchase_status`,
 `purchase_merchant`, `purchase_date`, `purchase_currency`, `purchase_total_cents`,
 `purchase_total_scope`, `purchase_item_allocation_cents`,
-`purchase_unallocated_cents`, `current_value_cents`, `current_value_currency`,
+`purchase_unallocated_cents`, `current_value_unit_cents`,
+`current_value_quantity`, `current_value_total_cents`,
+`current_value_currency`, `current_value_basis`, `current_value_estimated_at`,
 `warranty_provider`, `warranty_end_date`, `warranty_status`, `last_checked_at`,
 `last_checked_status`, `last_checked_quantity`, `last_checked_owned_quantity`,
 `last_checked_on_loan_quantity`, `last_checked_location_path`,
@@ -123,9 +137,14 @@ manifest. Only actual photographs count as photographic evidence.
 
 `purchase_total_scope` explicitly identifies a shared purchase total and whether it
 includes unselected items. The purchase total is not duplicated into a per-item
-allocation. Text cells beginning with `=`, `+`, `-`, `@`, tab or carriage return are
-prefixed with an apostrophe to prevent spreadsheet formula injection. No borrower
-names, loan notes, purchase notes or document notes are exported.
+allocation or multiplied by quantity. `current_value_unit_cents` is blank for a
+legacy record total; `current_value_total_cents` is the truthful extended per-unit
+total or the legacy amount once. `current_value_basis` is `per_unit` or
+`legacy_record_total`, so consumers never have to guess. Missing estimates leave
+unit and total blank rather than writing zero. Text cells beginning with `=`, `+`,
+`-`, `@`, tab or carriage return are prefixed with an apostrophe to prevent
+spreadsheet formula injection. No borrower names, loan notes, purchase notes or
+document notes are exported.
 
 ## ZIP evidence bundle
 
@@ -278,9 +297,9 @@ Representative screenshots and rendered PDF pages are in
 
 ## Verification
 
-- **307 PostgreSQL backend tests**, **132 Vitest tests** and **39 disposable-stack
-  Playwright workflows** pass; Ruff, strict TypeScript typecheck, production build
-  and Alembic drift checks pass.
+- **423 PostgreSQL backend tests**, **214 Vitest tests** and **72 disposable-stack
+  Playwright workflows** pass (71 passed, 1 fixture-dependent skip); Ruff, strict
+  TypeScript typecheck, production build and Alembic drift checks pass.
 - PostgreSQL backend tests cover item/room/container/home/overlap scope resolution,
   archived/empty/missing scope behavior, viewer and cross-household isolation,
   shared purchases and allocations, legacy unallocated purchases, multicurrency
@@ -288,11 +307,27 @@ Representative screenshots and rendered PDF pages are in
   PDF page/text extraction and independent reader parsing, CSV BOM/formula escaping,
   ZIP source bytes and shared-document deduplication, missing-file warnings,
   stale fingerprint/reconfirm, idempotent creation, limit enforcement, expiry,
-  cancellation, failure and retry.
+  cancellation, failure and retry. Current-value tests cover quantity × unit =
+  extended total, loaned owned units, borrowed-record exclusion, shared-purchase
+  separation, multicurrency, missing values, zero quantity, overflow validation,
+  legacy record-total migration/conversion audit and v1 snapshot rendering
+  without reinterpretation. Actual PDF text, CSV rows, ZIP manifest/CSV and
+  stored v2 snapshots assert unit 40.00 / quantity 2 / total 80.00.
 - Vitest tests cover preview/options/document selection, generate/download links,
   failed/retry states, keyboard controls and private-download messaging.
 - Disposable-stack Playwright workflows cover selecting items, previewing,
   generating and downloading PDF/CSV/ZIP, preview errors, cancellation/regeneration
-  and mobile screenshots. The Brave/manual workflow is separately fixture-gated.
+  and mobile screenshots. Current-value Playwright coverage checks the item
+  detail math, evidence preview total, and explicit legacy review/conversion.
+  The Brave/manual workflow is separately fixture-gated.
 - No real household records, paid AI, email, remote deployment or unsupported
   external service calls are used by the automated tests.
+
+## Per-unit current-value walkthrough
+
+- [Item detail: $40 per unit × 2 owned units = $80 total](walkthrough/current-value/01-item-unit-value-desktop.png)
+- [Evidence preview: currency total $80](walkthrough/current-value/02-evidence-preview-desktop.png)
+- [Legacy record total remains unmultiplied](walkthrough/current-value/03-legacy-record-total.png)
+- [Legacy conversion review](walkthrough/current-value/04-legacy-conversion-review.png)
+- [PDF value summary page](walkthrough/current-value/05-insurance-report-page.png)
+- [PDF item page: 40.00 per unit × 2 = 80.00 total](walkthrough/current-value/06-insurance-report-item.png)

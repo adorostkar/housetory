@@ -311,6 +311,16 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="current_value_currency_length",
         ),
         CheckConstraint(
+            "current_value_basis IS NULL OR current_value_basis IN "
+            "('per_unit', 'legacy_record_total')",
+            name="valid_current_value_basis",
+        ),
+        CheckConstraint(
+            "(current_value_cents IS NULL AND current_value_basis IS NULL) OR "
+            "(current_value_cents IS NOT NULL AND current_value_basis IS NOT NULL)",
+            name="current_value_basis_present",
+        ),
+        CheckConstraint(
             "purchase_info_status IS NULL OR purchase_info_status IN ('unknown', 'not_applicable')",
             name="valid_purchase_info_status",
         ),
@@ -345,6 +355,8 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_value_currency: Mapped[str] = mapped_column(
         String(3), nullable=False, server_default="USD"
     )
+    current_value_basis: Mapped[str | None] = mapped_column(String(32))
+    current_value_estimated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purchase_info_status: Mapped[str | None] = mapped_column(String(20))
 
     household: Mapped["Household"] = relationship(back_populates="items")

@@ -415,7 +415,7 @@ function OwnershipSection({
     <section className="mt-10">
       <SectionHeading
         title="Purchase & value"
-        description="Purchase totals and current estimates are reported side by side, never added across currencies."
+        description="Purchase transaction totals and current estimate totals are reported side by side, never added across currencies."
         actionLabel="Purchases"
         actionTo="/purchases"
       />
@@ -468,10 +468,10 @@ function OwnershipSection({
                   </div>
                   <div>
                     <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                      Current estimate
+                      Current estimate total
                     </p>
                     <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                      {formatCurrency(entry.current_value_cents, entry.currency, {
+                      {formatCurrency(entry.current_value_total_cents, entry.currency, {
                         compact: true,
                       })}
                     </p>
@@ -479,8 +479,9 @@ function OwnershipSection({
                 </div>
                 <p className="mt-4 text-[0.68rem] leading-relaxed text-muted-foreground">
                   {entry.purchase_item_count} items with purchase data ·{" "}
-                  {entry.current_value_item_count} items with estimates. Values are not
-                  converted between currencies.
+                  {entry.current_value_item_count} items with current estimates.
+                  Estimates are per owned unit × owned quantity; legacy record totals
+                  count once. Values are not converted between currencies.
                 </p>
               </div>
             ))}
@@ -606,7 +607,7 @@ function BreakdownTable({
                 <th className="px-5 py-2.5 font-medium">Name</th>
                 <th className="px-3 py-2.5 font-medium">Currency</th>
                 <th className="px-3 py-2.5 text-right font-medium">Purchase</th>
-                <th className="px-5 py-2.5 text-right font-medium">Current</th>
+                <th className="px-5 py-2.5 text-right font-medium">Current total</th>
               </tr>
             </thead>
             <tbody>
@@ -623,7 +624,7 @@ function BreakdownTable({
                     {formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
                   </td>
                   <td className="px-5 py-2.5 text-right tabular-nums">
-                    {formatCurrency(row.current_value_cents, row.currency, { compact: true })}
+                    {formatCurrency(row.current_value_total_cents, row.currency, { compact: true })}
                   </td>
                 </tr>
               ))}

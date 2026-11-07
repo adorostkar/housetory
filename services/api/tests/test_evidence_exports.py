@@ -1,3 +1,4 @@
+import copy
 import csv
 import hashlib
 import io
@@ -267,7 +268,7 @@ def test_preview_and_generation_preserve_purchase_loan_privacy_and_evidence(
     assert data["purchase_references"][0]["selected_allocated_cents"] == 7000
     assert data["purchase_references"][0]["has_unselected_items"] is True
     assert data["currency_totals"][0]["selected_allocated_purchase_cents"] == 7000
-    assert data["currency_totals"][0]["current_value_cents"] == 9000
+    assert data["currency_totals"][0]["current_value_total_cents"] == 18000
     assert any("shared with items outside" in warning for warning in data["warnings"])
     assert any("manual" in warning.lower() for warning in data["warnings"])
     manual_preview = next(doc for doc in data["documents"] if doc["id"] == manual["id"])
@@ -589,7 +590,7 @@ def test_multicurrency_legacy_purchase_and_shared_document_dedup(owner_client, p
     assert data["item_count"] == 2
     totals = {entry["currency"]: entry for entry in data["currency_totals"]}
     assert "USD" not in totals
-    assert totals["EUR"]["current_value_cents"] == 5000
+    assert totals["EUR"]["current_value_total_cents"] == 5000
     usd_purchase = next(
         entry for entry in data["purchase_references"] if entry["currency"] == "USD"
     )
@@ -684,3 +685,175 @@ def test_evidence_package_includes_exact_last_checked_state_and_marks_it_stale(
         page.extract_text() or "" for page in PdfReader(io.BytesIO(stale_pdf.content)).pages
     )
     assert "changed after that check" in stale_text
+
+
+def test_per_unit_value_appears_in_pdf_csv_zip_and_snapshot(owner_client, pdf_bytes):
+    room = create_room(owner_client, "Unit value evidence room")
+    item = create_item(
+        owner_client,
+        "Unit value camera",
+        room_id=room["id"],
+        quantity=2,
+        purchase={
+            "merchant": "Camera Shop",
+            "purchase_date": "2026-02-01",
+            "price_cents": 10000,
+            "currency": "USD",
+        },
+        current_value_cents=4000,
+        current_value_currency="USD",
+    )
+    loan = owner_client.post(
+        "/api/v1/loans",
+        json={
+            "item_id": item["id"],
+            "borrower_name": "Private Borrower",
+            "quantity": 1,
+            "lent_on": "2026-02-10",
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert loan.status_code == 201, loan.text
+    borrowed = owner_client.post(
+        "/api/v1/borrowed",
+        json={
+            "item_name": "Borrowed grinder",
+            "owner_name": "External Owner",
+            "quantity": 3,
+            "borrowed_on": "2026-01-01",
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert borrowed.status_code == 201, borrowed.text
+
+    preview_response = preview(owner_client, {"item_ids": [item["id"]]})
+    assert preview_response.status_code == 200, preview_response.text
+    data = preview_response.json()
+    assert data["format_version"] == "inventory-evidence-v2"
+    preview_item = data["items"][0]
+    assert preview_item["current_value_unit_cents"] == 4000
+    assert preview_item["current_value_quantity"] == 2
+    assert preview_item["current_value_total_cents"] == 8000
+    assert preview_item["current_value_currency"] == "USD"
+    assert preview_item["current_value_basis"] == "per_unit"
+    assert data["currency_totals"][0]["current_value_total_cents"] == 8000
+
+    created = create_package(owner_client, data)
+    assert created.status_code == 202, created.text
+    package_id = created.json()["id"]
+    assert evidence_export.run_evidence_export({"export_id": package_id})["status"] == "succeeded"
+
+    pdf_response = owner_client.get(f"/api/v1/evidence-exports/{package_id}/pdf")
+    assert pdf_response.status_code == 200
+    pdf_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf_response.content)).pages
+    )
+    assert "Estimated current value: 40.00 USD per unit x 2 owned units" in pdf_text
+    assert "80.00 USD total" in pdf_text
+    assert "Purchase total: Camera Shop" in pdf_text
+    assert "100.00 USD transaction total" in pdf_text
+    assert "recorded on loan 1" in pdf_text
+    assert "Borrowed grinder" not in pdf_text
+    assert "160.00" not in pdf_text
+    assert "180.00" not in pdf_text
+
+    csv_response = owner_client.get(f"/api/v1/evidence-exports/{package_id}/csv")
+    rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
+    header = rows[0]
+    for column in (
+        "current_value_unit_cents",
+        "current_value_quantity",
+        "current_value_total_cents",
+        "current_value_currency",
+        "current_value_basis",
+        "current_value_estimated_at",
+    ):
+        assert column in header
+    row = dict(zip(header, rows[1], strict=True))
+    assert row["current_value_unit_cents"] == "4000"
+    assert row["current_value_quantity"] == "2"
+    assert row["current_value_total_cents"] == "8000"
+    assert row["current_value_currency"] == "USD"
+    assert row["current_value_basis"] == "per_unit"
+    assert row["current_value_estimated_at"]
+
+    bundle = owner_client.get(f"/api/v1/evidence-exports/{package_id}/bundle")
+    assert bundle.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        manifest_item = next(entry for entry in manifest["items"] if entry["id"] == item["id"])
+        assert manifest_item["current_value_unit_cents"] == 4000
+        assert manifest_item["current_value_quantity"] == 2
+        assert manifest_item["current_value_total_cents"] == 8000
+        assert manifest_item["current_value_basis"] == "per_unit"
+        csv_name = next(name for name in archive.namelist() if name.endswith(".csv"))
+        zipped_rows = list(csv.reader(io.StringIO(archive.read(csv_name).decode("utf-8-sig"))))
+        zipped = dict(zip(zipped_rows[0], zipped_rows[1], strict=True))
+        assert zipped["current_value_total_cents"] == "8000"
+
+    with SessionLocal() as db:
+        package = db.get(InventoryEvidenceExport, uuid.UUID(package_id))
+        assert package is not None
+        assert package.format_version == "inventory-evidence-v2"
+        snapshot_item = package.snapshot["items"][0]
+        assert snapshot_item["current_value_unit_cents"] == 4000
+        assert snapshot_item["current_value_quantity"] == 2
+        assert snapshot_item["current_value_total_cents"] == 8000
+        assert snapshot_item["current_value_basis"] == "per_unit"
+
+
+def test_v1_snapshot_legacy_value_is_not_reinterpreted_by_renderers(owner_client):
+    item = create_item(owner_client, "Legacy snapshot item", quantity=2)
+    with SessionLocal() as db:
+        from housetory_api.models import Item
+
+        stored = db.get(Item, uuid.UUID(item["id"]))
+        assert stored is not None
+        stored.current_value_cents = 8000
+        stored.current_value_basis = "legacy_record_total"
+        stored.current_value_currency = "USD"
+        db.commit()
+
+    preview_data = preview(owner_client, {"item_ids": [item["id"]]}).json()
+    created = create_package(owner_client, preview_data)
+    assert created.status_code == 202, created.text
+    package_id = created.json()["id"]
+    evidence_export.run_evidence_export({"export_id": package_id})
+    with SessionLocal() as db:
+        package = db.get(InventoryEvidenceExport, uuid.UUID(package_id))
+        assert package is not None
+        snapshot = copy.deepcopy(package.snapshot)
+
+    snapshot["format_version"] = "inventory-evidence-v1"
+    for entry in snapshot["items"]:
+        legacy_item = dict(entry)
+        total = legacy_item.pop("current_value_total_cents", None)
+        legacy_item.pop("current_value_unit_cents", None)
+        legacy_item.pop("current_value_quantity", None)
+        legacy_item.pop("current_value_basis", None)
+        legacy_item.pop("current_value_estimated_at", None)
+        legacy_item["current_value_cents"] = total
+        entry.clear()
+        entry.update(legacy_item)
+    for entry in snapshot["currency_totals"]:
+        legacy_total = dict(entry)
+        legacy_total["current_value_cents"] = legacy_total.pop("current_value_total_cents", 0)
+        entry.clear()
+        entry.update(legacy_total)
+    snapshot["fingerprint"] = evidence_export._fingerprint(snapshot)
+
+    csv_bytes = evidence_export.build_csv(snapshot)
+    rows = list(csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig"))))
+    row = dict(zip(rows[0], rows[1], strict=True))
+    assert row["format_version"] == "inventory-evidence-v1"
+    assert row["current_value_unit_cents"] == ""
+    assert row["current_value_quantity"] == "2"
+    assert row["current_value_total_cents"] == "8000"
+    assert row["current_value_basis"] == "legacy_record_total"
+
+    pdf_bytes = evidence_export.build_pdf(snapshot)
+    pdf_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf_bytes)).pages
+    )
+    assert "legacy recorded total 80.00 USD" in pdf_text
+    assert "160.00" not in pdf_text

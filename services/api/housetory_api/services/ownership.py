@@ -25,6 +25,7 @@ from ..schemas.ownership import (
     ValuableItem,
     ValueBreakdownRow,
 )
+from . import current_value as current_value_service
 from .purchase_info import effective_purchase_info_status
 from .serializers import item_load_options, item_summary
 
@@ -148,8 +149,10 @@ def financial_overview(
                 purchase_totals[purchase.currency] += purchase.price_cents
                 seen_purchases.add(purchase.id)
 
-        if item.current_value_cents is not None:
-            current_totals[item.current_value_currency] += item.current_value_cents
+        current_total = current_value_service.total_value_cents(item)
+        current_basis = current_value_service.effective_basis(item)
+        if current_total is not None:
+            current_totals[item.current_value_currency] += current_total
             current_item_counts[item.current_value_currency] += 1
 
         if allocation is not None:
@@ -167,29 +170,30 @@ def financial_overview(
                 item.id,
                 purchase_cents=allocation.allocated_cents,
             )
-        if item.current_value_cents is not None:
+        if current_total is not None:
             _add_breakdown(
                 category_rows,
                 category_name,
                 item.current_value_currency,
                 item.id,
-                current_cents=item.current_value_cents,
+                current_cents=current_total,
             )
             _add_breakdown(
                 room_rows,
                 room_name,
                 item.current_value_currency,
                 item.id,
-                current_cents=item.current_value_cents,
+                current_cents=current_total,
             )
 
-        if item.current_value_cents is not None:
+        if current_total is not None:
             valuable.append(
                 ValuableItem(
                     item=item_summary(item, household_reminder_days=household_reminder_days),
-                    value_cents=item.current_value_cents,
+                    value_cents=current_total,
                     currency=item.current_value_currency,
                     value_kind="current",
+                    value_basis=current_basis,
                 )
             )
         elif allocation is not None:
@@ -210,7 +214,7 @@ def financial_overview(
         CurrencyOwnership(
             currency=currency,
             purchase_total_cents=purchase_totals.get(currency, 0),
-            current_value_cents=current_totals.get(currency, 0),
+            current_value_total_cents=current_totals.get(currency, 0),
             purchase_item_count=purchase_item_counts.get(currency, 0),
             current_value_item_count=current_item_counts.get(currency, 0),
         )
@@ -223,7 +227,7 @@ def financial_overview(
                 name=name,
                 currency=currency,
                 purchase_total_cents=values["purchase"],
-                current_value_cents=values["current"],
+                current_value_total_cents=values["current"],
                 item_count=len(values["item_ids"]),
             )
             for (name, currency), values in rows.items()
@@ -258,6 +262,16 @@ def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict
     for item in items:
         allocation = allocations.get(item.id)
         purchase = item.purchase
+        purchase_total_scope = ""
+        if purchase is not None:
+            if purchase.price_cents is None:
+                purchase_total_scope = "purchase total not recorded"
+            elif len(purchase.items) > 1:
+                purchase_total_scope = (
+                    "purchase transaction total; includes all linked items and units"
+                )
+            else:
+                purchase_total_scope = "purchase transaction total"
         rows.append(
             {
                 "item": item.name,
@@ -278,11 +292,28 @@ def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict
                 "purchase_total_cents": purchase.price_cents
                 if purchase and purchase.price_cents is not None
                 else "",
+                "purchase_total_scope": purchase_total_scope,
                 "purchase_allocated_cents": allocation.allocated_cents if allocation else "",
-                "current_value_cents": item.current_value_cents
+                "current_value_unit_cents": (
+                    current_value_service.unit_value_cents(item)
+                    if current_value_service.unit_value_cents(item) is not None
+                    else ""
+                ),
+                "current_value_quantity": item.quantity
                 if item.current_value_cents is not None
                 else "",
+                "current_value_total_cents": (
+                    current_value_service.total_value_cents(item)
+                    if current_value_service.total_value_cents(item) is not None
+                    else ""
+                ),
                 "current_value_currency": item.current_value_currency,
+                "current_value_basis": current_value_service.effective_basis(item) or "",
+                "current_value_estimated_at": (
+                    item.current_value_estimated_at.isoformat()
+                    if item.current_value_estimated_at is not None
+                    else ""
+                ),
                 "purchase_info_status": effective_purchase_info_status(item).value,
                 "missing_purchase_information": "yes" if _missing_purchase(item) else "no",
             }

@@ -35,6 +35,7 @@ from ..schemas.items import (
 from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseOut
 from ..schemas.warranties import WarrantyOut
+from . import current_value as current_value_service
 from .item_images import representative_image_out
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
 from .warranties import effective_reminder_days, warranty_status
@@ -386,6 +387,9 @@ def item_summary(
         warranty=(warranty_out(warranty, reminder_days) if warranty else None),
         current_value_cents=item.current_value_cents,
         current_value_currency=item.current_value_currency,
+        current_value_basis=current_value_service.effective_basis(item),
+        current_value_total_cents=current_value_service.total_value_cents(item),
+        current_value_estimated_at=item.current_value_estimated_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
         last_verified=last_verified_out(item, on_loan_quantity),

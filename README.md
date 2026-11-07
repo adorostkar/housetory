@@ -164,8 +164,12 @@ Tailscale is optional.
   duplicating the amount, receipt or merchant.
 - Warranties with provider, start date, duration, calculated expiration,
   certificate document, coverage notes, status and configurable reminders.
-- Ownership overview with purchase value, estimated current value, category and
-  room breakdowns, most valuable items and items missing purchase information.
+- Ownership overview with purchase transaction value, per-unit current-value
+  estimates extended by owned quantity, category and room breakdowns, most
+  valuable items and items missing purchase information.
+- Per-unit current values with explicit `unit × owned quantity = record total`,
+  separate original purchase totals, audited legacy record-total conversion,
+  missing values kept unknown, and matching item/PDF/CSV/ZIP/JSON semantics.
 - Multi-currency reporting that never adds currencies together; there is no
   implicit exchange rate.
 - CSV exports for documents, purchases, warranties and inventory.
@@ -301,7 +305,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 417 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 423 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -340,7 +344,10 @@ stack, not just unit mocks:
   direct-PDF versus source-page discovery, 401/403/429/timeout/invalid-output
   handling, idempotent duplicate-aware downloads with provenance,
   SSRF/redirect/size/type/timeout download guards, evidence scope/overlap and
-  archived handling, shared/legacy/multicurrency purchase semantics, CSV formula
+  archived handling, shared/legacy/multicurrency purchase semantics, per-unit
+  current-value extension by owned quantity, legacy record-total migration/
+  conversion audit, missing/zero/overflow values, actual PDF/CSV/ZIP/manifest
+  value columns, CSV formula
   escaping, ZIP source bytes/manifests/missing files, snapshot reconfirmation,
   idempotency, expiry/cancel/retry and authenticated package downloads,
   endpoint classification/redirect safety, hierarchy/overlap stocktake snapshots,
@@ -366,7 +373,7 @@ stack, not just unit mocks:
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
 - 214 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 70 checked-in Playwright workflows (69 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 72 checked-in Playwright workflows (71 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

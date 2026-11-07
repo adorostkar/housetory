@@ -6,7 +6,7 @@ from ..schemas.items import ItemSummary
 class CurrencyOwnership(BaseModel):
     currency: str
     purchase_total_cents: int
-    current_value_cents: int
+    current_value_total_cents: int
     purchase_item_count: int
     current_value_item_count: int
 
@@ -15,7 +15,7 @@ class ValueBreakdownRow(BaseModel):
     name: str
     currency: str
     purchase_total_cents: int
-    current_value_cents: int
+    current_value_total_cents: int
     item_count: int
 
 
@@ -24,6 +24,7 @@ class ValuableItem(BaseModel):
     value_cents: int
     currency: str
     value_kind: str
+    value_basis: str | None = None
 
 
 class FinancialOverview(BaseModel):

@@ -72,6 +72,7 @@ from ..schemas.evidence_exports import (
     EvidencePurchaseReference,
     EvidenceScopeIn,
 )
+from . import current_value as current_value_service
 from . import lending, storage
 from .labels import FONT_BOLD, FONT_REGULAR, _register_fonts
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
@@ -80,7 +81,7 @@ from .warranties import effective_reminder_days, warranty_status
 
 EVIDENCE_EXPORT_TASK = "exports.evidence"
 EVIDENCE_PRUNE_TASK = "maintenance.prune_exports"
-FORMAT_VERSION = "inventory-evidence-v1"
+FORMAT_VERSION = "inventory-evidence-v2"
 CONDITION_LABELS = {
     "new": "New",
     "excellent": "Excellent",
@@ -131,8 +132,12 @@ CSV_COLUMNS = [
     "purchase_total_scope",
     "purchase_item_allocation_cents",
     "purchase_unallocated_cents",
-    "current_value_cents",
+    "current_value_unit_cents",
+    "current_value_quantity",
+    "current_value_total_cents",
     "current_value_currency",
+    "current_value_basis",
+    "current_value_estimated_at",
     "warranty_provider",
     "warranty_end_date",
     "warranty_status",
@@ -195,6 +200,41 @@ def _fingerprint(snapshot: dict[str, Any]) -> str:
     }
     encoded = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _snapshot_current_value(item: dict[str, Any]) -> dict[str, Any]:
+    """Read current-value fields without reinterpreting an older snapshot.
+
+    v1 stored one ``current_value_cents`` amount per item record. It is treated
+    as a legacy record total here; it is never converted into a per-unit value or
+    multiplied by quantity. v2 stores the explicit unit/quantity/total basis.
+    """
+    if "current_value_total_cents" in item:
+        return {
+            "unit_cents": item.get("current_value_unit_cents"),
+            "quantity": item.get("current_value_quantity", item.get("quantity", 0)),
+            "total_cents": item.get("current_value_total_cents"),
+            "currency": item.get("current_value_currency"),
+            "basis": item.get("current_value_basis"),
+            "estimated_at": item.get("current_value_estimated_at"),
+        }
+    legacy_total = item.get("current_value_cents")
+    return {
+        "unit_cents": None,
+        "quantity": item.get("quantity", 0),
+        "total_cents": legacy_total,
+        "currency": item.get("current_value_currency"),
+        "basis": current_value_service.LEGACY_RECORD_TOTAL if legacy_total is not None else None,
+        "estimated_at": None,
+    }
+
+
+def _snapshot_currency_total(entry: dict[str, Any]) -> dict[str, Any]:
+    if "current_value_total_cents" in entry:
+        return entry
+    legacy = dict(entry)
+    legacy["current_value_total_cents"] = legacy.pop("current_value_cents", 0)
+    return legacy
 
 
 def _room_paths(rooms: list[Room]) -> dict[uuid.UUID, str]:
@@ -729,8 +769,16 @@ def build_snapshot(
                 if purchase is not None
                 else None
             ),
-            "current_value_cents": item.current_value_cents,
+            "current_value_unit_cents": current_value_service.unit_value_cents(item),
+            "current_value_quantity": current_value_service.owned_quantity(item),
+            "current_value_total_cents": current_value_service.total_value_cents(item),
             "current_value_currency": item.current_value_currency,
+            "current_value_basis": current_value_service.effective_basis(item),
+            "current_value_estimated_at": (
+                item.current_value_estimated_at.isoformat()
+                if item.current_value_estimated_at is not None
+                else None
+            ),
             "warranty": (
                 {
                     "provider": warranty.provider,
@@ -885,14 +933,15 @@ def build_snapshot(
                 if allocation.item_id == item.id and allocation.allocated_cents is not None:
                     allocation_totals[allocation.currency] += allocation.allocated_cents
                     allocation_items[allocation.currency].add(item.id)
-        if item.current_value_cents is not None:
-            current_totals[item.current_value_currency] += item.current_value_cents
+        current_total = current_value_service.total_value_cents(item)
+        if current_total is not None:
+            current_totals[item.current_value_currency] += current_total
             current_items[item.current_value_currency].add(item.id)
     currency_totals = [
         {
             "currency": currency,
             "selected_allocated_purchase_cents": allocation_totals.get(currency, 0),
-            "current_value_cents": current_totals.get(currency, 0),
+            "current_value_total_cents": current_totals.get(currency, 0),
             "allocated_item_count": len(allocation_items.get(currency, set())),
             "current_value_item_count": len(current_items.get(currency, set())),
         }
@@ -959,6 +1008,18 @@ def build_snapshot(
             f"{'has' if legacy_purchases == 1 else 'have'} no reviewed per-item allocation; "
             "no historical split was invented."
         )
+    legacy_values = sum(
+        1
+        for item in item_snapshot
+        if item["current_value_basis"] == current_value_service.LEGACY_RECORD_TOTAL
+    )
+    if legacy_values:
+        warnings.append(
+            f"{_plural(legacy_values, 'item')} "
+            f"{'has' if legacy_values == 1 else 'have'} a legacy current-value record total. "
+            "The recorded total is reported once and is not multiplied by quantity; "
+            "per-unit values were not recorded."
+        )
     if options.include_attachments and not options.include_document_originals:
         warnings.append("The bundle includes normalized/download copies, not exact original bytes.")
     if not options.include_attachments:
@@ -1017,32 +1078,42 @@ def build_snapshot(
 
 def _preview_from_snapshot(snapshot: dict[str, Any]) -> EvidencePreviewOut:
     options = EvidenceOptionsIn.model_validate(snapshot["options"])
-    items = [
-        EvidenceItemPreview(
-            id=uuid.UUID(item["id"]),
-            name=item["name"],
-            brand=item["brand"],
-            model=item["model"],
-            serial_number=item["serial_number"],
-            quantity=item["quantity"],
-            on_loan_quantity=item["on_loan_quantity"],
-            at_home_quantity=item["at_home_quantity"],
-            condition=item["condition"],
-            is_archived=item["is_archived"],
-            category=item["category"],
-            property_id=(uuid.UUID(item["property_id"]) if item.get("property_id") else None),
-            property_name=item.get("property_name"),
-            full_location_path=item["full_location_path"],
-            purchase_info_status=item["purchase_info_status"],
-            purchase_currency=(item.get("purchase") or {}).get("currency"),
-            item_allocation_cents=(item.get("purchase") or {}).get("item_allocation_cents"),
-            current_value_cents=item["current_value_cents"],
-            current_value_currency=item["current_value_currency"],
-            photo_count=item["photo_count"],
-            document_count=item["document_count"],
+    items = []
+    for item in snapshot["items"]:
+        current = _snapshot_current_value(item)
+        items.append(
+            EvidenceItemPreview(
+                id=uuid.UUID(item["id"]),
+                name=item["name"],
+                brand=item["brand"],
+                model=item["model"],
+                serial_number=item["serial_number"],
+                quantity=item["quantity"],
+                on_loan_quantity=item["on_loan_quantity"],
+                at_home_quantity=item["at_home_quantity"],
+                condition=item["condition"],
+                is_archived=item["is_archived"],
+                category=item["category"],
+                property_id=(uuid.UUID(item["property_id"]) if item.get("property_id") else None),
+                property_name=item.get("property_name"),
+                full_location_path=item["full_location_path"],
+                purchase_info_status=item["purchase_info_status"],
+                purchase_currency=(item.get("purchase") or {}).get("currency"),
+                item_allocation_cents=(item.get("purchase") or {}).get("item_allocation_cents"),
+                current_value_unit_cents=current["unit_cents"],
+                current_value_quantity=current["quantity"],
+                current_value_total_cents=current["total_cents"],
+                current_value_currency=current["currency"],
+                current_value_basis=current["basis"],
+                current_value_estimated_at=(
+                    datetime.fromisoformat(current["estimated_at"])
+                    if current.get("estimated_at")
+                    else None
+                ),
+                photo_count=item["photo_count"],
+                document_count=item["document_count"],
+            )
         )
-        for item in snapshot["items"]
-    ]
     documents = [
         EvidenceDocumentPreview(
             id=uuid.UUID(document["id"]),
@@ -1094,7 +1165,10 @@ def _preview_from_snapshot(snapshot: dict[str, Any]) -> EvidencePreviewOut:
         and snapshot["bundle_estimated_bytes"] <= snapshot["max_bundle_bytes"],
         items=items,
         documents=documents,
-        currency_totals=[EvidenceCurrencyTotal(**entry) for entry in snapshot["currency_totals"]],
+        currency_totals=[
+            EvidenceCurrencyTotal(**_snapshot_currency_total(entry))
+            for entry in snapshot["currency_totals"]
+        ],
         purchase_references=[
             EvidencePurchaseReference(**entry) for entry in snapshot["purchase_references"]
         ],
@@ -1346,12 +1420,15 @@ def _pdf_item_flowables(
     purchase = item.get("purchase")
     if purchase:
         purchase_text = (
-            f"Purchase: {purchase.get('merchant') or 'merchant not recorded'} · "
+            f"Purchase total: {purchase.get('merchant') or 'merchant not recorded'} · "
             f"{purchase.get('purchase_date') or 'date not recorded'} · "
-            f"{_money(purchase.get('total_cents'), purchase.get('currency'))} shared total"
+            f"{_money(purchase.get('total_cents'), purchase.get('currency'))} "
+            "transaction total"
         )
         if purchase.get("has_unselected_items"):
             purchase_text += " (includes items outside this export)"
+        elif purchase.get("item_count", 0) > 1:
+            purchase_text += " (transaction total for all linked items)"
         if purchase.get("item_allocation_cents") is not None:
             allocation_text = _money(
                 purchase["item_allocation_cents"],
@@ -1368,11 +1445,30 @@ def _pdf_item_flowables(
     else:
         purchase_text += " No purchase record is linked."
     lines.append(_paragraph(purchase_text, styles["small"]))
-    current = (
-        f"Current estimate (household-supplied): "
-        f"{_money(item.get('current_value_cents'), item.get('current_value_currency'))}"
-    )
-    lines.append(_paragraph(current, styles["small"]))
+    current = _snapshot_current_value(item)
+    if current["total_cents"] is None:
+        current_text = "Current value: not estimated (unknown, not zero)."
+    elif current["basis"] == current_value_service.PER_UNIT:
+        current_text = (
+            "Estimated current value: "
+            f"{_money(current['unit_cents'], current['currency'])} per unit x "
+            f"{current['quantity']} owned unit"
+            f"{'s' if current['quantity'] != 1 else ''} = "
+            f"{_money(current['total_cents'], current['currency'])} total "
+            "(household-supplied)."
+        )
+    else:
+        current_text = (
+            "Current value: legacy recorded total "
+            f"{_money(current['total_cents'], current['currency'])} for "
+            f"{current['quantity']} owned unit"
+            f"{'s' if current['quantity'] != 1 else ''}; per-unit value was not "
+            "recorded, so the total is reported once and not multiplied "
+            "(household-supplied)."
+        )
+    if current.get("estimated_at"):
+        current_text += f" Estimated {str(current['estimated_at'])[:10]}."
+    lines.append(_paragraph(current_text, styles["small"]))
     warranty = item.get("warranty")
     if warranty:
         lines.append(
@@ -1550,16 +1646,17 @@ def build_pdf(
             [
                 "Currency",
                 "Selected purchase allocations",
-                "Current estimates",
+                "Current estimate totals",
                 "Items with each figure",
             ]
         ]
         for entry in snapshot["currency_totals"]:
+            total_entry = _snapshot_currency_total(entry)
             rows.append(
                 [
                     entry["currency"],
                     _money(entry["selected_allocated_purchase_cents"], entry["currency"]),
-                    _money(entry["current_value_cents"], entry["currency"]),
+                    _money(total_entry["current_value_total_cents"], entry["currency"]),
                     f"{entry['allocated_item_count']} allocation · "
                     f"{entry['current_value_item_count']} estimate",
                 ]
@@ -1567,8 +1664,11 @@ def build_pdf(
         story.append(_table(rows, [20 * mm, 44 * mm, 42 * mm, 40 * mm]))
         story.append(
             _paragraph(
-                "The selected purchase allocation column sums only reviewed per-item "
-                "allocations for the selected items. Shared purchase grand totals are "
+                "Current estimate totals multiply each per-unit estimate by owned "
+                "quantity. Loaned owned units remain included; borrowed items are "
+                "excluded. Legacy record totals are included once and are not "
+                "multiplied. The selected purchase allocation column sums only "
+                "reviewed per-item allocations; shared purchase grand totals are "
                 "listed separately below and are not assigned to every item.",
                 styles["tiny"],
             )
@@ -1579,7 +1679,7 @@ def build_pdf(
         rows = [
             [
                 "Merchant / date",
-                "Shared total",
+                "Purchase total",
                 "Selected items",
                 "Selected allocation",
                 "Unallocated",
@@ -1724,16 +1824,17 @@ def build_csv(snapshot: dict[str, Any], *, deadline: float | None = None) -> byt
     for item in snapshot["items"]:
         _check_deadline(deadline)
         purchase = item.get("purchase") or {}
+        current = _snapshot_current_value(item)
         if not purchase:
             total_scope = "no purchase record"
         elif purchase.get("total_cents") is None:
             total_scope = "purchase total not recorded"
         elif purchase.get("has_unselected_items"):
-            total_scope = "shared purchase total; includes items outside selection"
+            total_scope = "purchase transaction total; includes items outside selection"
         elif purchase.get("item_count", 0) > 1:
-            total_scope = "shared purchase total; all linked items selected"
+            total_scope = "purchase transaction total; all linked items selected"
         else:
-            total_scope = "purchase total"
+            total_scope = "purchase transaction total"
         row = [
             snapshot.get("export_id") or "",
             snapshot["generated_at"],
@@ -1773,8 +1874,12 @@ def build_csv(snapshot: dict[str, Any], *, deadline: float | None = None) -> byt
             purchase.get("unallocated_cents")
             if purchase.get("unallocated_cents") is not None
             else "",
-            item.get("current_value_cents") if item.get("current_value_cents") is not None else "",
-            item.get("current_value_currency") or "",
+            current["unit_cents"] if current["unit_cents"] is not None else "",
+            current["quantity"],
+            current["total_cents"] if current["total_cents"] is not None else "",
+            current["currency"] or "",
+            current["basis"] or "",
+            current["estimated_at"] or "",
             (item.get("warranty") or {}).get("provider") or "",
             (item.get("warranty") or {}).get("end_date") or "",
             (item.get("warranty") or {}).get("status") or "",
@@ -1813,6 +1918,8 @@ def _zip_readme(snapshot: dict[str, Any], pdf_name: str, csv_name: str | None) -
         "It is not a physical stocktake, an appraisal, an insurance acceptance,",
         "a claim or a guarantee of coverage. Missing information is marked, not",
         "invented. Currencies are kept separate and never converted.",
+        "Current-value estimates are per owned unit and extended by owned quantity.",
+        "Legacy record totals are reported once and are not multiplied by quantity.",
         "",
         f"Main report: {pdf_name}",
     ]
@@ -2102,6 +2209,12 @@ def write_bundle(
                         "property_id": item["property_id"],
                         "property_name": item["property_name"],
                         "evidence_references": item["document_refs"],
+                        "current_value_unit_cents": _snapshot_current_value(item)["unit_cents"],
+                        "current_value_quantity": _snapshot_current_value(item)["quantity"],
+                        "current_value_total_cents": _snapshot_current_value(item)["total_cents"],
+                        "current_value_currency": _snapshot_current_value(item)["currency"],
+                        "current_value_basis": _snapshot_current_value(item)["basis"],
+                        "current_value_estimated_at": _snapshot_current_value(item)["estimated_at"],
                         "last_checked": item.get("last_checked"),
                     }
                     for item in snapshot["items"]

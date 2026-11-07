@@ -144,7 +144,7 @@ export function ItemCard({
           {typeof price === "number" && (
             <p
               className="shrink-0 text-right text-[0.8rem] font-medium tabular-nums text-foreground/75"
-              title={item.purchase?.is_shared ? "Shared purchase total" : "Purchase price"}
+              title={item.purchase?.is_shared ? "Shared purchase transaction total" : "Purchase transaction total"}
             >
               {formatCurrency(price, item.purchase?.currency)}
               {item.purchase?.is_shared && (

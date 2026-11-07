@@ -74,6 +74,9 @@ const item: ItemSummary = {
   warranty: null,
   current_value_cents: null,
   current_value_currency: "USD",
+  current_value_basis: null,
+  current_value_total_cents: null,
+  current_value_estimated_at: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
