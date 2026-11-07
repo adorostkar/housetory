@@ -30,7 +30,8 @@ def overview(
     location_count = int(
         db.scalar(
             select(func.count(StorageLocation.id)).where(
-                StorageLocation.household_id == household_id
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         or 0

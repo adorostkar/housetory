@@ -19,7 +19,13 @@ from ..models import (
     Room,
     StorageLocation,
 )
-from ..schemas.lending import ActivityEventOut, ActivityHistoryOut
+from ..schemas.lending import (
+    ActivityEventOut,
+    ActivityHistoryOut,
+    RestoreAssistedContainerOut,
+    RestoreAssistedItemOut,
+    RestoreAssistedUndoOut,
+)
 
 UNDOABLE_ACTIONS = {
     ActivityAction.ITEM_MOVED.value,
@@ -34,6 +40,8 @@ ACTION_LABELS = {
     ActivityAction.ITEMS_BULK_TAGGED.value: "Bulk tag update",
     ActivityAction.ITEMS_BULK_CATEGORISED.value: "Bulk category update",
     ActivityAction.CONTAINER_MOVED.value: "Container moved",
+    ActivityAction.CONTAINER_DELETED.value: "Container deleted (recoverable)",
+    ActivityAction.CONTAINER_RESTORED.value: "Container restored",
     ActivityAction.LOAN_CREATED.value: "Loan created",
     ActivityAction.LOAN_RETURNED.value: "Items returned",
     ActivityAction.LOAN_CORRECTED.value: "Loan corrected",
@@ -216,6 +224,307 @@ def _detail_uuid(details: dict[str, Any], key: str) -> uuid.UUID | None:
         return None
 
 
+def _restore_location_label(location: StorageLocation | None) -> str | None:
+    if location is None:
+        return None
+    if location.identifier and location.identifier != location.name:
+        return f"{location.identifier} · {location.name}"
+    return location.identifier or location.name
+
+
+def _restore_item_preview(
+    db: Session,
+    household_id: uuid.UUID,
+    item: Item | None,
+    *,
+    target_room_id: uuid.UUID | None,
+    target_location: StorageLocation | None,
+) -> RestoreAssistedItemOut | None:
+    if item is None:
+        return None
+    current_room = db.get(Room, item.room_id) if item.room_id else None
+    if current_room is not None and current_room.household_id != household_id:
+        current_room = None
+    current_location = (
+        db.get(StorageLocation, item.storage_location_id) if item.storage_location_id else None
+    )
+    if current_location is not None and current_location.household_id != household_id:
+        current_location = None
+    target_room = db.get(Room, target_room_id) if target_room_id else None
+    if target_room is not None and target_room.household_id != household_id:
+        target_room = None
+    return RestoreAssistedItemOut(
+        id=item.id,
+        name=item.name,
+        quantity=item.quantity,
+        current_room_id=current_room.id if current_room else None,
+        current_room_name=current_room.name if current_room else None,
+        current_location_id=current_location.id if current_location else None,
+        current_location_name=current_location.name if current_location else None,
+        current_location_identifier=(current_location.identifier if current_location else None),
+        target_room_id=target_room.id if target_room else None,
+        target_room_name=target_room.name if target_room else None,
+        target_location_id=target_location.id if target_location else None,
+        target_location_name=target_location.name if target_location else None,
+        target_location_identifier=(target_location.identifier if target_location else None),
+    )
+
+
+def _restore_container_preview(
+    db: Session,
+    container: StorageLocation,
+) -> RestoreAssistedContainerOut:
+    room = db.get(Room, container.room_id)
+    property_record = room.property if room is not None else None
+    parent = db.get(StorageLocation, container.parent_id) if container.parent_id else None
+    return RestoreAssistedContainerOut(
+        id=container.id,
+        name=container.name,
+        identifier=container.identifier,
+        legacy_identifier=container.legacy_identifier,
+        kind=container.kind,
+        container_type=container.container_type,
+        is_container=container.is_container,
+        room_id=room.id if room is not None else None,
+        room_name=room.name if room is not None else None,
+        property_id=property_record.id if property_record is not None else None,
+        property_name=property_record.name if property_record is not None else None,
+        parent_id=parent.id if parent is not None else None,
+        parent_name=parent.name if parent is not None else None,
+        deleted_at=container.deleted_at,
+        deleted_by_name=container.deleted_by_name,
+    )
+
+
+def _legacy_restore_preview(
+    db: Session,
+    household_id: uuid.UUID,
+    event: ActivityEvent,
+    *,
+    from_location_id: uuid.UUID,
+) -> RestoreAssistedUndoOut:
+    details = event.details or {}
+    from_detail = details.get("from") if isinstance(details.get("from"), dict) else {}
+    from_detail = from_detail or {}
+    from_room_id = _detail_uuid(details, "from_room_id")
+    room = db.get(Room, from_room_id) if from_room_id else None
+    if room is not None and room.household_id != household_id:
+        room = None
+    property_record = room.property if room is not None else None
+    item = (
+        db.scalar(
+            select(Item).where(
+                Item.id == event.item_id,
+                Item.household_id == household_id,
+            )
+        )
+        if event.item_id is not None
+        else None
+    )
+    path = from_detail.get("path") if isinstance(from_detail.get("path"), list) else []
+    parent_name = None
+    if len(path) > 1 and isinstance(path[-2], dict):
+        parent_name = str(path[-2].get("name") or "") or None
+    container = RestoreAssistedContainerOut(
+        id=from_location_id,
+        name=str(from_detail.get("location_name") or "") or None,
+        identifier=str(from_detail.get("location_identifier") or "") or None,
+        room_id=from_room_id,
+        room_name=(str(from_detail.get("room_name") or "") or None if room is None else room.name),
+        property_id=(
+            _detail_uuid(details, "from_property_id") or _detail_uuid(from_detail, "property_id")
+            if property_record is None
+            else property_record.id
+        ),
+        property_name=(
+            str(from_detail.get("property_name") or "") or None
+            if property_record is None
+            else property_record.name
+        ),
+        parent_name=parent_name,
+    )
+    return RestoreAssistedUndoOut(
+        available=False,
+        reason=(
+            "The original storage place was permanently deleted before recoverable "
+            "tombstones existed. Its identity cannot be restored or invented safely."
+        ),
+        legacy_unrecoverable=True,
+        will_restore_container=False,
+        will_move_item=False,
+        container=container,
+        item=_restore_item_preview(
+            db,
+            household_id,
+            item,
+            target_room_id=from_room_id,
+            target_location=None,
+        ),
+    )
+
+
+def _restore_assisted_preview(
+    db: Session,
+    household_id: uuid.UUID,
+    event: ActivityEvent,
+    *,
+    for_update: bool = False,
+) -> RestoreAssistedUndoOut | None:
+    """Return restore-assisted undo state for a deleted original place."""
+    if event.action != ActivityAction.ITEM_MOVED.value:
+        return None
+    details = event.details or {}
+    from_location_id = _detail_uuid(details, "from_location_id")
+    if from_location_id is None:
+        return None
+    if event.undoes_event_id is not None:
+        return None
+    if db.scalar(select(ActivityEvent.id).where(ActivityEvent.undoes_event_id == event.id)):
+        return None
+
+    container_query = select(StorageLocation).where(
+        StorageLocation.id == from_location_id,
+        StorageLocation.household_id == household_id,
+    )
+    if for_update:
+        container_query = container_query.with_for_update()
+    container = db.scalar(container_query)
+    if container is not None and container.deleted_at is None:
+        return None
+    if container is None:
+        return _legacy_restore_preview(db, household_id, event, from_location_id=from_location_id)
+
+    item_query = (
+        select(Item).where(Item.id == event.item_id, Item.household_id == household_id)
+        if event.item_id is not None
+        else None
+    )
+    if item_query is not None and for_update:
+        item_query = item_query.with_for_update()
+    item = db.scalar(item_query) if item_query is not None else None
+    from_room_id = _detail_uuid(details, "from_room_id")
+    to_room_id = _detail_uuid(details, "to_room_id")
+    to_location_id = _detail_uuid(details, "to_location_id")
+    from_detail = details.get("from") if isinstance(details.get("from"), dict) else {}
+    from_detail = from_detail or {}
+
+    reason: str | None = None
+    if item is None:
+        reason = "The item no longer exists."
+    elif item.is_archived:
+        reason = "Restore the item before restoring this move."
+    elif item.room_id != to_room_id or item.storage_location_id != to_location_id:
+        reason = "The item has moved since this action, so undo is unsafe."
+    elif _later_event_exists(
+        db,
+        event,
+        {ActivityAction.ITEM_MOVED.value, ActivityAction.ITEM_MOVE_UNDONE.value},
+    ):
+        reason = "A later item move exists. Undo that move first."
+
+    room = db.get(Room, from_room_id) if from_room_id else None
+    if room is not None and room.household_id != household_id:
+        room = None
+    if reason is None:
+        if from_room_id is None:
+            reason = "The original room is missing from movement history."
+        elif room is None:
+            reason = "The original room no longer exists."
+        elif container.room_id != from_room_id:
+            reason = "Recovery metadata points to a different room."
+        else:
+            from_property_id = _detail_uuid(details, "from_property_id") or _detail_uuid(
+                from_detail, "property_id"
+            )
+            if from_property_id is not None and room.property_id != from_property_id:
+                reason = "Recovery metadata points to a different property."
+
+    parent = None
+    if reason is None and container.parent_id is not None:
+        parent = db.get(StorageLocation, container.parent_id)
+        if parent is None or parent.household_id != household_id:
+            reason = "The original parent place no longer exists."
+        elif parent.deleted_at is not None:
+            reason = "The original parent place is also deleted. Restore it first."
+        elif parent.room_id != container.room_id:
+            reason = "The original parent place is now in a different room."
+
+    if reason is None and container.identifier:
+        conflict = db.scalar(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.identifier == container.identifier,
+                StorageLocation.id != container.id,
+            )
+        )
+        if conflict is not None:
+            reason = "The original identifier is already used by another place."
+
+    if reason is None and container.legacy_identifier:
+        conflict = db.scalar(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+                func.upper(StorageLocation.legacy_identifier)
+                == container.legacy_identifier.upper(),
+                StorageLocation.id != container.id,
+            )
+        )
+        if conflict is not None:
+            reason = "The original legacy identifier is already used by another active place."
+
+    if reason is None:
+        name_conflict = db.scalar(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+                StorageLocation.room_id == container.room_id,
+                StorageLocation.id != container.id,
+                func.lower(StorageLocation.name) == container.name.casefold(),
+                (
+                    StorageLocation.parent_id.is_(None)
+                    if container.parent_id is None
+                    else StorageLocation.parent_id == container.parent_id
+                ),
+            )
+        )
+        if name_conflict is not None:
+            reason = "Another active place now uses this name in the same room and parent."
+
+    target_room = room
+    return RestoreAssistedUndoOut(
+        available=reason is None,
+        reason=reason,
+        legacy_unrecoverable=False,
+        will_restore_container=True,
+        will_move_item=item is not None,
+        container=_restore_container_preview(db, container),
+        item=_restore_item_preview(
+            db,
+            household_id,
+            item,
+            target_room_id=target_room.id if target_room is not None else from_room_id,
+            target_location=container,
+        ),
+    )
+
+
+def restore_assisted_preview(
+    db: Session,
+    household_id: uuid.UUID,
+    event_id: uuid.UUID,
+) -> RestoreAssistedUndoOut:
+    event = get_event(db, household_id, event_id)
+    preview = _restore_assisted_preview(db, household_id, event)
+    if preview is None:
+        raise ApiError(
+            409,
+            "restore_not_applicable",
+            "This history action does not need a deleted container restored.",
+        )
+    return preview
+
+
 def _undo_blocked_reason(
     db: Session, event: ActivityEvent
 ) -> tuple[bool, str | None, ActivityEvent | None]:
@@ -270,6 +579,7 @@ def _undo_blocked_reason(
                 select(func.count(StorageLocation.id)).where(
                     StorageLocation.id == from_location,
                     StorageLocation.household_id == event.household_id,
+                    StorageLocation.active(),
                 )
             )
             == 0
@@ -284,6 +594,7 @@ def _undo_blocked_reason(
             select(StorageLocation).where(
                 StorageLocation.id == event.container_id,
                 StorageLocation.household_id == event.household_id,
+                StorageLocation.active(),
             )
         )
         if container is None:
@@ -319,6 +630,7 @@ def _undo_blocked_reason(
                 select(func.count(StorageLocation.id)).where(
                     StorageLocation.id == from_parent,
                     StorageLocation.household_id == event.household_id,
+                    StorageLocation.active(),
                 )
             )
             == 0
@@ -438,6 +750,7 @@ def serialize_event(db: Session, event: ActivityEvent) -> ActivityEventOut:
         undo_event_id=undo_event.id if undo_event else None,
         can_undo=can_undo,
         undo_blocked_reason=reason,
+        restore_assisted=_restore_assisted_preview(db, event.household_id, event),
     )
 
 
@@ -794,6 +1107,137 @@ def undo_event(
     return undo_event
 
 
+def restore_assisted_undo_event(
+    db: Session,
+    household_id: uuid.UUID,
+    event_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID | None,
+    actor_name: str | None,
+    request_id: uuid.UUID | None = None,
+) -> ActivityEvent:
+    """Restore one tombstoned place and undo one item move atomically."""
+    event = get_event(db, household_id, event_id, for_update=True)
+    if request_id is not None:
+        existing_request = find_request_event(db, household_id, request_id)
+        if existing_request is not None:
+            if existing_request.undoes_event_id != event.id:
+                raise ApiError(
+                    409,
+                    "request_id_reused",
+                    "That request id was used for another history action.",
+                )
+            return existing_request
+
+    existing_undo = db.scalar(
+        select(ActivityEvent).where(ActivityEvent.undoes_event_id == event.id)
+    )
+    if existing_undo is not None:
+        raise ApiError(409, "already_undone", "This action has already been undone.")
+
+    preview = _restore_assisted_preview(db, household_id, event, for_update=True)
+    if preview is None:
+        raise ApiError(
+            409,
+            "restore_not_applicable",
+            "This history action does not need a deleted container restored.",
+        )
+    if not preview.available or preview.container is None:
+        raise ApiError(
+            409,
+            "restore_not_safe",
+            preview.reason or "This move cannot be restored safely.",
+        )
+
+    container = db.scalar(
+        select(StorageLocation)
+        .where(
+            StorageLocation.id == preview.container.id,
+            StorageLocation.household_id == household_id,
+            StorageLocation.deleted_at.is_not(None),
+        )
+        .with_for_update()
+    )
+    if container is None:
+        raise ApiError(
+            409,
+            "restore_not_safe",
+            "The recoverable place changed before it could be restored.",
+        )
+    item = db.scalar(
+        select(Item)
+        .where(Item.id == event.item_id, Item.household_id == household_id)
+        .with_for_update()
+    )
+    if item is None:
+        raise ApiError(409, "restore_not_safe", "The item no longer exists.")
+    details = event.details or {}
+    from_room_id = _detail_uuid(details, "from_room_id")
+    if from_room_id is None:
+        raise ApiError(409, "restore_not_safe", "The original room is missing.")
+    now = datetime.now(UTC)
+    container.deleted_at = None
+    container.deleted_by_user_id = None
+    container.deleted_by_name = None
+    container.restored_at = now
+    container.restored_by_user_id = actor_user_id
+    container.updated_at = now
+    item.room_id = from_room_id
+    item.storage_location_id = container.id
+    item.updated_at = now
+    db.flush()
+
+    record_event(
+        db,
+        household_id,
+        actor_user_id=actor_user_id,
+        actor_name=actor_name,
+        action=ActivityAction.CONTAINER_RESTORED.value,
+        entity_type="container",
+        entity_id=container.id,
+        container_id=container.id,
+        summary=(
+            f"Restored container {container.identifier or container.name} for an item move undo"
+        ),
+        details={
+            "restored_container_id": str(container.id),
+            "restored_for_item_id": str(item.id),
+            "restored_for_move_event_id": str(event.id),
+            "room_id": str(from_room_id),
+            "identifier": container.identifier,
+            "name": container.name,
+        },
+    )
+    summary = _undo_summary(event)
+    summary = f"Restored container and {summary[:430]}"
+    undo_event = record_event(
+        db,
+        household_id,
+        actor_user_id=actor_user_id,
+        actor_name=actor_name,
+        action=ActivityAction.ITEM_MOVE_UNDONE.value,
+        entity_type="item",
+        entity_id=item.id,
+        item_id=item.id,
+        container_id=container.id,
+        summary=summary,
+        details={
+            "undone_event_id": str(event.id),
+            "undone_action": event.action,
+            "restore_assisted": True,
+            "restored_container_id": str(container.id),
+            "restored_container_name": container.name,
+            "restored_container_identifier": container.identifier,
+            "from": details.get("to", {}),
+            "to": details.get("from", {}),
+        },
+        request_id=request_id,
+        undoes_event_id=event.id,
+    )
+    db.flush()
+    return undo_event
+
+
 def _validate_destination(
     db: Session,
     household_id: uuid.UUID,
@@ -811,6 +1255,7 @@ def _validate_destination(
             select(StorageLocation).where(
                 StorageLocation.id == location_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:

@@ -31,6 +31,7 @@ def _location(db: Session, household_id: uuid.UUID, location_id: uuid.UUID) -> S
         select(StorageLocation).where(
             StorageLocation.id == location_id,
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
         )
     )
     if location is None:

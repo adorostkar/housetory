@@ -33,7 +33,8 @@ The same transactional backend workflow powers:
 - **Move all contents**: removes every item/nested place from a source while
   keeping the source.
 - **Move contents and delete**: moves first, verifies the source is empty, then
-  deletes it inside the same transaction.
+  deletes it inside the same transaction. Storage places become recoverable
+  tombstones; room deletion remains the explicit irreversible operation.
 
 Preview includes direct and nested item counts, units, archived items, active
 loans, nested places, child rooms, active borrowed placements and source photos.
@@ -55,11 +56,52 @@ Rules:
 - Item metadata, quantities, documents, photos, purchases and warranties are
   untouched.
 - A failed post-move verification rolls the entire transaction back.
-- The empty source delete is irreversible. The UI does not promise undo. Earlier
-  individual item-move history remains, but undo safely refuses when the original
-  source no longer exists.
-- Source room/place photos are deleted with the source and are called out in the
-  preview. Photos on moved nested places remain with those places.
+- Empty storage-place deletion is recoverable: the place row, identity, room,
+  parent, identifier, photos and deletion snapshot are retained as a tombstone.
+  Earlier individual item moves can offer **Restore container and undo move…** for
+  one eligible item at a time. This is not a whole-container undo.
+- Room deletion remains irreversible and stays blocked while active or
+  recoverable-deleted places/contents remain. The UI says so instead of implying
+  that a blocked room was deleted.
+- Storage-place photos are retained with a tombstone and return if the place is
+  restored. Room photos are deleted with the room. Photos on moved nested places
+  remain with those places.
+
+## Recoverable deleted storage places
+
+Deleting an empty storage place now writes a household-scoped tombstone rather
+than removing the row. Tombstones:
+
+- are excluded from active lists, counts, search, selection, label generation,
+  new move destinations and QR lookups;
+- keep their stable ID and QR identifier, so a later restore does not create a
+  duplicate or steal a reassigned identifier;
+- are not automatically purged. No retention purge job was added;
+- retain their photos and deletion snapshot, including room, parent, property,
+  path, identifier and photo count;
+- are visible as an honest `410 container_deleted` / `location_deleted` state when
+  an old QR or detail link is opened.
+
+An item move whose original place is a tombstone shows a distinct restore action
+in item history. The preview lists the original container identity, parent/room,
+identifier and the one item that will be returned. Confirmation atomically
+restores the tombstone and moves that one item back, then records a
+`container.restored` event and an `item.move_undone` compensating event.
+
+The restore is blocked rather than guessed when:
+
+- the item moved again after the recorded move;
+- the original room or parent place is missing or also deleted;
+- the original property/room metadata is inconsistent;
+- an active place now uses the same name in that room/parent, or the legacy
+  identifier is now used elsewhere;
+- the item is archived or no longer exists;
+- recovery metadata points to another household or the user lacks write access.
+
+Previously hard-deleted legacy places have no tombstone. Their history shows that
+they predate recoverable deletion and cannot be recreated safely; Housetory does
+not invent a room, parent or identity from incomplete snapshots. Room hierarchy
+restoration and whole-bulk reversal remain deferred.
 
 ## Containers list and detail
 
@@ -87,9 +129,12 @@ history remain household-scoped; cross-household IDs are not reachable.
   background job/cancel UI is provided.
 - Historical borrowed records that already have a returned/cancelled status keep
   their historical snapshots even if their old room/place is later deleted.
-- Removed source entity photos are irreversible.
-- There is no whole-place undo for deletion. Individual item moves may be undone
-  only while their original source still exists.
+- Room photos and room deletion remain irreversible.
+- There is no whole-place or whole-bulk undo. A recoverable storage-place
+  tombstone can restore only one eligible item move at a time; it does not bring
+  back other former contents.
+- Tombstones are retained without an automatic purge job. A future explicit
+  retention lifecycle is required before any permanent cleanup.
 
 ## Walkthrough screenshots
 
@@ -99,3 +144,5 @@ history remain household-scoped; cross-household IDs are not reachable.
 - [Move all contents preview](walkthrough/place-management/04-move-contents-preview.png)
 - [Move contents and delete preview](walkthrough/place-management/05-move-and-delete-preview.png)
 - [Room deletion with child-room reparenting preview](walkthrough/place-management/06-room-delete-preview.png)
+- [Restore-assisted undo preview](walkthrough/restore-assisted-undo/01-preview.png)
+- [Restored container and returned item](walkthrough/restore-assisted-undo/02-restored.png)

@@ -261,7 +261,10 @@ def _scope_roots(
         )
         .join(Room, Room.id == StorageLocation.room_id)
         .join(Property, Property.id == Room.property_id)
-        .where(StorageLocation.household_id == household_id)
+        .where(
+            StorageLocation.household_id == household_id,
+            StorageLocation.active(),
+        )
     ).all()
     room_by_id = {row[0]: row for row in room_rows}
     location_by_id = {row[0]: row for row in location_rows}
@@ -462,7 +465,10 @@ def build_snapshot(
     rooms = list(db.scalars(select(Room).where(Room.household_id == household.id)).all())
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household.id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household.id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     room_path_map = _room_paths(rooms)

@@ -25,9 +25,26 @@ def _get_location(db: Session, household_id: uuid.UUID, location_id: uuid.UUID) 
         select(StorageLocation).where(
             StorageLocation.id == location_id,
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
         )
     )
     if location is None:
+        deleted = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.id == location_id,
+                StorageLocation.household_id == household_id,
+                StorageLocation.deleted_at.is_not(None),
+            )
+        )
+        if deleted is not None:
+            raise ApiError(
+                410,
+                "location_deleted",
+                (
+                    f"Storage place {deleted.identifier or deleted.name} was deleted. "
+                    "Its item move history may offer a restore-assisted undo."
+                ),
+            )
         raise ApiError(404, "location_not_found", "Storage location not found.")
     return location
 
@@ -80,6 +97,7 @@ def _ensure_unique_name(
     query = select(StorageLocation.id).where(
         StorageLocation.household_id == household_id,
         StorageLocation.room_id == room_id,
+        StorageLocation.active(),
         func.lower(StorageLocation.name) == name.lower(),
     )
     if parent_id is None:
@@ -106,7 +124,8 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
     )
     rows = db.execute(
         select(StorageLocation.id, StorageLocation.parent_id).where(
-            StorageLocation.household_id == household_id
+            StorageLocation.household_id == household_id,
+            StorageLocation.active(),
         )
     ).all()
     return direct, descendant_totals(rows, direct)
@@ -144,7 +163,10 @@ def list_locations(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> StorageLocationList:
-    query = select(StorageLocation).where(StorageLocation.household_id == auth.household.id)
+    query = select(StorageLocation).where(
+        StorageLocation.household_id == auth.household.id,
+        StorageLocation.active(),
+    )
     if room_id is not None:
         _get_room(db, auth.household.id, room_id)
         query = query.where(StorageLocation.room_id == room_id)
@@ -269,7 +291,13 @@ def delete_location(
 ) -> Response:
     try:
         location = _get_location(db, auth.household.id, location_id)
-        delete_location_safely(db, auth.household.id, location)
+        delete_location_safely(
+            db,
+            auth.household.id,
+            location,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
         db.commit()
     except Exception:
         db.rollback()

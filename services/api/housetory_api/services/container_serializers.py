@@ -45,7 +45,10 @@ def qr_urls(location: StorageLocation) -> tuple[str, str, str | None]:
 def location_path_map(db: Session, household_id: uuid.UUID) -> dict[uuid.UUID, list[LocationBrief]]:
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     by_id = {location.id: location for location in locations}
@@ -109,6 +112,7 @@ def _counts(
             select(func.count(StorageLocation.id)).where(
                 StorageLocation.household_id == household_id,
                 StorageLocation.parent_id == location.id,
+                StorageLocation.active(),
             )
         )
         or 0
@@ -118,6 +122,7 @@ def _counts(
             select(func.count(StorageLocation.id)).where(
                 StorageLocation.household_id == household_id,
                 StorageLocation.id.in_(subtree),
+                StorageLocation.active(),
                 StorageLocation.is_container.is_(True),
             )
         )
@@ -225,6 +230,7 @@ def serialize_container_detail(
                     select(func.count(StorageLocation.id)).where(
                         StorageLocation.household_id == household_id,
                         StorageLocation.parent_id == child.id,
+                        StorageLocation.active(),
                     )
                 )
                 or 0

@@ -1146,6 +1146,7 @@ def _validate_location(
             select(StorageLocation).where(
                 StorageLocation.id == location.matched_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if existing is None:
@@ -1172,6 +1173,7 @@ def _validate_location(
             select(StorageLocation).where(
                 StorageLocation.id == parent_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if parent is None:
@@ -1180,6 +1182,7 @@ def _validate_location(
             raise ValueError("A nested storage place must belong to the same room.")
     query = select(StorageLocation).where(
         StorageLocation.household_id == household_id,
+        StorageLocation.active(),
         StorageLocation.room_id == room.id,
         func.lower(StorageLocation.name) == name.casefold(),
     )

@@ -918,6 +918,7 @@ def _plan_filters(
             location = db.scalar(
                 select(StorageLocation).where(
                     StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                     func.upper(StorageLocation.identifier) == identifier.upper(),
                 )
             )

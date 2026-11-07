@@ -93,7 +93,7 @@ Supported:
 
 | Action | Conditions checked before undo |
 | --- | --- |
-| Item move | Item exists, is not archived, is still at the destination, has no later move, and the original room/place still exists. |
+| Item move | Item exists, is not archived, is still at the destination, has no later move, and the original room/place still exists or is a recoverable-deleted storage-place tombstone. |
 | Container move | Container is still at the destination, has no later container move, and the original room/parent still exists. Current contents move with it. |
 | Loan creation | No returns, corrections or cancellation; loan untouched and item still exists. The loan becomes cancelled. |
 | Return | Return is active and latest; loan was not cancelled/corrected afterwards; undoing would not make outstanding exceed owned quantity. |
@@ -103,7 +103,9 @@ Blocked with a clear explanation:
 - any second undo of the same event;
 - undoing a compensating undo event;
 - item/container moved again after the event;
-- item archived, deleted, or original place deleted;
+- item archived or deleted;
+- the original room is gone, or a storage place was permanently deleted before
+  recoverable tombstones existed;
 - loan corrected/cancelled or return history superseded;
 - item quantity reduced too far after a return;
 - unsupported action types such as quantity edits, archive/delete, loan correction
@@ -111,6 +113,32 @@ Blocked with a clear explanation:
 
 Undo requires the same owner/member write permission as the original action.
 Viewers can read history but cannot lend, return, correct, cancel or undo.
+
+## Restore-assisted item-move undo
+
+Deleting an empty storage place retains a recoverable tombstone. If a later item
+history entry still points at that tombstone, item history offers **Restore
+container and undo move…** instead of ordinary Undo.
+
+- The item history event carries a live preview with the deleted container's
+  identity, identifier, property/room/parent and the single item that would be
+  returned. `GET /history/{event_id}/restore-preview` refreshes that state before
+  confirmation.
+- Confirmation calls `POST /history/{event_id}/restore-undo`. The server locks the
+  history event, item and tombstone, rechecks every blocker, restores the original
+  row/identity/identifier, returns one item, and records both
+  `container.restored` and `item.move_undone` compensating events atomically.
+- It never restores the container's other former contents, never recreates a
+  missing room or parent hierarchy, and never creates a duplicate identity.
+- A second item moved from the same container uses ordinary Undo after the first
+  restore; the container is reused, not recreated.
+- Blocked previews are explicit: later item move, archived/missing item, missing
+  room or parent, deleted parent, property mismatch, identifier/name conflict or
+  legacy hard deletion without a tombstone.
+- Repeated requests are idempotent. Concurrent confirms are serialized; exactly
+  one succeeds and the other reports the event as already undone.
+- Photos on the tombstoned storage place are retained. Photos on a deleted room
+  are not recoverable.
 
 ## Retry and concurrency safety
 
@@ -147,9 +175,10 @@ Automated PostgreSQL tests cover authorization and cross-household IDOR, stock
 limits, concurrent lending/returns, retries, partial returns, corrections, date
 and overdue handling, quantity/archive/delete restrictions, item and container
 history snapshots, safe/blocked/replayed undo, and concurrent single-winner undo.
-Frontend tests cover loan lists, dialogs, timeline confirmation and grouped
-quantities. Disposable-stack browser workflows cover lending, partial return,
-outstanding list, item timeline, item/container move history and undo.
+Frontend tests cover loan lists, dialogs, timeline confirmation, grouped
+quantities and the restore-assisted preview/blocker. Disposable-stack browser
+workflows cover lending, partial return, outstanding list, item timeline,
+item/container move history, ordinary undo and restore-assisted container undo.
 
 No paid AI, borrower email or real household content is used in tests. Real
 borrower messaging is intentionally out of scope.
@@ -183,3 +212,8 @@ Mobile item detail:
 Mobile loans list:
 
 ![Loans list mobile](walkthrough/lending/06-loans-list-mobile.png)
+
+## Restore-assisted undo screenshots
+
+- [Deleted-container restore preview](walkthrough/restore-assisted-undo/01-preview.png)
+- [Restored container and compensating item move](walkthrough/restore-assisted-undo/02-restored.png)

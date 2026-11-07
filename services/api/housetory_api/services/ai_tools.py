@@ -323,6 +323,7 @@ def _resolve_location(
             select(StorageLocation).where(
                 StorageLocation.id == location_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
     if not name:
@@ -333,6 +334,7 @@ def _resolve_location(
         exact = db.scalar(
             select(StorageLocation).where(
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
                 func.upper(StorageLocation.identifier) == identifier,
             )
         )
@@ -342,6 +344,7 @@ def _resolve_location(
         select(StorageLocation)
         .where(
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
             func.lower(StorageLocation.name) == normalized,
         )
         .limit(1)
@@ -349,6 +352,7 @@ def _resolve_location(
         select(StorageLocation)
         .where(
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
             StorageLocation.name.ilike(f"%{normalized}%"),
         )
         .order_by(func.length(StorageLocation.name))
@@ -718,7 +722,10 @@ def tool_search_locations(
     query = str(args.get("q") or "").strip()
     property_id = args.get("property_id")
     room_conditions = [Room.household_id == household_id]
-    location_conditions = [StorageLocation.household_id == household_id]
+    location_conditions = [
+        StorageLocation.household_id == household_id,
+        StorageLocation.active(),
+    ]
     if property_id is not None:
         room_conditions.append(Room.property_id == property_id)
         location_conditions.append(StorageLocation.room.has(Room.property_id == property_id))
@@ -822,6 +829,7 @@ def tool_list_room_contents(
         select(StorageLocation)
         .where(
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
             StorageLocation.room_id.in_(children),
         )
         .order_by(StorageLocation.sort_order, StorageLocation.name)

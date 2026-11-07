@@ -42,7 +42,10 @@ def build_index(
     if property_id is not None:
         room_conditions.append(Room.property_id == property_id)
     room_query = select(Room).where(*room_conditions)
-    location_query = select(StorageLocation).where(StorageLocation.household_id == household_id)
+    location_query = select(StorageLocation).where(
+        StorageLocation.household_id == household_id,
+        StorageLocation.active(),
+    )
     if property_id is not None:
         location_query = location_query.join(Room, Room.id == StorageLocation.room_id).where(
             Room.property_id == property_id

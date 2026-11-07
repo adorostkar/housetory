@@ -43,6 +43,7 @@ def location(db: Session, household_id: uuid.UUID, location_id: uuid.UUID) -> St
         select(StorageLocation).where(
             StorageLocation.id == location_id,
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
         )
     )
     if record is None:
@@ -240,7 +241,9 @@ def update_item_record(
             new_location_id = None
         if "room_id" in fields and "storage_location_id" not in fields and new_location_id:
             current_location = db.get(StorageLocation, new_location_id)
-            if current_location is not None and current_location.room_id != new_room_id:
+            if current_location is not None and (
+                current_location.deleted_at is not None or current_location.room_id != new_room_id
+            ):
                 new_location_id = None
         resolved_room_id, location_record = resolve_location(
             db, household_id, new_room_id, new_location_id

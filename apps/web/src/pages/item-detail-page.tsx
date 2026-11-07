@@ -743,6 +743,9 @@ export function ItemDetailPage() {
         <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
           Moves and lending changes, with household member, time and preserved place names.
           Undo creates a new compensating event and is only offered while it is safe.
+          If the original storage place was recoverably deleted, one item can be returned
+          after an explicit container-restore preview; other former contents are not
+          recreated.
         </p>
         <div className="mt-4">
           <ActivityTimeline

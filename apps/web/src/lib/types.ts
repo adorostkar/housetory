@@ -2330,6 +2330,51 @@ export interface LoanReturn {
   reversed_by_event_id: UUID | null;
 }
 
+export interface RestoreAssistedContainer {
+  id: UUID;
+  name: string | null;
+  identifier: string | null;
+  legacy_identifier: string | null;
+  kind: string | null;
+  container_type: string | null;
+  is_container: boolean | null;
+  room_id: UUID | null;
+  room_name: string | null;
+  property_id: UUID | null;
+  property_name: string | null;
+  parent_id: UUID | null;
+  parent_name: string | null;
+  deleted_at: string | null;
+  deleted_by_name: string | null;
+}
+
+export interface RestoreAssistedItem {
+  id: UUID;
+  name: string;
+  quantity: number;
+  current_room_id: UUID | null;
+  current_room_name: string | null;
+  current_location_id: UUID | null;
+  current_location_name: string | null;
+  current_location_identifier: string | null;
+  target_room_id: UUID | null;
+  target_room_name: string | null;
+  target_location_id: UUID | null;
+  target_location_name: string | null;
+  target_location_identifier: string | null;
+}
+
+export interface RestoreAssistedUndo {
+  available: boolean;
+  reason: string | null;
+  legacy_unrecoverable: boolean;
+  will_restore_container: boolean;
+  will_move_item: boolean;
+  item_count: number;
+  container: RestoreAssistedContainer | null;
+  item: RestoreAssistedItem | null;
+}
+
 export interface ActivityEvent {
   id: UUID;
   action: string;
@@ -2348,6 +2393,7 @@ export interface ActivityEvent {
   undo_event_id: UUID | null;
   can_undo: boolean;
   undo_blocked_reason: string | null;
+  restore_assisted?: RestoreAssistedUndo | null;
 }
 
 export interface ActivityHistory {
@@ -2505,6 +2551,7 @@ export interface UndoResult {
   event: ActivityEvent;
   undone_event_id: UUID;
   message: string;
+  restored_container_id?: UUID | null;
 }
 
 export interface BulkDestination {

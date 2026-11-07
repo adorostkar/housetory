@@ -35,6 +35,7 @@ def _ordered_locations(
             select(StorageLocation).where(
                 StorageLocation.household_id == household_id,
                 StorageLocation.id.in_(unique_ids),
+                StorageLocation.active(),
             )
         ).all()
     )

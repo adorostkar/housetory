@@ -80,13 +80,14 @@ Tailscale is optional.
   item lists reuse the Items bulk selection/action workflow with direct/nested
   scope, search, sort and mobile-friendly selection. Item detail preserves a safe
   same-app origin through edit/save/back, including after an item moves. Containers
-  expose consistent delete actions; empty places confirm deletion, while nonempty
-  rooms/containers offer **Move contents and delete** with previews, or
-  **Move all contents** without deleting. Transfers preserve nested places,
-  quantities, documents, loans and active borrowed placements, reparent child
-  rooms, reject cycles/cross-household destinations, and roll back completely on
-  stale counts or verification failure. See
-  [`docs/PLACE_MANAGEMENT.md`](docs/PLACE_MANAGEMENT.md).
+  expose consistent delete actions; empty storage places become recoverable
+  tombstones, while nonempty rooms/containers offer **Move contents and delete**
+  with previews, or **Move all contents** without deleting. Room deletion remains
+  explicit, irreversible and blocked by active or recoverable-deleted places.
+  Transfers preserve nested places, quantities, documents, loans, photos and
+  active borrowed placements, reparent child rooms, reject cycles/cross-household
+  destinations, and roll back completely on stale counts or verification failure.
+  See [`docs/PLACE_MANAGEMENT.md`](docs/PLACE_MANAGEMENT.md).
 - **Multiple households and All my places**: one account can join independent
   households with a different owner/member/viewer role in each. Create or switch
   households from a compact selector; editing stays in one explicit workspace,
@@ -218,6 +219,10 @@ Tailscale is optional.
   container moves, loans, returns, corrections and cancellation are recorded with
   actor and preserved name snapshots. Supported moves and lending actions offer a
   state-checked compensating undo; legacy items are not given fabricated history.
+  If an item's original storage place was recoverably deleted, item history can
+  preview and atomically restore that container identity and return one eligible
+  item without recreating other contents or missing hierarchy. See
+  [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md).
 - **Bulk organisation and compact list view**: select only the loaded item records
   and move, add/remove tags or explicitly set/clear a category in bounded atomic
   batches. The previews show destination, selected records/units and active-loan
@@ -296,7 +301,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 387 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 395 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -355,13 +360,13 @@ stack, not just unit mocks:
   permission and license evidence, evidence exclusion, AI preview/accept/reject,
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
-- 210 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 65 checked-in Playwright workflows (64 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 212 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 67 checked-in Playwright workflows (66 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
-  lending/partial return/outstanding list/timeline undo and item/container move
-  history, loaded-only bulk selection with move/tag/category dialogs and
+  lending/partial return/outstanding list/timeline undo, item/container move
+  history, recoverable deleted-container restore and blocker states, loaded-only bulk selection with move/tag/category dialogs and
   compact-list persistence, desktop/mobile multi-page scan editing, reorder,
   save, page-original access and cancel, OCR-to-line-item review with exact
   household matching, optional AI-refined fields/lines, reviewed apply and persisted

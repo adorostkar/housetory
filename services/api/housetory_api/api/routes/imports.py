@@ -158,6 +158,7 @@ def create_import(
             select(StorageLocation).where(
                 StorageLocation.id == location_id,
                 StorageLocation.household_id == auth.household.id,
+                StorageLocation.active(),
             )
         )
         if context_location is None:

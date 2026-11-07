@@ -97,7 +97,10 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
     location_counts = dict(
         db.execute(
             select(StorageLocation.room_id, func.count(StorageLocation.id))
-            .where(StorageLocation.household_id == household_id)
+            .where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
             .group_by(StorageLocation.room_id)
         ).all()
     )
@@ -356,8 +359,8 @@ def delete_room(
         raise ApiError(
             409,
             "room_not_empty",
-            "This room still has sub-rooms, storage locations, items or active "
-            "borrowed placements.",
+            "This room still has sub-rooms, active or recoverable-deleted places, "
+            "items or active borrowed placements. Nothing was deleted.",
         )
     db.delete(room)
     db.commit()

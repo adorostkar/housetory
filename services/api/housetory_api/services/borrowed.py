@@ -167,6 +167,7 @@ def _resolve_place(
             select(StorageLocation).where(
                 StorageLocation.id == storage_location_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:

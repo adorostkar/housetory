@@ -63,6 +63,29 @@ def _get(db: Session, household_id: uuid.UUID, location_id: uuid.UUID) -> Storag
     return get_location(db, household_id, location_id)
 
 
+def _get_recoverable_deleted(
+    db: Session, household_id: uuid.UUID, location_id: uuid.UUID
+) -> StorageLocation | None:
+    location = db.scalar(
+        select(StorageLocation).where(
+            StorageLocation.id == location_id,
+            StorageLocation.household_id == household_id,
+        )
+    )
+    return location if location is not None and location.deleted_at is not None else None
+
+
+def _deleted_error(location: StorageLocation) -> ApiError:
+    return ApiError(
+        410,
+        "container_deleted",
+        (
+            f"Container {location.identifier or location.name} was deleted. "
+            "Its item move history may offer a restore-assisted undo."
+        ),
+    )
+
+
 @router.get("/qr-config", response_model=ContainerQrConfig)
 def qr_config(auth: AuthContext = Depends(require_auth)) -> ContainerQrConfig:
     settings = get_settings()
@@ -87,7 +110,10 @@ def list_containers(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ContainerList:
-    conditions = [StorageLocation.household_id == auth.household.id]
+    conditions = [
+        StorageLocation.household_id == auth.household.id,
+        StorageLocation.active(),
+    ]
     if not include_fixed:
         conditions.append(StorageLocation.is_container.is_(True))
     if property_id is not None:
@@ -231,10 +257,20 @@ def lookup_identifier(
     location = db.scalar(
         select(StorageLocation).where(
             StorageLocation.household_id == auth.household.id,
+            StorageLocation.active(),
             func.upper(StorageLocation.identifier) == normalized,
         )
     )
     if location is None:
+        deleted = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.household_id == auth.household.id,
+                StorageLocation.deleted_at.is_not(None),
+                func.upper(StorageLocation.identifier) == normalized,
+            )
+        )
+        if deleted is not None:
+            raise _deleted_error(deleted)
         raise ApiError(404, "container_not_found", "No container has that identifier.")
     return serialize_container(db, auth.household.id, location)
 
@@ -245,6 +281,9 @@ def read_container(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ContainerDetail:
+    deleted = _get_recoverable_deleted(db, auth.household.id, location_id)
+    if deleted is not None:
+        raise _deleted_error(deleted)
     location = _get(db, auth.household.id, location_id)
     return serialize_container_detail(db, auth.household.id, location)
 
@@ -311,7 +350,13 @@ def delete_empty_container(
 ) -> Response:
     try:
         location = _get(db, auth.household.id, location_id)
-        delete_location_safely(db, auth.household.id, location)
+        delete_location_safely(
+            db,
+            auth.household.id,
+            location,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -466,6 +511,9 @@ def container_qr(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> Response:
+    deleted = _get_recoverable_deleted(db, auth.household.id, location_id)
+    if deleted is not None:
+        raise _deleted_error(deleted)
     location = _get(db, auth.household.id, location_id)
     payload = qr_payload(location.id)
     identifier = re.sub(r"[^A-Za-z0-9._-]+", "_", location.identifier or "container")

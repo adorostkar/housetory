@@ -88,6 +88,51 @@ class LoanReturnOut(BaseModel):
     reversed_by_event_id: uuid.UUID | None
 
 
+class RestoreAssistedContainerOut(BaseModel):
+    id: uuid.UUID
+    name: str | None = None
+    identifier: str | None = None
+    legacy_identifier: str | None = None
+    kind: str | None = None
+    container_type: str | None = None
+    is_container: bool | None = None
+    room_id: uuid.UUID | None = None
+    room_name: str | None = None
+    property_id: uuid.UUID | None = None
+    property_name: str | None = None
+    parent_id: uuid.UUID | None = None
+    parent_name: str | None = None
+    deleted_at: datetime | None = None
+    deleted_by_name: str | None = None
+
+
+class RestoreAssistedItemOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    quantity: int
+    current_room_id: uuid.UUID | None = None
+    current_room_name: str | None = None
+    current_location_id: uuid.UUID | None = None
+    current_location_name: str | None = None
+    current_location_identifier: str | None = None
+    target_room_id: uuid.UUID | None = None
+    target_room_name: str | None = None
+    target_location_id: uuid.UUID | None = None
+    target_location_name: str | None = None
+    target_location_identifier: str | None = None
+
+
+class RestoreAssistedUndoOut(BaseModel):
+    available: bool
+    reason: str | None = None
+    legacy_unrecoverable: bool = False
+    will_restore_container: bool = False
+    will_move_item: bool = False
+    item_count: int = 1
+    container: RestoreAssistedContainerOut | None = None
+    item: RestoreAssistedItemOut | None = None
+
+
 class ActivityEventOut(BaseModel):
     id: uuid.UUID
     action: str
@@ -106,6 +151,7 @@ class ActivityEventOut(BaseModel):
     undo_event_id: uuid.UUID | None
     can_undo: bool
     undo_blocked_reason: str | None
+    restore_assisted: RestoreAssistedUndoOut | None = None
 
 
 class ActivityHistoryOut(BaseModel):
@@ -149,3 +195,4 @@ class UndoResult(BaseModel):
     event: ActivityEventOut
     undone_event_id: uuid.UUID
     message: str
+    restored_container_id: uuid.UUID | None = None

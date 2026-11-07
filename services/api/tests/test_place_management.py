@@ -302,7 +302,9 @@ def test_move_contents_and_delete_never_deletes_inventory(owner_client):
     assert result["deleted"] is True
     assert result["total_items_preserved"] == 2
     assert item_count() == before_items
-    assert client.get(f"/api/v1/containers/{box['id']}").status_code == 404
+    deleted_view = client.get(f"/api/v1/containers/{box['id']}")
+    assert deleted_view.status_code == 410
+    assert deleted_view.json()["detail"]["code"] == "container_deleted"
 
     direct_state = client.get(f"/api/v1/items/{direct['id']}").json()["item"]
     nested_state = client.get(f"/api/v1/items/{nested['id']}").json()["item"]

@@ -30,7 +30,12 @@ from ..schemas.place_management import (
     PlaceTransferResult,
 )
 from . import history, lending
-from .containers import household_hierarchy_lock, location_breadcrumb, room_ancestors
+from .containers import (
+    household_hierarchy_lock,
+    location_breadcrumb,
+    room_ancestors,
+    tombstone_location,
+)
 from .hierarchy import descendant_ids
 from .items import update_item_record
 
@@ -144,7 +149,8 @@ def _load_scope(
         location_rows = list(
             db.execute(
                 select(StorageLocation.id, StorageLocation.parent_id).where(
-                    StorageLocation.household_id == household_id
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                 )
             ).all()
         )
@@ -155,6 +161,7 @@ def _load_scope(
                 .options(joinedload(StorageLocation.room).joinedload(Room.property))
                 .where(
                     StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                     StorageLocation.id.in_(subtree),
                 )
                 .order_by(StorageLocation.id)
@@ -220,6 +227,7 @@ def _load_scope(
                 .options(joinedload(StorageLocation.room).joinedload(Room.property))
                 .where(
                     StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                     StorageLocation.room_id.in_(subtree),
                 )
                 .order_by(StorageLocation.id)
@@ -320,6 +328,7 @@ def _resolve_destination(
             select(StorageLocation).where(
                 StorageLocation.id == destination_location_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:
@@ -545,6 +554,40 @@ def _preview_out(
             f"{len(scope.locations)} storage place(s) in this room keep their "
             "identifiers and move with their contents."
         )
+    if scope.kind == "room":
+        recoverable_deleted = int(
+            db.scalar(
+                select(func.count(StorageLocation.id)).where(
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.room_id.in_(scope.room_ids),
+                    StorageLocation.deleted_at.is_not(None),
+                )
+            )
+            or 0
+        )
+        if recoverable_deleted:
+            warnings.append(
+                f"{recoverable_deleted} recoverable-deleted place(s) are retained in "
+                "this room. Room deletion stays blocked until they are restored or "
+                "explicitly resolved."
+            )
+    if scope.kind == "location" and scope.source_location is not None:
+        recoverable_children = int(
+            db.scalar(
+                select(func.count(StorageLocation.id)).where(
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.parent_id == scope.source_location.id,
+                    StorageLocation.deleted_at.is_not(None),
+                )
+            )
+            or 0
+        )
+        if recoverable_children:
+            warnings.append(
+                f"{recoverable_children} recoverable-deleted nested place(s) are "
+                "retained here. Deleting this place would leave them without a live "
+                "parent, so their own restore would be blocked."
+            )
     if scope.source_photo_count:
         warnings.append(
             f"{scope.source_photo_count} attached photo(s) belong to the source itself "
@@ -654,6 +697,7 @@ def _assert_location_empty(db: Session, household_id: uuid.UUID, source: Storage
         .where(
             StorageLocation.household_id == household_id,
             StorageLocation.parent_id == source.id,
+            StorageLocation.active(),
         )
         .limit(1)
     )
@@ -713,7 +757,8 @@ def _assert_room_empty(db: Session, household_id: uuid.UUID, source: Room) -> No
         raise ApiError(
             409,
             "place_not_emptied",
-            "The room still has direct contents after the move; nothing was deleted.",
+            "The room still has active or recoverable-deleted places/contents; "
+            "nothing was deleted. Restore or explicitly resolve recoverable places first.",
         )
 
 
@@ -841,13 +886,20 @@ def transfer_place_contents(
                 select(StorageLocation).where(
                     StorageLocation.id == source_id,
                     StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                 )
             )
             if source is None:
                 raise ApiError(404, "place_not_found", "Storage place not found.")
             _assert_location_empty(db, household_id, source)
-            db.delete(source)
-            db.flush()
+            tombstone_location(
+                db,
+                household_id,
+                source,
+                actor_user_id=actor_user_id,
+                actor_name=actor_name,
+                record_event=False,
+            )
     else:
         source_room = scope.source_room
         assert source_room is not None
@@ -937,7 +989,7 @@ def transfer_place_contents(
         action=action,
         entity_type="container" if kind == "location" else "room",
         entity_id=source_id,
-        container_id=source_id if kind == "location" and not payload.delete_source else None,
+        container_id=source_id if kind == "location" else None,
         summary=(
             f"{summary_verb} {summary_source} {summary_tail} · "
             f"{len(scope.items)} item(s), {sum(item.quantity for item in scope.items)} unit(s)"

@@ -172,7 +172,10 @@ def _expand_roots(
     rooms = list(db.scalars(select(Room).where(Room.household_id == household_id)).all())
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     rooms_by_id = {room.id: room for room in rooms}
@@ -709,7 +712,10 @@ def session_detail(
     )
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     room_paths = _room_path_map(rooms)
@@ -807,6 +813,7 @@ def _destination(
             select(StorageLocation).where(
                 StorageLocation.id == container_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:
@@ -829,7 +836,10 @@ def _destination(
     rooms = list(db.scalars(select(Room).where(Room.household_id == household_id)).all())
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     path = _full_path(
@@ -1189,7 +1199,10 @@ def _review_session(
     locations = {
         location.id: location
         for location in db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     }
     room_paths = _room_path_map(list(rooms.values()))
@@ -1764,7 +1777,10 @@ def complete_session(
     )
     locations = list(
         db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     )
     room_paths = _room_path_map(rooms)
@@ -1914,6 +1930,7 @@ def scope_summary(
             select(StorageLocation).where(
                 StorageLocation.id == container_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:

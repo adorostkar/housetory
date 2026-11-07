@@ -223,6 +223,8 @@ class ActivityAction(StrEnum):
     ITEMS_BULK_TAGGED = "items.bulk_tagged"
     ITEMS_BULK_CATEGORISED = "items.bulk_categorised"
     CONTAINER_MOVED = "container.moved"
+    CONTAINER_DELETED = "container.deleted"
+    CONTAINER_RESTORED = "container.restored"
     LOAN_CREATED = "loan.created"
     LOAN_RETURNED = "loan.returned"
     LOAN_CORRECTED = "loan.corrected"

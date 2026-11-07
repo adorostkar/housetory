@@ -289,6 +289,7 @@ def _quick_household(
                 .join(Room, Room.id == StorageLocation.room_id)
                 .where(
                     StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
                     Room.property_id == property_id,
                 )
             ).all()
@@ -303,6 +304,7 @@ def _quick_household(
     location_rows = db.execute(
         select(StorageLocation.id, StorageLocation.parent_id).where(
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
             *(
                 [StorageLocation.id.in_(property_location_ids)]
                 if property_location_ids is not None
@@ -335,6 +337,7 @@ def _quick_household(
     for matched_id in db.scalars(
         select(StorageLocation.id).where(
             StorageLocation.household_id == household_id,
+            StorageLocation.active(),
             or_(
                 _any_like(StorageLocation.name, patterns),
                 _any_like(StorageLocation.identifier, patterns),
@@ -408,6 +411,7 @@ def _quick_household(
 
     location_conditions = [
         StorageLocation.household_id == household_id,
+        StorageLocation.active(),
         *(
             [StorageLocation.id.in_(property_location_ids)]
             if property_location_ids is not None

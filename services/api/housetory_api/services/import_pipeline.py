@@ -669,7 +669,9 @@ def _context_destination(
     location = db.get(StorageLocation, location_id) if location_id else None
     if room is not None and room.household_id != batch.household_id:
         room = None
-    if location is not None and location.household_id != batch.household_id:
+    if location is not None and (
+        location.household_id != batch.household_id or location.deleted_at is not None
+    ):
         location = None
     if location is not None:
         location_room = db.get(Room, location.room_id)
@@ -1218,6 +1220,7 @@ def _find_existing_container(
         found = db.scalar(
             select(StorageLocation).where(
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
                 StorageLocation.room_id.in_(room_ids),
                 (
                     (func.upper(StorageLocation.legacy_identifier) == legacy_identifier.upper())
@@ -1230,6 +1233,7 @@ def _find_existing_container(
             return found
     query = select(StorageLocation).where(
         StorageLocation.household_id == household_id,
+        StorageLocation.active(),
         StorageLocation.room_id == room_id,
         func.lower(StorageLocation.name) == name.strip().lower(),
     )

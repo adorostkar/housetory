@@ -172,13 +172,15 @@ def _scope_conditions(
             .where(
                 StorageLocation.id == scope_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:
             raise ApiError(404, "location_not_found", "Container or place not found.")
         rows = db.execute(
             select(StorageLocation.id, StorageLocation.parent_id).where(
-                StorageLocation.household_id == household_id
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         ).all()
         conditions.append(Item.storage_location_id.in_(descendant_ids(rows, location.id)))

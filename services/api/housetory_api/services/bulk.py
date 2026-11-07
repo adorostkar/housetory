@@ -98,6 +98,7 @@ def _destination(
             select(StorageLocation).where(
                 StorageLocation.id == location_id,
                 StorageLocation.household_id == household_id,
+                StorageLocation.active(),
             )
         )
         if location is None:

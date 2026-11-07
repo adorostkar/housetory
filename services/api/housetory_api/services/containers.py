@@ -13,12 +13,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, joinedload
 
 from ..api.errors import ApiError
-from ..domain import ContainerType, LoanStatus, prefix_for_container_type, prefix_for_location_kind
+from ..domain import (
+    ActivityAction,
+    ContainerType,
+    LoanStatus,
+    prefix_for_container_type,
+    prefix_for_location_kind,
+)
 from ..models import (
     BorrowedRecord,
     Document,
     Item,
     LocationIdentifierCounter,
+    LocationPhoto,
     Room,
     StorageLocation,
 )
@@ -64,11 +71,14 @@ def get_location(
     location_id: uuid.UUID,
     *,
     for_update: bool = False,
+    include_deleted: bool = False,
 ) -> StorageLocation:
     query = select(StorageLocation).where(
         StorageLocation.id == location_id,
         StorageLocation.household_id == household_id,
     )
+    if not include_deleted:
+        query = query.where(StorageLocation.active())
     if for_update:
         query = query.with_for_update()
     else:
@@ -86,13 +96,14 @@ def get_room(db: Session, household_id: uuid.UUID, room_id: uuid.UUID) -> Room:
     return room
 
 
-def location_rows(db: Session, household_id: uuid.UUID) -> list[tuple[uuid.UUID, uuid.UUID | None]]:
+def location_rows(
+    db: Session, household_id: uuid.UUID, *, include_deleted: bool = False
+) -> list[tuple[uuid.UUID, uuid.UUID | None]]:
+    conditions = [StorageLocation.household_id == household_id]
+    if not include_deleted:
+        conditions.append(StorageLocation.active())
     return list(
-        db.execute(
-            select(StorageLocation.id, StorageLocation.parent_id).where(
-                StorageLocation.household_id == household_id
-            )
-        ).all()
+        db.execute(select(StorageLocation.id, StorageLocation.parent_id).where(*conditions)).all()
     )
 
 
@@ -102,7 +113,10 @@ def location_ancestors(
     locations = {
         location.id: location
         for location in db.scalars(
-            select(StorageLocation).where(StorageLocation.household_id == household_id)
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
         ).all()
     }
     path: list[StorageLocation] = []
@@ -518,7 +532,10 @@ def move_container(
     locations = list(
         db.scalars(
             select(StorageLocation)
-            .where(StorageLocation.household_id == household_id)
+            .where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.active(),
+            )
             .order_by(StorageLocation.id)
             .with_for_update()
         ).all()
@@ -662,6 +679,7 @@ def container_children(
             .where(
                 StorageLocation.household_id == household_id,
                 StorageLocation.parent_id == location_id,
+                StorageLocation.active(),
             )
             .order_by(StorageLocation.sort_order, func.lower(StorageLocation.name))
         ).all()
@@ -686,11 +704,29 @@ def related_documents(
     )
 
 
-def delete_location_safely(db: Session, household_id: uuid.UUID, location: StorageLocation) -> None:
+def delete_location_safely(
+    db: Session,
+    household_id: uuid.UUID,
+    location: StorageLocation,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+) -> None:
+    """Tombstone an empty place so move history can recover it later.
+
+    The row is retained with its identity, room, parent, identifier, photos and
+    snapshot. Deleted places are excluded from active queries by
+    ``StorageLocation.active()``. No purge job removes tombstones.
+    """
     household_hierarchy_lock(db, household_id)
     location = get_location(db, household_id, location.id, for_update=True)
     has_children = db.scalar(
-        select(StorageLocation.id).where(StorageLocation.parent_id == location.id).limit(1)
+        select(StorageLocation.id)
+        .where(
+            StorageLocation.parent_id == location.id,
+            StorageLocation.active(),
+        )
+        .limit(1)
     )
     has_items = db.scalar(
         select(Item.id)
@@ -715,7 +751,72 @@ def delete_location_safely(db: Session, household_id: uuid.UUID, location: Stora
         raise ApiError(
             409,
             "location_not_empty",
-            "This location still has nested locations, items or active borrowed placements.",
+            "This location still has nested places, items or active borrowed placements.",
         )
-    db.delete(location)
+    tombstone_location(
+        db,
+        household_id,
+        location,
+        actor_user_id=actor_user_id,
+        actor_name=actor_name,
+        record_event=True,
+    )
+
+
+def tombstone_location(
+    db: Session,
+    household_id: uuid.UUID,
+    location: StorageLocation,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+    record_event: bool = True,
+) -> StorageLocation:
+    """Mark a place recoverable-deleted without removing its identity/photos."""
+    snapshot = history.location_snapshot(db, household_id, location.room_id, location.id)
+    now = datetime.now(UTC)
+    photo_count = int(
+        db.scalar(
+            select(func.count(LocationPhoto.id)).where(LocationPhoto.location_id == location.id)
+        )
+        or 0
+    )
+    snapshot.update(
+        {
+            "photo_count": photo_count,
+            "kind": location.kind,
+            "container_type": location.container_type,
+            "is_container": location.is_container,
+            "legacy_identifier": location.legacy_identifier,
+            "aliases": list(location.aliases or []),
+            "deleted_at": now.isoformat(),
+            "deleted_by_user_id": str(actor_user_id) if actor_user_id else None,
+            "deleted_by_name": actor_name,
+        }
+    )
+    location.deleted_at = now
+    location.deleted_by_user_id = actor_user_id
+    location.deleted_by_name = actor_name
+    location.deletion_snapshot = snapshot
+    location.restored_at = None
+    location.restored_by_user_id = None
+    location.updated_at = now
     db.flush()
+    if record_event:
+        history.record_event(
+            db,
+            household_id,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
+            action=ActivityAction.CONTAINER_DELETED.value,
+            entity_type="container",
+            entity_id=location.id,
+            container_id=location.id,
+            summary=(
+                f"Deleted container {location.identifier or location.name} "
+                f"({snapshot.get('room_name') or 'room'}). "
+                "It can be recovered from eligible item move history."
+            ),
+            details={"snapshot": snapshot, "soft_deleted": True},
+        )
+    return location

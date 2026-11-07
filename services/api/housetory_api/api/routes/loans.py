@@ -18,6 +18,7 @@ from ...schemas.lending import (
     LoanFilterStatus,
     LoanListOut,
     LoanReturnCreate,
+    RestoreAssistedUndoOut,
     UndoRequest,
     UndoResult,
 )
@@ -209,6 +210,53 @@ def container_history(
     _container(db, auth.household.id, container_id)
     return history.history_for_container(
         db, auth.household.id, container_id, limit=limit, offset=offset
+    )
+
+
+@router.get(
+    "/history/{event_id}/restore-preview",
+    response_model=RestoreAssistedUndoOut,
+)
+def preview_restore_assisted_undo(
+    event_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> RestoreAssistedUndoOut:
+    return history.restore_assisted_preview(db, auth.household.id, event_id)
+
+
+@router.post("/history/{event_id}/restore-undo", response_model=UndoResult)
+def restore_assisted_history_event(
+    event_id: uuid.UUID,
+    payload: UndoRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> UndoResult:
+    try:
+        event = history.restore_assisted_undo_event(
+            db,
+            auth.household.id,
+            event_id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+            request_id=payload.request_id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    details = event.details or {}
+    restored_container_id = None
+    if details.get("restored_container_id"):
+        try:
+            restored_container_id = uuid.UUID(str(details["restored_container_id"]))
+        except (ValueError, TypeError):
+            restored_container_id = None
+    return UndoResult(
+        event=history.serialize_event(db, event),
+        undone_event_id=event.undoes_event_id or event_id,
+        message=("Container restored and one item move undone with compensating history events."),
+        restored_container_id=restored_container_id,
     )
 
 

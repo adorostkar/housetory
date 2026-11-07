@@ -123,6 +123,7 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "legacy_identifier",
         ),
         Index("ix_storage_locations_parent_id", "parent_id"),
+        Index("ix_storage_locations_household_deleted", "household_id", "deleted_at"),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -152,6 +153,23 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     summary_contents_hash: Mapped[str | None] = mapped_column(String(64))
     label_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    deleted_by_name: Mapped[str | None] = mapped_column(String(120))
+    deletion_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    restored_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    @classmethod
+    def active(cls):
+        """SQL expression matching live (not tombstoned) storage places."""
+        return cls.deleted_at.is_(None)
 
     household: Mapped["Household"] = relationship(back_populates="storage_locations")
     room: Mapped[Room] = relationship(back_populates="storage_locations")

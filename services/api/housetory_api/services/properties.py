@@ -119,7 +119,10 @@ def _stats(
         for row in db.execute(
             select(Room.property_id, func.count(StorageLocation.id))
             .join(StorageLocation, StorageLocation.room_id == Room.id)
-            .where(Room.household_id == household_id)
+            .where(
+                Room.household_id == household_id,
+                StorageLocation.active(),
+            )
             .group_by(Room.property_id)
         ).all()
     }
@@ -328,6 +331,7 @@ def _subtree_rows(
             select(StorageLocation).where(
                 StorageLocation.household_id == household_id,
                 StorageLocation.room_id.in_(room_subtree),
+                StorageLocation.active(),
             )
         ).all()
     )
