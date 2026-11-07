@@ -108,15 +108,20 @@ beforeEach(() => {
 });
 
 describe("ItemImageControls", () => {
-  it("shows reference provenance and calls Find online image", async () => {
+  it("shows concise reference attribution and expands technical details", async () => {
     vi.mocked(api.post).mockResolvedValue(state);
     renderControls();
     expect(screen.getAllByText(/Reference image/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/exact model not confirmed/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/retrieved 2026-01-01/)).toBeVisible();
+    expect(screen.queryByText(/not an independent legal determination/)).not.toBeVisible();
+    await userEvent.click(screen.getByText("Image details"));
     expect(screen.getByRole("link", { name: "cc-by" })).toHaveAttribute(
       "href",
       "https://creativecommons.org/licenses/by/4.0/",
     );
+    expect(screen.getByText(/not an independent legal determination/)).toBeVisible();
+    expect(screen.getByText("1200 × 800")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: /Change online image/ }));
     expect(api.post).toHaveBeenCalledWith("/items/item-1/image/find", { force: true });
   });
@@ -183,7 +188,7 @@ describe("ItemImageControls", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps an existing AI illustration readable, honestly labelled and removable", () => {
+  it("keeps an existing AI illustration readable, honestly labelled and removable", async () => {
     state = {
       ...baseState,
       image: aiImage,
@@ -191,6 +196,8 @@ describe("ItemImageControls", () => {
     };
     renderControls();
     expect(screen.getAllByText("AI illustration").length).toBeGreaterThan(0);
+    expect(screen.getByText(/not a photo/)).toBeVisible();
+    await userEvent.click(screen.getByText("Image details"));
     expect(screen.getByText(/not evidence of the item's condition/)).toBeVisible();
     expect(screen.getByText(/new illustrations are no longer generated/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Find online image/ })).toBeVisible();

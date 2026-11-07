@@ -24,9 +24,8 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
-import { ItemDocuments } from "@/components/item-documents";
+import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { ItemLoanStatus } from "@/components/item-loan-status";
-import { ItemManuals } from "@/components/item-manuals";
 import { ItemStorageSection } from "@/components/item-storage-section";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
@@ -248,8 +247,6 @@ export function ItemDetailPage() {
           </section>
 
           <ItemStorageSection item={item} />
-
-          <ItemManuals item={item} />
         </div>
 
         <aside className="space-y-4">
@@ -790,7 +787,7 @@ export function ItemDetailPage() {
       </div>
 
       <div className="mt-8">
-        <ItemDocuments item={item} />
+        <ItemDocumentsAndManuals item={item} />
       </div>
 
       <section className="surface mt-4 p-5 sm:p-6">

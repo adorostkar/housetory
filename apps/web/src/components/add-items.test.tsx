@@ -72,11 +72,17 @@ describe("AddItems", () => {
     expect(screen.getByText("Office · BOX-001")).toBeVisible();
     expect(screen.getByRole("button", { name: /Enter manually/ })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: new RegExp(choice) }));
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        `${path}?room_id=room-1&location_id=box-1`,
-      ),
-    );
+    await waitFor(() => {
+      const url = new URL(
+        screen.getByTestId("location").textContent ?? "/",
+        "http://housetory.invalid",
+      );
+      expect(url.pathname).toBe(path);
+      expect(url.searchParams.get("room_id")).toBe("room-1");
+      expect(url.searchParams.get("location_id")).toBe("box-1");
+      expect(url.searchParams.get("from")).toBe("/");
+      expect(url.searchParams.get("from_label")).toBe("Office · BOX-001");
+    });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -96,11 +102,17 @@ describe("AddItems", () => {
     renderChooser({ register: true });
     await userEvent.click(screen.getByRole("button", { name: "Add items" }));
     await userEvent.click(screen.getByRole("button", { name: /Scan a photo/ }));
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        "/scan?room_id=room-9&location_id=box-9",
-      ),
-    );
+    await waitFor(() => {
+      const url = new URL(
+        screen.getByTestId("location").textContent ?? "/",
+        "http://housetory.invalid",
+      );
+      expect(url.pathname).toBe("/scan");
+      expect(url.searchParams.get("room_id")).toBe("room-9");
+      expect(url.searchParams.get("location_id")).toBe("box-9");
+      expect(url.searchParams.get("from")).toBe("/");
+      expect(url.searchParams.get("from_label")).toBe("Office · BOX-009");
+    });
   });
 
   it("closes with Escape and restores focus to the trigger", async () => {

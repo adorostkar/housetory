@@ -154,19 +154,21 @@ Tailscale is optional.
   than misleadingly verified. Evidence exports include exact last-checked facts
   only when a real completed observation exists. See
   [`docs/STOCKTAKE.md`](docs/STOCKTAKE.md).
-- **Item manuals and grounded product help**: attach an uploaded manual (no
-  make/model required) or reuse an existing Manual-library document across
-  compatible items. Compact item actions include Add manual, Attach existing,
-  Ask about this item and Find manual. Answers use the attached manuals' actual
-  text, cite real pages when page-level OCR exists and explicit sections/excerpts
-  otherwise, and fall back to extractive evidence without AI. Online search and
-  download require a deliberate, server-enforced manufacturer + complete model
-  confirmation, reviewed candidates and a configured search provider. The owner
-  adds one encrypted Brave Search API key and enables manual discovery in
-  **Settings → Online search**; an operator-only environment fallback and the
-  advanced manual gateway remain available. Similar products are never
-  auto-accepted. See
-  [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
+- **Item manuals and grounded product help**: one combined Documents & manuals
+  surface on the item page handles uploaded manuals, ordinary documents, scanned
+  pages and deliberate library links. It reuses existing Manual-library documents
+  across compatible items and offers Ask about this item, Add manual, Link
+  existing and Find manual without a second duplicate document/manual list.
+  Answers use the attached manuals' actual text, cite real pages when page-level
+  OCR exists and explicit sections/excerpts otherwise, and fall back to extractive
+  evidence without AI. Online search and download require a deliberate,
+  server-enforced manufacturer + complete model confirmation, reviewed candidates
+  and a configured search provider. The owner adds one encrypted Brave Search API
+  key and enables manual discovery in **Settings → Online search**; an
+  operator-only environment fallback and the advanced manual gateway remain
+  available. Similar products are never auto-accepted. See
+  [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md) and
+  [`docs/ITEM_FORM_AND_FILES.md`](docs/ITEM_FORM_AND_FILES.md).
 - CPU-only local OCR through Tesseract and Poppler in the worker: merchant,
   purchase date, total, currency, invoice number, product names and serial
   numbers are proposed for explicit review before inventory changes.
@@ -197,6 +199,12 @@ Tailscale is optional.
 - One clear **Add items** chooser for manual entry, **Scan a photo** and
   importing a list or file. This replaces separate primary Import/AI Scan
   navigation while keeping every focused workflow and import history.
+- The item form leads with name, quantity and place. Optional identity,
+  description, category, tags, purchase, current value and warranty stay in
+  collapsed summaries; editing a visible field never clears hidden recorded
+  values or shared-purchase relationships. Contextual Add items preserves the
+  source place and a useful return origin. See
+  [`docs/ITEM_FORM_AND_FILES.md`](docs/ITEM_FORM_AND_FILES.md).
 - A persistent quick search beneath **Add items** on desktop and near the top
   of the mobile overview, with grouped items, containers and locations, keyboard
   navigation and a link to full results.
@@ -387,15 +395,20 @@ stack, not just unit mocks:
   batch cancellation and preserved photos/vision/transcription, owned-item
   storage enable/move/undo/removal guards, existing-container ownership
   create/link/unlink, one-time value/purchase evidence across host and contents,
-  and explicit parent-only versus contents-included loans with independent returns.
-- 213 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 81 checked-in Playwright workflows (80 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+  explicit parent-only versus contents-included loans with independent returns,
+  collapsed item-form summaries preserving shared purchase, warranty, current
+  value and document links, contextual Add origin, combined document/manual
+  de-duplication and image-source technical disclosure.
+- 220 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 85 checked-in Playwright workflows (84 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
   lending/partial return/outstanding list/timeline undo, item/container move
   history, owned-item contents storage and explicit contents-included loan
-  choices, existing-container ownership details, recoverable deleted-container restore and blocker states, loaded-only bulk selection with move/tag/category dialogs and
+  choices, existing-container ownership details, collapsed item-form essentials
+  and optional summaries, combined documents/manuals and contextual Add origins,
+  recoverable deleted-container restore and blocker states, loaded-only bulk selection with move/tag/category dialogs and
   compact-list persistence, desktop/mobile multi-page scan editing, reorder,
   save, page-original access and cancel, OCR-to-line-item review with exact
   household matching, optional AI-refined fields/lines, reviewed apply and persisted

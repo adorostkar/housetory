@@ -127,11 +127,11 @@ test("uploads a manual without make/model, answers from its text, and attaches i
   await expect(askDialog.getByText(/Borrower, loan and household data/)).toHaveCount(0);
 
   await page.goto(`/items/${second.item.id}`);
-  await page.getByRole("button", { name: "Attach existing" }).click();
-  const attachDialog = page.getByRole("dialog", { name: "Attach an existing manual" });
+  await page.getByRole("button", { name: "Link existing" }).click();
+  const attachDialog = page.getByRole("dialog", { name: "Link an existing document" });
   const row = attachDialog.locator("li").filter({ hasText: title });
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Attach" }).click();
+  await row.getByRole("button", { name: "Link" }).click();
   await expect(attachDialog).toBeHidden();
   await expect(page.getByText(title).first()).toBeVisible();
 });

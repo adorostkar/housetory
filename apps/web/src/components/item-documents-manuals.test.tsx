@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ItemManuals } from "@/components/item-manuals";
+import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import type {
@@ -137,17 +137,21 @@ function session(role: SessionState["role"] = "owner"): SessionState {
   };
 }
 
-function renderManuals(data: ItemManualsData, role: SessionState["role"] = "owner") {
+function renderDocumentsAndManuals(
+  data: ItemManualsData,
+  role: SessionState["role"] = "owner",
+  detail: ItemDetail = item,
+) {
   activeManuals = data;
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   client.setQueryData(queryKeys.session, session(role));
-  client.setQueryData(queryKeys.itemManuals(item.id), data);
+  client.setQueryData(queryKeys.itemManuals(detail.id), data);
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <ItemManuals item={item} />
+        <ItemDocumentsAndManuals item={detail} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -214,9 +218,9 @@ beforeEach(() => {
   vi.mocked(api.put).mockReset();
 });
 
-describe("ItemManuals", () => {
+describe("ItemDocumentsAndManuals", () => {
   it("shows attached manuals and renders grounded answers with real citations", async () => {
-    renderManuals(manualsData());
+    renderDocumentsAndManuals(manualsData());
     expect(screen.getByText("DCD791B instruction manual")).toBeVisible();
     expect(screen.getByText("12 pages")).toBeVisible();
     expect(screen.getByText(/Exact make\/model is not confirmed/)).toBeVisible();
@@ -243,7 +247,7 @@ describe("ItemManuals", () => {
   });
 
   it("keeps no-AI and unconfigured online states honest", async () => {
-    renderManuals(manualsData());
+    renderDocumentsAndManuals(manualsData());
     vi.mocked(api.post).mockResolvedValue(
       answer({
         answer: "The attached manuals do not contain a matching passage.",
@@ -260,7 +264,7 @@ describe("ItemManuals", () => {
   });
 
   it("requires deliberate identity confirmation before online search", async () => {
-    renderManuals(
+    renderDocumentsAndManuals(
       manualsData({
         search: {
           configured: true,
@@ -300,7 +304,7 @@ describe("ItemManuals", () => {
   });
 
   it("searches only after confirmation, then requires candidate review before saving", async () => {
-    renderManuals(
+    renderDocumentsAndManuals(
       manualsData({
         search: {
           configured: true,
@@ -365,7 +369,7 @@ describe("ItemManuals", () => {
   });
 
   it("offers an explicit online question only when a profile and search are configured", async () => {
-    renderManuals(
+    renderDocumentsAndManuals(
       manualsData({
         search: {
           configured: true,
@@ -420,7 +424,7 @@ describe("ItemManuals", () => {
   });
 
   it("shows source-page-only candidates without guessing a PDF and offers upload", async () => {
-    renderManuals(
+    renderDocumentsAndManuals(
       manualsData({
         search: {
           configured: true,
@@ -470,12 +474,48 @@ describe("ItemManuals", () => {
   });
 
   it("keeps write actions out of viewers' reach while leaving manual questions readable", () => {
-    renderManuals(manualsData(), "viewer");
+    renderDocumentsAndManuals(manualsData(), "viewer");
     expect(screen.getByRole("button", { name: "Ask about this item" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add manual" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Find manual" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Attach existing" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders one compact attachment surface for an empty item", () => {
+    renderDocumentsAndManuals(manualsData({ manuals: [] }));
+    expect(
+      screen.getByRole("heading", { name: "Documents & manuals" }),
+    ).toBeVisible();
+    expect(screen.getByText("No documents or manuals attached")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Upload document" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add manual" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Scan pages" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Link existing" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Find manual" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Ask about this item" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Manuals & help" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lists a manual once even when it is also in the item document list", () => {
+    renderDocumentsAndManuals(manualsData(), "owner", {
+      ...item,
+      documents: [manualDocument],
+    });
+    expect(screen.getAllByText("DCD791B instruction manual")).toHaveLength(1);
+    expect(screen.getByText("12 pages")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add manual" })).toBeVisible();
+  });
+
+  it("opens the existing document library from the merged section", async () => {
+    renderDocumentsAndManuals(manualsData());
+    await userEvent.click(screen.getByRole("button", { name: "Link existing" }));
+    expect(
+      screen.getByRole("heading", { name: "Link an existing document" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Search document library")).toBeVisible();
   });
 });

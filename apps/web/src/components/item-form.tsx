@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { appendOrigin, type ItemOrigin } from "@/lib/navigation";
 import {
   queryKeys,
   useCategories,
@@ -74,6 +75,57 @@ function FormSection({
   );
 }
 
+function OptionalFormSection({
+  id,
+  title,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="surface p-5 sm:p-6">
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-4 text-left"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-[1.18rem] tracking-[-0.02em]">{title}</span>
+            <span className="text-[0.63rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Optional
+            </span>
+          </span>
+          <span className="mt-1 block text-[0.72rem] leading-relaxed text-muted-foreground">
+            {summary}
+          </span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-[0.66rem] font-medium text-muted-foreground">
+          {open ? "Hide" : "Edit"}
+          <ChevronDown
+            className={cn("size-3.5 transition-transform", open && "rotate-180")}
+          />
+        </span>
+      </button>
+      {open && (
+        <div id={id} className="mt-5 space-y-5 border-t border-border/60 pt-5">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function ItemForm({
   item,
   defaultPropertyId,
@@ -82,6 +134,7 @@ export function ItemForm({
   defaultName,
   returnTo,
   cancelTo,
+  origin,
 }: {
   item?: ItemDetail;
   defaultPropertyId?: string;
@@ -90,6 +143,7 @@ export function ItemForm({
   defaultName?: string;
   returnTo?: string;
   cancelTo?: string;
+  origin?: ItemOrigin | null;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -185,6 +239,10 @@ export function ItemForm({
     item?.warranty?.document_id ?? "",
   );
   const [warrantyNotes, setWarrantyNotes] = React.useState(item?.warranty?.notes ?? "");
+  const [identityOpen, setIdentityOpen] = React.useState(false);
+  const [purchaseOpen, setPurchaseOpen] = React.useState(false);
+  const [currentValueOpen, setCurrentValueOpen] = React.useState(false);
+  const [warrantyOpen, setWarrantyOpen] = React.useState(false);
 
   const locationsQuery = useLocations(roomId || undefined);
   const locationRecords = locationsQuery.data?.items ?? [];
@@ -259,7 +317,9 @@ export function ItemForm({
       invalidate();
       toast.success(item ? "Item updated" : "Item added");
       navigate(
-        item && returnTo ? returnTo : `/items/${response.item.id}`,
+        item && returnTo
+          ? returnTo
+          : appendOrigin(`/items/${response.item.id}`, origin),
         { replace: !item },
       );
     },
@@ -295,6 +355,91 @@ export function ItemForm({
       warrantyDocumentId ||
       warrantyNotes.trim(),
   );
+
+  const selectedCategory = categoriesQuery.data?.items.find(
+    (category) => category.id === categoryId,
+  );
+  const selectedTagNames = (tagsQuery.data?.items ?? [])
+    .filter((tag) => tagIds.includes(tag.id))
+    .map((tag) => tag.name);
+  const receiptDocument = (documentsQuery.data?.items ?? []).find(
+    (document) => document.id === receiptDocumentId,
+  );
+  const warrantyDocument = (documentsQuery.data?.items ?? []).find(
+    (document) => document.id === warrantyDocumentId,
+  );
+  const identityParts = [
+    [brand.trim(), model.trim()].filter(Boolean).join(" "),
+    serialNumber.trim() ? `Serial ${serialNumber.trim()}` : "",
+    selectedCategory?.name ?? "",
+    selectedTagNames.length > 0
+      ? `${selectedTagNames.length} tag${selectedTagNames.length === 1 ? "" : "s"}`
+      : "",
+    description.trim() ? "Description saved" : "",
+  ].filter(Boolean);
+  const identitySummary =
+    identityParts.length > 0
+      ? identityParts.join(" · ")
+      : "Brand, model, serial, description, category and tags are optional.";
+
+  const purchaseStatusLabel =
+    purchaseInfoStatus === "unknown"
+      ? "Purchase information unknown"
+      : purchaseInfoStatus === "not_applicable"
+        ? "Purchase information not applicable"
+        : "";
+  const purchaseParts = [
+    item?.purchase?.is_shared ? "Shared purchase" : "",
+    localPriceCents != null && Number.isFinite(localPriceCents)
+      ? formatCurrency(localPriceCents, currency)
+      : "",
+    vendor.trim(),
+    purchaseStatusLabel,
+    receiptDocument ? `Receipt: ${receiptDocument.title}` : "",
+    purchaseNotes.trim() ? "Notes saved" : "",
+  ].filter(Boolean);
+  const purchaseSummary = priceInvalid
+    ? "Check the purchase amount before saving."
+    : purchaseParts.length > 0
+      ? purchaseParts.join(" · ")
+      : "No purchase information recorded.";
+
+  const currentValueSummary = currentValueInvalid
+    ? "Check the current value before saving."
+    : localCurrentValueCents == null || !Number.isFinite(localCurrentValueCents)
+      ? "Not estimated. Missing is not zero."
+      : currentValueBasis === "legacy_record_total"
+        ? `Legacy record total ${formatCurrency(
+            localCurrentValueCents,
+            currentValueCurrency,
+          )} · review before converting`
+        : `${formatCurrency(
+            localCurrentValueCents,
+            currentValueCurrency,
+          )} per unit${
+            parsedQuantity > 0
+              ? ` · ${formatCurrency(
+                  currentValueTotalCents ?? 0,
+                  currentValueCurrency,
+                )} for ${parsedQuantity} ${
+                  parsedQuantity === 1 ? "unit" : "units"
+                }`
+              : ""
+          }`;
+
+  const warrantyParts = [
+    warrantyProvider.trim(),
+    warrantyDocument ? `Document: ${warrantyDocument.title}` : "",
+    computedWarrantyEnd ? `Ends ${computedWarrantyEnd}` : "",
+    warrantyDuration.trim() ? `${warrantyDuration.trim()} months` : "",
+    warrantyReminder.trim() ? `Reminder ${warrantyReminder.trim()} days` : "",
+    warrantyNotes.trim() ? "Notes saved" : "",
+  ].filter(Boolean);
+  const warrantySummary = durationInvalid || warrantyDatesInvalid
+    ? "Check the warranty dates and duration before saving."
+    : warrantyParts.length > 0
+      ? warrantyParts.join(" · ")
+      : "No warranty recorded.";
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -375,9 +520,10 @@ export function ItemForm({
       <form onSubmit={submit} className="space-y-6" noValidate>
         {generalError && <FormError message={generalError} />}
 
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-6">
-            <FormSection title="The essentials">
+        <FormSection
+          title="The essentials"
+          description="Name, quantity and place come first. Optional identity and financial details stay collapsed below."
+        >
               <Field label="Item name" htmlFor="item-name" error={fieldErrors?.name}>
                 <Input
                   id="item-name"
@@ -387,37 +533,6 @@ export function ItemForm({
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="Espresso machine"
-                />
-              </Field>
-
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="Brand" htmlFor="item-brand" optional>
-                  <Input
-                    id="item-brand"
-                    maxLength={120}
-                    value={brand}
-                    onChange={(event) => setBrand(event.target.value)}
-                    placeholder="La Marzocco"
-                  />
-                </Field>
-                <Field label="Model" htmlFor="item-model" optional>
-                  <Input
-                    id="item-model"
-                    maxLength={120}
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                    placeholder="Linea Mini"
-                  />
-                </Field>
-              </div>
-
-              <Field label="Serial number" htmlFor="item-serial" optional>
-                <Input
-                  id="item-serial"
-                  maxLength={200}
-                  value={serialNumber}
-                  onChange={(event) => setSerialNumber(event.target.value)}
-                  placeholder="Where to find it if you ever need it"
                 />
               </Field>
 
@@ -459,6 +574,133 @@ export function ItemForm({
                 </Field>
               </div>
 
+              <div className="rounded-xl border border-border/60 bg-background/30 p-3.5">
+                <p className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  Place
+                </p>
+                <div className="space-y-4">
+                  {properties.length > 0 && (
+                    <Field label="Property" htmlFor="item-property">
+                      <Select
+                        id="item-property"
+                        value={propertyId}
+                        onChange={(event) => {
+                          setPropertyId(event.target.value);
+                          setRoomId("");
+                          setLocationId("");
+                        }}
+                      >
+                        <option value="">No property / unlocated</option>
+                        {properties.map((property) => (
+                          <option key={property.id} value={property.id}>
+                            {property.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Room" htmlFor="item-room" error={fieldErrors?.room_id}>
+                      <Select
+                        id="item-room"
+                        value={roomId}
+                        onChange={(event) => {
+                          setRoomId(event.target.value);
+                          setLocationId("");
+                        }}
+                      >
+                        <option value="">No room yet</option>
+                        {roomOptions.map(({ room }) => (
+                          <option key={room.id} value={room.id}>
+                            {[
+                              propertyId ? null : room.property?.name,
+                              ...roomPath(roomsQuery.data?.items ?? [], room.id).map(
+                                (entry) => entry.name,
+                              ),
+                            ]
+                              .filter(Boolean)
+                              .join(" / ")}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+
+                    <Field
+                      label="Storage location"
+                      htmlFor="item-location"
+                      hint={!roomId ? "Choose a room first" : undefined}
+                    >
+                      <Select
+                        id="item-location"
+                        value={locationId}
+                        disabled={!roomId}
+                        onChange={(event) => setLocationId(event.target.value)}
+                      >
+                        <option value="">Room only</option>
+                        {locationOptions.map(({ location, depth }) => (
+                          <option key={location.id} value={location.id}>
+                            {depth > 0 ? `${"— ".repeat(depth)}` : ""}
+                            {location.identifier
+                              ? `${location.identifier} · ${location.name}`
+                              : location.name}{" "}
+                            · {LOCATION_KIND_LABELS[location.kind as LocationKind]}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  </div>
+                  {selectedLocationPath.length > 1 && (
+                    <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+                      {selectedLocationPath
+                        .map((location) => locationLabel(location))
+                        .join(" / ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </FormSection>
+
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-6">
+            <OptionalFormSection
+              id="optional-identity"
+              title="Identity & organisation"
+              summary={identitySummary}
+              open={identityOpen}
+              onToggle={() => setIdentityOpen((current) => !current)}
+            >
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Brand" htmlFor="item-brand" optional>
+                  <Input
+                    id="item-brand"
+                    maxLength={120}
+                    value={brand}
+                    onChange={(event) => setBrand(event.target.value)}
+                    placeholder="La Marzocco"
+                  />
+                </Field>
+                <Field label="Model" htmlFor="item-model" optional>
+                  <Input
+                    id="item-model"
+                    maxLength={120}
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    placeholder="Linea Mini"
+                  />
+                </Field>
+              </div>
+
+              <Field label="Serial number" htmlFor="item-serial" optional>
+                <Input
+                  id="item-serial"
+                  maxLength={200}
+                  value={serialNumber}
+                  onChange={(event) => setSerialNumber(event.target.value)}
+                  placeholder="Where to find it if you ever need it"
+                />
+              </Field>
+
               <Field label="Description" htmlFor="item-description" optional>
                 <Textarea
                   id="item-description"
@@ -468,12 +710,120 @@ export function ItemForm({
                   placeholder="Colour, material, where it came from, anything worth remembering."
                 />
               </Field>
-            </FormSection>
 
-            <FormSection
+              <Field label="Category" htmlFor="item-category" error={fieldErrors?.category_id}>
+                <div className="flex gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Select
+                      id="item-category"
+                      value={categoryId}
+                      onChange={(event) => setCategoryId(event.target.value)}
+                    >
+                      <option value="">No category</option>
+                      {(categoriesQuery.data?.items ?? []).map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Create a category"
+                    onClick={() => setCategoryDialogOpen(true)}
+                  >
+                    <Plus />
+                  </Button>
+                </div>
+              </Field>
+
+              <div>
+                <p className="text-[0.8rem] font-medium">Tags</p>
+                <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+                  Loose labels that cut across rooms.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(tagsQuery.data?.items ?? []).map((tag) => {
+                    const selected = tagIds.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() =>
+                          setTagIds((current) =>
+                            selected
+                              ? current.filter((id) => id !== tag.id)
+                              : [...current, tag.id],
+                          )
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[0.75rem] transition-colors",
+                          selected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-card/60 text-muted-foreground hover:border-foreground/25 hover:text-foreground",
+                        )}
+                      >
+                        {selected && <Check className="size-3" />}
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                  {tagsQuery.data?.items.length === 0 && (
+                    <p className="text-[0.75rem] text-muted-foreground">
+                      No tags yet. Create one below.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    aria-label="New tag name"
+                    maxLength={60}
+                    value={newTag}
+                    onChange={(event) => {
+                      setNewTag(event.target.value);
+                      setTagError(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addTagFromInput();
+                      }
+                    }}
+                    placeholder="Add a tag"
+                    className="h-9 text-[0.8rem]"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    className="size-9"
+                    aria-label="Create tag"
+                    disabled={createTag.isPending || !newTag.trim()}
+                    onClick={addTagFromInput}
+                  >
+                    {createTag.isPending ? <Spinner /> : <Plus />}
+                  </Button>
+                </div>
+                {tagError && <p className="text-[0.74rem] text-destructive">{tagError}</p>}
+              </div>
+            </OptionalFormSection>
+          </div>
+
+          <div className="space-y-6 xl:sticky xl:top-8">
+            <OptionalFormSection
+              id="optional-purchase"
               title="Purchase"
-              description="The original transaction total and receipt trail. This is not a per-unit price."
+              summary={purchaseSummary}
+              open={purchaseOpen}
+              onToggle={() => setPurchaseOpen((current) => !current)}
             >
+              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+                The original transaction total and receipt trail. This is not a
+                per-unit price.
+              </p>
               {item?.purchase?.is_shared && (
                 <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
                   This purchase is shared by {item.purchase.item_count} items. The
@@ -594,12 +944,19 @@ export function ItemForm({
                   placeholder="Return window, delivery details, who paid."
                 />
               </Field>
-            </FormSection>
+            </OptionalFormSection>
 
-            <FormSection
+            <OptionalFormSection
+              id="optional-current-value"
               title="Current value"
-              description="An optional estimate of what one owned unit is worth today. It is kept separate from the original purchase transaction total."
+              summary={currentValueSummary}
+              open={currentValueOpen}
+              onToggle={() => setCurrentValueOpen((current) => !current)}
             >
+              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+                An optional estimate of what one owned unit is worth today. It is kept
+                separate from the original purchase transaction total.
+              </p>
               {currentValueInvalid && (
                 <FormError message="Enter a valid current value, such as 129.00." />
               )}
@@ -693,12 +1050,18 @@ export function ItemForm({
                   )}
                 </div>
               )}
-            </FormSection>
+            </OptionalFormSection>
 
-            <FormSection
+            <OptionalFormSection
+              id="optional-warranty"
               title="Warranty"
-              description="Keep the end date in view so nothing slips past."
+              summary={warrantySummary}
+              open={warrantyOpen}
+              onToggle={() => setWarrantyOpen((current) => !current)}
             >
+              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+                Keep the end date in view so nothing slips past.
+              </p>
               {warrantyDatesInvalid && (
                 <FormError message="The warranty end date must come after its start date." />
               )}
@@ -796,196 +1159,19 @@ export function ItemForm({
                   placeholder="What the warranty covers, exclusions, claim phone number."
                 />
               </Field>
-            </FormSection>
-          </div>
-
-          <div className="space-y-6 xl:sticky xl:top-8">
-            <FormSection
-              title="Its place"
-              description="Every item can belong to a room and a more specific place."
-            >
-              {properties.length > 0 && (
-                <Field label="Property" htmlFor="item-property">
-                  <Select
-                    id="item-property"
-                    value={propertyId}
-                    onChange={(event) => {
-                      setPropertyId(event.target.value);
-                      setRoomId("");
-                      setLocationId("");
-                    }}
-                  >
-                    <option value="">No property / unlocated</option>
-                    {properties.map((property) => (
-                      <option key={property.id} value={property.id}>
-                        {property.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              )}
-
-              <Field label="Room" htmlFor="item-room" error={fieldErrors?.room_id}>
-                <Select
-                  id="item-room"
-                  value={roomId}
-                  onChange={(event) => {
-                    setRoomId(event.target.value);
-                    setLocationId("");
-                  }}
-                >
-                  <option value="">No room yet</option>
-                  {roomOptions.map(({ room }) => (
-                    <option key={room.id} value={room.id}>
-                      {[
-                        propertyId ? null : room.property?.name,
-                        ...roomPath(roomsQuery.data?.items ?? [], room.id).map(
-                          (entry) => entry.name,
-                        ),
-                      ]
-                        .filter(Boolean)
-                        .join(" / ")}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              <Field
-                label="Storage location"
-                htmlFor="item-location"
-                hint={!roomId ? "Choose a room first" : undefined}
-              >
-                <Select
-                  id="item-location"
-                  value={locationId}
-                  disabled={!roomId}
-                  onChange={(event) => setLocationId(event.target.value)}
-                >
-                  <option value="">Room only</option>
-                  {locationOptions.map(({ location, depth }) => (
-                    <option key={location.id} value={location.id}>
-                      {depth > 0 ? `${"— ".repeat(depth)}` : ""}
-                      {location.identifier
-                        ? `${location.identifier} · ${location.name}`
-                        : location.name}{" "}
-                      · {LOCATION_KIND_LABELS[location.kind as LocationKind]}
-                    </option>
-                  ))}
-                </Select>
-                {selectedLocationPath.length > 1 && (
-                  <p className="mt-2 text-[0.7rem] leading-relaxed text-muted-foreground">
-                    {selectedLocationPath
-                      .map((location) => locationLabel(location))
-                      .join(" / ")}
-                  </p>
-                )}
-              </Field>
-
-              <Field label="Category" htmlFor="item-category" error={fieldErrors?.category_id}>
-                <div className="flex gap-2">
-                  <div className="min-w-0 flex-1">
-                    <Select
-                      id="item-category"
-                      value={categoryId}
-                      onChange={(event) => setCategoryId(event.target.value)}
-                    >
-                      <option value="">No category</option>
-                      {(categoriesQuery.data?.items ?? []).map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="Create a category"
-                    onClick={() => setCategoryDialogOpen(true)}
-                  >
-                    <Plus />
-                  </Button>
-                </div>
-              </Field>
-            </FormSection>
-
-            <FormSection title="Tags" description="Loose labels that cut across rooms.">
-              <div className="flex flex-wrap gap-2">
-                {(tagsQuery.data?.items ?? []).map((tag) => {
-                  const selected = tagIds.includes(tag.id);
-                  return (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() =>
-                        setTagIds((current) =>
-                          selected
-                            ? current.filter((id) => id !== tag.id)
-                            : [...current, tag.id],
-                        )
-                      }
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[0.75rem] transition-colors",
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-card/60 text-muted-foreground hover:border-foreground/25 hover:text-foreground",
-                      )}
-                    >
-                      {selected && <Check className="size-3" />}
-                      {tag.name}
-                    </button>
-                  );
-                })}
-                {tagsQuery.data?.items.length === 0 && (
-                  <p className="text-[0.75rem] text-muted-foreground">
-                    No tags yet. Create one below.
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <Input
-                  aria-label="New tag name"
-                  maxLength={60}
-                  value={newTag}
-                  onChange={(event) => {
-                    setNewTag(event.target.value);
-                    setTagError(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addTagFromInput();
-                    }
-                  }}
-                  placeholder="Add a tag"
-                  className="h-9 text-[0.8rem]"
-                />
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="size-9"
-                  aria-label="Create tag"
-                  disabled={createTag.isPending || !newTag.trim()}
-                  onClick={addTagFromInput}
-                >
-                  {createTag.isPending ? <Spinner /> : <Plus />}
-                </Button>
-              </div>
-              {tagError && <p className="text-[0.74rem] text-destructive">{tagError}</p>}
-            </FormSection>
+            </OptionalFormSection>
           </div>
         </div>
 
         <div className="flex flex-col-reverse items-stretch gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-end">
           <Button
+            type="button"
             variant="ghost"
             onClick={() =>
               navigate(
                 item
                   ? cancelTo ?? `/items/${item.id}`
-                  : cancelTo ?? "/items",
+                  : cancelTo ?? origin?.path ?? "/items",
               )
             }
           >

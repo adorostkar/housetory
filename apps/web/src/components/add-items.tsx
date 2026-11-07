@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCanWrite } from "@/lib/queries";
+import { appendOrigin, itemOrigin } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 export interface AddItemsContext {
@@ -193,6 +194,7 @@ function AddItemsDialog({
   context: AddItemsContext | undefined;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const contextLabel = [context?.roomName, context?.locationName]
     .filter(Boolean)
     .join(" · ");
@@ -202,8 +204,14 @@ function AddItemsDialog({
     if (context?.roomId) params.set("room_id", context.roomId);
     if (context?.locationId) params.set("location_id", context.locationId);
     const query = params.toString();
+    const origin = context
+      ? itemOrigin(
+          `${location.pathname}${location.search}`,
+          contextLabel || "add-items source",
+        )
+      : null;
     onOpenChange(false);
-    navigate(query ? `${path}?${query}` : path);
+    navigate(appendOrigin(query ? `${path}?${query}` : path, origin));
   };
 
   return (

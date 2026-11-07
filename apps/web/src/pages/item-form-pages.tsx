@@ -13,6 +13,7 @@ export function ItemNewPage() {
   const propertyId = searchParams.get("property_id") ?? undefined;
   const locationId = searchParams.get("location_id") ?? undefined;
   const defaultName = searchParams.get("name") ?? undefined;
+  const origin = readOrigin(searchParams);
 
   return (
     <div className="animate-fade-up">
@@ -20,14 +21,15 @@ export function ItemNewPage() {
         eyebrow="New item"
         title="Add something to your home"
         description="Start with the essentials. Photographs and documents can follow once the item is saved."
-        backTo={roomId ? `/rooms/${roomId}` : "/items"}
-        backLabel={roomId ? "Back to room" : "All items"}
+        backTo={origin?.path ?? (roomId ? `/rooms/${roomId}` : "/items")}
+        backLabel={origin ? `Back to ${origin.label}` : roomId ? "Back to room" : "All items"}
       />
       <ItemForm
         defaultPropertyId={propertyId}
         defaultRoomId={roomId}
         defaultLocationId={locationId}
         defaultName={defaultName}
+        origin={origin}
       />
     </div>
   );
@@ -67,7 +69,7 @@ export function ItemEditPage() {
       <PageHeader
         eyebrow="Edit item"
         title={item.name}
-        description="Update the details, placement, purchase or warranty."
+        description="Update the essentials, then expand optional identity or financial details."
         backTo={itemDetailPath}
         backLabel="Back to item"
       />

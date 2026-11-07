@@ -25,6 +25,14 @@ Users can **Change image**, **Remove** a stored reference/AI image, or
 category-icon fallback. Actual photos and accepted media are never overwritten
 or deleted by these actions.
 
+The primary image-source line keeps the honest category/reference/AI label, the
+exact-model distinction and concise attribution. Lengthy provenance — full
+source and image URLs, license name/note/URL, permission basis, stored dimensions,
+provider/model metadata, retrieval date and non-active status — sits inside an
+accessible **Image details** disclosure. The Find/Change online image and Use icon
+controls stay visible outside the disclosure. See
+[`ITEM_FORM_AND_FILES.md`](ITEM_FORM_AND_FILES.md) for before/after screenshots.
+
 ## No-photo state and category icons
 
 There is no built-in illustration library, shape chooser or automatic line-art

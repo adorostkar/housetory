@@ -174,6 +174,7 @@ test("legacy record total is reviewed and explicitly converted in the item form"
   });
 
   await page.getByRole("link", { name: "Edit" }).first().click();
+  await page.getByRole("button", { name: /Current value/ }).click();
   await expect(page.getByText("Legacy recorded total", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Convert to per-unit" }).click();
   const preview = page.getByTestId("current-value-preview");
@@ -182,7 +183,7 @@ test("legacy record total is reviewed and explicitly converted in the item form"
   await expect(preview).toContainText("$80");
   const currentValueSection = page
     .locator("section")
-    .filter({ has: page.getByRole("heading", { name: "Current value" }) });
+    .filter({ has: page.getByTestId("current-value-preview") });
   await currentValueSection.scrollIntoViewIfNeeded();
   await currentValueSection.screenshot({
     path: "../../docs/walkthrough/current-value/04-legacy-conversion-review.png",

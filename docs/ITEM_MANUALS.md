@@ -15,14 +15,16 @@ multi-household work.
   A PDF, image or text manual can be uploaded without any make/model fields.
   The exact original is preserved and the normal document limits, duplicate
   warning, OCR, scan and authenticated download behavior still apply.
-- **Attach existing** lists manuals already in the household library that are
-  not yet linked to the item. One manual can be linked to several compatible
-  items through the existing `item_documents` association. Nothing is uploaded
-  again and the original document is not copied.
+- **Link existing** in the combined **Documents & manuals** surface lists every
+  household document not yet linked to the item, including manuals, receipts and
+  warranty certificates. One manual can be linked to several compatible items
+  through the existing `item_documents` association. Nothing is uploaded again
+  and the original document is not copied.
 - A non-manual document cannot be attached through the manual route. Cross-
   household documents and items return 404.
-- The item page shows a compact **Manuals & help** card. It does not replace the
-  existing Documents card, item photos, lending controls or purchase panels.
+- The item page shows one **Documents & manuals** surface. Manuals and ordinary
+  documents are de-duplicated by document ID, so a manual is not listed twice.
+  Item photos, lending controls and purchase panels remain separate.
 - The card shows how many items use a manual and warns before linking a manual
   that is already linked elsewhere. Housetory never infers compatibility from a
   shared brand or a similar name.
@@ -414,9 +416,16 @@ household record, live Brave request or paid provider was used.
 
 ### Before and after on the item page
 
-The existing item layout, typography, palette, photo area, lending, purchase,
-warranty and Documents panels are unchanged. The manual card is added compactly
-in the main column.
+The item layout, typography, palette, photo area, lending, purchase and warranty
+panels keep their existing feel. The separate Manuals card and Documents card are
+now one compact Documents & manuals surface with the same upload, scan, link,
+ask and online-discovery actions. See
+[`ITEM_FORM_AND_FILES.md`](ITEM_FORM_AND_FILES.md) for before/after screenshots.
+
+> The walkthrough screenshots below were captured with the earlier separate
+> Manuals card. They remain as historical evidence for manual upload, answers and
+> discovery; current combined-surface screenshots are in
+> [`ITEM_FORM_AND_FILES.md`](ITEM_FORM_AND_FILES.md).
 
 ![Item page before adding a manual, desktop](walkthrough/item-manuals/01-item-before-manual-desktop.png)
 
@@ -445,11 +454,11 @@ in the main column.
 - **432 PostgreSQL-backed backend tests** pass, including household online-search
   credential lifecycle/fallback/domain tests plus manual attachment,
   identity-gate, citation, idempotency, duplicate, provider-output and SSRF tests.
-- **213 Vitest frontend tests** pass, including the write-only online-search
+- **220 Vitest frontend tests** pass, including the write-only online-search
   Settings card, bulk AI-task progress/skips/confirmation, manual card/actions,
   Ask dialogs, real-page citations, no-AI/unconfigured states, identity
   confirmation, candidate review/download and viewer controls.
-- **81 disposable-stack Playwright workflows** pass (80 passed, 1
+- **85 disposable-stack Playwright workflows** pass (84 passed, 1
   fixture-dependent skip), including online-search Settings, bulk AI-task
   confirmation/results and two named manual workflows: a real synthetic
   upload/attach/answer flow and a mocked gated search/review/save flow at mobile

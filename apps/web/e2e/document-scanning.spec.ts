@@ -47,7 +47,7 @@ test("scans, edits, reorders and saves a multi-page document from item context",
   const item = await createItem(request);
   await page.goto(`/items/${item.item.id}`);
   await expect(page.getByRole("heading", { name: "Document scanner test item" })).toBeVisible();
-  await page.getByRole("button", { name: "Scan", exact: true }).click();
+  await page.getByRole("button", { name: "Scan pages" }).click();
   await expect(page.getByRole("heading", { name: "Scan document" })).toBeVisible();
 
   await page.locator("#scan-page-library").setInputFiles([

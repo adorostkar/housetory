@@ -295,7 +295,9 @@ test("existing AI illustration remains readable without a generation workflow", 
   await page.goto(`/items/${item.item.id}`);
   await expect(page.getByText("AI illustration").first()).toBeVisible();
   await expect(page.getByText(/not a photo/).first()).toBeVisible();
+  await page.getByText("Image details").click();
   await expect(page.getByText(/new illustrations are no longer generated/)).toBeVisible();
+  await expect(page.getByText(/not evidence of the item's condition/)).toBeVisible();
   await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Find online image/ })).toBeVisible();
   await page.getByRole("button", { name: "Find online image" }).click();
