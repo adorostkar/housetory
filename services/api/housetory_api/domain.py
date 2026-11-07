@@ -231,10 +231,13 @@ class LoanStatus(StrEnum):
 class ActivityAction(StrEnum):
     ITEM_MOVED = "item.moved"
     ITEM_VALUE_UPDATED = "item.value_updated"
+    ITEM_STORAGE_ENABLED = "item.storage_enabled"
+    ITEM_STORAGE_DISABLED = "item.storage_disabled"
     ITEMS_BULK_MOVED = "items.bulk_moved"
     ITEMS_BULK_TAGGED = "items.bulk_tagged"
     ITEMS_BULK_CATEGORISED = "items.bulk_categorised"
     CONTAINER_MOVED = "container.moved"
+    CONTAINER_OWNERSHIP_UNLINKED = "container.ownership_unlinked"
     CONTAINER_DELETED = "container.deleted"
     CONTAINER_RESTORED = "container.restored"
     LOAN_CREATED = "loan.created"

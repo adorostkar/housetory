@@ -392,6 +392,7 @@ def move_container(
     actor_user_id: uuid.UUID | None = None,
     actor_name: str | None = None,
     record_history: bool = True,
+    allow_owned: bool = False,
 ) -> StorageLocation:
     household_hierarchy_lock(db, household_id)
     # Lock the household's location rows in a deterministic order. This makes
@@ -417,6 +418,13 @@ def move_container(
             422,
             "not_a_container",
             "Only movable containers can be moved. Convert this fixed place first.",
+        )
+    if moving.owner_item_id is not None and not allow_owned:
+        raise ApiError(
+            409,
+            "owned_container_move_requires_item",
+            "This container provides storage for an owned item. Move the owning item "
+            "instead so its home location, contents and container stay together.",
         )
     get_room(db, household_id, destination_room_id)
     if destination_parent_id is not None:
@@ -588,6 +596,14 @@ def delete_location_safely(
     """
     household_hierarchy_lock(db, household_id)
     location = get_location(db, household_id, location.id, for_update=True)
+    if location.owner_item_id is not None:
+        raise ApiError(
+            409,
+            "owned_location_delete_blocked",
+            "This storage place belongs to an owned item. Remove the storage capability "
+            "from that item after moving out its contents; the container identity and QR "
+            "remain recoverable.",
+        )
     has_children = db.scalar(
         select(StorageLocation.id)
         .where(

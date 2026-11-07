@@ -573,6 +573,13 @@ def _preview_out(
                 "their item-move restoration unavailable."
             )
     if scope.kind == "location" and scope.source_location is not None:
+        source_owner = scope.source_location.owner_item_id
+        if source_owner is not None:
+            warnings.append(
+                "This container provides storage for an owned item. It cannot be deleted "
+                "here; move contents, then remove the storage capability from the item. "
+                "The container identifier and QR remain recoverable."
+            )
         recoverable_children = int(
             db.scalar(
                 select(func.count(StorageLocation.id)).where(
@@ -693,6 +700,13 @@ def _set_borrowed_room(record: BorrowedRecord, destination: _Destination) -> Non
 
 
 def _assert_location_empty(db: Session, household_id: uuid.UUID, source: StorageLocation) -> None:
+    if source.owner_item_id is not None:
+        raise ApiError(
+            409,
+            "owned_location_delete_blocked",
+            "This storage place provides storage for an owned item. Move out its contents "
+            "and remove the storage capability from the item first.",
+        )
     has_children = db.scalar(
         select(StorageLocation.id)
         .where(
@@ -790,6 +804,18 @@ def transfer_place_contents(
         return replayed
 
     scope = _load_scope(db, household_id, kind, source_id, lock_items=True)
+    if (
+        payload.delete_source
+        and kind == "location"
+        and scope.source_location is not None
+        and scope.source_location.owner_item_id is not None
+    ):
+        raise ApiError(
+            409,
+            "owned_location_delete_blocked",
+            "This storage place provides storage for an owned item. Move out its "
+            "contents and remove the storage capability from the item first.",
+        )
     destination, blockers = _resolve_destination(
         db,
         household_id,

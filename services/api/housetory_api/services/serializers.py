@@ -25,6 +25,7 @@ from ..schemas.imports import ImportSourceBrief
 from ..schemas.items import (
     CategoryBrief,
     ItemDetail,
+    ItemStorageOut,
     ItemSummary,
     LastVerifiedOut,
     LocationBrief,
@@ -402,6 +403,7 @@ def item_detail(
     household_reminder_days: int | None = None,
     import_source: ImportSourceBrief | None = None,
     location_path: list[LocationBrief] | None = None,
+    storage: ItemStorageOut | None = None,
     on_loan_quantity: int = 0,
 ) -> ItemDetail:
     summary = item_summary(
@@ -414,6 +416,7 @@ def item_detail(
         location_path=location_path or [],
         serial_number=item.serial_number,
         import_source=import_source,
+        storage=storage,
         photos=[
             photo_out(photo)
             for photo in sorted(item.photos, key=lambda p: (p.sort_order, p.created_at))

@@ -113,7 +113,8 @@ Rendered with disposable dense records at:
 | 1440 | 1000 | desktop regression |
 
 Pages checked: overview, items, settings, settings/AI, review, search, item edit,
-loans, rooms, containers, documents, purchases and assistant.
+item detail with owned contents, loans, rooms, containers, documents, purchases
+and assistant.
 
 Assertions:
 
@@ -124,6 +125,7 @@ Assertions:
 - the software-keyboard simulation hides and restores the bar with focus and text
   preserved
 - schedule, add-item, lend and return dialogs fit their viewport and scroll
+- item contents search/scope/sort controls and storage actions fit a 390px phone
 - the viewport meta does not disable zoom
 - increasing the root font size to 20px increases the input size as well
 
@@ -131,7 +133,7 @@ Results:
 
 - Chromium mobile/tablet matrix: pass
 - WebKit 27.2 mobile/tablet matrix with touch and DPR 3: pass
-- Full checked-in Playwright suite: **79 workflows, 78 passed, 1 fixture-dependent skip**
+- Full checked-in Playwright suite: **81 workflows, 80 passed, 1 fixture-dependent skip**
 - Desktop 1440 regression: compact controls and no mobile bar
 
 ## Screenshots

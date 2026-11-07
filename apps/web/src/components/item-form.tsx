@@ -38,6 +38,7 @@ import {
 import {
   addMonthsIso,
   cn,
+  collectDescendantIds,
   CONDITION_LABELS,
   flattenLocations,
   flattenRoomTree,
@@ -109,6 +110,7 @@ export function ItemForm({
   const [model, setModel] = React.useState(item?.model ?? "");
   const [serialNumber, setSerialNumber] = React.useState(item?.serial_number ?? "");
   const [quantity, setQuantity] = React.useState(String(item?.quantity ?? 1));
+  const storageLocked = Boolean(item?.storage?.active);
   const [condition, setCondition] = React.useState<ItemCondition>(item?.condition ?? "good");
   const [roomId, setRoomId] = React.useState(item?.room?.id ?? defaultRoomId ?? "");
   const [locationId, setLocationId] = React.useState(
@@ -185,7 +187,16 @@ export function ItemForm({
   const [warrantyNotes, setWarrantyNotes] = React.useState(item?.warranty?.notes ?? "");
 
   const locationsQuery = useLocations(roomId || undefined);
-  const locationOptions = flattenLocations(locationsQuery.data?.items ?? []);
+  const locationRecords = locationsQuery.data?.items ?? [];
+  const excludedLocations = item?.storage?.active
+    ? new Set([
+        item.storage.location_id,
+        ...collectDescendantIds(locationRecords, item.storage.location_id),
+      ])
+    : new Set<string>();
+  const locationOptions = flattenLocations(
+    locationRecords.filter((entry) => !excludedLocations.has(entry.id)),
+  );
   const roomOptions = flattenRoomTree(roomsQuery.data?.items ?? []);
   const selectedLocationPath = locationPath(
     locationsQuery.data?.items ?? [],
@@ -415,15 +426,21 @@ export function ItemForm({
                   label="Quantity"
                   htmlFor="item-quantity"
                   error={quantityInvalid ? "Enter a whole number from 0 to 1,000,000." : undefined}
+                  hint={
+                    storageLocked
+                      ? "Quantity stays 1 while this item provides storage. Create a separate item for each physical unit."
+                      : undefined
+                  }
                 >
                   <Input
                     id="item-quantity"
                     type="number"
                     inputMode="numeric"
-                    min={0}
+                    min={storageLocked ? 1 : 0}
                     max={1_000_000}
                     step={1}
                     value={quantity}
+                    disabled={storageLocked}
                     onChange={(event) => setQuantity(event.target.value)}
                   />
                 </Field>

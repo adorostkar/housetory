@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ..domain import ContainerType
-from ..schemas.common import Description, Name, ORMModel, trimmed
+from ..schemas.common import Description, ItemReference, Name, ORMModel, trimmed
 from ..schemas.documents import DocumentBrief
 from ..schemas.items import ItemSummary, LocationBrief, RoomBrief
 from ..schemas.properties import PropertyBrief
@@ -64,6 +64,17 @@ class ContainerConvert(BaseModel):
     container_type: ContainerType = ContainerType.BOX
 
 
+class ContainerOwnershipCreate(BaseModel):
+    """Create a deliberate ownership record for an existing container.
+
+    Omit ``item_id`` to create a new owned item. Provide it to link an existing
+    item deliberately; names are never matched automatically.
+    """
+
+    item_id: uuid.UUID | None = None
+    name: Name | None = None
+
+
 class ContainerBrief(ORMModel):
     id: uuid.UUID
     identifier: str | None
@@ -102,6 +113,7 @@ class ContainerOut(ORMModel):
     child_count: int = 0
     container_count: int = 0
     recoverable_deleted_child_count: int = 0
+    owner_item: ItemReference | None = None
     qr_payload: str
     qr_url: str
     qr_warning: str | None = None
@@ -116,6 +128,7 @@ class ContainerDetail(ContainerOut):
     children: list[ContainerBrief] = Field(default_factory=list)
     documents: list[DocumentBrief] = Field(default_factory=list)
     summary: ContainerSummaryOut
+    owner_item_detail: ItemSummary | None = None
 
 
 class ContainerList(BaseModel):

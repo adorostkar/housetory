@@ -12,6 +12,7 @@ membership again. A session stores the selected household id, not a global role.
 | Ask attached-manual or read-only online product questions | Yes | Yes | Yes |
 | Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
+| Enable/remove item-owned storage, link/unlink existing containers, lend contents explicitly | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
 | Read item image sources/provenance and category-icon fallback | Yes | Yes | Yes |
 | Find/change/remove item reference images, use the category-icon fallback, run reference-image batches, remove existing AI media | Yes | Yes | No |

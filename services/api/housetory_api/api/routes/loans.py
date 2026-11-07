@@ -17,6 +17,7 @@ from ...schemas.lending import (
     LoanDetailOut,
     LoanFilterStatus,
     LoanListOut,
+    LoanOptionsOut,
     LoanReturnCreate,
     RestoreAssistedUndoOut,
     UndoRequest,
@@ -185,6 +186,17 @@ def item_loans(
 ) -> ItemLoanSummaryOut:
     _item(db, auth.household.id, item_id)
     return lending.item_loan_summary(db, auth.household.id, item_id, on_date=on_date)
+
+
+@router.get("/items/{item_id}/loan-options", response_model=LoanOptionsOut)
+def item_loan_options(
+    item_id: uuid.UUID,
+    on_date: date | None = None,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> LoanOptionsOut:
+    _item(db, auth.household.id, item_id)
+    return lending.loan_options(db, auth.household.id, item_id, on_date=on_date)
 
 
 @router.get("/items/{item_id}/history", response_model=ActivityHistoryOut)

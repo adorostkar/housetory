@@ -202,6 +202,7 @@ export interface StorageLocation {
   container_type: ContainerType | null;
   identifier: string | null;
   label_generated_at: string | null;
+  owner_item?: ItemReference | null;
   sort_order: number;
   item_count: number;
   total_item_count: number;
@@ -808,11 +809,37 @@ export interface ImportSourceBrief {
   url: string;
 }
 
+export interface StorageCategoryCount {
+  name: string;
+  item_count: number;
+  total_quantity: number;
+}
+
+export interface ItemStorage {
+  location_id: UUID;
+  identifier: string | null;
+  name: string;
+  active: boolean;
+  room_id: UUID | null;
+  parent_id: UUID | null;
+  path: LocationBrief[];
+  item_count: number;
+  total_quantity: number;
+  direct_item_count: number;
+  direct_total_quantity: number;
+  empty: boolean;
+  categories: StorageCategoryCount[];
+  qr_url: string | null;
+  qr_payload: string | null;
+  qr_warning: string | null;
+}
+
 export interface ItemDetail extends ItemSummary {
   serial_number: string | null;
   photos: Photo[];
   documents: DocumentRecord[];
   import_source: ImportSourceBrief | null;
+  storage?: ItemStorage | null;
 }
 
 export interface ItemList {
@@ -1548,6 +1575,7 @@ export interface Container {
   child_count: number;
   container_count: number;
   recoverable_deleted_child_count?: number;
+  owner_item?: ItemReference | null;
   qr_payload: string;
   qr_url: string;
   qr_warning: string | null;
@@ -1579,6 +1607,7 @@ export interface ContainerDetail extends Container {
   children: ContainerChild[];
   documents: DocumentBrief[];
   summary: ContainerSummary;
+  owner_item_detail?: ItemSummary | null;
 }
 
 export interface ContainerList {
@@ -2285,6 +2314,8 @@ export type LoanFilterStatus =
 export interface Loan {
   id: UUID;
   item_id: UUID | null;
+  parent_loan_id?: UUID | null;
+  includes_contents?: boolean;
   item_name: string;
   item_name_snapshot: string;
   home_room_id: UUID | null;
@@ -2397,6 +2428,7 @@ export interface ActivityHistory {
 export interface LoanDetail extends Loan {
   returns: LoanReturn[];
   history: ActivityEvent[];
+  contents_loans?: Loan[];
 }
 
 export interface LoanList {
@@ -2418,6 +2450,35 @@ export interface ItemLoanSummary {
   outstanding_loan_count: number;
   overdue_count: number;
   loans: Loan[];
+}
+
+export interface LoanContentsItem {
+  item_id: UUID;
+  item_name: string;
+  owned_quantity: number;
+  on_loan_quantity: number;
+  available_quantity: number;
+}
+
+export interface LoanContentsExcluded {
+  item_name: string;
+  reason: string;
+  quantity: number;
+  owner_name: string | null;
+}
+
+export interface LoanOptions {
+  item_id: UUID;
+  item_name: string;
+  owned_quantity: number;
+  on_loan_quantity: number;
+  available_quantity: number;
+  has_contents: boolean;
+  storage_location_id: UUID | null;
+  storage_identifier: string | null;
+  contents_available_quantity: number;
+  contents_items: LoanContentsItem[];
+  excluded_items: LoanContentsExcluded[];
 }
 
 export interface BorrowedPhoto {

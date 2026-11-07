@@ -28,7 +28,10 @@ evidence and are excluded from stocktake snapshots and observations. Scope label
 paths include the property when the room belongs to one. Starting from a room includes that room, descendant rooms, items assigned to
 those rooms, and items inside storage places in those rooms. Starting from a
 container includes that container, descendant containers and the items assigned
-to them. Selecting both is supported; the union is de-duplicated by item ID.
+to them. The owned item that provides a storage place is physically outside its
+own backing place, so a container-scoped stocktake counts its contents but not the
+host item; a room/home scope counts the host and its contents once each.
+Selecting both is supported; the union is de-duplicated by item ID.
 
 On start the server records an immutable expected snapshot:
 

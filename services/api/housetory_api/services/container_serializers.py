@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import Item, StorageLocation
+from ..schemas.common import ItemReference
 from ..schemas.containers import (
     ContainerBrief,
     ContainerDetail,
@@ -26,7 +27,7 @@ from .containers import (
 )
 from .hierarchy import descendant_ids
 from .lending import loan_quantities_for_items
-from .serializers import document_brief, item_summary
+from .serializers import document_brief, item_load_options, item_summary
 
 
 def qr_urls(location: StorageLocation) -> tuple[str, str, str | None]:
@@ -186,6 +187,11 @@ def serialize_container(
         child_count=child_count,
         container_count=container_count,
         recoverable_deleted_child_count=recoverable_deleted_child_count,
+        owner_item=(
+            ItemReference(id=location.owner_item.id, name=location.owner_item.name)
+            if location.owner_item is not None
+            else None
+        ),
         qr_payload=payload,
         qr_url=qr_endpoint,
         qr_warning=warning,
@@ -267,6 +273,18 @@ def serialize_container_detail(
         RoomBrief(id=room.id, name=room.name)
         for room in room_ancestors(db, household_id, location.room_id)
     ]
+    owner_item_detail = None
+    if location.owner_item_id is not None:
+        owner_item = db.scalar(
+            select(Item)
+            .options(*item_load_options())
+            .where(Item.id == location.owner_item_id, Item.household_id == household_id)
+        )
+        if owner_item is not None:
+            owner_on_loan = loan_quantities_for_items(db, household_id, [owner_item.id]).get(
+                owner_item.id, 0
+            )
+            owner_item_detail = item_summary(owner_item, on_loan_quantity=owner_on_loan)
     return ContainerDetail(
         **base.model_dump(),
         room_path=room_path,
@@ -274,4 +292,5 @@ def serialize_container_detail(
         children=children,
         documents=[document_brief(document) for document in documents],
         summary=summary,
+        owner_item_detail=owner_item_detail,
     )

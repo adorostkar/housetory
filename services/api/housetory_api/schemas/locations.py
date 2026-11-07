@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from ..domain import LocationKind
-from ..schemas.common import Description, Name, ORMModel
+from ..schemas.common import Description, ItemReference, Name, ORMModel
 
 
 class StorageLocationCreate(BaseModel):
@@ -35,6 +35,7 @@ class StorageLocationOut(ORMModel):
     container_type: str | None = None
     identifier: str | None = None
     label_generated_at: datetime | None = None
+    owner_item: ItemReference | None = None
     sort_order: int
     item_count: int = 0
     total_item_count: int = 0

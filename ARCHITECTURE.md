@@ -274,12 +274,20 @@ Key decisions:
   Parent and child must share a room. Deleting a location that still has
   contents is rejected by the API.
 - **Movable containers** reuse the storage-location row and UUID. They add
-  `is_container`, `container_type`, a permanent household-unique `identifier`,
-  optional summary/headline snapshots and label timestamps. A container can be
-  unnamed; its display name falls back to the identifier. Fixed shelves,
-  cabinets and drawers remain non-container locations, optionally with their own
-  identifiers. Converting a place to a container is explicit and preserves its
-  UUID, children, items, documents and import provenance.
+  `is_container`, `container_type`, a permanent household-unique `identifier`
+  and label timestamps. A container can be unnamed; its display name falls back
+  to the identifier. Fixed shelves, cabinets and drawers remain non-container
+  locations, optionally with their own identifiers. Converting a place to a
+  container is explicit and preserves its UUID, children, items, documents and
+  import provenance.
+- **Owned storage items** link one owned item to one storage location through
+  `storage_locations.owner_item_id` (nullable unique). The item remains outside
+  its own backing place and keeps its purchase, warranty, value, photos,
+  documents, tags and history. Contents use the ordinary item storage-location
+  relation. Moving the item moves the backing location subtree; moving the
+  container independently is rejected. A storage-bearing item is deliberately
+  limited to quantity 1, and removal requires an empty place before tombstoning
+  the preserved identifier.
 - **Identifier allocation** uses `location_identifier_counters` keyed by
   household and prefix. A single atomic `INSERT … ON CONFLICT DO UPDATE …
   RETURNING` reserves a range, including bulk creation. Counters are never
@@ -291,10 +299,9 @@ Key decisions:
   moved subtree's `room_id`, the moved root's `parent_id`, and all linked items'
   `room_id`. Counts, search, breadcrumbs, financial breakdowns, exports and the
   QR payload derive from the updated rows and therefore remain consistent.
-- **Contents summaries** are deterministic snapshots built only from actual item
-  names, quantities and categories. A SHA-256 contents hash detects stale
-  summaries/labels. Optional AI produces only a short headline; item lines remain
-  deterministic. Manual edits are explicit snapshots.
+- **Contents summaries** are live nested/direct counts and category totals built
+  only from current item records. There is no saved snapshot, staleness hash,
+  manual edit or AI headline.
 - **Labels** are generated server-side as vector PDFs. Verified A4 presets store
   millimetre geometry (L7160/L7163/L7165/L7651); custom geometry is validated
   against the paper. QR modules and DejaVu fonts are vector-embedded. The user
@@ -764,6 +771,10 @@ development and nginx proxies in production. No CORS allowlist is needed.
   only the permanent identifier, optional name and live QR, so content movement
   does not invalidate them. Actual physical printer alignment depends on the
   printer and must be checked with the calibration sheet at 100% scale.
+- An owned item can provide one storage place and must remain quantity 1 while it
+  does. Separate boxes/furniture units are separate items. There is no kit/BOM,
+  automatic name matching, borrower directory or automatic propagation of parent
+  loan corrections; parent and child loans remain independently correctable.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
   attachments but may still contain malicious content when opened in a PDF
   reader. OCR parses untrusted documents locally in the worker; keep the worker

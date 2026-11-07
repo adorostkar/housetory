@@ -16,7 +16,10 @@ insurance dashboard, a new reporting framework, properties or stocktake.
 - **Items:** select one or more loaded items, then use **Export evidence** in the
   bulk action bar.
 - **Room detail:** exports the room and its descendant rooms/items.
-- **Container detail:** exports the selected container and descendant containers.
+- **Container detail:** exports the selected container, descendant containers
+  and the owned item that provides the storage place. The owner item is included
+  once, so its purchase/warranty/value evidence is not silently omitted and no
+  item is double counted.
 
 The item page and existing CSV export links are unchanged.
 
@@ -297,8 +300,8 @@ Representative screenshots and rendered PDF pages are in
 
 ## Verification
 
-- **423 PostgreSQL backend tests**, **213 Vitest tests** and **79 disposable-stack
-  Playwright workflows** pass (78 passed, 1 fixture-dependent skip); Ruff, strict
+- **432 PostgreSQL backend tests**, **213 Vitest tests** and **81 disposable-stack
+  Playwright workflows** pass (80 passed, 1 fixture-dependent skip); Ruff, strict
   TypeScript typecheck, production build and Alembic drift checks pass.
 - PostgreSQL backend tests cover item/room/container/home/overlap scope resolution,
   archived/empty/missing scope behavior, viewer and cross-household isolation,

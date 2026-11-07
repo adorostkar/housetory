@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { queryKeys } from "@/lib/queries";
+import { queryKeys, useItemLoanOptions } from "@/lib/queries";
 import type { Loan, LoanDetail } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
 
@@ -33,7 +33,10 @@ function invalidateLoans(client: ReturnType<typeof useQueryClient>, itemId?: str
   void client.invalidateQueries({ queryKey: ["loans"] });
   void client.invalidateQueries({ queryKey: ["items"] });
   void client.invalidateQueries({ queryKey: ["item"] });
-  if (itemId) void client.invalidateQueries({ queryKey: queryKeys.itemLoans(itemId) });
+  if (itemId) {
+    void client.invalidateQueries({ queryKey: queryKeys.itemLoans(itemId) });
+    void client.invalidateQueries({ queryKey: ["items", itemId, "loan-options"] });
+  }
   void client.invalidateQueries({ queryKey: queryKeys.overview });
 }
 
@@ -59,7 +62,9 @@ export function LendLoanDialog({
   const [lentOn, setLentOn] = React.useState(localDateISO());
   const [dueOn, setDueOn] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  const [includeContents, setIncludeContents] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const optionsQuery = useItemLoanOptions(itemId, open);
 
   React.useEffect(() => {
     if (!open) return;
@@ -68,6 +73,7 @@ export function LendLoanDialog({
     setLentOn(localDateISO());
     setDueOn("");
     setNotes("");
+    setIncludeContents(false);
     setError(null);
   }, [open, available]);
 
@@ -76,15 +82,20 @@ export function LendLoanDialog({
       api.post<LoanDetail>("/loans", {
         item_id: itemId,
         borrower_name: borrower.trim(),
-        quantity: Number(quantity),
+        quantity: includeContents ? 1 : Number(quantity),
         lent_on: lentOn,
         due_on: dueOn || null,
         notes: notes.trim() || null,
+        include_contents: includeContents,
         request_id: requestId,
       }),
     onSuccess: (loan) => {
       invalidateLoans(client, itemId);
-      toast.success(`Lent ${loan.quantity} × ${itemName} to ${loan.borrower_name}`);
+      toast.success(
+        loan.includes_contents && (loan.contents_loans?.length ?? 0) > 0
+          ? `Lent ${itemName} with ${loan.contents_loans?.length} content item(s) to ${loan.borrower_name}`
+          : `Lent ${loan.quantity} × ${itemName} to ${loan.borrower_name}`,
+      );
       onCreated?.(loan);
       onOpenChange(false);
     },
@@ -96,6 +107,7 @@ export function LendLoanDialog({
     !Number.isInteger(Number(quantity)) ||
     Number(quantity) < 1 ||
     Number(quantity) > available ||
+    (includeContents && !optionsQuery.data?.contents_items.length) ||
     !lentOn ||
     Boolean(dueOn && dueOn < lentOn);
 
@@ -124,6 +136,70 @@ export function LendLoanDialog({
             <strong className="font-medium text-foreground">{available}</strong> unit(s)
             available at home. Owned quantity includes loaned stock.
           </div>
+          {optionsQuery.data?.has_contents && (
+            <div className="rounded-xl border border-border/60 bg-background/40 p-3.5">
+              <label className="flex items-start gap-2.5 text-[0.78rem]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 rounded border-border"
+                  checked={includeContents}
+                  disabled={optionsQuery.data.contents_items.length === 0}
+                  onChange={(event) => {
+                    setIncludeContents(event.target.checked);
+                    if (event.target.checked) setQuantity("1");
+                  }}
+                />
+                <span>
+                  Include the contents in this loan
+                  <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                    {includeContents
+                      ? "Each available child item is loaned separately with the same borrower and dates. Returning the parent does not mark children returned."
+                      : "Off by default. The parent can be lent alone; its contents stay recorded at home and are not implied to be with the borrower."}
+                  </span>
+                </span>
+              </label>
+              {includeContents && (
+                <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+                  <p className="text-[0.7rem] text-muted-foreground">
+                    {optionsQuery.data.contents_items.length} item(s) ·{" "}
+                    {optionsQuery.data.contents_available_quantity} available unit(s)
+                    will be included:
+                  </p>
+                  <ul className="max-h-32 space-y-1 overflow-y-auto text-[0.7rem]">
+                    {optionsQuery.data.contents_items.map((entry) => (
+                      <li
+                        key={entry.item_id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-secondary/30 px-2.5 py-1.5"
+                      >
+                        <span className="truncate">{entry.item_name}</span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {entry.available_quantity} unit(s)
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {optionsQuery.data.excluded_items.length > 0 && (
+                    <div className="text-[0.66rem] leading-relaxed text-muted-foreground">
+                      <p className="font-medium">Not included:</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {optionsQuery.data.excluded_items.map((entry) => (
+                          <li key={`${entry.item_name}-${entry.reason}`}>
+                            {entry.item_name} — {entry.reason}
+                            {entry.owner_name ? ` (${entry.owner_name})` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {optionsQuery.isPending && open && (
+            <p className="text-[0.68rem] text-muted-foreground">
+              Checking whether this item holds contents…
+            </p>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Borrower" htmlFor="loan-borrower">
               <Input
@@ -141,7 +217,8 @@ export function LendLoanDialog({
                 type="number"
                 min={1}
                 max={available}
-                value={quantity}
+                value={includeContents ? "1" : quantity}
+                disabled={includeContents}
                 onChange={(event) => setQuantity(event.target.value)}
               />
             </Field>

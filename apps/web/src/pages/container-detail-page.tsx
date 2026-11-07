@@ -8,6 +8,7 @@ import {
   Printer,
   QrCode,
   Download,
+  PackageOpen,
   MoveRight,
   Search,
   Trash2,
@@ -35,6 +36,7 @@ import {
   ContainerMoveDialog,
   ContainerQrDialog,
 } from "@/components/container-dialogs";
+import { ContainerOwnershipDialog } from "@/components/ownership-dialogs";
 import { EmptyState } from "@/components/empty-state";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
@@ -77,11 +79,13 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { Container, ContainerType } from "@/lib/types";
 import {
   CONTAINER_TYPE_LABELS,
+  formatCurrency,
   formatDate,
   formatRelativeDate,
   itemContainer,
   pluralize,
 } from "@/lib/utils";
+import { WARRANTY_STATUS_LABELS, WARRANTY_STATUS_TONE } from "@/lib/labels";
 
 const TYPES: ContainerType[] = ["box", "bin", "crate", "suitcase", "bag", "other"];
 const ITEM_SORTS = {
@@ -105,6 +109,8 @@ export function ContainerDetailPage() {
   const [qrOpen, setQrOpen] = React.useState(false);
   const [moveOpen, setMoveOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [ownershipOpen, setOwnershipOpen] = React.useState(false);
+  const [unlinkOpen, setUnlinkOpen] = React.useState(false);
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
   const [emptyDeleteOpen, setEmptyDeleteOpen] = React.useState(false);
   const [transferMode, setTransferMode] = React.useState<"move" | "delete" | null>(null);
@@ -230,6 +236,20 @@ export function ContainerDetailPage() {
     },
   });
 
+  const unlinkOwnership = useMutation({
+    mutationFn: () => api.delete<Container>(`/containers/${containerId}/ownership`),
+    onSuccess: () => {
+      refreshContainer();
+      invalidate();
+      setUnlinkOpen(false);
+      toast.success("Ownership unlinked; the container remains a storage place");
+    },
+    onError: (error) => {
+      setUnlinkOpen(false);
+      toast.error(getApiErrorMessage(error));
+    },
+  });
+
   if (containerQuery.isPending) return <ContainerDetailSkeleton />;
   if (containerQuery.isError) {
     return (
@@ -280,7 +300,7 @@ export function ContainerDetailPage() {
               <Download />
               Export evidence
             </Button>
-            {canWrite && detail.is_container && (
+            {canWrite && detail.is_container && !detail.owner_item && (
               <Button variant="outline" onClick={() => setMoveOpen(true)}>
                 <Truck />
                 Move
@@ -293,7 +313,7 @@ export function ContainerDetailPage() {
                   Move contents
                 </Button>
               )}
-            {canWrite && (
+            {canWrite && !detail.owner_item && (
               <Button
                 variant="outline"
                 onClick={() => {
@@ -319,6 +339,85 @@ export function ContainerDetailPage() {
 
       <section className="surface mb-4 p-4 sm:p-5">
         <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />
+      </section>
+
+      <section className="surface mb-4 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                <PackageOpen className="size-4" />
+                Ownership details
+              </h2>
+              {detail.owner_item ? (
+                <Badge variant="sage">Owned item</Badge>
+              ) : (
+                <Badge variant="outline">Storage only</Badge>
+              )}
+            </div>
+            {detail.owner_item ? (
+              <>
+                <Link
+                  to={`/items/${detail.owner_item.id}`}
+                  className="mt-2 block font-display text-[1.25rem] tracking-[-0.02em] underline-offset-4 hover:underline"
+                >
+                  {detail.owner_item.name}
+                </Link>
+                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                  Purchase, warranty, photos, documents, value, tags and history are kept on
+                  this owned item. The container keeps its identifier, QR code and contents.
+                </p>
+                {detail.owner_item_detail && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {detail.owner_item_detail.current_value_total_cents != null && (
+                      <Badge variant="outline">
+                        Value{" "}
+                        {formatCurrency(
+                          detail.owner_item_detail.current_value_total_cents,
+                          detail.owner_item_detail.current_value_currency,
+                        )}
+                      </Badge>
+                    )}
+                    {detail.owner_item_detail.purchase && (
+                      <Badge variant="outline">Purchase recorded</Badge>
+                    )}
+                    {detail.owner_item_detail.warranty && (
+                      <Badge
+                        variant={
+                          WARRANTY_STATUS_TONE[detail.owner_item_detail.warranty.status]
+                        }
+                      >
+                        {WARRANTY_STATUS_LABELS[detail.owner_item_detail.warranty.status]}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 max-w-2xl text-[0.78rem] leading-relaxed text-muted-foreground">
+                This container is a storage place without an owned item. Add purchase,
+                warranty, photos, documents and value by linking an existing item or creating
+                one owned record. No duplicate inventory record is created automatically.
+              </p>
+            )}
+          </div>
+          {canWrite && detail.owner_item && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/items/${detail.owner_item.id}`}>Open owned item</Link>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setUnlinkOpen(true)}>
+                Unlink
+              </Button>
+            </div>
+          )}
+          {canWrite && !detail.owner_item && (
+            <Button variant="outline" size="sm" onClick={() => setOwnershipOpen(true)}>
+              <PackageOpen />
+              Add ownership details
+            </Button>
+          )}
+        </div>
       </section>
 
       <section className="surface p-5 sm:p-6">
@@ -627,6 +726,12 @@ export function ContainerDetailPage() {
       )}
 
       <ContainerQrDialog container={detail} open={qrOpen} onOpenChange={setQrOpen} />
+      <ContainerOwnershipDialog
+        container={detail}
+        open={ownershipOpen}
+        onOpenChange={setOwnershipOpen}
+        onLinked={() => refreshContainer()}
+      />
       {detail.is_container && (
         <ContainerMoveDialog
           container={detail}
@@ -714,6 +819,17 @@ export function ContainerDetailPage() {
         onOpenChange={setEvidenceOpen}
         scope={{ container_ids: [detail.id] }}
         title={`Export ${identifier} with evidence`}
+      />
+
+      <ConfirmDialog
+        open={unlinkOpen}
+        onOpenChange={setUnlinkOpen}
+        title={`Unlink ownership from ${identifier}?`}
+        description="The container and its contents stay unchanged. The owned item remains in inventory at its current place. Open loans must be returned first."
+        confirmLabel="Unlink ownership"
+        onConfirm={async () => {
+          await unlinkOwnership.mutateAsync();
+        }}
       />
 
       <ConfirmDialog

@@ -54,6 +54,37 @@ class LocationBrief(ORMModel):
     is_container: bool = False
 
 
+class StorageCategoryCount(BaseModel):
+    name: str
+    item_count: int = 0
+    total_quantity: int = 0
+
+
+class ItemStorageOut(BaseModel):
+    """The storage place an owned item provides.
+
+    The item itself lives outside this location. Contents are ordinary inventory
+    items assigned to this location or its nested places.
+    """
+
+    location_id: uuid.UUID
+    identifier: str | None = None
+    name: str
+    active: bool = True
+    room_id: uuid.UUID | None = None
+    parent_id: uuid.UUID | None = None
+    path: list[LocationBrief] = Field(default_factory=list)
+    item_count: int = 0
+    total_quantity: int = 0
+    direct_item_count: int = 0
+    direct_total_quantity: int = 0
+    empty: bool = True
+    categories: list[StorageCategoryCount] = Field(default_factory=list)
+    qr_url: str | None = None
+    qr_payload: str | None = None
+    qr_warning: str | None = None
+
+
 class ItemCreate(BaseModel):
     name: trimmed(1, 200)
     description: Description | None = None
@@ -163,6 +194,7 @@ class ItemDetail(ItemSummary):
     photos: list[PhotoOut]
     documents: list[DocumentOut]
     import_source: ImportSourceBrief | None = None
+    storage: ItemStorageOut | None = None
 
 
 class ItemList(BaseModel):
@@ -178,6 +210,10 @@ class ItemDetailResponse(BaseModel):
 
 class PhotoOrderRequest(BaseModel):
     photo_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+
+
+class ItemStorageEnableRequest(BaseModel):
+    existing_location_id: uuid.UUID | None = None
 
 
 class PhotoList(BaseModel):

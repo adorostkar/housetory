@@ -124,6 +124,7 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_storage_locations_parent_id", "parent_id"),
         Index("ix_storage_locations_household_deleted", "household_id", "deleted_at"),
+        Index("uq_storage_locations_owner_item_id", "owner_item_id", unique=True),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -134,6 +135,9 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("storage_locations.id", ondelete="CASCADE")
+    )
+    owner_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="SET NULL")
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -181,7 +185,14 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     children: Mapped[list["StorageLocation"]] = relationship(
         back_populates="parent", cascade="all, delete-orphan"
     )
-    items: Mapped[list["Item"]] = relationship(back_populates="storage_location")
+    items: Mapped[list["Item"]] = relationship(
+        back_populates="storage_location", foreign_keys="Item.storage_location_id"
+    )
+    owner_item: Mapped["Item | None"] = relationship(
+        back_populates="owned_location",
+        foreign_keys=[owner_item_id],
+        uselist=False,
+    )
     photos: Mapped[list["LocationPhoto"]] = relationship(
         back_populates="location", cascade="all, delete-orphan"
     )
@@ -361,7 +372,14 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     household: Mapped["Household"] = relationship(back_populates="items")
     room: Mapped[Room | None] = relationship(back_populates="items")
-    storage_location: Mapped[StorageLocation | None] = relationship(back_populates="items")
+    storage_location: Mapped[StorageLocation | None] = relationship(
+        back_populates="items", foreign_keys=[storage_location_id]
+    )
+    owned_location: Mapped[StorageLocation | None] = relationship(
+        back_populates="owner_item",
+        foreign_keys="StorageLocation.owner_item_id",
+        uselist=False,
+    )
     category: Mapped[Category | None] = relationship(back_populates="items")
     tags: Mapped[list[Tag]] = relationship(secondary=item_tags, back_populates="items")
     purchase: Mapped["Purchase | None"] = relationship(back_populates="items")

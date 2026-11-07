@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -34,10 +35,15 @@ class Loan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="valid_status",
         ),
         CheckConstraint("due_on is null or due_on >= lent_on", name="dates_in_order"),
+        CheckConstraint(
+            "parent_loan_id IS NULL OR parent_loan_id <> id",
+            name="not_own_parent",
+        ),
         UniqueConstraint("household_id", "request_id", name="uq_loans_household_request_id"),
         Index("ix_loans_household_status_due", "household_id", "status", "due_on"),
         Index("ix_loans_household_item", "household_id", "item_id"),
         Index("ix_loans_household_lent", "household_id", "lent_on"),
+        Index("ix_loans_parent_loan_id", "parent_loan_id"),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -46,6 +52,10 @@ class Loan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     item_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("items.id", ondelete="SET NULL")
     )
+    parent_loan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("loans.id", ondelete="SET NULL")
+    )
+    includes_contents: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     item_name_snapshot: Mapped[str] = mapped_column(String(200), nullable=False)
     home_room_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     home_room_name_snapshot: Mapped[str | None] = mapped_column(String(120))

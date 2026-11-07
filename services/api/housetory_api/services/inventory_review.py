@@ -42,7 +42,7 @@ from ..schemas.inventory_review import (
     ReviewSuggestionOut,
     ReviewSummaryOut,
 )
-from . import ai, history, lending
+from . import ai, history, lending, storage_items
 from .hierarchy import descendant_ids
 from .serializers import item_load_options, item_summary
 
@@ -1205,6 +1205,16 @@ def accept_suggestion(
         proposed_name = (payload.name or (suggestion.after_json or {}).get("name") or "").strip()
         if not proposed_name:
             return _decision(db, suggestion, "unsupported", "No name was proposed.")
+        if len(proposed_name) > 200:
+            return _decision(db, suggestion, "unsupported", "The proposed name is too long.")
+        owned = storage_items.active_owned_location(db, household_id, item.id)
+        if owned is not None and len(proposed_name) > 120:
+            return _decision(
+                db,
+                suggestion,
+                "unsupported",
+                "This item provides storage; its place name supports up to 120 characters.",
+            )
         before_name = (suggestion.before_json or {}).get("name")
         if item.name != before_name:
             suggestion.status = "stale"
@@ -1216,6 +1226,8 @@ def accept_suggestion(
                 "The item name changed after analysis; suggestion marked stale.",
             )
         item.name = proposed_name
+        if owned is not None:
+            owned.name = proposed_name
         after = {"name": proposed_name}
         action = ActivityAction.INVENTORY_REVIEW_NAME_APPLIED.value
         summary = f"Applied review name “{proposed_name}” (was “{before_name}”)"
@@ -1359,7 +1371,17 @@ def undo_suggestion(
         before_name = (suggestion.before_json or {}).get("name")
         if not before_name:
             return _decision(db, suggestion, "skipped", "The original name is unavailable.")
+        owned = storage_items.active_owned_location(db, household_id, item.id)
+        if owned is not None and len(before_name) > 120:
+            return _decision(
+                db,
+                suggestion,
+                "skipped",
+                "The original name is too long for the item's storage place.",
+            )
         item.name = before_name
+        if owned is not None:
+            owned.name = before_name
         action = ActivityAction.INVENTORY_REVIEW_NAME_REVERTED.value
         summary = f"Reverted review name to “{before_name}”"
     else:

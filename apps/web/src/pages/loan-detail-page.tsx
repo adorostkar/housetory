@@ -126,6 +126,17 @@ export function LoanDetailPage() {
                     {LOAN_STATUS_LABELS[loan.status]}
                   </Badge>
                   {loan.overdue && <Badge variant="destructive">Past due</Badge>}
+                  {loan.includes_contents && (
+                    <Badge variant="brass">Includes contents</Badge>
+                  )}
+                  {loan.parent_loan_id && (
+                    <Link
+                      to={`/loans/${loan.parent_loan_id}`}
+                      className="text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      Contents of parent loan
+                    </Link>
+                  )}
                 </div>
                 <h2 className="mt-3 font-display text-[1.7rem] tracking-[-0.025em]">
                   {loan.outstanding_quantity} of {loan.quantity} still out
@@ -189,6 +200,52 @@ export function LoanDetailPage() {
               </p>
             )}
           </section>
+
+          {(loan.contents_loans?.length ?? 0) > 0 && (
+            <section className="surface p-5 sm:p-6">
+              <div>
+                <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+                  Contents on this loan
+                </h2>
+                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                  Each child item has its own loan record, return history and availability.
+                  Returning this parent alone does not mark any child returned.
+                </p>
+              </div>
+              <ul className="mt-4 space-y-2">
+                {loan.contents_loans?.map((child) => (
+                  <li
+                    key={child.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-[0.76rem]"
+                  >
+                    <span className="min-w-0">
+                      <Link
+                        to={`/loans/${child.id}`}
+                        className="font-medium underline-offset-4 hover:underline"
+                      >
+                        {child.item_name}
+                      </Link>
+                      <span className="ml-2 text-muted-foreground">
+                        {child.outstanding_quantity} of {child.quantity} still out
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge variant={LOAN_STATUS_TONE[child.status]}>
+                        {LOAN_STATUS_LABELS[child.status]}
+                      </Badge>
+                      <span className="text-[0.68rem] text-muted-foreground">
+                        {child.outstanding_quantity === 0
+                          ? "Returned"
+                          : child.due_on
+                            ? `due ${formatDate(child.due_on)}`
+                            : "no due date"}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="surface p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">

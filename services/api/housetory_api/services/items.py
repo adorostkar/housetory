@@ -15,7 +15,7 @@ from ..api.errors import ApiError
 from ..models import Category, Item, Purchase, Room, StorageLocation, Tag, Warranty
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import current_value as current_value_service
-from . import history, lending
+from . import history, lending, storage_items
 from .purchase_info import explicit_status_value
 from .purchases import get_purchase, prune_orphan_purchases, validate_receipt
 from .serializers import item_load_options
@@ -322,6 +322,22 @@ def update_item_record(
     history_context: dict[str, Any] | None = None,
 ) -> Item:
     fields = payload.model_fields_set
+    owned = storage_items.active_owned_location(db, household_id, item.id)
+    if owned is not None:
+        if "quantity" in fields and payload.quantity is not None and payload.quantity != 1:
+            raise ApiError(
+                422,
+                "storage_item_quantity_required",
+                "This item provides storage and must stay at quantity 1. Create a separate "
+                "item for each physical box or piece of furniture.",
+            )
+        if "is_archived" in fields and payload.is_archived is True:
+            raise ApiError(
+                409,
+                "item_provides_storage",
+                "Move out the contents and remove this item's storage capability before "
+                "archiving it. Nothing was archived.",
+            )
 
     if "quantity" in fields or "is_archived" in fields:
         db.scalar(
@@ -360,6 +376,24 @@ def update_item_record(
         resolved_room_id, location_record = resolve_location(
             db, household_id, new_room_id, new_location_id
         )
+        if owned is not None:
+            if resolved_room_id is None:
+                raise ApiError(
+                    422,
+                    "storage_room_required",
+                    "A storage-bearing item must stay in a room while its storage place is active.",
+                )
+            destination_location_id = location_record.id if location_record else None
+            if owned.room_id != resolved_room_id or owned.parent_id != destination_location_id:
+                storage_items.move_owned_storage(
+                    db,
+                    household_id,
+                    item,
+                    destination_room_id=resolved_room_id,
+                    destination_location_id=destination_location_id,
+                    actor_user_id=actor_user_id,
+                    actor_name=actor_name,
+                )
         item.room_id = resolved_room_id
         item.storage_location_id = location_record.id if location_record else None
 
@@ -373,7 +407,17 @@ def update_item_record(
         item.tags = tags(db, household_id, payload.tag_ids)
 
     if payload.name is not None:
+        if owned is not None and len(payload.name.strip()) > 120:
+            raise ApiError(
+                422,
+                "storage_name_too_long",
+                "This item provides storage, whose place name supports up to 120 "
+                "characters. Shorten the item name.",
+            )
         item.name = payload.name
+        if owned is not None:
+            owned.name = payload.name
+            owned.updated_at = datetime.now(UTC)
     if "description" in fields:
         item.description = payload.description
     if "brand" in fields:

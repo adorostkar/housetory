@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...models import Item, Room, StorageLocation
+from ...schemas.common import ItemReference
 from ...schemas.locations import (
     StorageLocationCreate,
     StorageLocationList,
@@ -165,6 +166,11 @@ def _to_out(
         container_type=location.container_type,
         identifier=location.identifier,
         label_generated_at=location.label_generated_at,
+        owner_item=(
+            ItemReference(id=location.owner_item.id, name=location.owner_item.name)
+            if location.owner_item is not None
+            else None
+        ),
         sort_order=location.sort_order,
         item_count=direct_counts.get(location.id, 0),
         total_item_count=total_counts.get(location.id, 0),
@@ -268,6 +274,13 @@ def update_location(
     new_parent_id = payload.parent_id if "parent_id" in fields else location.parent_id
 
     if "parent_id" in fields:
+        if location.owner_item_id is not None and new_parent_id != location.parent_id:
+            raise ApiError(
+                409,
+                "owned_location_move_requires_item",
+                "This storage place belongs to an owned item. Move the owning item "
+                "instead so its contents and container identity stay together.",
+            )
         _validate_parent(
             db,
             auth.household.id,
@@ -290,6 +303,10 @@ def update_location(
 
     if payload.name is not None:
         location.name = payload.name
+        if location.owner_item_id is not None:
+            owner = db.get(Item, location.owner_item_id)
+            if owner is not None:
+                owner.name = payload.name
     if "description" in fields:
         location.description = payload.description
     if payload.kind is not None:

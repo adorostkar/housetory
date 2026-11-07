@@ -27,6 +27,7 @@ import { ErrorState } from "@/components/error-state";
 import { ItemDocuments } from "@/components/item-documents";
 import { ItemLoanStatus } from "@/components/item-loan-status";
 import { ItemManuals } from "@/components/item-manuals";
+import { ItemStorageSection } from "@/components/item-storage-section";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { ItemImageControls } from "@/components/item-image-controls";
@@ -186,16 +187,21 @@ export function ItemDetailPage() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
-                      disabled={archive.isPending || onLoan > 0}
+                      disabled={archive.isPending || onLoan > 0 || Boolean(item.storage?.active)}
                       onSelect={() => archive.mutate(item)}
                     >
                       {item.is_archived ? <ArchiveRestore /> : <Archive />}
                       {item.is_archived ? "Restore item" : "Archive item"}
                     </DropdownMenuItem>
+                    {item.storage?.active && (
+                      <p className="px-2 py-1 text-[0.63rem] leading-relaxed text-muted-foreground">
+                        Remove storage capability before archiving or deleting this item.
+                      </p>
+                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       destructive
-                      disabled={onLoan > 0}
+                      disabled={onLoan > 0 || Boolean(item.storage?.active)}
                       onSelect={() => setDeleteOpen(true)}
                     >
                       <Trash2 />
@@ -240,6 +246,8 @@ export function ItemDetailPage() {
               </p>
             )}
           </section>
+
+          <ItemStorageSection item={item} />
 
           <ItemManuals item={item} />
         </div>
@@ -537,8 +545,9 @@ export function ItemDetailPage() {
               </>
             ) : (
               <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
-                Everything is at home. Lending records a borrower without moving this item out
-                of its room or container.
+                {item.storage?.active
+                  ? "This owned item is at home. Its contents keep separate loan records; open or view an item to see its own current lending truth."
+                  : "Everything is at home. Lending records a borrower without moving this item out of its room or container."}
               </p>
             )}
           </section>
@@ -861,7 +870,7 @@ export function ItemDetailPage() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={`Delete ${item.name}?`}
-        description="The item and its photographs will be permanently removed. Documents used only by this item are removed too."
+        description="The item and its photographs will be permanently removed. Documents used only by this item are removed too. A storage-bearing item must have its contents moved out and storage capability removed first."
         confirmLabel="Delete item"
         onConfirm={async () => {
           await remove.mutateAsync(item.id);

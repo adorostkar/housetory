@@ -34,6 +34,13 @@ Tailscale is optional.
 - Explicit conversion of existing storage places into containers; fixed shelves,
   cabinets and drawers can also receive optional identifiers such as
   `SHELF-001`.
+- Owned items can provide storage: a toolbox, TV stand or other physical object
+  keeps its purchase, warranty, value, photos, documents, tags and history while
+  its item page contains the other items stored inside. Existing containers can
+  deliberately create or link one owned item, preserving the container/QR identity.
+  Items that provide storage stay at quantity 1; separate physical units are
+  separate items rather than invented instances. See
+  [`docs/ITEM_STORAGE.md`](docs/ITEM_STORAGE.md).
 - Live container contents counts and category grouping derived from current
   items; no saved summary snapshot, regeneration step, AI headline or stale claim.
 - A4 adhesive label printing with verified Avery L7160/L7163/L7165/L7651
@@ -200,7 +207,10 @@ Tailscale is optional.
 - **Lending with partial returns and safe undo**: lend quantity-bearing items to a
   borrower display name without moving them out of their room/container. Owned,
   at-home and on-loan quantities stay distinct; several open loans and partial
-  returns are supported. New loan can be started from the Loans page with an
+  returns are supported. An owned storage item explicitly offers parent-only or
+  contents-included lending; included contents become separate child loans with
+  the same borrower and dates, while parent-only lending never implies children
+  left home. New loan can be started from the Loans page with an
   inventory search and current available stock; every outstanding row has direct
   Record return, separate View details and item navigation. The item title area
   prominently states the borrower and quantity truth, labels the stored
@@ -307,7 +317,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 423 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 432 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -374,14 +384,18 @@ stack, not just unit mocks:
   endpoints/jobs without provider calls, existing AI-media display/removal,
   live container contents/category summaries after move and quantity changes,
   label identity/name/QR output without contents or AI headlines, reference
-  batch cancellation and preserved photos/vision/transcription.
+  batch cancellation and preserved photos/vision/transcription, owned-item
+  storage enable/move/undo/removal guards, existing-container ownership
+  create/link/unlink, one-time value/purchase evidence across host and contents,
+  and explicit parent-only versus contents-included loans with independent returns.
 - 213 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 79 checked-in Playwright workflows (78 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 81 checked-in Playwright workflows (80 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
   lending/partial return/outstanding list/timeline undo, item/container move
-  history, recoverable deleted-container restore and blocker states, loaded-only bulk selection with move/tag/category dialogs and
+  history, owned-item contents storage and explicit contents-included loan
+  choices, existing-container ownership details, recoverable deleted-container restore and blocker states, loaded-only bulk selection with move/tag/category dialogs and
   compact-list persistence, desktop/mobile multi-page scan editing, reorder,
   save, page-original access and cancel, OCR-to-line-item review with exact
   household matching, optional AI-refined fields/lines, reviewed apply and persisted
@@ -1161,7 +1175,8 @@ docker compose down                   # stop, keep data
   recognition and read-only document relationship suggestions.
 - Containers expose create/bulk/convert, live detail with live contents counts,
   identifier lookup, cross-room move, QR SVG, label templates, label PDF
-  generation and calibration PDFs. Saved-summary regeneration, AI headlines and
+  generation and calibration PDFs. Owned containers move with their owning item
+  rather than independently. Saved-summary regeneration, AI headlines and
   stale-summary management are retired.
 
 The endpoint inventory and data model are documented in

@@ -18,10 +18,12 @@ from ...schemas.containers import (
     ContainerList,
     ContainerMove,
     ContainerOut,
+    ContainerOwnershipCreate,
     ContainerQrConfig,
     ContainerUpdate,
 )
 from ...services import properties as property_service
+from ...services import storage_items
 from ...services.container_serializers import (
     serialize_container,
     serialize_container_detail,
@@ -89,6 +91,7 @@ def list_containers(
     container_type: str | None = None,
     empty: bool | None = None,
     include_fixed: bool = False,
+    include_owned: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     auth: AuthContext = Depends(require_auth),
@@ -100,6 +103,8 @@ def list_containers(
     ]
     if not include_fixed:
         conditions.append(StorageLocation.is_container.is_(True))
+    if not include_owned:
+        conditions.append(StorageLocation.owner_item_id.is_(None))
     if property_id is not None:
         property_service.get_property(db, auth.household.id, property_id)
         conditions.append(StorageLocation.room.has(Room.property_id == property_id))
@@ -289,6 +294,10 @@ def update_container(
         )
     if payload.name is not None:
         location.name = payload.name
+        if location.owner_item_id is not None:
+            owner = db.get(Item, location.owner_item_id)
+            if owner is not None:
+                owner.name = payload.name
     if "description" in fields:
         location.description = payload.description
     if payload.container_type is not None:
@@ -346,6 +355,62 @@ def delete_empty_container(
         db.rollback()
         raise
     return Response(status_code=204)
+
+
+@router.post("/{location_id}/ownership", response_model=ContainerDetail)
+def create_container_ownership(
+    location_id: uuid.UUID,
+    payload: ContainerOwnershipCreate,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ContainerDetail:
+    try:
+        if payload.item_id is not None:
+            storage_items.link_existing_item_to_location(
+                db,
+                auth.household.id,
+                location_id,
+                payload.item_id,
+                actor_user_id=auth.user.id,
+                actor_name=auth.user.name,
+            )
+        else:
+            storage_items.create_item_for_location(
+                db,
+                auth.household.id,
+                location_id,
+                name=payload.name,
+                actor_user_id=auth.user.id,
+                actor_name=auth.user.name,
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    location = _get(db, auth.household.id, location_id)
+    return serialize_container_detail(db, auth.household.id, location)
+
+
+@router.delete("/{location_id}/ownership", response_model=ContainerDetail)
+def delete_container_ownership(
+    location_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ContainerDetail:
+    try:
+        storage_items.unlink_location_owner(
+            db,
+            auth.household.id,
+            location_id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    location = _get(db, auth.household.id, location_id)
+    return serialize_container_detail(db, auth.household.id, location)
 
 
 @router.post("/{location_id}/identifier", response_model=ContainerOut)

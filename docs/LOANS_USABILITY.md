@@ -24,6 +24,16 @@ The Loans page now has a **New loan** action (owner/member only):
 
 No borrower account or person record is created.
 
+## Storage-bearing items
+
+When the selected item provides storage, the Lend dialog adds one explicit
+checkbox: **Include the contents in this loan**. Off is the default and lends only
+the parent item. On shows the available child items and total units; archived
+items, fully loaned children and borrowed-from-others records are listed as
+excluded. Saving creates separate child loans with the same borrower and dates.
+Each child keeps independent returns and history. Returning the parent never
+marks child loans returned.
+
 ## Outstanding loan rows
 
 Each row now provides:

@@ -65,7 +65,7 @@ function geometryFromPreset(preset: LabelPreset): LabelGeometry {
 export function LabelsPage() {
   const [searchParams] = useSearchParams();
   const templatesQuery = useLabelTemplates();
-  const containersQuery = useContainers({ include_fixed: true });
+  const containersQuery = useContainers({ include_fixed: true, include_owned: true });
   const containers = containersQuery.data?.items ?? [];
   const templates = templatesQuery.data?.items ?? [];
   const [selected, setSelected] = React.useState<Set<string>>(new Set());

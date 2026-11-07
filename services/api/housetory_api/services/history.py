@@ -37,6 +37,9 @@ UNDOABLE_ACTIONS = {
 ACTION_LABELS = {
     ActivityAction.ITEM_MOVED.value: "Item moved",
     ActivityAction.ITEM_VALUE_UPDATED.value: "Current value updated",
+    ActivityAction.ITEM_STORAGE_ENABLED.value: "Item storage enabled",
+    ActivityAction.ITEM_STORAGE_DISABLED.value: "Item storage removed",
+    ActivityAction.CONTAINER_OWNERSHIP_UNLINKED.value: "Container ownership unlinked",
     ActivityAction.ITEMS_BULK_MOVED.value: "Bulk move",
     ActivityAction.ITEMS_BULK_TAGGED.value: "Bulk tag update",
     ActivityAction.ITEMS_BULK_CATEGORISED.value: "Bulk category update",
@@ -431,6 +434,20 @@ def _restore_assisted_preview(
         reason = "Restore the item before restoring this move."
     elif item.room_id != to_room_id or item.storage_location_id != to_location_id:
         reason = "The item has moved since this action, so undo is unsafe."
+    elif (
+        db.scalar(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.owner_item_id == item.id,
+                StorageLocation.deleted_at.is_(None),
+            )
+        )
+        is not None
+    ):
+        reason = (
+            "This item provides storage. Move it from the item page so its contents "
+            "move with it; automatic restore is unavailable."
+        )
     elif _later_event_exists(
         db,
         event,
@@ -571,6 +588,20 @@ def _undo_blocked_reason(
         to_location = _detail_uuid(event.details, "to_location_id")
         if item.room_id != to_room or item.storage_location_id != to_location:
             return False, "The item has moved since this action, so undo is unsafe.", None
+        owned = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.household_id == event.household_id,
+                StorageLocation.owner_item_id == item.id,
+                StorageLocation.deleted_at.is_(None),
+            )
+        )
+        if owned is not None and (owned.room_id != to_room or owned.parent_id != to_location):
+            return (
+                False,
+                "The item's storage place no longer matches this move. Open the item "
+                "and move it again before undoing.",
+                None,
+            )
         if _later_event_exists(
             db,
             event,
@@ -615,6 +646,13 @@ def _undo_blocked_reason(
         )
         if container is None:
             return False, "The container no longer exists.", None
+        if container.owner_item_id is not None:
+            return (
+                False,
+                "This container belongs to an owned item. Move the item instead so its "
+                "contents and storage identity stay together.",
+                None,
+            )
         to_room = _detail_uuid(event.details, "to_room_id")
         to_parent = _detail_uuid(event.details, "to_parent_id")
         if container.room_id != to_room or container.parent_id != to_parent:
@@ -673,6 +711,20 @@ def _undo_blocked_reason(
             return False, "The item no longer exists.", None
         if db.scalar(select(func.count(LoanReturn.id)).where(LoanReturn.loan_id == loan.id)):
             return False, "The loan has return history, so undo is unsafe.", None
+        if loan.parent_loan_id is not None:
+            return (
+                False,
+                "This loan is part of a contents-included loan. Manage the parent loan "
+                "and its child loans explicitly instead of undoing its creation.",
+                None,
+            )
+        if db.scalar(select(Loan.id).where(Loan.parent_loan_id == loan.id)) is not None:
+            return (
+                False,
+                "This loan includes child content loans. Record returns or cancel them "
+                "separately; the parent creation cannot be undone as one action.",
+                None,
+            )
         if _later_event_exists(
             db,
             event,
@@ -930,6 +982,31 @@ def undo_event(
         from_room = _detail_uuid(details, "from_room_id")
         from_location = _detail_uuid(details, "from_location_id")
         _validate_destination(db, household_id, from_room, from_location)
+        owned = db.scalar(
+            select(StorageLocation).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.owner_item_id == item.id,
+                StorageLocation.deleted_at.is_(None),
+            )
+        )
+        if owned is not None:
+            from . import storage_items
+
+            if from_room is None:
+                raise ApiError(
+                    409,
+                    "undo_not_safe",
+                    "The original room is missing; the item's storage cannot follow.",
+                )
+            storage_items.move_owned_storage(
+                db,
+                household_id,
+                item,
+                destination_room_id=from_room,
+                destination_location_id=from_location,
+                actor_user_id=actor_user_id,
+                actor_name=actor_name,
+            )
         item.room_id = from_room
         item.storage_location_id = from_location
         db.flush()

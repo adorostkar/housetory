@@ -512,6 +512,8 @@ export function LoanRow({
           <Badge variant={LOAN_STATUS_TONE[loan.status]}>
             {LOAN_STATUS_LABELS[loan.status]}
           </Badge>
+          {loan.includes_contents && <Badge variant="brass">With contents</Badge>}
+          {loan.parent_loan_id && <Badge variant="outline">Content loan</Badge>}
           {loan.overdue && <Badge variant="destructive">Past due</Badge>}
         </div>
         <p className="mt-1 text-[0.76rem] text-foreground/80">

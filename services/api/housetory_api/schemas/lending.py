@@ -19,6 +19,7 @@ class LoanCreate(BaseModel):
     lent_on: date
     due_on: date | None = None
     notes: Description | None = None
+    include_contents: bool = False
     request_id: uuid.UUID
 
     @model_validator(mode="after")
@@ -52,6 +53,8 @@ class LoanCancelRequest(BaseModel):
 class LoanOut(BaseModel):
     id: uuid.UUID
     item_id: uuid.UUID | None
+    parent_loan_id: uuid.UUID | None = None
+    includes_contents: bool = False
     item_name: str
     item_name_snapshot: str
     home_room_id: uuid.UUID | None
@@ -161,9 +164,39 @@ class ActivityHistoryOut(BaseModel):
     offset: int
 
 
+class LoanContentsItemOut(BaseModel):
+    item_id: uuid.UUID
+    item_name: str
+    owned_quantity: int
+    on_loan_quantity: int = 0
+    available_quantity: int
+
+
+class LoanContentsExcludedOut(BaseModel):
+    item_name: str
+    reason: str
+    quantity: int = 0
+    owner_name: str | None = None
+
+
+class LoanOptionsOut(BaseModel):
+    item_id: uuid.UUID
+    item_name: str
+    owned_quantity: int
+    on_loan_quantity: int = 0
+    available_quantity: int
+    has_contents: bool = False
+    storage_location_id: uuid.UUID | None = None
+    storage_identifier: str | None = None
+    contents_available_quantity: int = 0
+    contents_items: list[LoanContentsItemOut] = Field(default_factory=list)
+    excluded_items: list[LoanContentsExcludedOut] = Field(default_factory=list)
+
+
 class LoanDetailOut(LoanOut):
     returns: list[LoanReturnOut]
     history: list[ActivityEventOut]
+    contents_loans: list[LoanOut] = Field(default_factory=list)
 
 
 class LoanListOut(BaseModel):

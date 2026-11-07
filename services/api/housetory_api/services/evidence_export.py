@@ -400,6 +400,15 @@ def _selected_item_rows(
             selectors.append(Item.room_id.in_(room_ids))
         if container_ids:
             selectors.append(Item.storage_location_id.in_(container_ids))
+            selectors.append(
+                Item.id.in_(
+                    select(StorageLocation.owner_item_id).where(
+                        StorageLocation.household_id == household_id,
+                        StorageLocation.id.in_(container_ids),
+                        StorageLocation.owner_item_id.is_not(None),
+                    )
+                )
+            )
         if not selectors:
             return [], scope_label
         conditions.append(or_(*selectors))

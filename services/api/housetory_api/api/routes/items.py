@@ -23,12 +23,13 @@ from ...schemas.items import (
     ItemCreate,
     ItemDetailResponse,
     ItemList,
+    ItemStorageEnableRequest,
     ItemUpdate,
     PhotoList,
     PhotoOrderRequest,
 )
 from ...services import items as item_service
-from ...services import lending, storage
+from ...services import lending, storage, storage_items
 from ...services import properties as property_service
 from ...services.container_serializers import location_path_map
 from ...services.containers import location_breadcrumb
@@ -79,6 +80,24 @@ def _location(db: Session, household_id: uuid.UUID, location_id: uuid.UUID) -> S
 
 def _category(db: Session, household_id: uuid.UUID, category_id: uuid.UUID) -> Category:
     return item_service.category(db, household_id, category_id)
+
+
+def _detail_response(db: Session, household_id: uuid.UUID, item: Item) -> ItemDetailResponse:
+    path = (
+        location_breadcrumb(db, household_id, item.storage_location_id)
+        if item.storage_location_id
+        else []
+    )
+    loan_quantities = lending.loan_quantities_for_items(db, household_id, [item.id])
+    return ItemDetailResponse(
+        item=item_detail(
+            item,
+            import_source=_import_source(db, item.id),
+            location_path=path,
+            storage=storage_items.storage_out(db, household_id, item.id),
+            on_loan_quantity=loan_quantities.get(item.id, 0),
+        )
+    )
 
 
 @router.get("/items", response_model=ItemList)
@@ -234,7 +253,13 @@ def create_item(
         if item.storage_location_id
         else []
     )
-    return ItemDetailResponse(item=item_detail(item, location_path=path))
+    return ItemDetailResponse(
+        item=item_detail(
+            item,
+            location_path=path,
+            storage=storage_items.storage_out(db, auth.household.id, item.id),
+        )
+    )
 
 
 @router.get("/items/{item_id}", response_model=ItemDetailResponse)
@@ -255,6 +280,7 @@ def get_item(
             item,
             import_source=_import_source(db, item.id),
             location_path=path,
+            storage=storage_items.storage_out(db, auth.household.id, item.id),
             on_loan_quantity=loan_quantities.get(item.id, 0),
         )
     )
@@ -291,6 +317,7 @@ def update_item(
         item=item_detail(
             item,
             location_path=path,
+            storage=storage_items.storage_out(db, auth.household.id, item.id),
             on_loan_quantity=loan_quantities.get(item.id, 0),
         )
     )
@@ -304,6 +331,7 @@ def delete_item(
 ) -> Response:
     item = lending.lock_item(db, auth.household.id, item_id)
     lending.ensure_item_deletable(db, auth.household.id, item)
+    storage_items.assert_item_delete_allowed(db, auth.household.id, item_id)
     item = _get_item(db, auth.household.id, item_id)
     keys = [photo.storage_key for photo in item.photos]
     keys += [photo.thumbnail_key for photo in item.photos if photo.thumbnail_key]
@@ -345,6 +373,56 @@ def delete_item(
     for key in keys:
         storage.delete_key(key)
     return Response(status_code=204)
+
+
+@router.post("/items/{item_id}/storage", response_model=ItemDetailResponse)
+def enable_item_storage(
+    item_id: uuid.UUID,
+    payload: ItemStorageEnableRequest,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ItemDetailResponse:
+    item = _get_item(db, auth.household.id, item_id)
+    try:
+        storage_items.enable_item_storage(
+            db,
+            auth.household.id,
+            item.id,
+            existing_location_id=payload.existing_location_id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.expire_all()
+    item = _get_item(db, auth.household.id, item.id)
+    return _detail_response(db, auth.household.id, item)
+
+
+@router.delete("/items/{item_id}/storage", response_model=ItemDetailResponse)
+def remove_item_storage(
+    item_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ItemDetailResponse:
+    item = _get_item(db, auth.household.id, item_id)
+    try:
+        storage_items.remove_item_storage(
+            db,
+            auth.household.id,
+            item.id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.expire_all()
+    item = _get_item(db, auth.household.id, item.id)
+    return _detail_response(db, auth.household.id, item)
 
 
 @router.get("/items/{item_id}/photos", response_model=PhotoList)

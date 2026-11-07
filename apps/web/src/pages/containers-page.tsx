@@ -224,7 +224,7 @@ export function ContainersPage() {
       <PageHeader
         eyebrow="Physical storage"
         title="Containers"
-        description="Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels."
+        description="Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels. Containers linked to owned items are managed from those item pages."
         actions={
           <>
             {canWrite && (

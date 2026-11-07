@@ -65,6 +65,7 @@ import type {
   LoanDetail,
   LoanFilterStatus,
   LoanList,
+  LoanOptions,
   WarrantyList,
   WarrantyStatus,
 } from "@/lib/types";
@@ -242,6 +243,18 @@ export function useItemLoans(itemId: string | undefined) {
         `/items/${itemId}/loans${buildQuery({ on_date: localDateISO() })}`,
       ),
     enabled: Boolean(itemId),
+  });
+}
+
+
+export function useItemLoanOptions(itemId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["items", itemId ?? "", "loan-options"],
+    queryFn: () =>
+      api.get<LoanOptions>(
+        `/items/${itemId}/loan-options${buildQuery({ on_date: localDateISO() })}`,
+      ),
+    enabled: Boolean(itemId) && enabled,
   });
 }
 
@@ -727,6 +740,7 @@ export interface ContainerFilters {
   container_type?: string;
   empty?: boolean;
   include_fixed?: boolean;
+  include_owned?: boolean;
 }
 
 export function useContainers(filters: ContainerFilters = {}, limit = 200) {
