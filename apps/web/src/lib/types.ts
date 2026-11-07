@@ -158,6 +158,7 @@ export interface Room {
   location_count: number;
   total_item_count: number;
   total_location_count: number;
+  recoverable_deleted_location_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -208,6 +209,7 @@ export interface StorageLocation {
   sort_order: number;
   item_count: number;
   total_item_count: number;
+  recoverable_deleted_child_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -1555,6 +1557,7 @@ export interface Container {
   total_quantity: number;
   child_count: number;
   container_count: number;
+  recoverable_deleted_child_count?: number;
   summary_short: string | null;
   summary_headline: string | null;
   qr_payload: string;

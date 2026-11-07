@@ -8,12 +8,14 @@ from PIL import Image
 from sqlalchemy import func, select
 
 from housetory_api.api.errors import ApiError
+from housetory_api.api.routes import rooms as rooms_route
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import (
     ActivityEvent,
     Household,
     HouseholdMember,
+    LocationPhoto,
     StorageLocation,
     User,
 )
@@ -357,6 +359,191 @@ def test_legacy_hard_deleted_place_is_honestly_unrecoverable(owner_client):
     assert blocked.json()["detail"]["code"] == "restore_not_safe"
     state = client.get(f"/api/v1/items/{item['id']}").json()["item"]
     assert state["room"]["id"] == garage["id"]
+
+
+def test_empty_room_with_only_tombstones_can_be_deleted(owner_client):
+    client = owner_client
+    office = create_room(client, "Tombstone room")
+    garage = create_room(client, "Garage")
+    box = create_container(client, office["id"], name="Tombstone box")
+    item = create_item(client, "Tombstone item", office["id"], box["id"])
+    photo = client.post(
+        f"/api/v1/locations/{box['id']}/photos",
+        files={"files": ("box.jpg", make_jpeg(), "image/jpeg")},
+    )
+    assert photo.status_code == 201, photo.text
+    move_item(client, item["id"], garage["id"])
+    delete_container(client, box["id"])
+    event = move_event_for(client, item["id"], box["id"])
+
+    deleted = client.delete(f"/api/v1/rooms/{office['id']}")
+    assert deleted.status_code == 204, deleted.text
+    with SessionLocal() as db:
+        tombstone = db.get(StorageLocation, uuid.UUID(box["id"]))
+        assert tombstone is not None
+        assert tombstone.deleted_at is not None
+        assert tombstone.room_id is None
+        assert tombstone.detached_at is not None
+        assert tombstone.deletion_snapshot["room_id"] == office["id"]
+        assert tombstone.deletion_snapshot["room_name"] == "Tombstone room"
+        assert (
+            db.scalar(
+                select(func.count(LocationPhoto.id)).where(
+                    LocationPhoto.location_id == tombstone.id
+                )
+            )
+            == 1
+        )
+    assert client.get(f"/api/v1/rooms/{office['id']}").status_code == 404
+    assert client.get(f"/api/v1/containers/{box['id']}").status_code == 410
+    assert client.get(f"/api/v1/containers/lookup/{box['identifier']}").status_code == 410
+    containers = client.get(
+        "/api/v1/containers",
+        params={"q": box["identifier"], "include_fixed": True},
+    ).json()["items"]
+    assert box["id"] not in {entry["id"] for entry in containers}
+
+    preview = restore_preview(client, event["id"])
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["available"] is False
+    assert "room" in (body["reason"] or "").lower()
+    assert body["container"]["room_name"] == "Tombstone room"
+    assert body["container"]["property_name"] is not None
+    blocked = restore_undo(client, event["id"])
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "restore_not_safe"
+
+
+def test_parent_container_delete_keeps_child_tombstone_and_blocks_restore(owner_client):
+    client = owner_client
+    office = create_room(client, "Parent room")
+    garage = create_room(client, "Garage")
+    parent_box = create_container(client, office["id"], name="Parent box")
+    child_box = create_container(client, office["id"], name="Child box", parent_id=parent_box["id"])
+    item = create_item(client, "Child item", office["id"], child_box["id"])
+    move_item(client, item["id"], garage["id"])
+    delete_container(client, child_box["id"])
+    child_event = move_event_for(client, item["id"], child_box["id"])
+
+    parent_delete = client.delete(f"/api/v1/containers/{parent_box['id']}")
+    assert parent_delete.status_code == 204, parent_delete.text
+    with SessionLocal() as db:
+        parent = db.get(StorageLocation, uuid.UUID(parent_box["id"]))
+        child = db.get(StorageLocation, uuid.UUID(child_box["id"]))
+        assert parent is not None and parent.deleted_at is not None
+        assert child is not None and child.deleted_at is not None
+        assert child.parent_id == parent.id
+    preview = restore_preview(client, child_event["id"]).json()
+    assert preview["available"] is False
+    assert "parent" in (preview["reason"] or "").lower()
+    blocked = restore_undo(client, child_event["id"])
+    assert blocked.status_code == 409
+
+    # Deleting the now otherwise-empty room detaches both tombstones but keeps
+    # their rows, audit and photos.
+    room_delete = client.delete(f"/api/v1/rooms/{office['id']}")
+    assert room_delete.status_code == 204, room_delete.text
+    with SessionLocal() as db:
+        parent = db.get(StorageLocation, uuid.UUID(parent_box["id"]))
+        child = db.get(StorageLocation, uuid.UUID(child_box["id"]))
+        assert parent is not None and parent.room_id is None
+        assert child is not None and child.room_id is None
+        assert parent.deleted_at is not None and child.deleted_at is not None
+
+
+def test_active_children_and_contents_still_block_parent_deletion(owner_client):
+    client = owner_client
+    office = create_room(client, "Active room")
+    parent_box = create_container(client, office["id"], name="Active parent")
+    child_box = create_container(
+        client, office["id"], name="Active child", parent_id=parent_box["id"]
+    )
+    assert client.delete(f"/api/v1/containers/{parent_box['id']}").status_code == 409
+    assert client.delete(f"/api/v1/rooms/{office['id']}").status_code == 409
+
+    # Move the active child out, then an active item still protects the parent.
+    move_response = client.patch(
+        f"/api/v1/storage-locations/{child_box['id']}",
+        json={"parent_id": None},
+    )
+    assert move_response.status_code == 200, move_response.text
+    item = create_item(client, "Active item", office["id"], parent_box["id"])
+    assert client.delete(f"/api/v1/containers/{parent_box['id']}").status_code == 409
+    assert item["location"]["id"] == parent_box["id"]
+    assert client.delete(f"/api/v1/rooms/{office['id']}").status_code == 409
+
+
+def test_place_transfer_preview_warns_and_room_delete_remains_usable(owner_client):
+    client = owner_client
+    office = create_room(client, "Transfer room")
+    garage = create_room(client, "Garage")
+    tombstone_box = create_container(client, office["id"], name="Transfer tombstone")
+    move_item(
+        client,
+        create_item(client, "Moved out", office["id"], tombstone_box["id"])["id"],
+        garage["id"],
+    )
+    delete_container(client, tombstone_box["id"])
+    active_item = create_item(client, "Active item", office["id"])
+
+    preview = client.get(
+        f"/api/v1/place-management/rooms/{office['id']}/preview",
+        params={"destination_room_id": garage["id"]},
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["can_proceed"] is True
+    assert any("recoverable-deleted" in warning for warning in body["warnings"])
+    assert any("restoration unavailable" in warning for warning in body["warnings"])
+
+    transferred = client.post(
+        f"/api/v1/place-management/rooms/{office['id']}/transfer",
+        json={
+            "destination_room_id": garage["id"],
+            "delete_source": True,
+            "expected_fingerprint": body["fingerprint"],
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert transferred.status_code == 200, transferred.text
+    assert transferred.json()["deleted"] is True
+    assert client.get(f"/api/v1/rooms/{office['id']}").status_code == 404
+    item_state = client.get(f"/api/v1/items/{active_item['id']}").json()["item"]
+    assert item_state["room"]["id"] == garage["id"]
+    with SessionLocal() as db:
+        tombstone = db.get(StorageLocation, uuid.UUID(tombstone_box["id"]))
+        assert tombstone is not None
+        assert tombstone.room_id is None
+        assert tombstone.deleted_at is not None
+        assert tombstone.detached_at is not None
+
+
+def test_room_delete_rolls_back_detachment_on_failure(owner_client, monkeypatch):
+    client = owner_client
+    office = create_room(client, "Rollback room")
+    garage = create_room(client, "Garage")
+    box = create_container(client, office["id"], name="Rollback tombstone")
+    item = create_item(client, "Rollback item", office["id"], box["id"])
+    move_item(client, item["id"], garage["id"])
+    delete_container(client, box["id"])
+
+    original = rooms_route.detach_tombstones_for_room
+
+    def fail_after_detach(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("fixture failure after detachment")
+
+    monkeypatch.setattr(rooms_route, "detach_tombstones_for_room", fail_after_detach)
+    with pytest.raises(RuntimeError):
+        client.delete(f"/api/v1/rooms/{office['id']}")
+    monkeypatch.setattr(rooms_route, "detach_tombstones_for_room", original)
+    assert client.get(f"/api/v1/rooms/{office['id']}").status_code == 200
+    with SessionLocal() as db:
+        tombstone = db.get(StorageLocation, uuid.UUID(box["id"]))
+        assert tombstone is not None
+        assert tombstone.room_id == uuid.UUID(office["id"])
+        assert tombstone.detached_at is None
 
 
 def test_restore_is_idempotent_and_concurrent(owner_client):

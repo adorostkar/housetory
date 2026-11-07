@@ -13,7 +13,7 @@ from ...schemas.locations import (
     StorageLocationUpdate,
 )
 from ...services.containers import delete_location_safely, household_hierarchy_lock
-from ...services.hierarchy import descendant_totals
+from ...services.hierarchy import descendant_ids, descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -110,7 +110,7 @@ def _ensure_unique_name(
         raise ApiError(409, "location_name_taken", "A location with this name already exists here.")
 
 
-def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
+def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict, dict]:
     direct = dict(
         db.execute(
             select(Item.storage_location_id, func.count(Item.id))
@@ -128,11 +128,31 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
             StorageLocation.active(),
         )
     ).all()
-    return direct, descendant_totals(rows, direct)
+    all_rows = db.execute(
+        select(StorageLocation.id, StorageLocation.parent_id).where(
+            StorageLocation.household_id == household_id
+        )
+    ).all()
+    deleted_ids = set(
+        db.scalars(
+            select(StorageLocation.id).where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.deleted_at.is_not(None),
+            )
+        ).all()
+    )
+    recoverable_deleted = {
+        location_id: len(set(descendant_ids(all_rows, location_id)) & deleted_ids)
+        for location_id, _parent_id in rows
+    }
+    return direct, descendant_totals(rows, direct), recoverable_deleted
 
 
 def _to_out(
-    location: StorageLocation, direct_counts: dict, total_counts: dict
+    location: StorageLocation,
+    direct_counts: dict,
+    total_counts: dict,
+    recoverable_deleted: dict | None = None,
 ) -> StorageLocationOut:
     return StorageLocationOut(
         id=location.id,
@@ -150,6 +170,7 @@ def _to_out(
         sort_order=location.sort_order,
         item_count=direct_counts.get(location.id, 0),
         total_item_count=total_counts.get(location.id, 0),
+        recoverable_deleted_child_count=(recoverable_deleted or {}).get(location.id, 0),
         created_at=location.created_at,
         updated_at=location.updated_at,
     )
@@ -184,8 +205,10 @@ def list_locations(
             func.lower(StorageLocation.name),
         )
     ).all()
-    direct, totals = _counts(db, auth.household.id)
-    return StorageLocationList(items=[_to_out(location, direct, totals) for location in locations])
+    direct, totals, recoverable_deleted = _counts(db, auth.household.id)
+    return StorageLocationList(
+        items=[_to_out(location, direct, totals, recoverable_deleted) for location in locations]
+    )
 
 
 @router.post("", response_model=StorageLocationOut, status_code=201)
@@ -220,7 +243,7 @@ def create_location(
     )
     db.add(location)
     db.commit()
-    return _to_out(location, {}, {})
+    return _to_out(location, {}, {}, {})
 
 
 @router.get("/{location_id}", response_model=StorageLocationOut)
@@ -230,8 +253,8 @@ def get_location(
     db: Session = Depends(get_db),
 ) -> StorageLocationOut:
     location = _get_location(db, auth.household.id, location_id)
-    direct, totals = _counts(db, auth.household.id)
-    return _to_out(location, direct, totals)
+    direct, totals, recoverable_deleted = _counts(db, auth.household.id)
+    return _to_out(location, direct, totals, recoverable_deleted)
 
 
 @router.patch("/{location_id}", response_model=StorageLocationOut)
@@ -279,8 +302,8 @@ def update_location(
         location.parent_id = new_parent_id
 
     db.commit()
-    direct, totals = _counts(db, auth.household.id)
-    return _to_out(location, direct, totals)
+    direct, totals, recoverable_deleted = _counts(db, auth.household.id)
+    return _to_out(location, direct, totals, recoverable_deleted)
 
 
 @router.delete("/{location_id}", status_code=204)

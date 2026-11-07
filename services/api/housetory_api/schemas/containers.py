@@ -109,6 +109,7 @@ class ContainerOut(ORMModel):
     total_quantity: int = 0
     child_count: int = 0
     container_count: int = 0
+    recoverable_deleted_child_count: int = 0
     summary_short: str | None = None
     summary_headline: str | None = None
     qr_payload: str

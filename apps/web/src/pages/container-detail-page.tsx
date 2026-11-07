@@ -891,7 +891,11 @@ export function ContainerDetailPage() {
         open={emptyDeleteOpen}
         onOpenChange={setEmptyDeleteOpen}
         title={`Delete ${identifier}?`}
-        description="This place is empty and can be removed. Attached place photos, if any, are deleted with it. This cannot be undone."
+        description={
+          (detail.recoverable_deleted_child_count ?? 0) > 0
+            ? `This place has ${detail.recoverable_deleted_child_count} recoverable-deleted nested place(s). Deleting it leaves them without a live parent, so their item-move restoration becomes unavailable. Its own identity and photos are retained. This cannot be undone.`
+            : "This place is empty and can be removed. Its identity and photos are retained for eligible item-move restoration. This cannot be undone."
+        }
         confirmLabel="Delete place"
         onConfirm={async () => {
           await deleteEmpty.mutateAsync();

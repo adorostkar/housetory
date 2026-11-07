@@ -806,7 +806,11 @@ export function RoomDetailPage() {
         open={deleteRoomOpen}
         onOpenChange={setDeleteRoomOpen}
         title={`Delete ${room.name}?`}
-        description="This room is empty and can be safely removed. This cannot be undone."
+        description={
+          (room.recoverable_deleted_location_count ?? 0) > 0
+            ? `This room has ${room.recoverable_deleted_location_count} recoverable-deleted place(s). Deleting the room keeps their audit and photos, but their item-move restoration becomes unavailable. This cannot be undone.`
+            : "This room is empty and can be safely removed. This cannot be undone."
+        }
         confirmLabel="Delete room"
         onConfirm={async () => {
           await deleteRoom.mutateAsync();
@@ -832,7 +836,11 @@ export function RoomDetailPage() {
           if (!open) setDeletingLocation(null);
         }}
         title={`Delete ${deletingLocation?.name ?? "place"}?`}
-        description="This storage place is empty and can be safely removed. Attached place photos, if any, are deleted with it. This cannot be undone."
+        description={
+          (deletingLocation?.recoverable_deleted_child_count ?? 0) > 0
+            ? `This storage place has ${deletingLocation?.recoverable_deleted_child_count} recoverable-deleted nested place(s). Deleting it leaves them without a live parent, so their item-move restoration becomes unavailable. Its own identity and photos are retained. This cannot be undone.`
+            : "This storage place is empty and can be removed. Its identity and photos are retained for eligible item-move restoration. This cannot be undone."
+        }
         confirmLabel="Delete place"
         onConfirm={async () => {
           if (!deletingLocation) return;

@@ -31,6 +31,7 @@ from ..schemas.place_management import (
 )
 from . import history, lending
 from .containers import (
+    detach_tombstones_for_room,
     household_hierarchy_lock,
     location_breadcrumb,
     room_ancestors,
@@ -568,8 +569,8 @@ def _preview_out(
         if recoverable_deleted:
             warnings.append(
                 f"{recoverable_deleted} recoverable-deleted place(s) are retained in "
-                "this room. Room deletion stays blocked until they are restored or "
-                "explicitly resolved."
+                "this room. Deleting the room keeps their audit and photos but makes "
+                "their item-move restoration unavailable."
             )
     if scope.kind == "location" and scope.source_location is not None:
         recoverable_children = int(
@@ -737,6 +738,7 @@ def _assert_room_empty(db: Session, household_id: uuid.UUID, source: Room) -> No
         .where(
             StorageLocation.household_id == household_id,
             StorageLocation.room_id == source.id,
+            StorageLocation.active(),
         )
         .limit(1)
     )
@@ -965,6 +967,13 @@ def transfer_place_contents(
             if source_room is None:
                 raise ApiError(404, "place_not_found", "Room not found.")
             _assert_room_empty(db, household_id, source_room)
+            detach_tombstones_for_room(
+                db,
+                household_id,
+                source_room.id,
+                actor_user_id=actor_user_id,
+                actor_name=actor_name,
+            )
             db.delete(source_room)
             db.flush()
 

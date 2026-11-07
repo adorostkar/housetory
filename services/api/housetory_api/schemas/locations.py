@@ -40,6 +40,7 @@ class StorageLocationOut(ORMModel):
     sort_order: int
     item_count: int = 0
     total_item_count: int = 0
+    recoverable_deleted_child_count: int = 0
     created_at: datetime
     updated_at: datetime
 

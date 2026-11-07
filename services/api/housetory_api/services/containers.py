@@ -763,6 +763,54 @@ def delete_location_safely(
     )
 
 
+def detach_tombstones_for_room(
+    db: Session,
+    household_id: uuid.UUID,
+    room_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+    actor_name: str | None = None,
+) -> int:
+    """Detach recoverable place tombstones before their original room is deleted.
+
+    The original room identity remains in each immutable deletion snapshot. The
+    tombstone rows, audit events and photos stay in the household; only their
+    live room reference is detached so the room can be deliberately removed and
+    later restoration honestly reports that the original room is gone.
+    """
+    now = datetime.now(UTC)
+    rows = list(
+        db.scalars(
+            select(StorageLocation)
+            .where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.room_id == room_id,
+                StorageLocation.deleted_at.is_not(None),
+            )
+            .with_for_update()
+        ).all()
+    )
+    reason = "Original room deleted; item-move restoration for this place is unavailable."
+    for location in rows:
+        snapshot = dict(location.deletion_snapshot or {})
+        snapshot.update(
+            {
+                "original_room_id": str(room_id),
+                "detached_at": now.isoformat(),
+                "detached_reason": reason,
+                "detached_by_user_id": str(actor_user_id) if actor_user_id else None,
+                "detached_by_name": actor_name,
+            }
+        )
+        location.room_id = None
+        location.detached_at = now
+        location.detached_reason = reason
+        location.deletion_snapshot = snapshot
+        location.updated_at = now
+    db.flush()
+    return len(rows)
+
+
 def tombstone_location(
     db: Session,
     household_id: uuid.UUID,

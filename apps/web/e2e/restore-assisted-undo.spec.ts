@@ -190,3 +190,69 @@ test("shows an honest blocker when the item moved again after container deletion
   expect(body.item.room.id).toBe(attic.id);
   expect(body.item.location).toBeNull();
 });
+
+test("room deletion warns about detached recoverable places and leaves an honest blocker", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  const id = suffix();
+  const office = await createRoom(request, `Detach office ${id}`);
+  const garage = await createRoom(request, `Detach garage ${id}`);
+  const box = await createContainer(request, office.id, `Detach box ${id}`);
+  const item = await createItem(
+    request,
+    `Detach router ${id}`,
+    office.id,
+    box.id,
+  );
+  await moveItem(request, item.item.id, garage.id, null);
+  await deleteContainer(request, box.id);
+
+  await page.goto(`/rooms/${office.id}`);
+  await page.getByRole("button", { name: "Room options" }).click();
+  await page.getByRole("menuitem", { name: "Delete room" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByText(/recoverable-deleted place/),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(/item-move restoration becomes unavailable/),
+  ).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({
+    path: "../../docs/walkthrough/restore-assisted-undo/03-room-delete-warning.png",
+    fullPage: false,
+  });
+  await dialog.getByRole("button", { name: "Delete room" }).click();
+  await expect(page.getByText("Room deleted")).toBeVisible();
+  await page.waitForTimeout(350);
+
+  const headers = await currentHeaders(request);
+  const rooms = await request.get("/api/v1/rooms", { headers });
+  const roomBody = (await rooms.json()) as { items: Array<{ id: string }> };
+  expect(roomBody.items.some((entry) => entry.id === office.id)).toBe(false);
+  const container = await request.get(`/api/v1/containers/${box.id}`, {
+    headers,
+  });
+  expect(container.status()).toBe(410);
+
+  await page.goto(`/items/${item.item.id}`);
+  await expect(
+    page.getByText(/Restore unavailable: The original room no longer exists/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Restore container and undo move/ }),
+  ).toHaveCount(0);
+  await page
+    .getByText(/Restore unavailable: The original room no longer exists/)
+    .scrollIntoViewIfNeeded();
+  await page.waitForTimeout(350);
+  await page.screenshot({
+    path: "../../docs/walkthrough/restore-assisted-undo/04-detached-blocker.png",
+    fullPage: false,
+  });
+});

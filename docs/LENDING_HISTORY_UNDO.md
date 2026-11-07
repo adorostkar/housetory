@@ -135,6 +135,10 @@ container and undo move…** instead of ordinary Undo.
 - Blocked previews are explicit: later item move, archived/missing item, missing
   room or parent, deleted parent, property mismatch, identifier/name conflict or
   legacy hard deletion without a tombstone.
+- Deliberately deleting an otherwise empty room or parent container with only
+  historical tombstones is allowed after a truthful warning. The tombstones keep
+  their identity/audit/photos and original room/parent snapshots, but their
+  restore is then blocked because the original parent is gone.
 - Repeated requests are idempotent. Concurrent confirms are serialized; exactly
   one succeeds and the other reports the event as already undone.
 - Photos on the tombstoned storage place are retained. Photos on a deleted room
@@ -217,3 +221,5 @@ Mobile loans list:
 
 - [Deleted-container restore preview](walkthrough/restore-assisted-undo/01-preview.png)
 - [Restored container and compensating item move](walkthrough/restore-assisted-undo/02-restored.png)
+- [Room deletion warning for recoverable places](walkthrough/restore-assisted-undo/03-room-delete-warning.png)
+- [Honest missing-room blocker after detachment](walkthrough/restore-assisted-undo/04-detached-blocker.png)

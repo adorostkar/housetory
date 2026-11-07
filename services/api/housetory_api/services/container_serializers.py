@@ -87,7 +87,7 @@ def location_path_map(db: Session, household_id: uuid.UUID) -> dict[uuid.UUID, l
 
 def _counts(
     db: Session, household_id: uuid.UUID, location: StorageLocation
-) -> tuple[int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int]:
     subtree = descendant_ids(location_rows(db, household_id), location.id)
     direct_items = list(
         db.scalars(
@@ -128,12 +128,25 @@ def _counts(
         )
         or 0
     )
+    all_subtree = descendant_ids(location_rows(db, household_id, include_deleted=True), location.id)
+    recoverable_deleted_child_count = len(
+        set(
+            db.scalars(
+                select(StorageLocation.id).where(
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.id.in_(all_subtree),
+                    StorageLocation.deleted_at.is_not(None),
+                )
+            ).all()
+        )
+    )
     return (
         len(direct_items),
         len(total_items),
         sum(item.quantity for item in total_items),
         child_count,
         container_count,
+        recoverable_deleted_child_count,
     )
 
 
@@ -143,9 +156,14 @@ def serialize_container(
     location: StorageLocation,
 ) -> ContainerOut:
     payload, qr_endpoint, warning = qr_urls(location)
-    item_count, total_item_count, total_quantity, child_count, container_count = _counts(
-        db, household_id, location
-    )
+    (
+        item_count,
+        total_item_count,
+        total_quantity,
+        child_count,
+        container_count,
+        recoverable_deleted_child_count,
+    ) = _counts(db, household_id, location)
     return ContainerOut(
         id=location.id,
         property=PropertyBrief(
@@ -170,6 +188,7 @@ def serialize_container(
         total_quantity=total_quantity,
         child_count=child_count,
         container_count=container_count,
+        recoverable_deleted_child_count=recoverable_deleted_child_count,
         summary_short=location.summary_short,
         summary_headline=location.summary_headline,
         qr_payload=payload,

@@ -129,8 +129,8 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     household_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
     )
-    room_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="SET NULL")
     )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("storage_locations.id", ondelete="CASCADE")
@@ -165,6 +165,8 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     restored_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
+    detached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    detached_reason: Mapped[str | None] = mapped_column(String(200))
 
     @classmethod
     def active(cls):
@@ -172,7 +174,7 @@ class StorageLocation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return cls.deleted_at.is_(None)
 
     household: Mapped["Household"] = relationship(back_populates="storage_locations")
-    room: Mapped[Room] = relationship(back_populates="storage_locations")
+    room: Mapped[Room | None] = relationship(back_populates="storage_locations")
     parent: Mapped["StorageLocation | None"] = relationship(
         remote_side="StorageLocation.id", back_populates="children"
     )

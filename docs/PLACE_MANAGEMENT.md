@@ -60,9 +60,11 @@ Rules:
   parent, identifier, photos and deletion snapshot are retained as a tombstone.
   Earlier individual item moves can offer **Restore container and undo move…** for
   one eligible item at a time. This is not a whole-container undo.
-- Room deletion remains irreversible and stays blocked while active or
-  recoverable-deleted places/contents remain. The UI says so instead of implying
-  that a blocked room was deleted.
+- Room deletion remains irreversible and stays blocked while genuinely active
+  places, items, borrowed placements or child rooms remain. If only historical
+  tombstones remain, deletion is allowed after an explicit preview warning that
+  detaches those tombstones from the room; their audit, snapshots and photos are
+  retained, but their item-move restoration becomes unavailable.
 - Storage-place photos are retained with a tombstone and return if the place is
   restored. Room photos are deleted with the room. Photos on moved nested places
   remain with those places.
@@ -102,6 +104,28 @@ Previously hard-deleted legacy places have no tombstone. Their history shows tha
 they predate recoverable deletion and cannot be recreated safely; Housetory does
 not invent a room, parent or identity from incomplete snapshots. Room hierarchy
 restoration and whole-bulk reversal remain deferred.
+
+### Deleting parents with historical tombstones
+
+Room and parent-container deletion is not permanently vetoed by hidden history:
+
+- An otherwise empty room may be deliberately deleted when only tombstones refer
+  to it. A preview/confirmation warns that the tombstones will be detached from
+  the room and their item-move restoration will become unavailable.
+- Detachment keeps the tombstone row, stable identity, deletion snapshot, audit
+  events and location photos. It clears only the live room reference and records
+  `detached_at` / `detached_reason`; the immutable snapshot retains the original
+  room, property and parent path.
+- A parent container may be deleted when it has only tombstoned nested places.
+  The child tombstone remains; a later restore is blocked honestly because the
+  original parent is deleted.
+- Active child places, active items, active borrowed placements and child rooms
+  still block or use the existing move-contents workflow. No active content is
+  detached or discarded.
+- Old QR/detail links still return the honest recoverable-deleted state after
+  detachment, and the tombstone remains excluded from active lists/counts/search.
+- No automatic purge is introduced. Room photos are still deleted with the room;
+  storage-place photos remain with their tombstones.
 
 ## Containers list and detail
 
@@ -146,3 +170,5 @@ history remain household-scoped; cross-household IDs are not reachable.
 - [Room deletion with child-room reparenting preview](walkthrough/place-management/06-room-delete-preview.png)
 - [Restore-assisted undo preview](walkthrough/restore-assisted-undo/01-preview.png)
 - [Restored container and returned item](walkthrough/restore-assisted-undo/02-restored.png)
+- [Room deletion warning for recoverable places](walkthrough/restore-assisted-undo/03-room-delete-warning.png)
+- [Honest missing-room blocker after detachment](walkthrough/restore-assisted-undo/04-detached-blocker.png)

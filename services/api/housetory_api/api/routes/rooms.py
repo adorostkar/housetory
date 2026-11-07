@@ -14,6 +14,7 @@ from ...schemas.properties import (
 )
 from ...schemas.rooms import RoomCreate, RoomList, RoomOut, RoomUpdate
 from ...services import properties as property_service
+from ...services.containers import detach_tombstones_for_room
 from ...services.hierarchy import descendant_totals
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -82,7 +83,7 @@ def _validate_parent(
     return _get_room(db, household_id, parent_id)
 
 
-def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
+def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict, dict]:
     item_counts = dict(
         db.execute(
             select(Item.room_id, func.count(Item.id))
@@ -104,16 +105,27 @@ def _counts(db: Session, household_id: uuid.UUID) -> tuple[dict, dict]:
             .group_by(StorageLocation.room_id)
         ).all()
     )
-    return item_counts, location_counts
+    recoverable_deleted_counts = dict(
+        db.execute(
+            select(StorageLocation.room_id, func.count(StorageLocation.id))
+            .where(
+                StorageLocation.household_id == household_id,
+                StorageLocation.deleted_at.is_not(None),
+            )
+            .group_by(StorageLocation.room_id)
+        ).all()
+    )
+    return item_counts, location_counts, recoverable_deleted_counts
 
 
 def _aggregate_counts(
-    rooms: list[Room], item_counts: dict, location_counts: dict
-) -> tuple[dict, dict]:
+    rooms: list[Room], item_counts: dict, location_counts: dict, deleted_counts: dict
+) -> tuple[dict, dict, dict]:
     rows = [(room.id, room.parent_id) for room in rooms]
     return (
         descendant_totals(rows, item_counts),
         descendant_totals(rows, location_counts),
+        descendant_totals(rows, deleted_counts),
     )
 
 
@@ -123,6 +135,7 @@ def _to_out(
     location_counts: dict,
     total_items: dict,
     total_locations: dict,
+    total_recoverable_deleted: dict,
 ) -> RoomOut:
     return RoomOut(
         id=room.id,
@@ -136,6 +149,7 @@ def _to_out(
         location_count=location_counts.get(room.id, 0),
         total_item_count=total_items.get(room.id, 0),
         total_location_count=total_locations.get(room.id, 0),
+        recoverable_deleted_location_count=total_recoverable_deleted.get(room.id, 0),
         created_at=room.created_at,
         updated_at=room.updated_at,
     )
@@ -157,11 +171,20 @@ def list_rooms(
         .where(*conditions)
         .order_by(Room.sort_order, func.lower(Room.name))
     ).all()
-    item_counts, location_counts = _counts(db, auth.household.id)
-    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
+    item_counts, location_counts, deleted_counts = _counts(db, auth.household.id)
+    total_items, total_locations, total_recoverable_deleted = _aggregate_counts(
+        list(rooms), item_counts, location_counts, deleted_counts
+    )
     return RoomList(
         items=[
-            _to_out(room, item_counts, location_counts, total_items, total_locations)
+            _to_out(
+                room,
+                item_counts,
+                location_counts,
+                total_items,
+                total_locations,
+                total_recoverable_deleted,
+            )
             for room in rooms
         ]
     )
@@ -212,7 +235,7 @@ def create_room(
     db.add(room)
     db.commit()
     room = _get_room(db, auth.household.id, room.id)
-    return _to_out(room, {}, {}, {}, {})
+    return _to_out(room, {}, {}, {}, {}, {})
 
 
 @router.get("/{room_id}", response_model=RoomOut)
@@ -223,9 +246,18 @@ def get_room(
 ) -> RoomOut:
     room = _get_room(db, auth.household.id, room_id)
     rooms = db.scalars(select(Room).where(Room.household_id == auth.household.id)).all()
-    item_counts, location_counts = _counts(db, auth.household.id)
-    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
-    return _to_out(room, item_counts, location_counts, total_items, total_locations)
+    item_counts, location_counts, deleted_counts = _counts(db, auth.household.id)
+    total_items, total_locations, total_recoverable_deleted = _aggregate_counts(
+        list(rooms), item_counts, location_counts, deleted_counts
+    )
+    return _to_out(
+        room,
+        item_counts,
+        location_counts,
+        total_items,
+        total_locations,
+        total_recoverable_deleted,
+    )
 
 
 @router.patch("/{room_id}", response_model=RoomOut)
@@ -284,9 +316,18 @@ def update_room(
         .options(joinedload(Room.property))
         .where(Room.household_id == auth.household.id)
     ).all()
-    item_counts, location_counts = _counts(db, auth.household.id)
-    total_items, total_locations = _aggregate_counts(list(rooms), item_counts, location_counts)
-    return _to_out(room, item_counts, location_counts, total_items, total_locations)
+    item_counts, location_counts, deleted_counts = _counts(db, auth.household.id)
+    total_items, total_locations, total_recoverable_deleted = _aggregate_counts(
+        list(rooms), item_counts, location_counts, deleted_counts
+    )
+    return _to_out(
+        room,
+        item_counts,
+        location_counts,
+        total_items,
+        total_locations,
+        total_recoverable_deleted,
+    )
 
 
 @router.get(
@@ -336,7 +377,14 @@ def delete_room(
     room = _get_room(db, auth.household.id, room_id)
     has_children = db.scalar(select(Room.id).where(Room.parent_id == room.id).limit(1)) is not None
     has_locations = (
-        db.scalar(select(StorageLocation.id).where(StorageLocation.room_id == room.id).limit(1))
+        db.scalar(
+            select(StorageLocation.id)
+            .where(
+                StorageLocation.room_id == room.id,
+                StorageLocation.active(),
+            )
+            .limit(1)
+        )
         is not None
     )
     has_items = db.scalar(select(Item.id).where(Item.room_id == room.id).limit(1)) is not None
@@ -359,9 +407,16 @@ def delete_room(
         raise ApiError(
             409,
             "room_not_empty",
-            "This room still has sub-rooms, active or recoverable-deleted places, "
-            "items or active borrowed placements. Nothing was deleted.",
+            "This room still has sub-rooms, active places, items or active borrowed "
+            "placements. Nothing was deleted.",
         )
+    detach_tombstones_for_room(
+        db,
+        auth.household.id,
+        room.id,
+        actor_user_id=auth.user.id,
+        actor_name=auth.user.name,
+    )
     db.delete(room)
     db.commit()
     return Response(status_code=204)

@@ -476,7 +476,11 @@ export function ContainersPage() {
           if (!open) setDeleteTarget(null);
         }}
         title={`Delete ${deleteTarget?.identifier ?? deleteTarget?.name ?? "container"}?`}
-        description="This container or fixed place is empty and can be removed. This cannot be undone."
+        description={
+          (deleteTarget?.recoverable_deleted_child_count ?? 0) > 0
+            ? `This container has ${deleteTarget?.recoverable_deleted_child_count} recoverable-deleted nested place(s). Deleting it leaves them without a live parent, so their item-move restoration becomes unavailable. Its own identity and photos are retained. This cannot be undone.`
+            : "This container or fixed place is empty and can be removed. Its identity and photos are retained for eligible item-move restoration. This cannot be undone."
+        }
         confirmLabel="Delete container"
         onConfirm={async () => {
           if (!deleteTarget) return;

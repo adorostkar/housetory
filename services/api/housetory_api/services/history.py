@@ -274,7 +274,12 @@ def _restore_container_preview(
     db: Session,
     container: StorageLocation,
 ) -> RestoreAssistedContainerOut:
-    room = db.get(Room, container.room_id)
+    snapshot = container.deletion_snapshot or {}
+    snapshot_path = snapshot.get("path") if isinstance(snapshot.get("path"), list) else []
+    snapshot_parent = (
+        snapshot_path[-2] if len(snapshot_path) > 1 and isinstance(snapshot_path[-2], dict) else {}
+    )
+    room = db.get(Room, container.room_id) if container.room_id else None
     property_record = room.property if room is not None else None
     parent = db.get(StorageLocation, container.parent_id) if container.parent_id else None
     return RestoreAssistedContainerOut(
@@ -285,12 +290,22 @@ def _restore_container_preview(
         kind=container.kind,
         container_type=container.container_type,
         is_container=container.is_container,
-        room_id=room.id if room is not None else None,
-        room_name=room.name if room is not None else None,
-        property_id=property_record.id if property_record is not None else None,
-        property_name=property_record.name if property_record is not None else None,
-        parent_id=parent.id if parent is not None else None,
-        parent_name=parent.name if parent is not None else None,
+        room_id=(room.id if room is not None else _detail_uuid(snapshot, "room_id")),
+        room_name=(room.name if room is not None else str(snapshot.get("room_name") or "") or None),
+        property_id=(
+            property_record.id
+            if property_record is not None
+            else _detail_uuid(snapshot, "property_id")
+        ),
+        property_name=(
+            property_record.name
+            if property_record is not None
+            else str(snapshot.get("property_name") or "") or None
+        ),
+        parent_id=(parent.id if parent is not None else _detail_uuid(snapshot_parent, "id")),
+        parent_name=(
+            parent.name if parent is not None else str(snapshot_parent.get("name") or "") or None
+        ),
         deleted_at=container.deleted_at,
         deleted_by_name=container.deleted_by_name,
     )

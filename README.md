@@ -83,7 +83,8 @@ Tailscale is optional.
   expose consistent delete actions; empty storage places become recoverable
   tombstones, while nonempty rooms/containers offer **Move contents and delete**
   with previews, or **Move all contents** without deleting. Room deletion remains
-  explicit, irreversible and blocked by active or recoverable-deleted places.
+  explicit and irreversible; active contents still block it, while historical
+  tombstones are detached after a truthful warning and become restore-unavailable.
   Transfers preserve nested places, quantities, documents, loans, photos and
   active borrowed placements, reparent child rooms, reject cycles/cross-household
   destinations, and roll back completely on stale counts or verification failure.
@@ -301,7 +302,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 395 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 400 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -361,7 +362,7 @@ stack, not just unit mocks:
   caps/batch cancellation and the OpenAI Images adapter contract with fixture
   responses.
 - 212 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 67 checked-in Playwright workflows (66 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 68 checked-in Playwright workflows (67 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
