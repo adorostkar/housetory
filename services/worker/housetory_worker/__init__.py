@@ -13,6 +13,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import delete, func, select
+
 from housetory_api import __version__
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
@@ -38,6 +40,11 @@ from housetory_api.services.import_pipeline import (
     IMPORT_TASK,
     run_import_job,
 )
+from housetory_api.services.inventory_review_schedule import (
+    SCHEDULED_REVIEW_TASK,
+    dispatch_due_reviews,
+    run_scheduled_review_job,
+)
 from housetory_api.services.item_image_generation import (
     BATCH_TASK as ITEM_IMAGE_BATCH_TASK,
 )
@@ -45,18 +52,10 @@ from housetory_api.services.item_image_generation import (
     NEW_ITEM_TASK as ITEM_IMAGE_NEW_ITEM_TASK,
 )
 from housetory_api.services.item_image_generation import (
-    expire_pending_illustrations,
-)
-from housetory_api.services.item_image_generation import (
     run_batch_job as run_item_image_batch,
 )
 from housetory_api.services.item_image_generation import (
     run_new_item_job as run_item_image_new_item,
-)
-from housetory_api.services.inventory_review_schedule import (
-    SCHEDULED_REVIEW_TASK,
-    dispatch_due_reviews,
-    run_scheduled_review_job,
 )
 from housetory_api.services.recognition import (
     RECOGNITION_TASK,
@@ -76,7 +75,6 @@ from housetory_api.services.voice import (
 from housetory_api.services.voice import (
     process_transcription as run_voice_transcription,
 )
-from sqlalchemy import delete, func, select
 
 logging.basicConfig(
     level=logging.INFO,
@@ -87,9 +85,7 @@ logger = logging.getLogger("housetory.worker")
 PRUNE_TASK = "maintenance.prune_expired_sessions"
 PRUNE_FINISHED_TASK = "maintenance.prune_finished_jobs"
 PRUNE_ITEM_IMAGES_TASK = "maintenance.prune_item_images"
-HEARTBEAT_FILE = Path(
-    os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
-)
+HEARTBEAT_FILE = Path(os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat"))
 POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
 MAINTENANCE_INTERVAL_HOURS = 6
 
@@ -117,9 +113,7 @@ def _record_worker_heartbeat(worker_id: str) -> None:
 def prune_expired_sessions(payload: dict) -> dict:
     del payload
     with SessionLocal() as db:
-        result = db.execute(
-            delete(AuthSession).where(AuthSession.expires_at < func.now())
-        )
+        result = db.execute(delete(AuthSession).where(AuthSession.expires_at < func.now()))
         db.commit()
         return {"deleted": int(result.rowcount or 0)}
 
@@ -132,8 +126,7 @@ def prune_finished_jobs(payload: dict) -> dict:
             delete(Job).where(
                 Job.status.in_([JobStatus.SUCCEEDED.value, JobStatus.FAILED.value]),
                 Job.finished_at.is_not(None),
-                Job.finished_at
-                < func.now() - func.make_interval(0, 0, 0, interval_days),
+                Job.finished_at < func.now() - func.make_interval(0, 0, 0, interval_days),
             )
         )
         db.commit()
@@ -153,17 +146,17 @@ HANDLERS = {
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
-    VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(
-        payload.get("voice_note_id")
-    ),
-    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(
-        payload.get("voice_note_id")
-    ),
+    VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(payload.get("voice_note_id")),
+    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(payload.get("voice_note_id")),
     ITEM_IMAGE_NEW_ITEM_TASK: run_item_image_new_item,
     ITEM_IMAGE_BATCH_TASK: lambda payload: run_item_image_batch(
         payload, uuid.UUID(str(payload["job_id"]))
     ),
-    PRUNE_ITEM_IMAGES_TASK: lambda payload: {"expired": expire_pending_illustrations()},
+    PRUNE_ITEM_IMAGES_TASK: lambda payload: {
+        "status": "retired",
+        "deleted": 0,
+        "message": "Pending-illustration pruning was retired; existing media is preserved.",
+    },
     SCHEDULED_REVIEW_TASK: run_scheduled_review_job,
 }
 
@@ -200,10 +193,7 @@ def schedule_maintenance() -> None:
         if has_active_job(db, PRUNE_TASK):
             return
         last = db.scalar(
-            select(Job)
-            .where(Job.task == PRUNE_TASK)
-            .order_by(Job.created_at.desc())
-            .limit(1)
+            select(Job).where(Job.task == PRUNE_TASK).order_by(Job.created_at.desc()).limit(1)
         )
         if last is not None:
             reference = last.finished_at or last.created_at
@@ -227,9 +217,6 @@ def schedule_maintenance() -> None:
 
         if not has_active_job(db, EVIDENCE_PRUNE_TASK):
             enqueue(db, EVIDENCE_PRUNE_TASK)
-
-        if not has_active_job(db, PRUNE_ITEM_IMAGES_TASK):
-            enqueue(db, PRUNE_ITEM_IMAGES_TASK)
 
 
 def dispatch_scheduled_reviews() -> None:

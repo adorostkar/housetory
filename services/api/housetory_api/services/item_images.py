@@ -1,9 +1,9 @@
 """Item image display priority and provenance helpers.
 
 Actual photographs remain in ``item_photos`` and always take priority. The only
-selectable non-photo sources are downloaded reference images and accepted AI
-illustrations. No-photo fallback is rendered by the frontend as a simple category
-icon, not generated line art.
+selectable non-photo sources are downloaded reference images and existing legacy
+AI illustrations. New illustration generation is retired. No-photo fallback is
+rendered by the frontend as a simple category icon, not generated line art.
 """
 
 from __future__ import annotations
@@ -11,11 +11,11 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
-from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..api.errors import ApiError
 from ..config import get_settings
 from ..models import Item, ItemImage
 from ..schemas.item_images import ItemImageOut, ItemImageSettingsOut, ItemImageState
@@ -82,14 +82,6 @@ def active_image(item: Item) -> ItemImage | None:
     if not active:
         return None
     return max(active, key=lambda image: image.created_at)
-
-
-def pending_images(item: Item) -> list[ItemImage]:
-    return sorted(
-        (image for image in item.images if image.status == "pending" and image.source_type == "ai"),
-        key=lambda image: image.created_at,
-        reverse=True,
-    )
 
 
 def _image_urls(image: ItemImage) -> tuple[str | None, str | None]:
@@ -165,42 +157,16 @@ def product_text(item: Item, limit: int = 600) -> str:
     return " · ".join(part.strip() for part in parts if part and part.strip())[:limit]
 
 
-def generation_used_today(db: Session, household_id: uuid.UUID) -> int:
-    start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(
-        db.scalar(
-            select(func.count(ItemImage.id)).where(
-                ItemImage.household_id == household_id,
-                ItemImage.source_type == "ai",
-                ItemImage.created_at >= start,
-            )
-        )
-        or 0
-    )
-
-
-def settings_out(db: Session, household) -> ItemImageSettingsOut:  # noqa: ANN001
-    used = generation_used_today(db, household.id)
-    cap = household.item_image_daily_generation_cap
-    return ItemImageSettingsOut(
-        auto_reference=household.item_image_auto_reference,
-        auto_generate=household.item_image_auto_generate,
-        daily_generation_cap=cap,
-        daily_generations_used=used,
-        daily_generations_remaining=max(0, cap - used),
-    )
+def settings_out(household) -> ItemImageSettingsOut:  # noqa: ANN001
+    return ItemImageSettingsOut(auto_reference=household.item_image_auto_reference)
 
 
 def state_out(
-    db: Session,
     item: Item,
     *,
     search_configured: bool,
     search_provider_label: str | None,
     search_reason: str | None,
-    generation_configured: bool,
-    generation_provider_label: str | None,
-    generation_reason: str | None,
 ) -> ItemImageState:
     selected = active_image(item)
     return ItemImageState(
@@ -208,15 +174,34 @@ def state_out(
         actual_photo_count=len(item.photos),
         image=image_out(selected) if selected is not None else None,
         selected=image_out(selected) if selected is not None else None,
-        pending=[image_out(image) for image in pending_images(item)],
-        settings=settings_out(db, item.household),
+        settings=settings_out(item.household),
         search_configured=search_configured,
         search_provider_label=search_provider_label,
         search_reason=search_reason,
-        generation_configured=generation_configured,
-        generation_provider_label=generation_provider_label,
-        generation_reason=generation_reason,
     )
+
+
+def delete_item_image(
+    db: Session,
+    household_id: uuid.UUID,
+    item_id: uuid.UUID,
+    image_id: uuid.UUID,
+) -> None:
+    image = db.scalar(
+        select(ItemImage).where(
+            ItemImage.id == image_id,
+            ItemImage.item_id == item_id,
+            ItemImage.household_id == household_id,
+        )
+    )
+    if image is None:
+        raise ApiError(404, "item_image_not_found", "Item image not found.")
+    from . import storage
+
+    storage.delete_key(image.storage_key)
+    storage.delete_key(image.thumbnail_key)
+    db.delete(image)
+    db.flush()
 
 
 def clear_active_images(db: Session, item_id: uuid.UUID) -> None:

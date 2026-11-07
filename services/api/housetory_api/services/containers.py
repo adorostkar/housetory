@@ -1,7 +1,5 @@
 """Movable containers, permanent identifiers, summaries and hierarchy movement."""
 
-import hashlib
-import json
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -37,18 +35,12 @@ from .serializers import item_load_options
 
 @dataclass
 class LocationSummary:
-    short: str
-    detailed: str
-    headline: str | None
-    lines: list[str] = field(default_factory=list)
-    detailed_lines: list[str] = field(default_factory=list)
     item_count: int = 0
     total_quantity: int = 0
+    direct_item_count: int = 0
+    direct_total_quantity: int = 0
     empty: bool = True
-    contents_hash: str = ""
-    generated_at: datetime | None = None
-    source: str | None = None
-    stored: bool = False
+    categories: list[dict[str, Any]] = field(default_factory=list)
 
 
 def household_hierarchy_lock(db: Session, household_id: uuid.UUID) -> None:
@@ -345,91 +337,39 @@ def load_container_items(
     )
 
 
-def _item_line(item: Item) -> str:
-    name = re.sub(r"\s+", " ", item.name).strip()[:80]
-    return f"{item.quantity} × {name}" if item.quantity > 1 else name
-
-
-def deterministic_summary(items: list[Item]) -> LocationSummary:
-    if not items:
-        return LocationSummary(
-            short="Empty container",
-            detailed="No items are assigned to this container yet.",
-            headline=None,
-            lines=[],
-            detailed_lines=[],
-            item_count=0,
-            total_quantity=0,
-            empty=True,
-            contents_hash=_contents_hash(items),
+def live_summary(
+    db: Session,
+    household_id: uuid.UUID,
+    location: StorageLocation,
+    *,
+    items: list[Item] | None = None,
+) -> LocationSummary:
+    """Live nested/direct counts and category totals from current items."""
+    nested_items = (
+        items if items is not None else load_container_items(db, household_id, location.id)
+    )
+    direct_items = [item for item in nested_items if item.storage_location_id == location.id]
+    categories: dict[str, dict[str, int]] = {}
+    for item in nested_items:
+        name = item.category.name if item.category else "Uncategorised"
+        entry = categories.setdefault(name, {"item_count": 0, "total_quantity": 0})
+        entry["item_count"] += 1
+        entry["total_quantity"] += item.quantity
+    category_rows = [
+        {"name": name, **values}
+        for name, values in sorted(
+            categories.items(),
+            key=lambda entry: (-entry[1]["total_quantity"], entry[0].lower()),
         )
-
-    by_name: dict[tuple[str, str], dict[str, Any]] = {}
-    for item in items:
-        category = item.category.name if item.category else "Uncategorised"
-        key = (item.name.strip().lower(), category)
-        if key not in by_name:
-            by_name[key] = {
-                "name": re.sub(r"\s+", " ", item.name).strip()[:80],
-                "category": category,
-                "quantity": 0,
-            }
-        by_name[key]["quantity"] += item.quantity
-
-    ordered = sorted(
-        by_name.values(),
-        key=lambda entry: (-entry["quantity"], entry["name"].lower()),
-    )
-    short_lines = [
-        f"{entry['quantity']} × {entry['name']}" if entry["quantity"] > 1 else entry["name"]
-        for entry in ordered
     ]
-    if len(short_lines) > 4:
-        hidden = len(short_lines) - 4
-        short_lines = short_lines[:4] + [f"and {hidden} more"]
-
-    detailed_lines: list[str] = []
-    categories: dict[str, list[dict[str, Any]]] = {}
-    for entry in ordered:
-        categories.setdefault(entry["category"], []).append(entry)
-    for category in sorted(categories, key=lambda value: value.lower()):
-        if category != "Uncategorised":
-            detailed_lines.append(category)
-        for entry in sorted(categories[category], key=lambda value: value["name"].lower()):
-            line = (
-                f"{entry['quantity']} × {entry['name']}" if entry["quantity"] > 1 else entry["name"]
-            )
-            detailed_lines.append(("  " if category != "Uncategorised" else "") + line)
-    if len(detailed_lines) > 12:
-        hidden = len(detailed_lines) - 12
-        detailed_lines = detailed_lines[:12] + [f"and {hidden} more"]
-
-    total_quantity = sum(item.quantity for item in items)
     return LocationSummary(
-        short="\n".join(short_lines)[:600],
-        detailed="\n".join(detailed_lines)[:1600],
-        headline=None,
-        lines=short_lines,
-        detailed_lines=detailed_lines,
-        item_count=len(items),
-        total_quantity=total_quantity,
-        empty=False,
-        contents_hash=_contents_hash(items),
+        item_count=len(nested_items),
+        total_quantity=sum(item.quantity for item in nested_items),
+        direct_item_count=len(direct_items),
+        direct_total_quantity=sum(item.quantity for item in direct_items),
+        empty=not nested_items,
+        categories=category_rows,
     )
-
-
-def _contents_hash(items: list[Item]) -> str:
-    payload = [
-        {
-            "id": str(item.id),
-            "name": item.name,
-            "quantity": item.quantity,
-            "category": item.category.name if item.category else None,
-            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-        }
-        for item in sorted(items, key=lambda entry: str(entry.id))
-    ]
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def summary_for_location(
@@ -438,80 +378,8 @@ def summary_for_location(
     location: StorageLocation,
     *,
     live_items: list[Item] | None = None,
-    include_stored: bool = True,
 ) -> LocationSummary:
-    items = (
-        live_items
-        if live_items is not None
-        else load_container_items(db, household_id, location.id)
-    )
-    live = deterministic_summary(items)
-    if not include_stored:
-        return live
-    stored = bool(location.summary_generated_at)
-    return LocationSummary(
-        short=location.summary_short if location.summary_short else live.short,
-        detailed=location.summary_detailed if location.summary_detailed else live.detailed,
-        headline=location.summary_headline,
-        lines=live.lines,
-        detailed_lines=live.detailed_lines,
-        item_count=live.item_count,
-        total_quantity=live.total_quantity,
-        empty=live.empty,
-        contents_hash=live.contents_hash,
-        generated_at=location.summary_generated_at,
-        source=location.summary_source,
-        stored=stored,
-    )
-
-
-def summary_is_stale(location: StorageLocation, live: LocationSummary) -> bool:
-    return bool(
-        location.summary_generated_at
-        and location.summary_contents_hash
-        and location.summary_contents_hash != live.contents_hash
-    )
-
-
-def refresh_summary(
-    db: Session,
-    household_id: uuid.UUID,
-    location: StorageLocation,
-    *,
-    source: str = "deterministic",
-    headline: str | None = None,
-    short: str | None = None,
-    detailed: str | None = None,
-) -> LocationSummary:
-    items = load_container_items(db, household_id, location.id)
-    live = deterministic_summary(items)
-    location.summary_short = (short if short is not None else live.short)[:4000] or None
-    location.summary_detailed = (detailed if detailed is not None else live.detailed)[:4000] or None
-    if source == "deterministic":
-        location.summary_headline = None
-    else:
-        location.summary_headline = headline if headline is not None else location.summary_headline
-    if location.summary_headline is not None:
-        location.summary_headline = location.summary_headline.strip()[:240] or None
-    location.summary_source = source
-    location.summary_generated_at = datetime.now(UTC)
-    location.summary_contents_hash = live.contents_hash
-    db.flush()
-    return summary_for_location(db, household_id, location, live_items=items)
-
-
-def contents_updated_at(items: list[Item], location: StorageLocation) -> datetime | None:
-    timestamps = [item.updated_at for item in items if item.updated_at is not None]
-    if location.updated_at is not None:
-        timestamps.append(location.updated_at)
-    return max(timestamps) if timestamps else None
-
-
-def label_is_stale(location: StorageLocation, items: list[Item]) -> bool:
-    if location.label_generated_at is None:
-        return False
-    latest = contents_updated_at(items, location)
-    return bool(latest and latest > location.label_generated_at)
+    return live_summary(db, household_id, location, items=live_items)
 
 
 def move_container(

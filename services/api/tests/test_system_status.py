@@ -38,10 +38,10 @@ def test_task_specific_capability_matrix_does_not_require_blanket_tools():
     )
     states = model_task_states("openrouter", text_only)
     assert states["assistant"] == "compatible"
-    assert states["labels"] == "compatible"
     assert states["vision"] == "incompatible"
     assert states["transcription"] == "incompatible"
-    assert states["item_images"] == "incompatible"
+    assert "labels" not in states
+    assert "item_images" not in states
 
     audio_chat = FakeModel(
         kind="chat",
@@ -60,12 +60,10 @@ def test_task_specific_capability_matrix_does_not_require_blanket_tools():
         output_modalities=("image",),
         endpoints=("/api/v1/images",),
     )
-    assert model_task_state("openrouter", "item_images", image) == "compatible"
     assert model_task_state("openrouter", "assistant", image) == "incompatible"
 
     assert model_task_state("anthropic", "transcription", text_only) == "adapter_unavailable"
     assert model_task_state("openai", "assistant", None) == "unverified"
-    assert model_task_state("openai", "item_images", None) == "unverified"
 
 
 def test_explicit_task_test_requires_confirmation_and_records_live_result(

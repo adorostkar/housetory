@@ -34,8 +34,8 @@ Tailscale is optional.
 - Explicit conversion of existing storage places into containers; fixed shelves,
   cabinets and drawers can also receive optional identifiers such as
   `SHELF-001`.
-- Deterministic contents summaries with quantities and category grouping, plus an
-  optional AI headline that never replaces the actual item lines.
+- Live container contents counts and category grouping derived from current
+  items; no saved summary snapshot, regeneration step, AI headline or stale claim.
 - A4 adhesive label printing with verified Avery L7160/L7163/L7165/L7651
   presets, compact/standard/detailed layouts, custom geometry, partial-sheet
   starting positions, calibration offsets, PDF preview and vector QR codes.
@@ -102,9 +102,10 @@ Tailscale is optional.
   immediately. All-my-places assistant answers are deterministic and never send
   one household's data through another household's AI provider or consent. See
   [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md).
-- **Item images, references and illustrations**: actual photos always take
-  priority, followed by labelled reference images, accepted AI illustrations and
-  a compact category-icon fallback. Built-in line-art shapes and their chooser
+- **Item images and references**: actual photos always take priority, followed by
+  labelled public reference images and existing legacy AI illustrations, then a
+  compact category-icon fallback. New AI illustration generation was retired;
+  existing AI media remains viewable, replaceable and removable. Built-in line-art shapes and their chooser
   have been removed; legacy built-in rows are retained but retired from display.
   Optional Brave Image Search automatically selects a compatible public-web
   reference without a candidate-approval dialog, using conservative query-only
@@ -281,14 +282,13 @@ Tailscale is optional.
   OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
   **Settings → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
-- Separate task models for assistant, imports, documents, search, vision,
-  voice transcription, item illustrations and label headlines, with capability
-  warnings and explicit remote-processing consent. Local, private-network and
-  remote endpoints are labelled separately. Voice transcription is opt-in and
-  supports OpenAI/Gemini audio plus OpenRouter STT or audio-input models; item
-  illustrations support the OpenAI Images API and OpenRouter Image API. Each task
-  has a specific minimum capability (text, image input, audio input/STT or image
-  output), not a blanket tools/structured requirement. Confirmed-incompatible
+- Separate task models for assistant, imports, documents, search, vision and
+  voice transcription, with capability warnings and explicit remote-processing
+  consent. Local, private-network and remote endpoints are labelled separately.
+  Voice transcription is opt-in and supports OpenAI/Gemini audio plus OpenRouter
+  STT or audio-input models. Item illustrations and label/container AI headlines
+  were retired. Each active task has a specific minimum capability (text, image
+  input or audio input/STT), not a blanket tools/structured requirement. Confirmed-incompatible
   models are hidden; unknown metadata and exact IDs are offered with an unverified
   warning and an explicit, bounded live test. No discovery or status request runs a
   paid inference. See [`docs/AI_PROVIDERS.md`](docs/AI_PROVIDERS.md).
@@ -315,9 +315,9 @@ stack, not just unit mocks:
   provider adapters, task capabilities, consent enforcement, entity photos,
   multi-object recognition/apply/idempotency, voice-note grouping/corrections/
   duplicate resolution/split/idempotent confirmation, OpenAI/Gemini/OpenRouter
-  transcription adapters, OpenRouter image-output adapter, task-specific
-  capability contracts, unverified exact-ID paths, bounded task tests and the
-  confirmed bulk AI-task test workflow, household online-search credential
+  transcription adapters, task-specific capability contracts, unverified exact-ID
+  paths, bounded task tests and the confirmed bulk AI-task test workflow,
+  household online-search credential
   lifecycle/fallback/domain validation and worker resolution, worker
   heartbeat/status scoping, borrowed-record quantities/partial returns/corrections/
   cancellation/idempotency/concurrency/history, private borrowed photos, role and
@@ -370,12 +370,13 @@ stack, not just unit mocks:
   candidate format/HTTP fallback, AVIF re-encoding, decoded resolution and
   original-vs-thumbnail quality fallback, clean-photo vs spec/dimension
   infographic ranking, PS5 empty-box packaging alias, bounded reference/AI
-  gallery frames and license evidence, evidence exclusion, AI
-  preview/accept/reject,
-  caps/batch cancellation and the OpenAI Images adapter contract with fixture
-  responses.
-- 214 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 78 checked-in Playwright workflows (77 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+  gallery frames and license evidence, evidence exclusion, retired illustration
+  endpoints/jobs without provider calls, existing AI-media display/removal,
+  live container contents/category summaries after move and quantity changes,
+  label identity/name/QR output without contents or AI headlines, reference
+  batch cancellation and preserved photos/vision/transcription.
+- 213 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 79 checked-in Playwright workflows (78 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -754,11 +755,12 @@ household owner and open **Settings → AI providers**.
    consent. TLS certificate verification is never disabled and redirects are not
    followed.
 4. Assign a provider and model to assistant, smart imports, document
-   interpretation, natural-language search, image recognition and optional label
-   headlines. Each task uses the searchable discovered catalog and switches
+   interpretation, natural-language search, image recognition and voice
+   transcription. Each task uses the searchable discovered catalog and switches
    catalogs when its provider changes. Known non-chat models are excluded, vision
-   tasks require image input, voice transcription requires STT/audio input, and
-   item illustrations require image output. Unknown capability metadata is marked
+   tasks require image input, and voice transcription requires STT/audio input.
+   Retired illustration and label-headline tasks are not offered. Unknown
+   capability metadata is marked
    for verification, and manual IDs are validated on save. Existing task
    assignments are preserved if discovery fails.
    General Settings verifies whether a saved task model appears in the provider
@@ -1157,9 +1159,10 @@ docker compose down                   # stop, keep data
   natural-language flow.
 - AI endpoints expose provider status, grounded assistant, smart search, photo
   recognition and read-only document relationship suggestions.
-- Containers expose create/bulk/convert, live detail, identifier lookup,
-  cross-room move, deterministic/AI summary, QR SVG, label templates, label PDF
-  generation and calibration PDFs.
+- Containers expose create/bulk/convert, live detail with live contents counts,
+  identifier lookup, cross-room move, QR SVG, label templates, label PDF
+  generation and calibration PDFs. Saved-summary regeneration, AI headlines and
+  stale-summary management are retired.
 
 The endpoint inventory and data model are documented in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).

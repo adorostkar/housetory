@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ImagePlus,
   Loader2,
-  Palette,
   Search,
   X,
 } from "lucide-react";
@@ -24,7 +23,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
 import type { ItemImageBatchJob, ItemImageBatchPreview, ItemSummary } from "@/lib/types";
-import { cn, pluralize } from "@/lib/utils";
+import { pluralize } from "@/lib/utils";
 
 function newRequestId() {
   return crypto.randomUUID();
@@ -47,7 +46,7 @@ export function BulkImagesDialog({
   const invalidate = useInvalidateInventory();
   const invalidateRef = React.useRef(invalidate);
   invalidateRef.current = invalidate;
-  const [action, setAction] = React.useState<"reference" | "illustration">("reference");
+  const action = "reference" as const;
   const [job, setJob] = React.useState<ItemImageBatchJob | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const requestId = React.useRef(newRequestId());
@@ -55,7 +54,6 @@ export function BulkImagesDialog({
 
   React.useEffect(() => {
     if (!open) return;
-    setAction("reference");
     setJob(null);
     setError(null);
     requestId.current = newRequestId();
@@ -141,39 +139,12 @@ export function BulkImagesDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setAction("reference")}
-              className={cn(
-                "rounded-xl border px-3.5 py-3 text-left text-[0.78rem]",
-                action === "reference"
-                  ? "border-foreground/30 bg-secondary"
-                  : "border-border/65 bg-background/40",
-              )}
-            >
-              <Search className="mb-1.5 size-4" />
-              <span className="block font-medium">Find reference images</span>
-              <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
-                Automatic lawful lookup; no AI generation.
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setAction("illustration")}
-              className={cn(
-                "rounded-xl border px-3.5 py-3 text-left text-[0.78rem]",
-                action === "illustration"
-                  ? "border-foreground/30 bg-secondary"
-                  : "border-border/65 bg-background/40",
-              )}
-            >
-              <Palette className="mb-1.5 size-4" />
-              <span className="block font-medium">Generate illustrations</span>
-              <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
-                Uses the configured Item illustrations provider and the daily hard cap.
-              </span>
-            </button>
+          <div className="rounded-xl border border-border/65 bg-background/40 px-3.5 py-3 text-[0.78rem]">
+            <Search className="mb-1.5 size-4" />
+            <span className="block font-medium">Find reference images</span>
+            <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+              Automatic public-web lookup; no AI generation.
+            </span>
           </div>
 
           {previewQuery.isPending ? (
@@ -192,13 +163,6 @@ export function BulkImagesDialog({
                 <Metric label="Has a real photo" value={preview.skipped_has_photo} />
                 <Metric label="Unavailable" value={preview.skipped_unavailable} />
               </div>
-              {action === "illustration" && (
-                <p className="mt-2 text-[0.68rem] text-muted-foreground">
-                  Up to {preview.estimated_generations} generation(s);{" "}
-                  {preview.daily_generation_remaining} remaining today. Hard batch cap:{" "}
-                  {preview.hard_cap}.
-                </p>
-              )}
               {preview.notices.length > 0 && (
                 <ul className="mt-2 space-y-1 text-[0.68rem] leading-relaxed text-muted-foreground">
                   {preview.notices.map((notice) => (

@@ -133,7 +133,9 @@ presets are covered by tests.
 3. Added quantities, categories and items to the containers.
 4. Moved `BIN-001` from the Office cupboard to the Attic; its identifier, items
    and QR payload stayed unchanged.
-5. Regenerated deterministic summaries and verified the contents.
+5. Regenerated deterministic summaries and verified the contents. *(Historical:
+   saved summary regeneration and AI headlines were later retired; current
+   container views show live counts from current items.)*
 6. Created and viewed an authenticated QR destination.
 7. Opened the label builder, selected L7165/detailed, started at the third
    position on a partially used sheet, previewed the generated PDF and downloaded

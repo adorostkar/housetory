@@ -48,8 +48,6 @@ export interface Household {
   name: string;
   warranty_reminder_days: number;
   item_image_auto_reference?: boolean;
-  item_image_auto_generate?: boolean;
-  item_image_daily_generation_cap?: number;
 }
 
 export interface HouseholdMembership extends Household {
@@ -203,8 +201,6 @@ export interface StorageLocation {
   is_container: boolean;
   container_type: ContainerType | null;
   identifier: string | null;
-  summary_headline: string | null;
-  summary_short: string | null;
   label_generated_at: string | null;
   sort_order: number;
   item_count: number;
@@ -715,10 +711,6 @@ export interface ItemImage {
 
 export interface ItemImageSettings {
   auto_reference: boolean;
-  auto_generate: boolean;
-  daily_generation_cap: number;
-  daily_generations_used: number;
-  daily_generations_remaining: number;
 }
 
 export interface ItemImageState {
@@ -726,25 +718,18 @@ export interface ItemImageState {
   actual_photo_count: number;
   image: ItemImage | null;
   selected: ItemImage | null;
-  pending: ItemImage[];
   settings: ItemImageSettings;
   search_configured: boolean;
   search_provider_label: string | null;
   search_reason: string | null;
-  generation_configured: boolean;
-  generation_provider_label: string | null;
-  generation_reason: string | null;
 }
 
 export interface ItemImageBatchPreview {
-  action: "reference" | "illustration";
+  action: "reference";
   selected_count: number;
   eligible_count: number;
   skipped_has_photo: number;
   skipped_unavailable: number;
-  estimated_generations: number;
-  daily_generation_remaining: number;
-  hard_cap: number;
   notices: string[];
 }
 
@@ -1526,24 +1511,20 @@ export interface ImportDecision {
 }
 
 
-export interface ContainerSummary {
-  short: string;
-  detailed: string;
-  headline: string | null;
-  lines: string[];
-  detailed_lines: string[];
+export interface ContainerCategoryCount {
+  name: string;
   item_count: number;
   total_quantity: number;
+}
+
+export interface ContainerSummary {
+  item_count: number;
+  total_quantity: number;
+  direct_item_count: number;
+  direct_total_quantity: number;
   empty: boolean;
-  stale: boolean;
-  needs_refresh: boolean;
-  stored: boolean;
-  source: "deterministic" | "ai" | "manual" | null;
-  contents_hash: string;
-  generated_at: string | null;
+  categories: ContainerCategoryCount[];
   label_generated_at: string | null;
-  label_stale: boolean;
-  contents_updated_at: string | null;
 }
 
 export interface Container {
@@ -1567,8 +1548,6 @@ export interface Container {
   child_count: number;
   container_count: number;
   recoverable_deleted_child_count?: number;
-  summary_short: string | null;
-  summary_headline: string | null;
   qr_payload: string;
   qr_url: string;
   qr_warning: string | null;

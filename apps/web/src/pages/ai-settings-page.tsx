@@ -65,9 +65,7 @@ const TASK_LABELS: Record<string, string> = {
   documents: "Document interpretation",
   search: "Natural-language search",
   vision: "Image recognition",
-  labels: "Label summary headlines",
   transcription: "Voice transcription",
-  item_images: "Item illustrations",
 };
 
 const CAPABILITY_LABELS: Record<string, string> = {
@@ -577,9 +575,8 @@ export function AiSettingsPage() {
         <p className="mt-1 text-[0.75rem] text-muted-foreground">
           Choose a provider and model per task. Vision requires image input; voice
           transcription requires OpenAI/Gemini audio support or an OpenRouter STT/audio-input
-          model; item illustrations require OpenAI Images or an OpenRouter image-output model.
-          Capability detection uses provider metadata where available and validates manual IDs
-          when you save.
+          model. Capability detection uses provider metadata where available and
+          validates manual IDs when you save.
         </p>
         <div className="mt-5 space-y-3">
           {Object.values(tasks)
@@ -594,15 +591,9 @@ export function AiSettingsPage() {
                   ? "vision"
                   : task.task === "transcription"
                     ? "audio"
-                    : task.task === "item_images"
-                      ? "image"
-                      : undefined;
+                    : undefined;
               const allowedKinds =
-                requiredCapability === "audio"
-                  ? ["chat", "speech"]
-                  : requiredCapability === "image"
-                    ? ["image"]
-                    : ["chat"];
+                requiredCapability === "audio" ? ["chat", "speech"] : ["chat"];
               const selectedTaskState =
                 selectedModel?.task_states?.[task.task];
               const selectedCompatible =

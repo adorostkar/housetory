@@ -434,12 +434,15 @@ def test_fixed_location_identifier_qr_and_label(owner_client):
     assert "SHELF-001" in pdf_text(labels.content)
 
 
-def test_deterministic_summary_staleness_and_manual_edit(owner_client):
+def test_live_container_summary_updates_and_retires_saved_summaries(owner_client):
     room = create_room(owner_client, "Attic")
     box = create_container(owner_client, room["id"], name="Winter clothing")
     empty = owner_client.get(f"/api/v1/containers/{box['id']}").json()
     assert empty["summary"]["empty"] is True
-    assert "Empty" in empty["summary"]["short"]
+    assert empty["summary"]["item_count"] == 0
+    assert empty["summary"]["total_quantity"] == 0
+    assert empty["summary"]["direct_item_count"] == 0
+    assert empty["summary"]["categories"] == []
 
     create_item(
         owner_client,
@@ -461,15 +464,26 @@ def test_deterministic_summary_staleness_and_manual_edit(owner_client):
         room_id=room["id"],
         storage_location_id=box["id"],
     )
-    summary = owner_client.post(f"/api/v1/containers/{box['id']}/summary")
-    assert summary.status_code == 200, summary.text
-    body = summary.json()["summary"]
-    assert body["item_count"] == 3
-    assert body["total_quantity"] == 6
-    assert "3 × Winter jacket" in body["short"]
-    assert "2 × Scarf" in body["short"]
-    assert "Gloves" in body["short"]
-    assert body["stale"] is False
+    nested = create_container(owner_client, room["id"], name="Gloves pocket", parent_id=box["id"])
+    create_item(
+        owner_client,
+        "Liner gloves",
+        quantity=2,
+        room_id=room["id"],
+        storage_location_id=nested["id"],
+    )
+
+    detail = owner_client.get(f"/api/v1/containers/{box['id']}").json()
+    summary = detail["summary"]
+    assert summary["item_count"] == 4
+    assert summary["total_quantity"] == 8
+    assert summary["direct_item_count"] == 3
+    assert summary["direct_total_quantity"] == 6
+    assert {row["name"] for row in summary["categories"]} == {"Uncategorised"}
+    assert summary["empty"] is False
+    assert "stale" not in summary
+    assert "short" not in summary
+    assert "headline" not in summary
 
     label = owner_client.post(
         "/api/v1/labels/pdf",
@@ -480,8 +494,7 @@ def test_deterministic_summary_staleness_and_manual_edit(owner_client):
     assert "BOX-001" in label_text
     assert "Winter clothing" in label_text
     assert "Winter jacket" not in label_text
-    assert "Scarf" not in label_text
-    assert "Gloves" not in label_text
+    assert "Liner gloves" not in label_text
     assert "Attic" not in label_text
 
     create_item(
@@ -490,73 +503,23 @@ def test_deterministic_summary_staleness_and_manual_edit(owner_client):
         room_id=room["id"],
         storage_location_id=box["id"],
     )
-    stale = owner_client.get(f"/api/v1/containers/{box['id']}").json()
-    assert stale["summary"]["stale"] is True
-    assert stale["summary"]["needs_refresh"] is True
-    assert stale["summary"]["label_stale"] is True
+    updated = owner_client.get(f"/api/v1/containers/{box['id']}").json()["summary"]
+    assert updated["item_count"] == 5
+    assert updated["total_quantity"] == 9
+    assert updated["direct_item_count"] == 4
+    assert updated["direct_total_quantity"] == 7
 
-    refreshed = owner_client.post(f"/api/v1/containers/{box['id']}/summary").json()["summary"]
-    assert refreshed["stale"] is False
-    assert "Ski goggles" in refreshed["short"]
-
-    manual = owner_client.patch(
-        f"/api/v1/containers/{box['id']}/summary",
-        json={"headline": "Winter gear", "short": "Winter clothes and ski gear"},
-    )
-    assert manual.status_code == 200, manual.text
-    assert manual.json()["summary"]["source"] == "manual"
-    assert manual.json()["summary"]["headline"] == "Winter gear"
-    assert manual.json()["summary"]["short"] == "Winter clothes and ski gear"
-
-
-def test_ai_summary_uses_grounded_headline_and_falls_back(owner_client, monkeypatch):
-    from housetory_api.schemas.ai import AiStatus
-    from housetory_api.services import ai
-
-    room = create_room(owner_client, "Attic")
-    box = create_container(owner_client, room["id"], name="Winter clothing")
-    create_item(
-        owner_client,
-        "Winter jacket",
-        quantity=3,
-        room_id=room["id"],
-        storage_location_id=box["id"],
-    )
-    fake_status = AiStatus(
-        provider="ollama",
-        mode="local",
-        model="summary-test",
-        configured=True,
-        available=True,
-        privacy_note="Local",
-    )
-    monkeypatch.setattr(ai, "provider_status", lambda probe=True: fake_status)
-    monkeypatch.setattr(
-        ai, "complete_json", lambda *args, **kwargs: {"headline": "Winter clothing and accessories"}
-    )
-    result = owner_client.post(f"/api/v1/containers/{box['id']}/summary/ai")
-    assert result.status_code == 200, result.text
-    body = result.json()
-    assert body["used_ai"] is True
-    assert body["summary"]["headline"] == "Winter clothing and accessories"
-    assert "3 × Winter jacket" in body["summary"]["short"]
-
-    monkeypatch.setattr(
-        ai, "complete_json", lambda *args, **kwargs: {"headline": "3 boxes of unknown things"}
-    )
-    fallback = owner_client.post(f"/api/v1/containers/{box['id']}/summary/ai")
-    assert fallback.status_code == 200
-    assert fallback.json()["used_ai"] is False
-    assert "deterministic" in (fallback.json()["notice"] or "").lower()
-
-    monkeypatch.setattr(
-        ai,
-        "provider_status",
-        lambda probe=True: fake_status.model_copy(update={"configured": False}),
-    )
-    unavailable = owner_client.post(f"/api/v1/containers/{box['id']}/summary/ai")
-    assert unavailable.status_code == 200
-    assert unavailable.json()["used_ai"] is False
+    for path, method in [
+        (f"/api/v1/containers/{box['id']}/summary", "post"),
+        (f"/api/v1/containers/{box['id']}/summary/ai", "post"),
+        (f"/api/v1/containers/{box['id']}/summary", "patch"),
+    ]:
+        response = getattr(owner_client, method)(
+            path,
+            **({"json": {"headline": "Winter gear"}} if method == "patch" else {}),
+        )
+        assert response.status_code == 410, response.text
+        assert response.json()["detail"]["code"] == "feature_retired"
 
 
 def test_label_templates_geometry_partial_sheets_and_calibration(owner_client):
@@ -619,7 +582,6 @@ def test_label_templates_geometry_partial_sheets_and_calibration(owner_client):
     assert len(PdfReader(io.BytesIO(recorded.content)).pages) == 1
     detail = owner_client.get(f"/api/v1/containers/{first['id']}").json()
     assert detail["label_generated_at"] is not None
-    assert detail["summary"]["label_stale"] is False
 
     calibration = owner_client.get(
         "/api/v1/labels/calibration.pdf?template=L7165&offset_x_mm=1.5&offset_y_mm=-0.5"

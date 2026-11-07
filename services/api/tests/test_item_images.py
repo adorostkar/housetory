@@ -8,8 +8,6 @@ from sqlalchemy import select
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import (
-    AiProvider,
-    AiTaskSetting,
     Household,
     HouseholdMember,
     Item,
@@ -134,41 +132,6 @@ def lg_candidate(title="LG OLED TV 77 inch product photo", source="lg.com", exac
         width=1600,
         height=900,
     )
-
-
-def configure_illustration(household_id, monkeypatch):
-    with SessionLocal() as db:
-        provider_record = AiProvider(
-            household_id=household_id,
-            provider="openai",
-            display_name="Fixture Images",
-            base_url="https://api.openai.com/v1",
-            default_model="gpt-image-1",
-            cloud_consent=True,
-        )
-        db.add(provider_record)
-        db.flush()
-        db.add(
-            AiTaskSetting(
-                household_id=household_id,
-                task="item_images",
-                provider_id=provider_record.id,
-                model="gpt-image-1",
-                enabled=True,
-            )
-        )
-        db.commit()
-    captured = {}
-
-    def fake_generate(prompt, *, config, size="1024x1024"):
-        captured["prompt"] = prompt
-        captured["provider_id"] = config.provider_id
-        return png_bytes((120, 40, 60))
-
-    from housetory_api.services import item_image_generation
-
-    monkeypatch.setattr(item_image_generation.ai, "generate_image", fake_generate)
-    return captured
 
 
 def viewer_headers(owner_client, email="image-viewer@example.com"):
@@ -413,7 +376,11 @@ def test_reference_is_excluded_from_evidence_and_does_not_mutate_stock(owner_cli
     assert "representative" not in str(session["items"][0]).lower()
 
 
-def test_manual_ai_illustration_preview_accept_reject_and_cap(owner_client, monkeypatch):
+def test_illustration_generation_is_retired_and_existing_ai_media_stays_readable(
+    owner_client,
+):
+    from housetory_api.services import storage
+
     room = create_room(owner_client)
     item = create_item(
         owner_client,
@@ -421,47 +388,117 @@ def test_manual_ai_illustration_preview_accept_reject_and_cap(owner_client, monk
         room["id"],
         description="Oak frame, pale fabric, reading chair for the study",
     )
+    retired = owner_client.post(f"/api/v1/items/{item['id']}/illustration")
+    assert retired.status_code == 410
+    assert retired.json()["detail"]["code"] == "feature_retired"
+
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    with SessionLocal() as db:
+        active_file = storage.store_item_image_bytes(
+            household_id,
+            uuid.UUID(item["id"]),
+            png_bytes((120, 40, 60)),
+            source_type="ai",
+            filename="existing-ai.png",
+        )
+        pending_file = storage.store_item_image_bytes(
+            household_id,
+            uuid.UUID(item["id"]),
+            png_bytes((30, 120, 60)),
+            source_type="ai",
+            filename="old-pending-ai.png",
+        )
+        active_image = ItemImage(
+            household_id=household_id,
+            item_id=uuid.UUID(item["id"]),
+            source_type="ai",
+            status="active",
+            storage_key=active_file.storage_key,
+            thumbnail_key=active_file.thumbnail_key,
+            original_filename=active_file.original_filename,
+            content_type=active_file.content_type,
+            byte_size=active_file.byte_size,
+            width=active_file.width,
+            height=active_file.height,
+            source_name="Fixture AI illustration",
+        )
+        pending_image = ItemImage(
+            household_id=household_id,
+            item_id=uuid.UUID(item["id"]),
+            source_type="ai",
+            status="pending",
+            storage_key=pending_file.storage_key,
+            thumbnail_key=pending_file.thumbnail_key,
+            original_filename=pending_file.original_filename,
+            content_type=pending_file.content_type,
+            byte_size=pending_file.byte_size,
+            width=pending_file.width,
+            height=pending_file.height,
+            source_name="Fixture pending AI illustration",
+        )
+        db.add_all([active_image, pending_image])
+        db.commit()
+        pending_id = pending_image.id
+
     state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
-    assert state["generation_configured"] is False
-    unconfigured = owner_client.post(f"/api/v1/items/{item['id']}/illustration")
-    assert unconfigured.status_code == 503
-    assert unconfigured.json()["detail"]["code"] == "illustration_generation_unconfigured"
+    assert state["selected"]["source_type"] == "ai"
+    assert state["selected"]["label"] == "AI illustration"
+    assert "pending" not in state
+    detail = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
+    assert detail["representative_image"]["label"] == "AI illustration"
 
-    captured = configure_illustration(
-        uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"]),
-        monkeypatch,
-    )
-    generated = owner_client.post(f"/api/v1/items/{item['id']}/illustration")
-    assert generated.status_code == 200, generated.text
-    pending = generated.json()["pending"]
-    assert len(pending) == 1
-    assert pending[0]["source_type"] == "ai"
-    assert pending[0]["label"] == "AI illustration"
-    assert "Oak reading chair" in captured["prompt"]
-    assert "borrower" not in captured["prompt"].lower()
+    accept = owner_client.post(f"/api/v1/items/{item['id']}/images/{pending_id}/accept")
+    assert accept.status_code == 410
+    assert accept.json()["detail"]["code"] == "feature_retired"
 
-    accepted = owner_client.post(f"/api/v1/items/{item['id']}/images/{pending[0]['id']}/accept")
-    assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["selected"]["source_type"] == "ai"
-    assert accepted.json()["selected"]["exact_model_confirmed"] is False
-    assert accepted.json()["pending"] == []
-
-    # Hard cap is checked against stored AI images for the household day.
-    owner_client.patch("/api/v1/household", json={"item_image_daily_generation_cap": 1})
-    second = owner_client.post(f"/api/v1/items/{item['id']}/illustration")
-    assert second.status_code == 409
-    assert second.json()["detail"]["code"] == "illustration_generation_cap"
-
-    # Remove the active AI image; actual photos are unaffected.
     removed = owner_client.delete(f"/api/v1/items/{item['id']}/image")
     assert removed.status_code == 200
     assert removed.json()["selected"] is None
+    with SessionLocal() as db:
+        # Removing the selected image no longer silently deletes an old pending preview.
+        assert db.get(ItemImage, pending_id) is not None
+
+
+def test_illustration_batch_action_is_retired_without_provider_calls(
+    owner_client,
+    monkeypatch,
+):
+    room = create_room(owner_client)
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"], brand="LG")
+    called = {"search": 0, "download": 0}
+
+    def fake_results(*_args, **_kwargs):
+        called["search"] += 1
+        return []
+
+    def fake_download(*_args, **_kwargs):
+        called["download"] += 1
+        raise AssertionError("retired illustration batch must not download images")
+
+    monkeypatch.setattr(item_image_search, "_brave_image_results", fake_results)
+    monkeypatch.setattr(item_image_search, "_download_candidate", fake_download)
+    preview = owner_client.post(
+        "/api/v1/items/images/batch/preview",
+        json={"item_ids": [item["id"]], "action": "illustration"},
+    )
+    assert preview.status_code == 410
+    assert preview.json()["detail"]["code"] == "feature_retired"
+    created = owner_client.post(
+        "/api/v1/items/images/batch",
+        json={
+            "item_ids": [item["id"]],
+            "action": "illustration",
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert created.status_code == 410
+    assert called == {"search": 0, "download": 0}
 
 
 def test_auto_new_item_reference_job_and_batch_cancel(owner_client, monkeypatch):
     owner_client.patch(
         "/api/v1/household",
-        json={"item_image_auto_reference": True, "item_image_auto_generate": False},
+        json={"item_image_auto_reference": True},
     )
     room = create_room(owner_client)
     item = create_item(
@@ -486,7 +523,7 @@ def test_auto_new_item_reference_job_and_batch_cancel(owner_client, monkeypatch)
     state = owner_client.get(f"/api/v1/items/{item['id']}/image").json()
     assert state["selected"]["source_type"] == "reference"
 
-    # Batch preview accounts for existing photos and the household cap.
+    # Batch preview accounts for existing photos.
     other = create_item(owner_client, "LG OLED television second", room["id"], brand="LG")
     preview = owner_client.post(
         "/api/v1/items/images/batch/preview",
@@ -579,73 +616,6 @@ def test_brave_image_ranker_rejects_missing_brand_and_stock_hosts(owner_client):
         height=800,
     )
     assert rank_candidates(branded, [stock]) == []
-
-
-def test_openai_image_adapter_contract_and_invalid_outputs(monkeypatch):
-    from housetory_api.services import ai
-    from housetory_api.services.ai_runtime import AiRuntimeConfig
-
-    config = AiRuntimeConfig(
-        provider="openai",
-        base_url="https://api.openai.com/v1",
-        api_key="fixture",
-        model="gpt-image-1",
-        task="item_images",
-        provider_id=None,
-        display_name="OpenAI Images",
-        mode="cloud",
-        source="database",
-        enabled=True,
-        cloud_consent=True,
-        configured=True,
-    )
-    captured = {}
-    image_data = png_bytes()
-
-    def fake_request(url, payload, **kwargs):
-        captured["url"] = url
-        captured["payload"] = payload
-        import base64
-
-        return {"data": [{"b64_json": base64.b64encode(image_data).decode()}]}
-
-    monkeypatch.setattr(ai, "_request_json", fake_request)
-    assert ai.generate_image("A clean product illustration", config=config) == image_data
-    assert captured["url"].endswith("/images/generations")
-    assert captured["payload"]["model"] == "gpt-image-1"
-    assert captured["payload"]["n"] == 1
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {"data": [{"url": "https://example.com/image.png"}]},
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "URL-only" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("URL-only image response was accepted")
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {"data": [{"b64_json": "not-base64!"}]},
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "invalid base64" in str(exc).lower()
-    else:  # pragma: no cover
-        raise AssertionError("Invalid base64 image was accepted")
-
-    non_openai = replace(config, provider="gemini")
-    try:
-        ai.generate_image("prompt", config=non_openai)
-    except ai.AiUnavailable as exc:
-        assert "OpenAI Images" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("Unsupported image provider was accepted")
 
 
 def test_image_download_rejects_private_or_nonimage_responses(monkeypatch):
@@ -990,111 +960,6 @@ def test_public_web_search_selects_one_image_without_a_domain_allowlist(owner_cl
         )
         assert len(rows) == 1
         assert rows[0].permission_basis == "public_web"
-
-
-def test_openrouter_image_adapter_contract_and_output_validation(monkeypatch):
-    import base64
-
-    from housetory_api.services import ai
-    from housetory_api.services.ai_runtime import AiRuntimeConfig
-
-    config = AiRuntimeConfig(
-        provider="openrouter",
-        base_url="https://openrouter.ai/api/v1",
-        api_key="fixture",
-        model="bytedance-seed/seedream-test",
-        task="item_images",
-        provider_id=None,
-        display_name="OpenRouter Images",
-        mode="cloud",
-        source="database",
-        enabled=True,
-        cloud_consent=True,
-        configured=True,
-    )
-    image_data = png_bytes()
-    captured = {}
-
-    def fake_request(url, payload, **kwargs):
-        captured["url"] = url
-        captured["payload"] = payload
-        captured["headers"] = kwargs.get("headers")
-        return {
-            "created": 1748372400,
-            "data": [
-                {
-                    "b64_json": base64.b64encode(image_data).decode(),
-                    "media_type": "image/png",
-                }
-            ],
-            "usage": {"cost": 0.01},
-        }
-
-    monkeypatch.setattr(ai, "_request_json", fake_request)
-    assert ai.generate_image("A clean product illustration", config=config) == image_data
-    assert str(captured["url"]).endswith("/images")
-    assert not str(captured["url"]).endswith("/images/generations")
-    assert captured["payload"] == {
-        "model": "bytedance-seed/seedream-test",
-        "prompt": "A clean product illustration",
-    }
-    assert captured["headers"]["Authorization"] == "Bearer fixture"
-    assert captured["headers"]["X-Title"] == "Housetory"
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {"data": [{"url": "https://example.com/generated.png"}]},
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "URL-only" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("OpenRouter URL-only output was accepted")
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {
-            "data": [
-                {
-                    "b64_json": base64.b64encode(image_data).decode(),
-                    "media_type": "image/svg+xml",
-                }
-            ]
-        },
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "unsupported image media type" in str(exc).lower()
-    else:  # pragma: no cover
-        raise AssertionError("SVG output was accepted as an item illustration")
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {"data": []},
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "no generated image" in str(exc).lower()
-    else:  # pragma: no cover
-        raise AssertionError("Empty OpenRouter image output was accepted")
-
-    monkeypatch.setattr(
-        ai,
-        "_request_json",
-        lambda *_args, **_kwargs: {"data": [{"b64_json": "not-base64!"}]},
-    )
-    try:
-        ai.generate_image("prompt", config=config)
-    except ai.AiInvalidOutput as exc:
-        assert "invalid base64" in str(exc).lower()
-    else:  # pragma: no cover
-        raise AssertionError("Invalid OpenRouter base64 was accepted")
 
 
 def test_representative_thumbnail_preserves_aspect_without_cropping(upload_root):
@@ -1816,3 +1681,49 @@ def test_undersized_existing_reference_is_not_reported_as_a_successful_update(
             )
             is not None
         )
+
+
+def test_retired_generation_jobs_make_no_provider_or_search_calls(
+    owner_client,
+    monkeypatch,
+):
+    room = create_room(owner_client)
+    item = create_item(owner_client, "LG OLED TV 77 inch", room["id"], brand="LG")
+    calls = {"provider": 0, "search": 0, "download": 0}
+
+    def unexpected(*_args, **_kwargs):
+        calls["provider"] += 1
+        raise AssertionError("retired generation made an external call")
+
+    def unexpected_search(*_args, **_kwargs):
+        calls["search"] += 1
+        raise AssertionError("retired generation started a search")
+
+    def unexpected_download(*_args, **_kwargs):
+        calls["download"] += 1
+        raise AssertionError("retired generation downloaded an image")
+
+    monkeypatch.setattr(item_image_search, "_brave_image_results", unexpected_search)
+    monkeypatch.setattr(item_image_search, "_download_candidate", unexpected_download)
+
+    result = run_batch_job(
+        {
+            "household_id": str(owner_client.get("/api/v1/auth/session").json()["household"]["id"]),
+            "action": "illustration",
+            "item_ids": [item["id"]],
+        },
+        uuid.uuid4(),
+    )
+    assert result["status"] == "retired"
+    assert result["completed"] == 0
+    assert result["skipped"] == 1
+    assert "retired" in result["message"].lower()
+
+    skipped = run_new_item_job(
+        {
+            "household_id": str(owner_client.get("/api/v1/auth/session").json()["household"]["id"]),
+            "item_id": item["id"],
+        }
+    )
+    assert skipped["status"] == "skipped"
+    assert calls == {"provider": 0, "search": 0, "download": 0}

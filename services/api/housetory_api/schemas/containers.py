@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from ..domain import ContainerType
 from ..schemas.common import Description, Name, ORMModel, trimmed
@@ -11,24 +11,22 @@ from ..schemas.items import ItemSummary, LocationBrief, RoomBrief
 from ..schemas.properties import PropertyBrief
 
 
-class ContainerSummaryOut(BaseModel):
-    short: str
-    detailed: str
-    headline: str | None = None
-    lines: list[str] = Field(default_factory=list)
-    detailed_lines: list[str] = Field(default_factory=list)
+class ContainerCategoryCount(BaseModel):
+    name: str
     item_count: int = 0
     total_quantity: int = 0
+
+
+class ContainerSummaryOut(BaseModel):
+    """Live counts derived from current items; no saved snapshot is used."""
+
+    item_count: int = 0
+    total_quantity: int = 0
+    direct_item_count: int = 0
+    direct_total_quantity: int = 0
     empty: bool = True
-    stale: bool = False
-    needs_refresh: bool = False
-    stored: bool = False
-    source: str | None = None
-    contents_hash: str
-    generated_at: datetime | None = None
+    categories: list[ContainerCategoryCount] = Field(default_factory=list)
     label_generated_at: datetime | None = None
-    label_stale: bool = False
-    contents_updated_at: datetime | None = None
 
 
 class ContainerCreate(BaseModel):
@@ -64,12 +62,6 @@ class ContainerMove(BaseModel):
 class ContainerConvert(BaseModel):
     location_id: uuid.UUID
     container_type: ContainerType = ContainerType.BOX
-
-
-class ContainerSummaryUpdate(BaseModel):
-    short: trimmed(1, 4000) | None = None
-    detailed: trimmed(1, 4000) | None = None
-    headline: trimmed(1, 240) | None = None
 
 
 class ContainerBrief(ORMModel):
@@ -110,8 +102,6 @@ class ContainerOut(ORMModel):
     child_count: int = 0
     container_count: int = 0
     recoverable_deleted_child_count: int = 0
-    summary_short: str | None = None
-    summary_headline: str | None = None
     qr_payload: str
     qr_url: str
     qr_warning: str | None = None
@@ -138,18 +128,6 @@ class ContainerList(BaseModel):
 class ContainerBulkResult(BaseModel):
     items: list[ContainerOut]
     identifiers: list[str]
-
-
-class AiContainerSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    headline: str = Field(min_length=1, max_length=240)
-
-
-class ContainerSummaryResult(BaseModel):
-    summary: ContainerSummaryOut
-    used_ai: bool
-    notice: str | None = None
 
 
 class LabelGeometry(BaseModel):

@@ -94,25 +94,8 @@ const status: SystemStatus = {
       error: null,
     },
     {
-      task: "labels",
-      label: "Label suggestions",
-      provider_label: "OpenAI household",
-      model: "shared-model",
-      model_label: "Shared Model",
-      model_listed: true,
-      enabled: false,
-      configured: true,
-      compatibility: "compatible",
-      capabilities: ["text"],
-      live_tested: false,
-      last_test_status: null,
-      last_test_at: null,
-      last_test_error: null,
-      error: null,
-    },
-    {
       task: "search",
-      label: "Search summaries",
+      label: "Natural-language search",
       provider_label: null,
       model: null,
       model_label: null,
@@ -288,11 +271,6 @@ describe("SystemStatusPanel", () => {
       { task: "transcription", state: "queued", reason: undefined },
       { task: "vision", state: "queued", reason: undefined },
       {
-        task: "labels",
-        state: "skipped",
-        reason: "Disabled for this household.",
-      },
-      {
         task: "search",
         state: "skipped",
         reason: "No search provider is configured.",
@@ -374,8 +352,7 @@ describe("SystemStatusPanel", () => {
     expect(runningButton).toBeDisabled();
     await userEvent.click(runningButton);
     expect(api.post).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByText("Skipped")).toHaveLength(2);
-    expect(screen.getByText("Disabled for this household.")).toBeVisible();
+    expect(screen.getAllByText("Skipped")).toHaveLength(1);
     expect(
       screen.getAllByText("No search provider is configured.").length,
     ).toBeGreaterThan(0);

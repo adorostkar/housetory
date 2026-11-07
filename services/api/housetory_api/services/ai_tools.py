@@ -41,7 +41,6 @@ from ..services.warranty_dashboard import build_dashboard, load_warranties
 from . import borrowed as borrowed_service
 from .container_serializers import location_path_map
 from .containers import (
-    deterministic_summary,
     load_container_items,
     location_ancestors,
     room_ancestors,
@@ -890,7 +889,6 @@ def tool_get_container_contents(
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days
     )
-    live = deterministic_summary(items)
     room_chain = room_ancestors(db, household_id, location.room_id)
     property_name = (
         room_chain[0].property.name if room_chain and room_chain[0].property is not None else None
@@ -939,7 +937,7 @@ def tool_get_container_contents(
             "room": location.room.name if location.room else None,
             "item_count": len(summaries),
             "total_quantity": sum(item.quantity for item in items),
-            "summary": live.short,
+            "summary": summary,
         },
     )
 

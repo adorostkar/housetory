@@ -59,7 +59,7 @@ const items: ItemSummary[] = [
 ];
 
 const room = { id: "room-1", name: "Office", description: null, parent_id: null, sort_order: 0, item_count: 2, location_count: 1, total_item_count: 2, total_location_count: 1, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
-const location = { id: "box-1", room_id: "room-1", parent_id: null, name: "Camera gear", description: null, kind: "box", is_container: true, container_type: "box", identifier: "BOX-001", summary_headline: null, summary_short: null, label_generated_at: null, sort_order: 0, item_count: 2, total_item_count: 2, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+const location = { id: "box-1", room_id: "room-1", parent_id: null, name: "Camera gear", description: null, kind: "box", is_container: true, container_type: "box", identifier: "BOX-001", label_generated_at: null, sort_order: 0, item_count: 2, total_item_count: 2, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 const category = { id: "category-1", name: "Electronics", parent_id: null, color: null, description: null, sort_order: 0, item_count: 0, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 const tag = { id: "tag-1", name: "Fragile", created_at: "2026-01-01T00:00:00Z", item_count: 0 };
 

@@ -40,8 +40,6 @@ const location = {
   is_container: true,
   container_type: "box",
   identifier: "BOX-001",
-  summary_headline: null,
-  summary_short: null,
   label_generated_at: null,
   sort_order: 0,
   item_count: 1,

@@ -164,8 +164,6 @@ def _to_out(
         is_container=location.is_container,
         container_type=location.container_type,
         identifier=location.identifier,
-        summary_headline=location.summary_headline,
-        summary_short=location.summary_short,
         label_generated_at=location.label_generated_at,
         sort_order=location.sort_order,
         item_count=direct_counts.get(location.id, 0),

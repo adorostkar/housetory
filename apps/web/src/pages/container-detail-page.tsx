@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   Check,
   ChevronRight,
   FileText,
@@ -11,7 +10,6 @@ import {
   Download,
   MoveRight,
   Search,
-  Sparkles,
   Trash2,
   Truck,
 } from "lucide-react";
@@ -107,7 +105,6 @@ export function ContainerDetailPage() {
   const [qrOpen, setQrOpen] = React.useState(false);
   const [moveOpen, setMoveOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
-  const [summaryEditing, setSummaryEditing] = React.useState(false);
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
   const [emptyDeleteOpen, setEmptyDeleteOpen] = React.useState(false);
   const [transferMode, setTransferMode] = React.useState<"move" | "delete" | null>(null);
@@ -123,9 +120,6 @@ export function ContainerDetailPage() {
   const [editName, setEditName] = React.useState("");
   const [editDescription, setEditDescription] = React.useState("");
   const [editType, setEditType] = React.useState<ContainerType>("box");
-  const [headline, setHeadline] = React.useState("");
-  const [short, setShort] = React.useState("");
-  const [detailed, setDetailed] = React.useState("");
   const container = containerQuery.data;
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
@@ -196,9 +190,6 @@ export function ContainerDetailPage() {
     setEditName(container.name);
     setEditDescription(container.description ?? "");
     setEditType(container.container_type ?? "box");
-    setHeadline(container.summary.headline ?? "");
-    setShort(container.summary.short);
-    setDetailed(container.summary.detailed);
   }, [container]);
 
   const refreshContainer = () => {
@@ -237,42 +228,6 @@ export function ContainerDetailPage() {
       }
       toast.error(getApiErrorMessage(error));
     },
-  });
-
-  const regenerate = useMutation({
-    mutationFn: () => api.post<{ summary: unknown }>(`/containers/${containerId}/summary`),
-    onSuccess: () => {
-      refreshContainer();
-      toast.success("Deterministic summary regenerated");
-    },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
-  });
-
-  const aiSummary = useMutation({
-    mutationFn: () =>
-      api.post<{ used_ai: boolean; notice: string | null }>(
-        `/containers/${containerId}/summary/ai`,
-      ),
-    onSuccess: (result) => {
-      refreshContainer();
-      toast.success(result.notice ?? "Summary updated");
-    },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
-  });
-
-  const saveSummary = useMutation({
-    mutationFn: () =>
-      api.patch(`/containers/${containerId}/summary`, {
-        headline: headline.trim() || null,
-        short: short.trim() || null,
-        detailed: detailed.trim() || null,
-      }),
-    onSuccess: () => {
-      refreshContainer();
-      setSummaryEditing(false);
-      toast.success("Summary saved");
-    },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
   if (containerQuery.isPending) return <ContainerDetailSkeleton />;
@@ -417,82 +372,6 @@ export function ContainerDetailPage() {
         )}
       </section>
 
-      <section className="surface mt-4 p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 font-display text-[1.45rem] tracking-[-0.025em]">
-              <Sparkles className="size-4 text-brass" />
-              Contents summary
-            </h2>
-            <p className="mt-1 text-[0.72rem] text-muted-foreground">
-              {detail.summary.source === "ai"
-                ? "AI headline with deterministic item lines"
-                : detail.summary.source === "manual"
-                  ? "Manually edited snapshot"
-                  : "Generated only from actual inventory records"}
-              {detail.summary.generated_at
-                ? ` · ${formatDate(detail.summary.generated_at)}`
-                : " · not generated yet"}
-            </p>
-          </div>
-          {canWrite && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={regenerate.isPending}
-                onClick={() => regenerate.mutate()}
-              >
-                {regenerate.isPending ? <Spinner /> : <Sparkles />}
-                Regenerate
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={aiSummary.isPending}
-                onClick={() => aiSummary.mutate()}
-              >
-                {aiSummary.isPending ? <Spinner /> : <Sparkles />}
-                AI headline
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setSummaryEditing(true)}>
-                <Pencil />
-                Edit summary
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {detail.summary.stale && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-3.5 py-2.5 text-[0.73rem] leading-relaxed text-muted-foreground">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-brass" />
-            <span>
-              The saved summary no longer matches the current contents. Regenerate or edit it
-              if you use it for reference; printed labels do not include contents.
-            </span>
-          </div>
-        )}
-
-        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(260px,0.7fr)]">
-          <div className="rounded-xl border border-border/60 bg-background/35 p-4">
-            {detail.summary.headline && (
-              <p className="font-display text-[1.28rem] tracking-[-0.02em]">
-                {detail.summary.headline}
-              </p>
-            )}
-            <p className="mt-1 whitespace-pre-line text-[0.84rem] leading-[1.75] text-foreground/80">
-              {detail.summary.short}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border/60 bg-secondary/25 p-4">
-            <p className="eyebrow">Detailed</p>
-            <p className="mt-2 whitespace-pre-line text-[0.74rem] leading-[1.7] text-muted-foreground">
-              {detail.summary.detailed}
-            </p>
-          </div>
-        </div>
-      </section>
-
       <section className="mt-8">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -504,6 +383,22 @@ export function ContainerDetailPage() {
                 ? "Only items assigned directly to this place."
                 : "Direct and nested items, including quantities and photos."}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-muted-foreground">
+              <span>
+                {pluralize(detail.summary.item_count, "item")} ·{" "}
+                {detail.summary.total_quantity} nested units
+              </span>
+              <span>·</span>
+              <span>
+                {pluralize(detail.summary.direct_item_count, "item")} ·{" "}
+                {detail.summary.direct_total_quantity} directly here
+              </span>
+              {detail.summary.categories.slice(0, 6).map((category) => (
+                <Badge key={category.name} variant="outline">
+                  {category.name} · {category.item_count}
+                </Badge>
+              ))}
+            </div>
           </div>
           <AddItemsButton context={addItemsContext} variant="outline" size="sm" />
         </div>
@@ -820,72 +715,6 @@ export function ContainerDetailPage() {
         scope={{ container_ids: [detail.id] }}
         title={`Export ${identifier} with evidence`}
       />
-
-      <Dialog open={summaryEditing} onOpenChange={setSummaryEditing}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit summary snapshot</DialogTitle>
-            <DialogDescription>
-              This text is kept for reference in Housetory. Labels print only the permanent
-              identifier, optional name and QR code; the QR always opens current inventory.
-            </DialogDescription>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveSummary.mutate();
-            }}
-          >
-            <div>
-              <label htmlFor="summary-headline" className="text-[0.78rem] font-medium">
-                Headline
-              </label>
-              <Input
-                id="summary-headline"
-                value={headline}
-                maxLength={240}
-                onChange={(event) => setHeadline(event.target.value)}
-                className="mt-1.5"
-                placeholder="Winter clothing"
-              />
-            </div>
-            <div>
-              <label htmlFor="summary-short" className="text-[0.78rem] font-medium">
-                Short contents
-              </label>
-              <Textarea
-                id="summary-short"
-                value={short}
-                maxLength={4000}
-                onChange={(event) => setShort(event.target.value)}
-                className="mt-1.5 min-h-24"
-              />
-            </div>
-            <div>
-              <label htmlFor="summary-detailed" className="text-[0.78rem] font-medium">
-                Detailed contents
-              </label>
-              <Textarea
-                id="summary-detailed"
-                value={detailed}
-                maxLength={4000}
-                onChange={(event) => setDetailed(event.target.value)}
-                className="mt-1.5 min-h-28"
-              />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setSummaryEditing(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saveSummary.isPending}>
-                {saveSummary.isPending ? <Spinner /> : <Check />}
-                Save summary
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <ConfirmDialog
         open={emptyDeleteOpen}

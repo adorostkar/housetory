@@ -20,7 +20,6 @@ from ...schemas.item_images import (
     ItemImageFindRequest,
     ItemImageState,
 )
-from ...services import item_image_generation as generation
 from ...services import item_image_search as image_search
 from ...services import item_images as image_service
 from ...services import storage
@@ -38,23 +37,17 @@ def _search_availability(db: Session, household_id: uuid.UUID):
     return True, provider.label, None
 
 
-def _provider_state(db: Session, household_id: uuid.UUID):
+def _search_state(db: Session, household_id: uuid.UUID):
     search_configured, search_label, search_reason = _search_availability(db, household_id)
-    generation_configured, generation_label, generation_reason = generation.generation_status(
-        db, household_id
-    )
     return {
         "search_configured": search_configured,
         "search_provider_label": search_label,
         "search_reason": search_reason,
-        "generation_configured": generation_configured,
-        "generation_provider_label": generation_label,
-        "generation_reason": generation_reason,
     }
 
 
 def _state(db: Session, item: Item) -> ItemImageState:
-    return image_service.state_out(db, item, **_provider_state(db, item.household_id))
+    return image_service.state_out(item, **_search_state(db, item.household_id))
 
 
 def _item(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> Item:
@@ -110,9 +103,7 @@ def remove_item_image(
     item = _item(db, auth.household.id, item_id)
     selected = image_service.active_image(item)
     if selected is not None:
-        generation.delete_item_image(db, auth.household.id, item.id, selected.id)
-    for pending in image_service.pending_images(item):
-        generation.delete_item_image(db, auth.household.id, item.id, pending.id)
+        image_service.delete_item_image(db, auth.household.id, item.id, selected.id)
     db.commit()
     db.refresh(item)
     return _state(db, item)
@@ -127,40 +118,33 @@ def reset_item_image(
     return remove_item_image(item_id, auth, db)
 
 
-@router.post("/items/{item_id}/illustration", response_model=ItemImageState)
+@router.post("/items/{item_id}/illustration")
 def generate_item_illustration(
     item_id: uuid.UUID,
     auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ItemImageState:
-    generation.generate_pending_illustration(
-        db,
-        auth.household.id,
-        item_id,
-        actor_user_id=auth.user.id,
+) -> None:
+    del item_id, auth
+    raise ApiError(
+        410,
+        "feature_retired",
+        "Item illustration generation was retired. Existing AI illustrations remain "
+        "viewable and removable, and public reference-image lookup is unchanged.",
     )
-    db.commit()
-    item = _item(db, auth.household.id, item_id)
-    return _state(db, item)
 
 
-@router.post("/items/{item_id}/images/{image_id}/accept", response_model=ItemImageState)
+@router.post("/items/{item_id}/images/{image_id}/accept")
 def accept_item_image(
     item_id: uuid.UUID,
     image_id: uuid.UUID,
     auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ItemImageState:
-    generation.select_generated_illustration(
-        db,
-        auth.household.id,
-        item_id,
-        image_id,
-        actor_user_id=auth.user.id,
+) -> None:
+    del item_id, image_id, auth
+    raise ApiError(
+        410,
+        "feature_retired",
+        "Pending illustration acceptance was retired. Existing AI illustrations "
+        "remain viewable and removable.",
     )
-    db.commit()
-    item = _item(db, auth.household.id, item_id)
-    return _state(db, item)
 
 
 @router.delete("/items/{item_id}/images/{image_id}", response_model=ItemImageState)
@@ -170,7 +154,7 @@ def delete_item_image(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ItemImageState:
-    generation.delete_item_image(db, auth.household.id, item_id, image_id)
+    image_service.delete_item_image(db, auth.household.id, item_id, image_id)
     db.commit()
     item = _item(db, auth.household.id, item_id)
     return _state(db, item)
@@ -192,10 +176,15 @@ def _preview(
     item_ids: list[uuid.UUID],
     action: str,
 ) -> ItemImageBatchPreview:
+    if action != "reference":
+        raise ApiError(
+            410,
+            "feature_retired",
+            "Bulk illustration generation was retired. Choose public reference-image "
+            "lookup instead.",
+        )
     items = _items_for_batch(db, household_id, item_ids)
     search_ready, _search_label, search_reason = _search_availability(db, household_id)
-    generation_configured, _label, _reason = generation.generation_status(db, household_id)
-    settings = image_service.settings_out(db, items[0].household)
     eligible = 0
     has_photo = 0
     unavailable = 0
@@ -206,34 +195,19 @@ def _preview(
         if item.is_archived:
             unavailable += 1
             continue
-        if action == "reference" and (
-            not search_ready or not image_search.reference_search_ready(item)
-        ):
-            unavailable += 1
-            continue
-        if action == "illustration" and not generation_configured:
+        if not search_ready or not image_search.reference_search_ready(item):
             unavailable += 1
             continue
         eligible += 1
     notices = []
-    if action == "reference" and not search_ready:
+    if not search_ready:
         notices.append(search_reason or "Reference-image search is not configured.")
-    if action == "illustration" and not generation_configured:
-        notices.append("Item illustration generation is not configured for this household.")
-    if action == "illustration" and settings.daily_generations_remaining <= 0:
-        notices.append("The household's daily illustration generation cap has been reached.")
-    hard_cap = settings.daily_generations_remaining if action == "illustration" else 50
     return ItemImageBatchPreview(
-        action=action,
+        action="reference",
         selected_count=len(items),
         eligible_count=eligible,
         skipped_has_photo=has_photo,
         skipped_unavailable=unavailable,
-        estimated_generations=(
-            min(eligible, settings.daily_generations_remaining) if action == "illustration" else 0
-        ),
-        daily_generation_remaining=settings.daily_generations_remaining,
-        hard_cap=max(0, min(50, hard_cap)),
         notices=notices,
     )
 
@@ -279,7 +253,7 @@ def create_image_batch(
         )
     existing = db.scalar(
         select(Job).where(
-            Job.task == generation.BATCH_TASK,
+            Job.task == "item_images.batch",
             Job.payload["request_id"].astext == str(payload.request_id),
         )
     )
@@ -295,7 +269,7 @@ def create_image_batch(
         return _job_out(existing)
     job = enqueue(
         db,
-        generation.BATCH_TASK,
+        "item_images.batch",
         {},
         max_attempts=1,
         commit=False,
@@ -323,7 +297,7 @@ def read_image_batch(
     job = db.get(Job, job_id)
     if (
         job is None
-        or job.task != generation.BATCH_TASK
+        or job.task != "item_images.batch"
         or (job.payload or {}).get("household_id") != str(auth.household.id)
     ):
         raise ApiError(404, "image_job_not_found", "Image batch job not found.")
@@ -339,7 +313,7 @@ def cancel_image_batch(
     job = db.get(Job, job_id)
     if (
         job is None
-        or job.task != generation.BATCH_TASK
+        or job.task != "item_images.batch"
         or (job.payload or {}).get("household_id") != str(auth.household.id)
     ):
         raise ApiError(404, "image_job_not_found", "Image batch job not found.")

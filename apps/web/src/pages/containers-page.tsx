@@ -572,14 +572,6 @@ function ContainerCard({
                 : `${pluralize(container.total_item_count, "item")} · ${container.total_quantity} units`}
             </span>
           </p>
-          {container.summary_short && (
-            <p className="mt-3 line-clamp-2 whitespace-pre-line rounded-lg bg-secondary/35 px-2.5 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
-              {container.summary_headline
-                ? `${container.summary_headline}\n`
-                : ""}
-              {container.summary_short}
-            </p>
-          )}
         </Link>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">

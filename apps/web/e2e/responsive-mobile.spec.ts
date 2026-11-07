@@ -129,9 +129,7 @@ function seedAiTaskRows(householdId: string) {
       ('documents', 'openai', 'gpt-4.1-2026-long-identifier-abcdefghijklmnopqrstuvwxyz'),
       ('search', 'openrouter', 'openrouter/google/gemini-2.5-flash-long-identifier-abcdefghijklmnopqrstuvwxyz'),
       ('vision', 'openai', 'gpt-4.1-vision-2026-very-long-model-identifier-abcdefghijklmnopqrstuvwxyz'),
-      ('labels', 'openai', 'gpt-4.1-nano-long-identifier-abcdefghijklmnopqrstuvwxyz'),
-      ('transcription', 'openai', 'gpt-4o-transcribe-long-identifier-abcdefghijklmnopqrstuvwxyz'),
-      ('item_images', 'openai', 'gpt-image-1-long-identifier-abcdefghijklmnopqrstuvwxyz')
+      ('transcription', 'openai', 'gpt-4o-transcribe-long-identifier-abcdefghijklmnopqrstuvwxyz')
     ) AS v(task, provider, model)
     CROSS JOIN (
       SELECT id FROM ai_providers
@@ -594,7 +592,7 @@ test.describe("mobile responsive", () => {
       await page.setViewportSize({ width, height: width <= 430 ? 844 : 1024 });
       await page.goto("/settings/ai");
       await expect(page.getByRole("heading", { name: "AI providers", level: 1 })).toBeVisible();
-      await expect(page.getByTestId("ai-task-row")).toHaveCount(8);
+      await expect(page.getByTestId("ai-task-row")).toHaveCount(6);
       await page.waitForTimeout(120);
       const metrics = await page.evaluate(() => {
         const viewport = window.innerWidth;

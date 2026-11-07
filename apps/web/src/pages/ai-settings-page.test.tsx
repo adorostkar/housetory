@@ -52,7 +52,7 @@ const settings: AiSettings = {
     task("documents", "provider-openai", "gpt-4o"),
     task("search", "provider-openai", "gpt-4o"),
     task("vision", "provider-openai", "gpt-4o"),
-    task("labels", "provider-openai", "gpt-4o"),
+    task("transcription", "provider-openai", "gpt-4o"),
   ],
 };
 

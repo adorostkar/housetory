@@ -10,10 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ..domain import AiProviderType, AiTask
+from ..domain import ACTIVE_AI_TASKS, AiProviderType, AiTask
 
 TaskState = Literal["compatible", "unverified", "incompatible", "adapter_unavailable"]
-MinimumCapability = Literal["text", "vision", "audio", "image"]
+MinimumCapability = Literal["text", "vision", "audio"]
 
 TEXT_PROVIDERS = frozenset(
     {
@@ -33,12 +33,6 @@ TRANSCRIPTION_PROVIDERS = frozenset(
         AiProviderType.OPENROUTER.value,
     }
 )
-IMAGE_PROVIDERS = frozenset(
-    {
-        AiProviderType.OPENAI.value,
-        AiProviderType.OPENROUTER.value,
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -53,12 +47,10 @@ TASK_PROFILES: dict[str, TaskProfile] = {
     AiTask.IMPORTS.value: TaskProfile("text", TEXT_PROVIDERS, frozenset({"chat"})),
     AiTask.DOCUMENTS.value: TaskProfile("text", TEXT_PROVIDERS, frozenset({"chat"})),
     AiTask.SEARCH.value: TaskProfile("text", TEXT_PROVIDERS, frozenset({"chat"})),
-    AiTask.LABELS.value: TaskProfile("text", TEXT_PROVIDERS, frozenset({"chat"})),
     AiTask.VISION.value: TaskProfile("vision", VISION_PROVIDERS, frozenset({"chat"})),
     AiTask.TRANSCRIPTION.value: TaskProfile(
         "audio", TRANSCRIPTION_PROVIDERS, frozenset({"chat", "speech"})
     ),
-    AiTask.ITEM_IMAGES.value: TaskProfile("image", IMAGE_PROVIDERS, frozenset({"image"})),
 }
 
 ADAPTER_GAP_MESSAGES = {
@@ -67,15 +59,12 @@ ADAPTER_GAP_MESSAGES = {
         "This provider is not confirmed incapable; Housetory has no transcription "
         "adapter for it yet."
     ),
-    AiTask.ITEM_IMAGES.value: (
-        "Item illustrations have adapters for OpenAI Images and OpenRouter Image API "
-        "only. This provider is not confirmed incapable; Housetory has no image "
-        "adapter for it yet."
-    ),
 }
 
 
 def task_profile(task: str) -> TaskProfile:
+    if AiTask(task).value not in {entry.value for entry in ACTIVE_AI_TASKS}:
+        raise KeyError(task)
     return TASK_PROFILES[AiTask(task).value]
 
 
@@ -156,16 +145,7 @@ def model_task_state(provider: str, task: str, model: Any | None) -> TaskState:
             return "compatible" if metadata else "unverified"
         return "unverified"
 
-    if profile.minimum == "image":
-        if kind in {"embedding", "speech"}:
-            return "incompatible"
-        if outputs or endpoints:
-            if "image" in outputs or "/api/v1/images" in endpoints:
-                return "compatible"
-            return "incompatible"
-        if kind == "image" or "image" in capabilities:
-            return "compatible" if metadata else "unverified"
-        return "unverified"
+    return "unverified"
 
     return "unverified"
 

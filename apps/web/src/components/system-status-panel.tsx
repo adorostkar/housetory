@@ -703,7 +703,7 @@ export function SystemStatusPanel({
                 requestedTestCount === 1 ? "" : "s"
               } using each task's currently selected provider and model: ${requestedTaskLabels.join(
                 ", ",
-              )}. It makes external provider calls and may incur usage or credits. It sends no inventory, photos, real documents, audio recordings, borrower data or notes. Image tests may generate one small synthetic image; transcription tests use a synthetic tone; vision tests use a synthetic image. Disabled or unconfigured tasks are skipped with a reason. A client disconnect does not cancel an in-flight provider request; refresh status afterwards to see stored results.`
+              )}. It makes external provider calls and may incur usage or credits. It sends no inventory, photos, real documents, audio recordings, borrower data or notes. Transcription tests use a synthetic tone; vision tests use a synthetic image. Disabled or unconfigured tasks are skipped with a reason. A client disconnect does not cancel an in-flight provider request; refresh status afterwards to see stored results.`
             : ""
         }
         confirmLabel={`Run ${requestedTestCount} task test${

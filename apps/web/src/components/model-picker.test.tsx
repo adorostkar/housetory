@@ -125,17 +125,6 @@ describe("ModelPicker", () => {
     expect(screen.queryByText("Text embedding 3 small")).not.toBeInTheDocument();
   });
 
-  it("filters image-output models for item illustrations", async () => {
-    render(<Harness requiredCapability="image" />);
-    const input = screen.getByRole("combobox", { name: "Test model" });
-    await userEvent.click(input);
-    const options = screen.getAllByRole("option");
-    expect(options).toHaveLength(1);
-    expect(options[0]).toHaveTextContent("Image Generation");
-    expect(screen.queryByText("Whisper Test")).not.toBeInTheDocument();
-    expect(screen.queryByText("Text Only")).not.toBeInTheDocument();
-  });
-
   it("filters audio-capable chat and speech models for transcription", async () => {
     render(<Harness requiredCapability="audio" />);
     const input = screen.getByRole("combobox", { name: "Test model" });

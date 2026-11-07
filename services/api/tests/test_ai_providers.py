@@ -30,16 +30,14 @@ def test_ai_provider_settings_encrypt_secrets_and_assign_tasks(owner_client):
     body = settings.json()
     assert body["credential_key_configured"] is True
     assert body["providers"] == []
-    assert len(body["tasks"]) == 8
+    assert len(body["tasks"]) == 6
     assert {task["task"] for task in body["tasks"]} == {
         "assistant",
         "imports",
         "documents",
         "search",
         "vision",
-        "labels",
         "transcription",
-        "item_images",
     }
 
     response = owner_client.post("/api/v1/ai/providers", json=provider_payload())
@@ -1009,27 +1007,6 @@ def test_openrouter_task_saves_require_compatible_discovered_media_models(
     )
     assert transcription.status_code == 200, transcription.text
 
-    images = owner_client.put(
-        "/api/v1/ai/tasks/item_images",
-        json={
-            "provider_id": provider["id"],
-            "model": "openai/gpt-image-test",
-            "enabled": True,
-        },
-    )
-    assert images.status_code == 200, images.text
-
-    audio_as_image = owner_client.put(
-        "/api/v1/ai/tasks/item_images",
-        json={
-            "provider_id": provider["id"],
-            "model": "openai/whisper-test",
-            "enabled": True,
-        },
-    )
-    assert audio_as_image.status_code == 422
-    assert audio_as_image.json()["detail"]["code"] == "model_capability_mismatch"
-
     image_as_transcription = owner_client.put(
         "/api/v1/ai/tasks/transcription",
         json={
@@ -1053,9 +1030,7 @@ def test_openrouter_task_saves_require_compatible_discovered_media_models(
     assert text_as_transcription.json()["detail"]["code"] == "model_capability_mismatch"
 
 
-def test_task_states_are_task_specific_and_text_only_labels_are_compatible(
-    owner_client, monkeypatch
-):
+def test_task_states_are_task_specific_and_retired_tasks_are_inert(owner_client, monkeypatch):
     provider = owner_client.post(
         "/api/v1/ai/providers",
         json=provider_payload(
@@ -1083,12 +1058,12 @@ def test_task_states_are_task_specific_and_text_only_labels_are_compatible(
     assert models.status_code == 200, models.text
     row = models.json()["models"][0]
     assert row["task_states"]["assistant"] == "compatible"
-    assert row["task_states"]["labels"] == "compatible"
     assert row["task_states"]["vision"] == "incompatible"
     assert row["task_states"]["transcription"] == "incompatible"
-    assert row["task_states"]["item_images"] == "incompatible"
+    assert "labels" not in row["task_states"]
+    assert "item_images" not in row["task_states"]
 
-    saved = owner_client.put(
+    retired = owner_client.put(
         "/api/v1/ai/tasks/labels",
         json={
             "provider_id": provider["id"],
@@ -1096,5 +1071,28 @@ def test_task_states_are_task_specific_and_text_only_labels_are_compatible(
             "enabled": True,
         },
     )
-    assert saved.status_code == 200, saved.text
-    assert saved.json()["compatibility"] == "compatible"
+    assert retired.status_code == 410
+    assert retired.json()["detail"]["code"] == "ai_task_retired"
+
+
+def test_retired_ai_tasks_return_clear_unsupported_without_live_calls(owner_client):
+    status = owner_client.get("/api/v1/ai/status?task=item_images")
+    assert status.status_code == 410
+    assert status.json()["detail"]["code"] == "ai_task_retired"
+
+    tested = owner_client.post(
+        "/api/v1/ai/tasks/labels/test",
+        json={"confirm": True},
+    )
+    assert tested.status_code == 410
+    assert tested.json()["detail"]["code"] == "ai_task_retired"
+
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    assert {task["task"] for task in settings["tasks"]} == {
+        "assistant",
+        "imports",
+        "documents",
+        "search",
+        "vision",
+        "transcription",
+    }

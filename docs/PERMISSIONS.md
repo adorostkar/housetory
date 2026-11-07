@@ -14,8 +14,8 @@ membership again. A session stores the selected household id, not a global role.
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |
 | Read item image sources/provenance and category-icon fallback | Yes | Yes | Yes |
-| Find/change/remove item reference images, use the category-icon fallback, generate/accept/reject AI illustrations, run image batches | Yes | Yes | No |
-| Change household automatic item-image lookup/generation settings and generation cap | Yes | No | No |
+| Find/change/remove item reference images, use the category-icon fallback, run reference-image batches, remove existing AI media | Yes | Yes | No |
+| Change household automatic reference-image lookup setting | Yes | No | No |
 | Create imports, scans, recognition records, OCR and summary jobs | Yes | Yes | No |
 | Generate/download label PDFs that record label timestamps | Yes | Yes | No |
 | Read/export CSV reports, preview and download evidence packages, and use read-only quick/natural search | Yes | Yes | Yes |
@@ -35,15 +35,14 @@ membership again. A session stores the selected household id, not a global role.
   account may create a household and becomes its owner; this never changes its
   role in another household. Selecting a household validates the membership
   before changing the session.
-- Item images are separate from item photographs. Reference/AI images are private
-  household/item artifacts with authenticated file routes, explicit provenance
-  and one active non-photo image per item. Viewers can read them but cannot
-  search, generate, accept/reject, remove or batch. Outbound Brave image search
-  receives minimized product text only; OpenAI Images generation receives the
-  same minimized text and requires the household Item illustrations task and
-  provider consent. Online-search settings and the encrypted Brave credential
-  are owner-only, household-scoped and write-only; members and viewers cannot
-  read or change them. Automatic reference downloads use public websites by
+- Item images are separate from item photographs. Reference images and existing
+  legacy AI illustrations are private household/item artifacts with authenticated
+  file routes, explicit provenance and one active non-photo image per item.
+  Viewers can read them but cannot search, remove or batch. New illustration
+  generation and label/container AI headlines are retired. Outbound Brave image
+  search receives minimized product text only. Online-search settings and the
+  encrypted Brave credential are owner-only, household-scoped and write-only;
+  members and viewers cannot read or change them. Automatic reference downloads use public websites by
   default with public-address/redirect validation and image re-encoding; an
   optional advanced domain restriction can narrow sources. Unknown reuse
   permission is recorded honestly. Non-photographic images are excluded from

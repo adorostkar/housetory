@@ -103,22 +103,12 @@ export function SettingsPage() {
   const [autoReference, setAutoReference] = React.useState(
     session.data?.household?.item_image_auto_reference ?? false,
   );
-  const [autoGenerate, setAutoGenerate] = React.useState(
-    session.data?.household?.item_image_auto_generate ?? false,
-  );
-  const [imageGenerationCap, setImageGenerationCap] = React.useState(
-    String(session.data?.household?.item_image_daily_generation_cap ?? 10),
-  );
 
   React.useEffect(() => {
     if (session.data?.household) {
       setHouseholdName(session.data.household.name);
       setReminderDays(String(session.data.household.warranty_reminder_days));
       setAutoReference(session.data.household.item_image_auto_reference ?? false);
-      setAutoGenerate(session.data.household.item_image_auto_generate ?? false);
-      setImageGenerationCap(
-        String(session.data.household.item_image_daily_generation_cap ?? 10),
-      );
     }
   }, [session.data?.household]);
 
@@ -126,10 +116,6 @@ export function SettingsPage() {
     !/^\d+$/.test(reminderDays) ||
     Number(reminderDays) < 1 ||
     Number(reminderDays) > 3650;
-  const imageCapInvalid =
-    !/^\d+$/.test(imageGenerationCap) ||
-    Number(imageGenerationCap) < 1 ||
-    Number(imageGenerationCap) > 100;
 
   const saveHousehold = useMutation({
     mutationFn: () =>
@@ -137,8 +123,6 @@ export function SettingsPage() {
         name: householdName.trim(),
         warranty_reminder_days: Number(reminderDays),
         item_image_auto_reference: autoReference,
-        item_image_auto_generate: autoGenerate,
-        item_image_daily_generation_cap: Number(imageGenerationCap),
       }),
     onSuccess: (household) => {
       queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
@@ -194,7 +178,7 @@ export function SettingsPage() {
             className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end"
             onSubmit={(event) => {
               event.preventDefault();
-              if (householdName.trim() && !reminderInvalid && !imageCapInvalid) {
+              if (householdName.trim() && !reminderInvalid) {
                 saveHousehold.mutate();
               }
             }}
@@ -238,13 +222,9 @@ export function SettingsPage() {
                 saveHousehold.isPending ||
                 !householdName.trim() ||
                 reminderInvalid ||
-                imageCapInvalid ||
                 (householdName.trim() === household?.name &&
                   Number(reminderDays) === household?.warranty_reminder_days &&
-                  autoReference === (household?.item_image_auto_reference ?? false) &&
-                  autoGenerate === (household?.item_image_auto_generate ?? false) &&
-                  Number(imageGenerationCap) ===
-                    (household?.item_image_daily_generation_cap ?? 10))
+                  autoReference === (household?.item_image_auto_reference ?? false))
               }
             >
               {saveHousehold.isPending && <Spinner />}
@@ -257,10 +237,9 @@ export function SettingsPage() {
           >
             <p className="text-[0.76rem] font-medium">Item images</p>
             <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
-              Item pages always expose both online image lookup and AI illustration
-              actions. They use different services and are configured separately.
-              Automatic actions run only after a new item is saved, never on every
-              keystroke. Reference images are tried before AI illustrations.
+              Item pages use actual photos first, then a public reference image, then a
+              category icon. Existing AI illustrations remain viewable and removable;
+              new illustration generation was retired.
             </p>
             <div className="mt-3 rounded-lg border border-border/60 bg-background/30 p-3">
               <p className="text-[0.72rem] font-medium">Online reference-image lookup</p>
@@ -274,24 +253,8 @@ export function SettingsPage() {
                 </Link>
                 : add one Brave Search key. Reference-image lookup searches public
                 websites automatically by default; an optional advanced source
-                restriction can narrow downloads. AI provider credentials do not enable
-                online lookup.
+                restriction can narrow downloads.
               </p>
-            </div>
-            <div className="mt-2 rounded-lg border border-border/60 bg-background/30 p-3">
-              <p className="text-[0.72rem] font-medium">AI illustrations</p>
-              <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
-                Requires the household Item illustrations task with an image-output
-                model and provider consent. Online-search credentials do not enable AI
-                generation. Generated previews remain pending until you explicitly
-                accept one.
-              </p>
-              <Link
-                to="/settings/ai"
-                className="mt-1.5 inline-block text-[0.66rem] underline underline-offset-4 hover:text-foreground"
-              >
-                Configure AI providers
-              </Link>
             </div>
             <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
               <input
@@ -309,41 +272,6 @@ export function SettingsPage() {
                 </span>
               </span>
             </label>
-            <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-4 rounded border-border"
-                checked={autoGenerate}
-                disabled={!isOwner || saveHousehold.isPending}
-                onChange={(event) => setAutoGenerate(event.target.checked)}
-              />
-              <span>
-                Fall back to an AI illustration when no reference is selected
-                <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
-                  Off by default. Requires the household Item illustrations task and
-                  provider consent. A hard daily generation count cap applies; provider
-                  billing cannot be estimated reliably.
-                </span>
-              </span>
-            </label>
-            <div className="mt-3 max-w-[220px]">
-              <Field
-                label="Daily AI illustration cap"
-                htmlFor="item-image-generation-cap"
-                hint="Hard count, 1–100"
-                error={imageCapInvalid ? "Enter 1–100." : undefined}
-              >
-                <Input
-                  id="item-image-generation-cap"
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={imageGenerationCap}
-                  disabled={!isOwner || saveHousehold.isPending}
-                  onChange={(event) => setImageGenerationCap(event.target.value)}
-                />
-              </Field>
-            </div>
           </div>
           {generalError && <div className="mt-3"><FormError message={generalError} /></div>}
           <div className="max-w-sm">

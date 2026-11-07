@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
-from ..domain import AiTask
+from ..domain import RETIRED_AI_TASKS, AiTask
 from ..models import AiTaskSetting
 from ..schemas.ai_settings import AiTaskTestOut
 from . import ai, transcription
@@ -114,16 +114,6 @@ def _transcription_test(config) -> str:
         path.unlink(missing_ok=True)
 
 
-def _image_test(config) -> str:
-    image = ai.generate_image(
-        "A plain medium-gray square centered on a white background, minimal icon.",
-        config=config,
-    )
-    if not image:
-        raise ai.AiInvalidOutput("The image provider returned no image bytes.")
-    return "The provider returned a generated image."
-
-
 def run_task_test(
     db: Session,
     household_id: uuid.UUID,
@@ -135,6 +125,13 @@ def run_task_test(
         task = AiTask(task).value
     except ValueError:
         raise ApiError(422, "invalid_ai_task", "Choose a valid AI task.") from None
+    if task in {retired.value for retired in RETIRED_AI_TASKS}:
+        raise ApiError(
+            410,
+            "ai_task_retired",
+            "This AI task was retired. Existing results remain readable, but it "
+            "cannot be configured or tested anymore.",
+        )
     if not confirm:
         raise ApiError(
             422,
@@ -192,10 +189,8 @@ def run_task_test(
             message = _text_test(config)
         elif profile.minimum == "vision":
             message = _vision_test(config)
-        elif profile.minimum == "audio":
-            message = _transcription_test(config)
         else:
-            message = _image_test(config)
+            message = _transcription_test(config)
         status = "passed"
     except ai.AiError as exc:
         status, message = _status_for_error(exc)

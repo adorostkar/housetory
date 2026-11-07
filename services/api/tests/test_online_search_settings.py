@@ -383,7 +383,7 @@ def test_shared_brave_credential_and_worker_pick_up_changes_immediately(owner_cl
 
     owner_client.patch(
         "/api/v1/household",
-        json={"item_image_auto_reference": True, "item_image_auto_generate": False},
+        json={"item_image_auto_reference": True},
     )
     room = _create_room(owner_client, "Worker room")
     item = _create_item(
@@ -424,7 +424,7 @@ def test_shared_brave_credential_and_worker_pick_up_changes_immediately(owner_cl
         assert manual.kind == "none" and manual.source == "household"
         assert image.kind == "none" and image.source == "household"
 
-    assert run_new_item_job(payload) == {"status": "skipped"}
+    assert run_new_item_job(payload)["status"] == "skipped"
 
     enabled = _save(
         owner_client,

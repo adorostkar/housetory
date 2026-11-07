@@ -759,11 +759,11 @@ development and nginx proxies in production. No CORS allowlist is needed.
 - The login rate limiter is process-local and resets on restart; it is not a
   substitute for Tailscale ACLs. Setup is not rate-limited and can be claimed
   before the first owner exists.
-- Container summaries/AI headlines can be stale until regenerated. Printed
-  labels intentionally show only the permanent identifier, optional name and live
-  QR, so content movement does not invalidate them. Actual physical printer
-  alignment depends on the printer and must be checked with the calibration
-  sheet at 100% scale.
+- Container contents counts and category totals are derived live from current
+  items, with no saved snapshot to become stale. Printed labels intentionally show
+  only the permanent identifier, optional name and live QR, so content movement
+  does not invalidate them. Actual physical printer alignment depends on the
+  printer and must be checked with the calibration sheet at 100% scale.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
   attachments but may still contain malicious content when opened in a PDF
   reader. OCR parses untrusted documents locally in the worker; keep the worker

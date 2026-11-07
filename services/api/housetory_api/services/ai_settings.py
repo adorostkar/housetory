@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..config import get_settings
-from ..domain import AiProviderType, AiTask
+from ..domain import ACTIVE_AI_TASKS, RETIRED_AI_TASKS, AiProviderType, AiTask
 from ..models import AiProvider, AiTaskSetting, HouseholdOnlineSearchSettings
 from ..schemas.ai_settings import (
     AiModelOut,
@@ -59,9 +59,7 @@ TASK_LABELS = {
     AiTask.DOCUMENTS.value: "Document interpretation",
     AiTask.SEARCH.value: "Natural-language search",
     AiTask.VISION.value: "Image recognition",
-    AiTask.LABELS.value: "Label summary headlines",
     AiTask.TRANSCRIPTION.value: "Voice transcription",
-    AiTask.ITEM_IMAGES.value: "Item illustrations",
 }
 
 MODEL_CACHE_TTL_SECONDS = 300
@@ -109,9 +107,7 @@ TASK_CAPABILITY = {
     AiTask.DOCUMENTS.value: "text",
     AiTask.SEARCH.value: "text",
     AiTask.VISION.value: "vision",
-    AiTask.LABELS.value: "text",
     AiTask.TRANSCRIPTION.value: "audio",
-    AiTask.ITEM_IMAGES.value: "image",
 }
 
 
@@ -242,7 +238,7 @@ def _assign_default_tasks(db: Session, household_id: uuid.UUID, provider: AiProv
     if not provider.default_model or not provider.enabled:
         return
     capabilities = model_capabilities(provider.provider, provider.default_model)
-    for task in TASK_LABELS:
+    for task in (entry.value for entry in ACTIVE_AI_TASKS):
         # Audio transcription is deliberately opt-in: a chat model is not proof
         # that the account can transcribe audio.
         if task == AiTask.TRANSCRIPTION.value:
@@ -373,6 +369,13 @@ def update_task(
         task = AiTask(task).value
     except ValueError:
         raise ApiError(422, "invalid_ai_task", "Choose a valid AI task.") from None
+    if task in {retired.value for retired in RETIRED_AI_TASKS}:
+        raise ApiError(
+            410,
+            "ai_task_retired",
+            "This AI task was retired. Existing results remain readable, but it "
+            "cannot be configured or tested anymore.",
+        )
     provider = None
     if payload.provider_id is not None:
         provider = _provider_or_404(db, household_id, payload.provider_id)

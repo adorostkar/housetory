@@ -112,9 +112,7 @@ test("status screen shows real readiness and task states; optional features are 
   await expect(
     page.getByRole("button", { name: "Find online image" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Generate illustration" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);
   await expect(page.getByText("Setup required").first()).toBeVisible();
   await page.getByRole("button", { name: "Find online image" }).click();
   await expect(
@@ -127,16 +125,6 @@ test("status screen shows real readiness and task states; optional features are 
     path: "../../docs/walkthrough/local-polish/04-image-lookup-setup-light.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Generate illustration" }).click();
-  await expect(page.getByText("AI illustration setup required")).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Open AI provider settings" }),
-  ).toHaveAttribute("href", "/settings/ai");
-  await page.screenshot({
-    path: "../../docs/walkthrough/local-polish/05-image-generation-setup-light.png",
-    fullPage: false,
-  });
-
   await page.goto("/voice");
   await expect(
     page.getByRole("heading", { name: "Voice transcription is not set up" }),

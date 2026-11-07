@@ -7,12 +7,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 let fixtureServer: http.Server;
 let fixturePort = 0;
 let sttRequests: Array<Record<string, unknown>> = [];
-let imageRequests: Array<Record<string, unknown>> = [];
 
-const PNG_64X48 = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAAaElEQVR4nNXOQREAIAzAsFKZiEAJohGxB9coyNr3UCZxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEidxEufvwNQD/V4BtOYVtIgAAAAASUVORK5CYII=",
-  "base64",
-);
 
 const AUDIO_CHAT_MODEL = {
   id: "openai/audio-chat",
@@ -106,32 +101,6 @@ test.beforeAll(async () => {
         JSON.stringify({
           text: "There is a cordless drill in the office.",
           usage: { seconds: 3.2, cost: 0.0001 },
-        }),
-      );
-      return;
-    }
-    if (request.method === "POST" && url.pathname === "/api/v1/images") {
-      const body = JSON.parse(bodyText || "{}") as Record<string, unknown>;
-      imageRequests.push(body);
-      if (body.model === "openai/image-error") {
-        response.statusCode = 400;
-        response.end(
-          JSON.stringify({
-            error: { message: "fixture image generation failure", code: 400 },
-          }),
-        );
-        return;
-      }
-      response.end(
-        JSON.stringify({
-          created: 1748372400,
-          data: [
-            {
-              b64_json: PNG_64X48.toString("base64"),
-              media_type: "image/png",
-            },
-          ],
-          usage: { cost: 0.01 },
         }),
       );
       return;
@@ -279,7 +248,7 @@ async function waitForTranscription(
   throw new Error("Voice transcription did not finish.");
 }
 
-test("OpenRouter audio and image models configure, transcribe and generate locally", async ({
+test("OpenRouter audio models configure and transcribe locally", async ({
   page,
   request,
 }) => {
@@ -329,16 +298,6 @@ test("OpenRouter audio and image models configure, transcribe and generate local
     "Whisper Test",
     ["Image Test", "Text Chat"],
   );
-  await configureTask(
-    page,
-    provider.id,
-    "Item illustrations",
-    "Image Test",
-    ["Whisper Test", "Audio Chat", "Text Chat"],
-  );
-  await expect(page.getByText("Item illustrations updated")).toHaveCount(0, {
-    timeout: 7_000,
-  });
   await page.setViewportSize({ width: 1440, height: 1400 });
   await page.getByText("Task defaults", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({
@@ -392,48 +351,8 @@ test("OpenRouter audio and image models configure, transcribe and generate local
   });
 
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByRole("button", { name: "Generate illustration" })).toBeEnabled();
-  await page.getByRole("button", { name: "Generate illustration" }).click();
-  await expect(page.getByText("AI illustration preview")).toBeVisible();
-  await page.screenshot({
-    path: "../../docs/walkthrough/openrouter-media/03-image-preview-light.png",
-    fullPage: false,
-  });
-  await page.getByRole("button", { name: "Use", exact: true }).click();
-  await expect(page.getByText("AI illustration").first()).toBeVisible();
-  await expect(page.getByText(/not a photo/).first()).toBeVisible();
-  expect(imageRequests.length).toBeGreaterThan(0);
-  expect(imageRequests.at(-1)?.["model"]).toBe("openai/image-test");
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
-  await page.locator("html.dark").waitFor();
-  await page.waitForTimeout(350);
-  await page.screenshot({
-    path: "../../docs/walkthrough/openrouter-media/04-image-accepted-dark.png",
-    fullPage: false,
-  });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
-
-  const errorTask = await request.put("/api/v1/ai/tasks/item_images", {
-    data: {
-      provider_id: provider.id,
-      model: "openai/image-error",
-      enabled: true,
-    },
-  });
-  expect(errorTask.ok()).toBeTruthy();
-  await page.reload();
-  await page.getByRole("button", { name: "Generate illustration" }).click();
-  await expect(
-    page.getByText(/did not return a usable image|HTTP 400/).first(),
-  ).toBeVisible();
-  const restored = await request.put("/api/v1/ai/tasks/item_images", {
-    data: {
-      provider_id: provider.id,
-      model: "openai/image-test",
-      enabled: true,
-    },
-  });
-  expect(restored.ok()).toBeTruthy();
+  await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Find online image/ })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/ai");

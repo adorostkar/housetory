@@ -48,8 +48,8 @@ const statusFixture = {
       model: "vision-fixture-model",
       model_label: "Vision Fixture Model",
     }),
-    task("labels", "Label suggestions", { enabled: false }),
-    task("search", "Search summaries", {
+    task("documents", "Document interpretation", { enabled: false }),
+    task("search", "Natural-language search", {
       enabled: true,
       configured: false,
       provider_label: null,

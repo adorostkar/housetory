@@ -5,6 +5,11 @@ Status is deliberately honest: Core Inventory is complete and verified, but the
 product is not finished. Earlier platform milestones used different phase numbers;
 the product-facing numbering below follows the delivery brief.
 
+> Historical checklist: later simplification batches retired some previously
+> delivered capabilities, including item illustration generation, AI label/container
+> headlines and saved-summary management. The current README and topic docs
+> describe active behavior; entries below record what was delivered at the time.
+
 ## Working agreement
 
 - Preserve data. Migrations are append-only once deployed.
@@ -1760,6 +1765,11 @@ rules are in `docs/ITEM_IMAGES.md`.
   derivatives. The same lookup is deduplicated and reused within a household only.
 
 ### Stage C — AI illustrations and automation
+
+> Retired in simplification batch 1. The items below are historical; new
+> illustration generation, pending-preview acceptance, automatic AI fallback,
+> daily caps and bulk generation are no longer active. Existing AI media remains
+> readable/removable and reference-image lookup is unchanged.
 
 - [x] Added the Item illustrations AI task using the documented OpenAI Images API
   (`/images/generations`, inline `b64_json` only), not chat-completion output.

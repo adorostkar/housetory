@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..domain import AiProviderType, AiTask
+from ..domain import ACTIVE_AI_TASKS, AiProviderType
 from ..schemas.common import Name, trimmed
 
 AiTaskName = Literal[
@@ -13,9 +13,7 @@ AiTaskName = Literal[
     "documents",
     "search",
     "vision",
-    "labels",
     "transcription",
-    "item_images",
 ]
 
 
@@ -147,4 +145,4 @@ class AiSettingsModels(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-TASKS: tuple[str, ...] = tuple(task.value for task in AiTask)
+TASKS: tuple[str, ...] = tuple(task.value for task in ACTIVE_AI_TASKS)

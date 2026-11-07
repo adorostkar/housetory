@@ -99,20 +99,12 @@ function imageState(
     actual_photo_count: 0,
     image: selected,
     selected,
-    pending: [],
     settings: {
       auto_reference: false,
-      auto_generate: false,
-      daily_generation_cap: 10,
-      daily_generations_used: 0,
-      daily_generations_remaining: 10,
     },
     search_configured: true,
     search_provider_label: "Brave Image Search API",
     search_reason: null,
-    generation_configured: true,
-    generation_provider_label: "OpenAI Images",
-    generation_reason: null,
     ...overrides,
   };
 }
@@ -258,7 +250,7 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   });
 });
 
-test("manual AI preview, explicit accept, and unconfigured search state", async ({
+test("existing AI illustration remains readable without a generation workflow", async ({
   page,
   request,
 }) => {
@@ -272,78 +264,49 @@ test("manual AI preview, explicit accept, and unconfigured search state", async 
     description: "Oak frame, pale fabric, reading chair for the study",
   });
   await mockImageAsset(page, "ai");
-  const emptyState = imageState(item.item.id, null, {
+  const activeImage = image("ai", { id: "image-ai", status: "active" });
+  const state = imageState(item.item.id, activeImage, {
     search_configured: false,
     search_reason: "Reference-image search is disabled in Settings → Online search.",
   });
-  const pendingImage = image("ai", { id: "image-ai", status: "pending" });
-  const activeImage = image("ai", { id: "image-ai", status: "active" });
   await page.route(new RegExp(`/api/v1/items/${item.item.id}/image$`), async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, json: emptyState });
+      await route.fulfill({ status: 200, json: state });
     } else {
       await route.continue();
     }
   });
-  await page.route(
-    new RegExp(`/api/v1/items/${item.item.id}/illustration$`),
-    async (route) => {
-      await route.fulfill({
-        status: 200,
-        json: imageState(item.item.id, null, {
-          search_configured: false,
-          pending: [pendingImage],
-        }),
-      });
-    },
-  );
-  await page.route(
-    new RegExp(`/api/v1/items/${item.item.id}/images/image-ai/accept$`),
-    async (route) => {
-      await route.fulfill({
-        status: 200,
-        json: imageState(item.item.id, activeImage, {
-          search_configured: false,
-          generation_configured: true,
-        }),
-      });
-    },
-  );
+  const detailResponse = await request.get(`/api/v1/items/${item.item.id}`);
+  const detail = await detailResponse.json();
+  await page.route(new RegExp(`/api/v1/items/${item.item.id}$`), async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      json: {
+        item: {
+          ...detail.item,
+          primary_photo: null,
+          representative_image: activeImage,
+        },
+      },
+    });
+  });
 
   await page.goto(`/items/${item.item.id}`);
-  await page.getByRole("button", { name: "Find online image" }).click();
-  await expect(page.getByText("Online image lookup setup required")).toBeVisible();
-  await expect(
-    page.getByText(/Reference-image search is disabled in Settings/i),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Open online search settings" }),
-  ).toHaveAttribute("href", "/settings#online-search");
-  await expect(
-    page.getByRole("button", { name: "Find online image" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Generate illustration" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Generate illustration" }).click();
-  await expect(page.getByText("AI illustration preview")).toBeVisible();
-  await expect(
-    page.getByRole("img", { name: "Pending AI illustration preview" }),
-  ).toHaveClass(/object-contain/);
-  await page.screenshot({
-    path: "../../docs/walkthrough/item-images/08-ai-preview-light.png",
-    fullPage: false,
-  });
-  await page.getByRole("button", { name: "Use", exact: true }).click();
   await expect(page.getByText("AI illustration").first()).toBeVisible();
   await expect(page.getByText(/not a photo/).first()).toBeVisible();
+  await expect(page.getByText(/new illustrations are no longer generated/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Find online image/ })).toBeVisible();
+  await page.getByRole("button", { name: "Find online image" }).click();
+  await expect(page.getByText("Online image lookup setup required")).toBeVisible();
   await page.screenshot({
-    path: "../../docs/walkthrough/item-images/09-ai-accepted-light.png",
+    path: "../../docs/walkthrough/item-images/08-existing-ai-illustration.png",
     fullPage: false,
   });
 });
 
-test("household image settings and explicit batch cancellation", async ({ page, request }) => {
+test("household reference image setting and explicit batch cancellation", async ({ page, request }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("housetory-theme", "light");
   });
@@ -351,10 +314,6 @@ test("household image settings and explicit batch cancellation", async ({ page, 
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   const autoReference = page.getByLabel(/Automatically find a reference image/);
   if (!(await autoReference.isChecked())) await autoReference.check();
-  const autoGenerate = page.getByLabel(/Fall back to an AI illustration/);
-  if (!(await autoGenerate.isChecked())) await autoGenerate.check();
-  const cap = String(3 + (Date.now() % 80));
-  await page.getByLabel(/Daily AI illustration cap/).fill(cap);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Household settings updated")).toBeVisible();
   await page.screenshot({
@@ -380,9 +339,6 @@ test("household image settings and explicit batch cancellation", async ({ page, 
         eligible_count: 2,
         skipped_has_photo: 0,
         skipped_unavailable: 0,
-        estimated_generations: 0,
-        daily_generation_remaining: 2,
-        hard_cap: 50,
         notices: [],
       },
     }),
@@ -493,14 +449,13 @@ test("item cards and compact list rows use the category icon fallback", async ({
   });
 });
 
-test("existing item generation stays opt-in and no external provider is required", async ({
+test("existing item reference lookup stays opt-in and no external provider is required", async ({
   request,
 }) => {
   await request.patch("/api/v1/household", {
     headers: await currentHeaders(request),
     data: {
       item_image_auto_reference: false,
-      item_image_auto_generate: false,
     },
   });
   const id = suffix();
@@ -513,5 +468,5 @@ test("existing item generation stays opt-in and no external provider is required
   const body = await state.json();
   expect(body["selected"]).toBeNull();
   expect(body["image"]).toBeNull();
-  expect(body["generation_configured"]).toBe(false);
+  expect(body["settings"]["auto_reference"]).toBe(false);
 });

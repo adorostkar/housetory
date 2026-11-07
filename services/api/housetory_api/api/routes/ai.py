@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...db import get_db
-from ...domain import RecognitionStatus
+from ...domain import RETIRED_AI_TASKS, RecognitionStatus
 from ...models import AiRecognition
 from ...schemas.ai import (
     AiRecognitionApplyRequest,
@@ -64,6 +64,13 @@ def ai_status(
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiStatus:
+    if task in {retired.value for retired in RETIRED_AI_TASKS}:
+        raise ApiError(
+            410,
+            "ai_task_retired",
+            "This AI task was retired. Existing results remain readable, but it "
+            "cannot be configured or tested anymore.",
+        )
     return ai_service.provider_status(
         probe=True,
         db=db,

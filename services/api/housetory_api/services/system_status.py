@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .. import __version__
 from ..api.errors import ApiError
 from ..config import get_settings
-from ..domain import AiTask, JobStatus
+from ..domain import ACTIVE_AI_TASKS, JobStatus
 from ..models import Job, WorkerHeartbeat
 from ..schemas.system import (
     ExternalServiceStatus,
@@ -31,16 +31,7 @@ from . import ai, item_image_search, manual_web
 from . import ai_settings as settings_service
 from .inventory_review_schedule import schedule_summary
 
-TASK_ORDER = (
-    AiTask.ASSISTANT.value,
-    AiTask.DOCUMENTS.value,
-    AiTask.IMPORTS.value,
-    AiTask.ITEM_IMAGES.value,
-    AiTask.LABELS.value,
-    AiTask.SEARCH.value,
-    AiTask.TRANSCRIPTION.value,
-    AiTask.VISION.value,
-)
+TASK_ORDER = tuple(task.value for task in ACTIVE_AI_TASKS)
 
 
 def _release() -> ReleaseStatus:

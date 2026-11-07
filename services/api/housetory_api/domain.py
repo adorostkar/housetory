@@ -198,6 +198,17 @@ class AiTask(StrEnum):
     ITEM_IMAGES = "item_images"
 
 
+ACTIVE_AI_TASKS = (
+    AiTask.ASSISTANT,
+    AiTask.IMPORTS,
+    AiTask.DOCUMENTS,
+    AiTask.SEARCH,
+    AiTask.VISION,
+    AiTask.TRANSCRIPTION,
+)
+RETIRED_AI_TASKS = (AiTask.LABELS, AiTask.ITEM_IMAGES)
+
+
 class VoiceNoteStatus(StrEnum):
     QUEUED = "queued"
     TRANSCRIBING = "transcribing"

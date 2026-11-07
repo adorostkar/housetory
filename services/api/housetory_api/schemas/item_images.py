@@ -32,10 +32,6 @@ class ItemImageOut(BaseModel):
 
 class ItemImageSettingsOut(BaseModel):
     auto_reference: bool = False
-    auto_generate: bool = False
-    daily_generation_cap: int = 10
-    daily_generations_used: int = 0
-    daily_generations_remaining: int = 10
 
 
 class ItemImageState(BaseModel):
@@ -43,14 +39,10 @@ class ItemImageState(BaseModel):
     actual_photo_count: int = 0
     image: ItemImageOut | None = None
     selected: ItemImageOut | None = None
-    pending: list[ItemImageOut] = Field(default_factory=list)
     settings: ItemImageSettingsOut
     search_configured: bool = False
     search_provider_label: str | None = None
     search_reason: str | None = None
-    generation_configured: bool = False
-    generation_provider_label: str | None = None
-    generation_reason: str | None = None
 
 
 class ItemImageFindRequest(BaseModel):
@@ -63,14 +55,11 @@ class ItemImageBatchPreviewRequest(BaseModel):
 
 
 class ItemImageBatchPreview(BaseModel):
-    action: Literal["reference", "illustration"]
+    action: Literal["reference"]
     selected_count: int
     eligible_count: int
     skipped_has_photo: int
     skipped_unavailable: int
-    estimated_generations: int
-    daily_generation_remaining: int
-    hard_cap: int
     notices: list[str] = Field(default_factory=list)
 
 

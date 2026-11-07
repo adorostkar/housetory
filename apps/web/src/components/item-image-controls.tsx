@@ -1,12 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  Check,
-  Globe2,
-  ImageOff,
-  Info,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
+import { Globe2, ImageOff, Info, Trash2 } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -15,11 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
-import {
-  queryKeys,
-  useCanWrite,
-  useItemImage,
-} from "@/lib/queries";
+import { queryKeys, useCanWrite, useItemImage } from "@/lib/queries";
 import type { ItemImage, ItemImageState } from "@/lib/types";
 
 function sourceNote(image: ItemImage) {
@@ -31,66 +20,13 @@ function sourceNote(image: ItemImage) {
   return `AI illustration${image.provider_label ? ` · ${image.provider_label}` : ""} · not a photo`;
 }
 
-function PendingPreview({
-  image,
-  busy,
-  canWrite,
-  onAccept,
-  onReject,
-}: {
-  image: ItemImage;
-  busy: boolean;
-  canWrite: boolean;
-  onAccept: () => void;
-  onReject: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/65 bg-background/45 p-2.5">
-      {image.thumbnail_url ? (
-        <img
-          src={image.thumbnail_url}
-          alt="Pending AI illustration preview"
-          className="size-16 rounded-lg border border-border/60 bg-secondary/30 object-contain p-1"
-        />
-      ) : null}
-      <div className="min-w-0 flex-1">
-        <p className="text-[0.74rem] font-medium">AI illustration preview</p>
-        <p className="text-[0.66rem] text-muted-foreground">
-          Generated from product text only. Review before using it on cards.
-        </p>
-      </div>
-      {canWrite ? (
-        <div className="flex gap-1.5">
-          <Button type="button" size="sm" disabled={busy} onClick={onAccept}>
-            {busy ? <Spinner /> : <Check />}
-            Use
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={onReject}
-          >
-            Reject
-          </Button>
-        </div>
-      ) : (
-        <Badge variant="outline">Awaiting review</Badge>
-      )}
-    </div>
-  );
-}
-
 export function ItemImageControls({ itemId }: { itemId: string }) {
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const imageQuery = useItemImage(itemId);
   const state = imageQuery.data;
   const [busyAction, setBusyAction] = React.useState<string | null>(null);
-  const [setupAction, setSetupAction] = React.useState<
-    "search" | "generation" | null
-  >(null);
+  const [showSearchSetup, setShowSearchSetup] = React.useState(false);
 
   const setState = (next: ItemImageState) => {
     queryClient.setQueryData(queryKeys.itemImage(itemId), next);
@@ -124,32 +60,11 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
         : "Reference image added",
     );
 
-  const generate = () =>
-    run(
-      "generate",
-      () => api.post<ItemImageState>(`/items/${itemId}/illustration`),
-      "Illustration generated for review",
-    );
-
   const remove = () =>
     run(
       "remove",
       () => api.delete<ItemImageState>(`/items/${itemId}/image`),
       "Selected image removed",
-    );
-
-  const accept = (imageId: string) =>
-    run(
-      "accept",
-      () => api.post<ItemImageState>(`/items/${itemId}/images/${imageId}/accept`),
-      "AI illustration accepted",
-    );
-
-  const reject = (imageId: string) =>
-    run(
-      "reject",
-      () => api.delete<ItemImageState>(`/items/${itemId}/images/${imageId}`),
-      "Pending illustration discarded",
     );
 
   if (imageQuery.isPending) return null;
@@ -163,7 +78,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       ? image.source_page_url
       : null;
   const searchReady = state.search_configured;
-  const generationReady = state.generation_configured;
 
   return (
     <section
@@ -181,14 +95,12 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
         ) : (
           <Badge variant="outline">Category icon</Badge>
         )}
-        {actual && (
-          <Badge variant="sage">Actual photo is used</Badge>
-        )}
+        {actual && <Badge variant="sage">Actual photo is used</Badge>}
       </div>
 
       <p className="mt-1.5 text-[0.7rem] leading-relaxed text-muted-foreground">
         {actual
-          ? "Your actual photograph always takes priority over reference images and illustrations."
+          ? "Your actual photograph always takes priority over reference images and existing AI illustrations."
           : image
             ? sourceNote(image)
             : "No photograph or selected reference/AI image. A category icon is shown."}
@@ -236,23 +148,10 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
         )}
       {!actual && image?.source_type === "ai" && (
         <p className="mt-1 text-[0.66rem] text-muted-foreground">
-          Generated image; it is not evidence of the item's condition or exact model.
+          This existing AI illustration is not evidence of the item's condition or
+          exact model. It remains viewable and removable; new illustrations are no
+          longer generated.
         </p>
-      )}
-
-      {!actual && state.pending.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {state.pending.slice(0, 2).map((pending) => (
-            <PendingPreview
-              key={pending.id ?? pending.created_at ?? "pending"}
-              image={pending}
-              busy={busy}
-              canWrite={canWrite}
-              onAccept={() => pending.id && accept(pending.id)}
-              onReject={() => pending.id && reject(pending.id)}
-            />
-          ))}
-        </div>
       )}
 
       {canWrite && !actual && (
@@ -267,12 +166,10 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
                 title={searchReady ? undefined : state.search_reason ?? undefined}
                 onClick={() => {
                   if (!searchReady) {
-                    setSetupAction((current) =>
-                      current === "search" ? null : "search",
-                    );
+                    setShowSearchSetup((current) => !current);
                     return;
                   }
-                  setSetupAction(null);
+                  setShowSearchSetup(false);
                   void findImage();
                 }}
               >
@@ -282,35 +179,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
                   : "Find online image"}
               </Button>
               {!searchReady && (
-                <Badge variant="brass" className="text-[0.58rem]">
-                  Setup required
-                </Badge>
-              )}
-            </div>
-            <div className="inline-flex flex-wrap items-center gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                title={generationReady ? undefined : state.generation_reason ?? undefined}
-                onClick={() => {
-                  if (!generationReady) {
-                    setSetupAction((current) =>
-                      current === "generation" ? null : "generation",
-                    );
-                    return;
-                  }
-                  setSetupAction(null);
-                  void generate();
-                }}
-              >
-                {busyAction === "generate" ? <Spinner /> : <Sparkles />}
-                {state.pending.length > 0
-                  ? "Generate another"
-                  : "Generate illustration"}
-              </Button>
-              {!generationReady && (
                 <Badge variant="brass" className="text-[0.58rem]">
                   Setup required
                 </Badge>
@@ -330,7 +198,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
             )}
           </div>
 
-          {setupAction === "search" && !searchReady && (
+          {showSearchSetup && !searchReady && (
             <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-[0.7rem] leading-relaxed">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground/85">
@@ -343,38 +211,13 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
                   "Online reference-image lookup is not configured for this household."}
               </p>
               <p className="mt-1.5 text-muted-foreground">
-                This is separate from AI generation. The household owner can enable
-                reference-image lookup in Online search settings. It searches public
-                websites by default and automatically selects one suitable image; an
-                optional domain restriction can narrow sources. An AI provider key
-                does not enable online lookup.
+                The household owner can enable reference-image lookup in Online
+                search settings. It searches public websites by default and
+                automatically selects one suitable image; an optional domain
+                restriction can narrow sources.
               </p>
               <Button className="mt-2" size="sm" variant="outline" asChild>
                 <Link to="/settings#online-search">Open online search settings</Link>
-              </Button>
-            </div>
-          )}
-
-          {setupAction === "generation" && !generationReady && (
-            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-[0.7rem] leading-relaxed">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium text-foreground/85">
-                  AI illustration setup required
-                </p>
-                <Badge variant="brass">AI task configuration</Badge>
-              </div>
-              <p className="mt-1 break-words text-muted-foreground">
-                {state.generation_reason ??
-                  "AI illustration generation is not configured for this household."}
-              </p>
-              <p className="mt-1.5 text-muted-foreground">
-                This is separate from online image lookup. Configure the household
-                Item illustrations task with an image-output model and provider
-                consent. An online image-search key does not enable AI generation.
-                Generated previews stay pending until you explicitly accept one.
-              </p>
-              <Button className="mt-2" size="sm" variant="outline" asChild>
-                <Link to="/settings/ai">Open AI provider settings</Link>
               </Button>
             </div>
           )}
@@ -400,7 +243,6 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           Remove stored image
         </Button>
       )}
-
     </section>
   );
 }

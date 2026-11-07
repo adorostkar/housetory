@@ -38,7 +38,7 @@ The 320px document width now matches the viewport.
 ## AI task rows at intermediate widths
 
 The `/settings/ai` task rows previously switched to a four-column layout at the
-`sm` breakpoint. With real provider labels and eight task settings, the fixed
+`sm` breakpoint. With real provider labels and six active task settings, the fixed
 `auto` action group (Save + Test, about 208px wide) extended past the card at 768px
 and at 1024px where the desktop sidebar appears.
 
@@ -47,7 +47,7 @@ The row now stays in a safe wrapped layout until the `xl` breakpoint, with
 action group whose Save/Test buttons remain intact. At `xl` the four-column row is
 used only when enough width exists.
 
-Measured at 768px with two providers and eight tasks:
+Measured at 768px with two providers and six active tasks:
 
 | Measurement | Before | After |
 | --- | ---: | ---: |
@@ -131,7 +131,7 @@ Results:
 
 - Chromium mobile/tablet matrix: pass
 - WebKit 27.2 mobile/tablet matrix with touch and DPR 3: pass
-- Full checked-in Playwright suite: **78 workflows, 77 passed, 1 fixture-dependent skip**
+- Full checked-in Playwright suite: **79 workflows, 78 passed, 1 fixture-dependent skip**
 - Desktop 1440 regression: compact controls and no mobile bar
 
 ## Screenshots

@@ -600,8 +600,9 @@ Residual Phase 5 risks:
   remains operator-dependent; use the calibration sheet at 100% scale.
 - Printed text is a snapshot and can become stale. The UI flags it and the QR
   always opens live data, but a person reading only the label may see old text.
-- Summaries and AI headlines are heuristic/user-editable. AI cannot add printed
-  item lines, but it can still phrase a headline poorly.
+- Container contents counts are derived live from current items. Saved summary
+  snapshots, manual summary editing and AI headlines were retired; no printed
+  item lines or current contents are included in labels.
 - Container moves are serialized per household; large hierarchies or very large
   item sets increase lock duration. Limits and transactional rollback prevent
   corruption but not temporary contention.

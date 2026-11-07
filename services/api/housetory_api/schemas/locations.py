@@ -34,8 +34,6 @@ class StorageLocationOut(ORMModel):
     is_container: bool = False
     container_type: str | None = None
     identifier: str | None = None
-    summary_headline: str | None = None
-    summary_short: str | None = None
     label_generated_at: datetime | None = None
     sort_order: int
     item_count: int = 0

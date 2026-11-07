@@ -1,4 +1,4 @@
-# Item images, references and illustrations
+# Item images and references
 
 Item images are display aids, not physical evidence. They never replace user
 photographs, change inventory facts, or count as a stocktake/evidence observation.
@@ -9,7 +9,7 @@ photographs, change inventory facts, or count as a stocktake/evidence observatio
 | --- | --- | --- |
 | 1 | **Actual photo** (`item_photos`) | A user upload of the real unit. May show condition, colour and wear. |
 | 2 | **Reference image** (`item_images`, `reference`) | A downloaded product image with recorded source/provenance. Not proof of the exact unit or condition. |
-| 3 | **AI illustration** (`item_images`, `ai`) | An accepted generated illustration from product text. Not a photo and never an exact-model claim. |
+| 3 | **Existing AI illustration** (`item_images`, `ai`) | Legacy generated media from before illustration generation was retired. It remains viewable/removable, is not a photo, and never claims the exact model. New generation is not available. |
 | 4 | **Category icon** | A simple Lucide icon based on the item's category when no actual photo or selected reference/AI image exists. |
 
 The detail page always uses the actual photo gallery first. Non-photographic
@@ -206,86 +206,53 @@ domain restriction is set, the asset host must remain inside it.
 - If an actual photo is added before or during lookup, the actual photo wins and
   the stale reference result is not attached.
 
-## AI item illustrations
+## Retired AI item illustrations
 
-AI generation is optional and disabled by default. It supports two authenticated
-image-generation adapters; neither is a chat-completions substitute:
+Item illustration generation was retired. There is no **Generate illustration**
+or **Generate another** button, no pending-preview Accept/Reject workflow, no
+automatic AI fallback, no daily generation cap and no bulk illustration action.
 
-- **OpenAI Images API:** `POST /images/generations`, accepting inline `b64_json`.
-- **OpenRouter Image API:** `POST /api/v1/images`, accepting the documented
-  `data[].b64_json` response and optional `media_type`.
+Existing AI illustration rows and files are **not deleted**:
 
-URL-only responses are rejected rather than fetched. OpenRouter SVG/GIF or
-unknown media types are rejected explicitly; accepted raster data is decoded,
-size-bounded and normalized through the same private derivative path as other
-item images. The encrypted provider key, provider enablement and cloud/private
-consent rules are the same as other AI tasks. Anthropic, xAI, direct Gemini and
-Ollama are not offered as item-image generators and are rejected at task save.
+- an active legacy AI illustration still appears with an honest
+  **AI illustration · not a photo** label and its provider provenance where
+  available;
+- it can be replaced by a public reference image or removed with **Use icon**;
+- old pending previews are retained in the database/media store but are not
+  silently accepted, rejected, pruned or shown as a generation workflow;
+- old queued illustration jobs return a truthful retired/skipped result without a
+  provider call;
+- old generation and accept endpoints return `410 feature_retired` with a clear
+  message rather than a generic failure.
 
-OpenRouter image models are discovered from the documented Models API with
-`output_modalities=image`; the picker exposes only models advertising image
-output, and manual IDs are validated when saved. See
-[`docs/AI_PROVIDERS.md`](AI_PROVIDERS.md).
+The retired provider adapters are no longer called by the application. Shared
+provider image **recognition** (vision), document OCR and voice transcription are
+unchanged. Provider credentials and task choices for active tasks are preserved.
 
-The prompt contains only minimized product text: item name, brand, model,
-description and category. It never includes borrowers, room contents, receipts,
-documents or notes. The prompt asks for a generic illustration with no logos,
-text, people or claims about the exact unit's condition. Generated content is
-untrusted and is normalized through the same image validation/derivative path.
+## Household reference-image settings and permissions
 
-Manual generation is always **preview → Use / Reject**:
-1. Generate creates a pending AI illustration.
-2. The pending preview is shown with an AI/not-a-photo label.
-3. **Use** makes it the selected display image.
-4. **Reject** deletes the pending file.
-5. Regenerate creates a new pending image and removes older pending previews.
+Automatic public reference-image lookup remains available and is still off by
+default. Its settings are owner-managed. AI illustration toggles and daily caps
+were removed from the normal API and UI; historical database columns remain
+unused for migration safety.
 
-Automatic generation for newly saved items is a separate, default-off household
-setting. It runs only after save, only when no actual photo exists and the item
-has a sufficiently useful description. It is not triggered on keystrokes or on
-existing-library items. The explicit batch action is the only way to process old
-items.
+Viewers can read image sources and labels but cannot find, remove or batch.
+Members and owners can use the remaining reference-image actions. All routes
+require the current household context and reject cross-household item/image IDs.
+Private file routes require a current membership.
 
-### Spending and generation limits
+## Batch reference lookup
 
-- A hard per-household **daily AI generation count cap** is stored (1–100,
-  default 10) and enforced before each generation. Counts include pending and
-  accepted AI images for the current day.
-- The app never retries paid image generation automatically; new-item and batch
-  jobs use one attempt.
-- A provider-specific monetary estimate is not claimed because pricing and
-  billing eligibility depend on the account/provider. The settings UI explains
-  the hard count cap and says billing cannot be estimated reliably.
-- Batch/reference lookup is bounded to the explicit selection (maximum 50 items)
-  and does not crawl the library.
-
-## Household settings and permissions
-
-Defaults for every household (including existing ones) are:
-- automatic reference lookup: **off**
-- automatic AI fallback: **off**
-- daily generation cap: **10**
-
-Owners can change these in Settings. Manual Find image/Generate remain available
-according to provider configuration. Viewers can read image sources and labels
-but cannot find, generate, accept, reject, remove or batch. Members can use image
-actions. All routes require the current household context and reject
-cross-household item/image IDs. Item images are stored under household/item paths
-and private file routes require a current membership.
-
-## Batch jobs
-
-The batch dialog is an explicit action over selected items, with:
+The batch dialog is an explicit reference-image lookup over selected items, with:
 - preview counts (selected, eligible, already has a real photo, unavailable);
-- estimated generation count and remaining hard cap;
-- notices for missing search/generation configuration;
+- notices for missing reference-search configuration;
 - durable worker job, progress counts, failure/skip counts and cancel;
 - request-ID replay deduplication;
 - no surprise full-library scan and no automatic retry storm.
 
-Cancellation stops the worker before the next item. Progress is stored on the
-durable job; queued/running jobs are household-scoped. Expired pending previews
-and old superseded/rejected image files are pruned by maintenance.
+Legacy illustration batches are retired without provider calls. Cancellation
+stops the reference worker before the next item. Pending illustration media is no
+longer pruned by maintenance.
 
 ## Evidence, recognition and stocktake exclusion
 
@@ -306,35 +273,38 @@ state, purchase data and room/container placement are unchanged.
 
 `item_images` stores:
 - household/item/creator/provider ownership;
-- source type (`reference`, `ai`; legacy `builtin` rows are retained but
+- source type (`reference`, legacy `ai`; legacy `builtin` rows are retained but
   superseded/ignored) and status (`pending`, `active`, `superseded`, `rejected`);
 - private storage keys, dimensions, MIME type and size;
 - legacy illustration key (not written or rendered);
 - source URL/page/publisher, retrieval time;
 - permission basis (`configured_source_policy` or `provider_license`), provider
   license name/URL when supplied, and an honest policy/license note;
-- exact-model confirmation, model label, search fingerprint and generation
-  prompt/error.
+- exact-model confirmation, model label, search fingerprint and legacy
+  generation prompt/error metadata.
 
 A partial unique index ensures only one active non-photo image per item. The
-append-only migrations add the three household image settings, a durable job
-result JSON field, permission/license provenance columns, and retire legacy
-built-in rows by status. They do not create image rows for existing items,
+append-only migrations added the historical household image settings, a durable
+job result JSON field, permission/license provenance columns, and retired legacy
+built-in rows by status. The later application simplification stops using the
+generation toggles/cap and pending-preview maintenance without deleting media or
+rewriting deployed migrations. They do not create image rows for existing items,
 delete media, change item/photo IDs, or alter existing provider/task choices.
 
 ## API summary
 
-- `GET /items/{id}/image` — current source, pending previews, settings and
-  provider availability.
+- `GET /items/{id}/image` — current selected source, settings and reference-search
+  availability.
 - `POST /items/{id}/image/find` — automatic reference lookup/selection.
-- `POST /items/{id}/illustration` — generate pending AI preview.
-- `POST /items/{id}/images/{image_id}/accept` — accept pending AI.
-- `DELETE /items/{id}/images/{image_id}` — reject/delete pending or selected.
 - `DELETE /items/{id}/image` — remove the selected non-actual source.
 - `POST /items/{id}/image/reset` — reset to fallback.
 - `POST /items/images/batch/preview` / `POST /items/images/batch` /
-  `GET /items/images/batch/{job_id}` / `.../cancel` — explicit batch workflow.
+  `GET /items/images/batch/{job_id}` / `.../cancel` — explicit reference-image
+  batch workflow.
 - `GET /item-images/{id}/file|thumbnail` — authenticated private derivative.
+- Retired generation paths (`POST /items/{id}/illustration`,
+  `POST /items/{id}/images/{image_id}/accept`, illustration batch actions)
+  return `410 feature_retired`.
 
 ## Verification and limits
 
@@ -348,10 +318,10 @@ provenance, deceptive brand hosts, stock-host rejection, bounded candidate
 fallback (HTTP/private/HTML/corrupt/oversized/unsupported then valid), real AVIF
 re-encoding, PS5 empty-box packaging alias, public-web vs optional restriction
 provenance, provider license evidence, lookup reuse,
-evidence exclusion, AI preview/accept/reject, hard caps, batch
-preview/dedupe/cancel, permission/IDOR, the OpenAI Images adapter contract and
-the OpenRouter Image API contract including URL-only/SVG/invalid-data rejection.
-They use fixture responses and never make live search/generation calls. Public-web
+evidence exclusion, retired-generation endpoints/jobs without provider calls,
+legacy AI media display/removal, batch reference preview/dedupe/cancel,
+permission/IDOR and preservation of photos/reference/vision. They use fixture
+responses and never make live search/generation calls. Public-web
 coverage verifies no-domain readiness, automatic single-image selection outside
 any preexisting allowlist, `public_web` provenance/unknown-permission wording,
 optional legacy restriction behavior, private/non-image/oversized/malformed
@@ -361,11 +331,11 @@ download, tiny-original-to-adequate-thumbnail fallback, deceptive 800×800
 metadata over a real 90×90 payload, all-undersized rejection without storage,
 and clean-product-photo preference over tiny banners and specification graphics.
 
-Vitest covers category-icon/reference/actual card priority, source controls and
-preview acceptance. Disposable Playwright covers category-icon fallback, a mocked
-automatic reference flow with source labels, actual-photo priority, manual AI
-preview/accept, unconfigured states, household setting toggles and batch
-cancellation. Reference/AI gallery bounds are checked with real landscape,
+Vitest covers category-icon/reference/actual card priority, source controls,
+existing AI-media labelling and absence of generation controls. Disposable
+Playwright covers category-icon fallback, a mocked automatic reference flow with
+source labels, actual-photo priority, existing AI-media display without a
+generate workflow, reference settings and batch cancellation. Reference/AI gallery bounds are checked with real landscape,
 portrait, square and AI fixture images at phone/tablet/desktop widths:
 [landscape reference](walkthrough/photo-sizing/07-reference-landscape-desktop.png),
 [portrait reference](walkthrough/photo-sizing/08-reference-portrait-desktop.png),
@@ -375,9 +345,9 @@ and [AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
 Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
-Final local verification: **423 PostgreSQL backend tests**, **214 Vitest tests**
-and **78 disposable-stack Playwright workflows** (77 passed, 1 fixture-dependent
-skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
+Final local verification after simplification batch 1: backend/frontend tests,
+typecheck, build and disposable Playwright regression pass; exact counts are in
+the repository verification section and the batch report. Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and
 exports volume; migrations `a8c0e2f4b6d8`, `b2d4f6a8c0e1` and `d6f8b0c2e4a6` preserved the
@@ -388,8 +358,9 @@ public-web reference lookup; the household still controls the explicit enable
 toggle and Brave key.
 
 Remaining live validation (not performed here): a real Brave Image Search
-subscription/key, a real OpenAI Images key/model, and a real OpenRouter
-image-output key/model with consent, credit and billing.
+subscription/key. Existing legacy AI illustrations are preserved but are not
+generated by the current application, so no image-generation provider validation
+is required for normal operation.
 Tests verify the documented request/response contract and safety/error paths but
 cannot certify external provider image quality, availability, pricing or source
 licensing for every result.

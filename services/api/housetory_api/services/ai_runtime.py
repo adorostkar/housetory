@@ -33,14 +33,6 @@ CLOUD_PROVIDERS = {
     AiProviderType.OPENROUTER.value,
 }
 
-TEXT_TASKS = {
-    AiTask.ASSISTANT.value,
-    AiTask.IMPORTS.value,
-    AiTask.DOCUMENTS.value,
-    AiTask.SEARCH.value,
-    AiTask.LABELS.value,
-}
-
 
 @dataclass(frozen=True)
 class AiRuntimeConfig:
@@ -384,26 +376,6 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             error=(
                 "No vision task is configured. Choose a vision-capable provider and "
                 "model under Settings → AI providers → Task defaults."
-            ),
-        )
-    if task == AiTask.ITEM_IMAGES.value:
-        return AiRuntimeConfig(
-            provider="disabled",
-            base_url="",
-            api_key=None,
-            model=None,
-            task=task,
-            provider_id=None,
-            display_name=None,
-            mode="disabled",
-            source="database",
-            enabled=False,
-            cloud_consent=False,
-            configured=False,
-            error=(
-                "No item illustration task is configured. Choose an OpenAI Images or "
-                "OpenRouter image-output model under Settings → AI providers → "
-                "Task defaults."
             ),
         )
     if task == AiTask.TRANSCRIPTION.value:

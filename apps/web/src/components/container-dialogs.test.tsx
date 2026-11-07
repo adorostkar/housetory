@@ -74,8 +74,6 @@ const container: Container = {
   total_quantity: 0,
   child_count: 0,
   container_count: 1,
-  summary_short: null,
-  summary_headline: null,
   qr_payload: "http://localhost:8080/containers/box-1",
   qr_url: "/api/v1/containers/box-1/qr.svg",
   qr_warning: null,

@@ -17,15 +17,12 @@ from ..schemas.items import LocationBrief, RoomBrief
 from ..schemas.properties import PropertyBrief
 from .containers import (
     container_children,
-    contents_updated_at,
-    label_is_stale,
     load_container_items,
     location_breadcrumb,
     location_rows,
     related_documents,
     room_ancestors,
     summary_for_location,
-    summary_is_stale,
 )
 from .hierarchy import descendant_ids
 from .lending import loan_quantities_for_items
@@ -189,8 +186,6 @@ def serialize_container(
         child_count=child_count,
         container_count=container_count,
         recoverable_deleted_child_count=recoverable_deleted_child_count,
-        summary_short=location.summary_short,
-        summary_headline=location.summary_headline,
         qr_payload=payload,
         qr_url=qr_endpoint,
         qr_warning=warning,
@@ -259,27 +254,14 @@ def serialize_container_detail(
     ]
     documents = related_documents(db, household_id, [item.id for item in items])
     live = summary_for_location(db, household_id, location, live_items=items)
-    stale = summary_is_stale(location, live)
-    label_stale = label_is_stale(location, items)
-    latest = contents_updated_at(items, location)
     summary = ContainerSummaryOut(
-        short=live.short,
-        detailed=live.detailed,
-        headline=live.headline,
-        lines=live.lines,
-        detailed_lines=live.detailed_lines,
         item_count=live.item_count,
         total_quantity=live.total_quantity,
+        direct_item_count=live.direct_item_count,
+        direct_total_quantity=live.direct_total_quantity,
         empty=live.empty,
-        stale=stale,
-        needs_refresh=(not live.stored) or stale,
-        stored=live.stored,
-        source=live.source,
-        contents_hash=live.contents_hash,
-        generated_at=live.generated_at,
+        categories=live.categories,
         label_generated_at=location.label_generated_at,
-        label_stale=label_stale,
-        contents_updated_at=latest,
     )
     room_path = [
         RoomBrief(id=room.id, name=room.name)
