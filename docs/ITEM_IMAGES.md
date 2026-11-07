@@ -376,7 +376,7 @@ Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
 
 Final local verification: **423 PostgreSQL backend tests**, **214 Vitest tests**
-and **77 disposable-stack Playwright workflows** (76 passed, 1 fixture-dependent
+and **78 disposable-stack Playwright workflows** (77 passed, 1 fixture-dependent
 skip) pass; Ruff, strict TypeScript typecheck, production build and Alembic drift
 checks pass. Backup
 `backups/housetory-20261106T081932Z` includes the database, uploads, imports and

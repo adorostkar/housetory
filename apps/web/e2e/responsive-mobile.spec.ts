@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
@@ -91,6 +92,77 @@ async function seedDenseFixtures(request: APIRequestContext) {
   });
   expect(loan.ok()).toBeTruthy();
   return { itemId, roomId };
+}
+
+function seedAiTaskRows(householdId: string) {
+  const sql = `
+    INSERT INTO ai_providers
+      (household_id, provider, display_name, base_url, default_model, enabled, cloud_consent)
+    VALUES
+      ('${householdId}', 'openrouter',
+       'OpenRouter production account with a long descriptive display name',
+       'https://openrouter.ai/api/v1',
+       'openrouter/anthropic/claude-3.5-sonnet-2026-long-identifier-abcdefghijklmnopqrstuvwxyz',
+       true, true),
+      ('${householdId}', 'openai',
+       'OpenAI production account with a long descriptive display name',
+       'https://api.openai.com/v1',
+       'gpt-4.1-vision-2026-very-long-model-identifier-abcdefghijklmnopqrstuvwxyz',
+       true, true)
+    ON CONFLICT (household_id, provider) DO UPDATE SET
+      display_name = excluded.display_name,
+      base_url = excluded.base_url,
+      default_model = excluded.default_model,
+      enabled = true,
+      cloud_consent = true;
+
+    INSERT INTO ai_task_settings (household_id, task, provider_id, model, enabled)
+    SELECT
+      '${householdId}',
+      v.task,
+      CASE WHEN v.provider = 'openai' THEN p_openai.id ELSE p_openrouter.id END,
+      v.model,
+      true
+    FROM (VALUES
+      ('assistant', 'openrouter', 'openrouter/anthropic/claude-3.5-sonnet-2026-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('imports', 'openai', 'gpt-4.1-mini-2026-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('documents', 'openai', 'gpt-4.1-2026-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('search', 'openrouter', 'openrouter/google/gemini-2.5-flash-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('vision', 'openai', 'gpt-4.1-vision-2026-very-long-model-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('labels', 'openai', 'gpt-4.1-nano-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('transcription', 'openai', 'gpt-4o-transcribe-long-identifier-abcdefghijklmnopqrstuvwxyz'),
+      ('item_images', 'openai', 'gpt-image-1-long-identifier-abcdefghijklmnopqrstuvwxyz')
+    ) AS v(task, provider, model)
+    CROSS JOIN (
+      SELECT id FROM ai_providers
+      WHERE household_id = '${householdId}' AND provider = 'openrouter'
+    ) p_openrouter
+    CROSS JOIN (
+      SELECT id FROM ai_providers
+      WHERE household_id = '${householdId}' AND provider = 'openai'
+    ) p_openai
+    ON CONFLICT (household_id, task) DO UPDATE SET
+      provider_id = excluded.provider_id,
+      model = excluded.model,
+      enabled = true;
+  `;
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      process.env.E2E_DB_CONTAINER ?? "housetory-e2e-db-1",
+      "psql",
+      "-U",
+      "housetory",
+      "-d",
+      "housetory",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      sql,
+    ],
+    { stdio: "pipe" },
+  );
 }
 
 async function pageMetrics(page: import("@playwright/test").Page) {
@@ -494,6 +566,148 @@ test.describe("mobile responsive", () => {
     await page.keyboard.press("Escape");
   });
 });
+
+  test("AI task rows fit every intermediate width with real provider/task data", async ({
+    page,
+  }) => {
+    const sessionResponse = await page.request.get("/api/v1/auth/session");
+    expect(sessionResponse.ok()).toBeTruthy();
+    const session = (await sessionResponse.json()) as {
+      household?: { id: string } | null;
+      households?: Array<{ id: string }>;
+    };
+    const originalHouseholdId = session.household?.id ?? session.households?.[0]?.id;
+    expect(originalHouseholdId).toBeTruthy();
+    const createdHousehold = await page.request.post("/api/v1/households", {
+      data: { name: `Responsive AI layout ${randomUUID()}` },
+    });
+    expect(createdHousehold.ok()).toBeTruthy();
+    const testHouseholdId = ((await createdHousehold.json()) as {
+      household: { id: string };
+    }).household.id;
+    seedAiTaskRows(testHouseholdId);
+
+    const sizes = [320, 640, 700, 767, 768, 800, 820, 843, 844, 869, 1024, 1280, 1440];
+    const failures: unknown[] = [];
+    try {
+    for (const width of sizes) {
+      await page.setViewportSize({ width, height: width <= 430 ? 844 : 1024 });
+      await page.goto("/settings/ai");
+      await expect(page.getByRole("heading", { name: "AI providers", level: 1 })).toBeVisible();
+      await expect(page.getByTestId("ai-task-row")).toHaveCount(8);
+      await page.waitForTimeout(120);
+      const metrics = await page.evaluate(() => {
+        const viewport = window.innerWidth;
+        const rows = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-testid="ai-task-row"]'),
+        ).map((row) => {
+          const rowRect = row.getBoundingClientRect();
+          const actions = row.querySelector<HTMLElement>(
+            '[data-testid="ai-task-actions"]',
+          );
+          const actionsRect = actions?.getBoundingClientRect();
+          const buttons = Array.from(
+            row.querySelectorAll<HTMLElement>('[data-testid="ai-task-actions"] button'),
+          ).map((button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              text: (button.textContent || "").trim(),
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              height: rect.height,
+            };
+          });
+          const provider = row.querySelector<HTMLElement>(
+            '[data-testid="ai-task-provider"]',
+          );
+          const model = row.querySelector<HTMLElement>('[data-testid="ai-task-model"]');
+          return {
+            left: rowRect.left,
+            right: rowRect.right,
+            width: rowRect.width,
+            scrollWidth: row.scrollWidth,
+            clientWidth: row.clientWidth,
+            actionsRight: actionsRect?.right ?? null,
+            actionsWidth: actionsRect?.width ?? null,
+            providerWidth: provider?.getBoundingClientRect().width ?? 0,
+            modelWidth: model?.getBoundingClientRect().width ?? 0,
+            buttons,
+          };
+        });
+        return {
+          viewport,
+          scrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+          rows,
+        };
+      });
+      if (width === 768) {
+        await page
+          .getByRole("heading", { name: "Task defaults", level: 2 })
+          .scrollIntoViewIfNeeded();
+        await page.waitForTimeout(200);
+        await page.screenshot({
+          path: "../../docs/walkthrough/responsive-mobile/after-768-ai-settings.png",
+          fullPage: false,
+        });
+      }
+      if (
+        metrics.scrollWidth > metrics.viewport + 1 ||
+        metrics.bodyScrollWidth > metrics.viewport + 1
+      ) {
+        failures.push({ width, documentOverflow: metrics });
+      }
+      for (const row of metrics.rows) {
+        if (
+          row.right > metrics.viewport + 0.5 ||
+          row.left < -0.5 ||
+          row.scrollWidth > row.clientWidth + 1 ||
+          row.actionsRight === null ||
+          row.actionsRight > row.right + 0.5 ||
+          row.providerWidth <= 0 ||
+          row.modelWidth <= 0
+        ) {
+          failures.push({ width, row });
+        }
+        for (const button of row.buttons) {
+          if (
+            button.right > row.right + 0.5 ||
+            button.right > metrics.viewport + 0.5 ||
+            button.left < -0.5 ||
+            button.height < 32
+          ) {
+            failures.push({ width, button });
+          }
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+    } finally {
+      if (originalHouseholdId) {
+        await page.request.post(
+          `/api/v1/households/${originalHouseholdId}/select`,
+        );
+      }
+      execFileSync(
+        "docker",
+        [
+          "exec",
+          process.env.E2E_DB_CONTAINER ?? "housetory-e2e-db-1",
+          "psql",
+          "-U",
+          "housetory",
+          "-d",
+          "housetory",
+          "-v",
+          "ON_ERROR_STOP=1",
+          "-c",
+          `DELETE FROM households WHERE id = '${testHouseholdId}';`,
+        ],
+        { stdio: "pipe" },
+      );
+    }
+  });
 
 test.describe("desktop regression", () => {
   test.use({ viewport: { width: 1440, height: 1000 }, isMobile: false, hasTouch: false });

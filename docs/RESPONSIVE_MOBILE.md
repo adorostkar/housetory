@@ -35,6 +35,31 @@ Fix:
 
 The 320px document width now matches the viewport.
 
+## AI task rows at intermediate widths
+
+The `/settings/ai` task rows previously switched to a four-column layout at the
+`sm` breakpoint. With real provider labels and eight task settings, the fixed
+`auto` action group (Save + Test, about 208px wide) extended past the card at 768px
+and at 1024px where the desktop sidebar appears.
+
+The row now stays in a safe wrapped layout until the `xl` breakpoint, with
+`min-width: 0` task/provider/model fields, full-width model row, and a wrapping
+action group whose Save/Test buttons remain intact. At `xl` the four-column row is
+used only when enough width exists.
+
+Measured at 768px with two providers and eight tasks:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Document `scrollWidth` | 782 | 768 |
+| Task card right | 711 | 711 |
+| Action group right | 782.125 | 698 |
+| Test button right | 782.125 | 278.125 |
+| Test button height | 32 | 32 |
+
+The action group no longer leaves the card, and the document no longer grows past
+the 768px viewport.
+
 ## Mobile navigation
 
 The previous eight-tab bar was reduced to five healthy targets:
@@ -106,7 +131,7 @@ Results:
 
 - Chromium mobile/tablet matrix: pass
 - WebKit 27.2 mobile/tablet matrix with touch and DPR 3: pass
-- Full checked-in Playwright suite: **77 workflows, 76 passed, 1 fixture-dependent skip**
+- Full checked-in Playwright suite: **78 workflows, 77 passed, 1 fixture-dependent skip**
 - Desktop 1440 regression: compact controls and no mobile bar
 
 ## Screenshots
@@ -126,6 +151,8 @@ After:
 - [Keyboard-open simulation: bottom bar hidden](walkthrough/responsive-mobile/after-390-keyboard-hidden.png)
 - [Keyboard dismissed: bar restored and text retained](walkthrough/responsive-mobile/after-390-keyboard-restored.png)
 - [1440 desktop regression](walkthrough/responsive-mobile/after-1440-desktop.png)
+- [768 AI task rows before the targeted fix](walkthrough/responsive-mobile/before-768-ai-settings.png)
+- [768 AI task rows after the targeted fix](walkthrough/responsive-mobile/after-768-ai-settings.png)
 
 ## Limitation
 

@@ -634,9 +634,10 @@ export function AiSettingsPage() {
               return (
                 <div
                   key={task.task}
-                  className="grid gap-2 rounded-xl border border-border/60 p-3 sm:grid-cols-[minmax(140px,0.7fr)_minmax(160px,1fr)_minmax(180px,1.2fr)_auto] sm:items-center"
+                  data-testid="ai-task-row"
+                  className="grid gap-3 rounded-xl border border-border/60 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start xl:grid-cols-[minmax(140px,0.7fr)_minmax(160px,1fr)_minmax(180px,1.2fr)_auto] xl:items-center"
                 >
-                  <div>
+                  <div data-testid="ai-task-name" className="min-w-0 break-words">
                     <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
                     <p className="text-[0.65rem] text-muted-foreground">
                       {task.enabled
@@ -654,6 +655,7 @@ export function AiSettingsPage() {
                   </div>
                   <Select
                     aria-label={`${TASK_LABELS[task.task]} provider`}
+                    data-testid="ai-task-provider"
                     value={task.provider_id ?? ""}
                     onChange={(event) => {
                       const nextProvider = settings.providers.find(
@@ -684,7 +686,10 @@ export function AiSettingsPage() {
                       </option>
                     ))}
                   </Select>
-                  <div>
+                  <div
+                    data-testid="ai-task-model"
+                    className="min-w-0 md:col-span-2 xl:col-span-1"
+                  >
                     <ModelPicker
                       id={`task-${task.task}-model`}
                       ariaLabel={`${TASK_LABELS[task.task]} model`}
@@ -735,8 +740,11 @@ export function AiSettingsPage() {
                       </p>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+                  <div
+                    data-testid="ai-task-actions"
+                    className="flex min-w-0 flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-self-end"
+                  >
+                    <label className="flex shrink-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground">
                       <input
                         type="checkbox"
                         className="size-3.5 accent-primary"
@@ -753,6 +761,7 @@ export function AiSettingsPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      className="shrink-0"
                       disabled={saveTask.isPending || !selectedCompatible}
                       onClick={() => saveTask.mutate(task)}
                     >
@@ -762,6 +771,7 @@ export function AiSettingsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      className="shrink-0"
                       disabled={
                         testTask.isPending ||
                         !task.enabled ||

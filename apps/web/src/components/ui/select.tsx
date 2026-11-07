@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 const Select = React.forwardRef<HTMLSelectElement, React.ComponentProps<"select">>(
   ({ className, children, ...props }, ref) => (
-    <div className="relative">
+    <div className="relative min-w-0">
       <select
         ref={ref}
         className={cn(
