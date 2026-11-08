@@ -113,10 +113,11 @@ boundary; **NOT RUN** means intentionally skipped to avoid paid or destructive a
 | Mobile input sizing and keyboard shrink behavior | PASS with device limitation | responsive-mobile spec checks mobile input size and simulated 390×500 keyboard shrink; real iPhone keyboard/PWA cannot be emulated |
 | Accessibility basics | PASS | accessible names/roles, keyboard flows, focus return, loading/error/empty states across tests |
 | Migration from server baseline to head | PASS | `test_release_migration.py`: baseline `a1c3e5f7b9d2` → head `c2d3e4f5a6b7`; rerunning head is no-op; provider ciphertext/version and item values unchanged; legacy values become `legacy_record_total`; new metadata/table nullable/empty |
-| Main data/settings preservation after local deploy | PENDING FINAL DEPLOY | before/after fingerprints listed in the deploy section |
+| Main data/settings preservation after local deploy | PASS | 52 items / 1 photo / 3 images / 2 providers / 8 tasks / 1 loan preserved; 0 applied values, 2 preview rows; provider ciphertext presence, Brave/SMTP/default-text settings and Alembic head unchanged; 8090 fixtures unchanged |
 | Real paid AI/Brave/SMTP/insurance-provider calls | NOT RUN | mocks/fixtures only; no paid calls or real external messages |
 | Real iPhone/iPad PWA keyboard and standalone behavior | LIMIT | not emulatable in this environment; requires manual iPhone check |
 | Live server commit, privileged helper status, Docker/Compose and env names | UNVERIFIED | read-only SSH shows Ubuntu 24.04.5, nginx active, 18089 and public HTTPS health 200; `/opt/housetory` is mode 700 root, Docker socket denied, sudo needs a password; no values read |
+| Local 8080 deployment | PASS | commit `0166708` built and deployed to existing `housetory` project; health 200; DB/storage ok; data/settings preserved; System status healthy; no volume reset |
 | Server deployment | NOT PERFORMED | branch is unmerged; no push/merge/deploy performed |
 
 ## Responsive audit evidence
@@ -133,6 +134,58 @@ status, Purchases and Warranties at 320, 768 and 1440 widths.
 The checked-in `responsive-mobile.spec.ts` additionally covers 320×568, 390×844,
 844×390 landscape, 768×1024, 1024×768 and 1440×1000, dense AI rows, dialogs,
 menus, keyboard-open simulation and More navigation.
+
+## Local 8080 deployment evidence
+
+The audit fixes were committed as `0166708` (`fix: close final release audit gaps`),
+then deployed to the existing local `housetory` Compose project on port 8080 with
+`RELEASE_COMMIT=0166708036f4`, `RELEASE_CHANNEL=local`. The report-only follow-up
+commit was then deployed with identical application code so the running release
+commit matches branch HEAD. No volumes were removed or recreated. A pre-deploy backup
+was written to `backups/housetory-20261108T060015Z` (database, uploads, imports,
+exports; mode 600 files, SHA-256 checksums).
+
+Before deployment, the running release was `908011219375` with Alembic head
+`c2d3e4f5a6b7`. Preserved fingerprints:
+
+| Fingerprint | Before | After |
+| --- | --- | --- |
+| Items | 52 | 52 |
+| Item photos | 1 | 1 |
+| Item images | 3 | 3 |
+| AI providers | 2 | 2 |
+| AI task settings | 8 | 8 |
+| Loans | 1 | 1 |
+| Applied current values | 0 | 0 |
+| Valuation preview rows | 2 | 2 |
+| Alembic revision | `c2d3e4f5a6b7` | `c2d3e4f5a6b7` |
+
+Provider credentials remained present with `api_key_version=1`; the OpenAI and
+OpenRouter providers were unchanged. The saved default text model remained
+`deepseek/deepseek-v4.1-flash` and all eight task rows kept their model/enabled/
+inheritance values. Online search remained manual+reference enabled with an encrypted
+Brave credential (`api_key_version=1`). SMTP reported `email_configured=true` and the
+AI credential key remained configured; no secret values were printed.
+
+System status before the fix was `attention` with one core issue (“Worker jobs: 2
+failed job(s)”). After deployment it is `healthy` with
+`attention_count=0`, `core_issue_count=0`, `configured_feature_issue_count=0` and no
+issues. Live job counts exclude the retired task (`succeeded=43`, no recent failures),
+while the two historical `maintenance.prune_item_images` failed rows remain in
+PostgreSQL for audit/retry.
+
+The existing 8090 acceptance fixtures were not modified. Their before/after
+fingerprints were identical: 216 items, 6 item photos, 1 item image, 1 provider,
+5 task settings, 24 loans, and the accepted host/child item IDs plus shelf container
+ID `b109fc38-2c4f-4798-8af3-bf13acd73517` remained present.
+
+Health checks after deploy:
+
+```text
+GET http://localhost:8080/api/v1/health/ready -> 200, database=ok, storage=ok
+GET http://localhost:8080/                    -> 200
+container RELEASE_COMMIT                      -> matches committed audit HEAD
+```
 
 ## Server read-only facts (2026-11-08)
 
