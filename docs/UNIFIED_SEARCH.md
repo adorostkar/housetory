@@ -73,6 +73,16 @@ has and an explicit limitation; it does not claim a conclusive no-result.
   another household's provider.
 - IDs supplied in conversation context are re-authorised against the current
   memberships and property scope before any read.
+- Provider inputs are partitioned before planning and answer synthesis. Item
+  names, borrowers and loan references are re-read from authorised rows for that
+  household and property; client-supplied labels are not trusted.
+- Raw prior conversation prose is only reused when the scope is one household
+  without a property filter. In all-places or property scopes it can mix facts
+  with no sound provenance, so it is withheld from every provider and replaced
+  by that household's validated structured context. The current user question is
+  still sent because the user authored it intentionally. This preserves useful
+  follow-ups from resolved items, candidates and loan references without
+  broadcasting another household's names, borrowers, documents or answers.
 - Changing household or property resets browser session context and invalidates
   server-side candidate/loan references.
 
@@ -89,6 +99,12 @@ Context is bounded and on by default:
 There is no user-facing context size, token or cost setting. Mutable loan and
 location facts are re-read from the database on every turn; no factual answer is
 cached. A new search or scope change resets the session.
+
+A plain recorded name remains a direct inventory lookup even when the browser has
+restored structured context. Reloading or repeating the same named lookup does
+not call a model and does not append another dialogue turn. Context is only used
+as a reason to interpret queries that actually contain a follow-up reference or
+pronoun.
 
 The accepted four-turn sequence works without a bare item ID being the only
 memory:
@@ -114,6 +130,22 @@ containers, documents, purchases, warranties, borrowed records and historical
 loans. AI plans are validated against allowed tool names and item IDs before
 execution. No assistant path creates, edits, moves, lends or deletes records.
 
+## Answer presentation
+
+AI answers are rendered through a small safe renderer that supports paragraphs,
+simple bullet lists, bold, italic and inline code only. Raw HTML and Markdown
+links are never interpreted; they remain text. The answer block uses `dir="auto"`
+and `text-start` so Persian/Arabic answers are RTL while embedded LTR item names,
+model numbers, identifiers and paths stay readable. Reference links remain in the
+separate grounded links area.
+
+The answer prompt asks for concise natural prose in the user's language, forbids
+JSON/internal field names/condition codes/technical rationale, and asks the model
+to translate recorded labels. Items are summarised without unasked purchase,
+warranty, value, condition or serial clutter. If no loan record exists, the model
+is instructed to say no loan is recorded in the available records rather than
+claim the item was never loaned to anyone.
+
 ## Verification
 
 - Backend tests cover Unicode/ZWNJ/Arabic variants, Persian drill questions with
@@ -121,10 +153,20 @@ execution. No assistant path creates, edits, moves, lends or deletes records.
   Swedish and mixed model-number direct matching, four-turn context, returned vs
   outstanding durations, alias ambiguity, provider failure, no-provider fallback,
   property isolation and per-household provider boundaries.
+- Privacy tests inspect the full captured system/user payload for every planning
+  and answer call across two providers. Distinct item, borrower and document
+  sentinels from prior history/context never appear in the other household's
+  provider payload, including property scope.
+- Direct-context tests prove a plain named lookup remains direct with populated
+  context, re-reads newly created loan facts, and does not call a provider. The
+  browser test reloads the same named URL three times and keeps one dialogue
+  pair.
 - Frontend tests cover the direct submit flow, AI-assisted rendering, fallback
-  labelling, reset and context request shape.
-- Playwright workflows cover one global box at desktop/mobile widths, RTL input,
-  direct results, mocked AI-assisted answers, follow-up history/context and the
+  labelling, reset, duplicate-turn prevention, safe Markdown subset rendering and
+  HTML/link non-interpretation.
+- Playwright workflows cover one global box at 320/390/768/1440 widths, the only
+  visible/tabbable search entry and Cmd/Ctrl+K target, RTL/mixed input, direct
+  results, an RTL Markdown-format AI answer, follow-up history/context and the
   real no-provider fallback.
 
 ![Direct desktop results](walkthrough/unified-search/01-direct-desktop.png)

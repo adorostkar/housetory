@@ -140,9 +140,24 @@ export function SearchSessionProvider({ children }: { children: React.ReactNode 
   const record = React.useCallback(
     (query: string, response: SearchQueryResponse) => {
       setState((current) => {
+        const boundedQuery = query.slice(0, MAX_CONTENT);
+        const lastUserTurn = [...current.turns]
+          .reverse()
+          .find((turn) => turn.role === "user");
+        if (lastUserTurn?.content === boundedQuery) {
+          // Reloading the same URL or repeating the same lookup must not append
+          // duplicate dialogue turns or grow provider context.
+          const next: StoredSearchSession = {
+            ...current,
+            context: response.context,
+            lastQuery: query,
+          };
+          writeSession(storageKey, next);
+          return next;
+        }
         const turns = [
           ...current.turns,
-          { role: "user" as const, content: query.slice(0, MAX_CONTENT) },
+          { role: "user" as const, content: boundedQuery },
           {
             role: "assistant" as const,
             content: assistantSummary(response).slice(0, MAX_CONTENT),

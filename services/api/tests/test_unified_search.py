@@ -13,7 +13,9 @@ from tests.test_multi_household import (
     add_membership,
     create_household,
     create_item,
+    create_loan,
     create_room,
+    current_headers,
     household_id,
     switch,
 )
@@ -676,3 +678,258 @@ def test_legacy_multilingual_assistant_and_natural_routes_share_the_flow(
     assert natural_body["mode"] == "ai"
     assert natural_body["items"][0]["id"] == drill["id"]
     assert natural_body["answer"] == "دریل شما در کارگاه است."
+
+
+def _scope_key_for(household_ids: list[uuid.UUID], property_id: uuid.UUID | None = None) -> str:
+    return f"{','.join(sorted(str(value) for value in household_ids))}|{property_id or ''}"
+
+
+def test_provider_payloads_are_partitioned_by_household_and_property(
+    owner_client, monkeypatch
+):
+    first_id = household_id(owner_client)
+    first_room = create_room(owner_client, "Privacy first room")
+    first_item = create_item(owner_client, "A-only drill sentinel", first_room["id"], 1)
+    first_loan = create_loan(owner_client, first_item["id"], borrower="A-borrower-sentinel")
+
+    created = create_household(owner_client, "Privacy cabin")
+    second_id = uuid.UUID(created["household"]["id"])
+    second_room = create_room(owner_client, "Privacy second room")
+    second_item = create_item(owner_client, "B-only drill sentinel", second_room["id"], 1)
+    second_loan = create_loan(
+        owner_client, second_item["id"], borrower="B-borrower-sentinel"
+    )
+    switch(owner_client, first_id)
+
+    first_provider = _configure_provider(first_id, 11501, "Privacy first")
+    second_provider = _configure_provider(second_id, 11502, "Privacy second")
+    plan_calls: list[tuple[uuid.UUID | None, str, str]] = []
+    answer_calls: list[tuple[uuid.UUID | None, str, str]] = []
+
+    def fake_plan(system, prompt, *, config):
+        plan_calls.append((config.provider_id, system, prompt))
+        chosen = (
+            first_item["id"]
+            if config.provider_id == first_provider
+            else second_item["id"]
+        )
+        return {"tool": "locate_item", "arguments": {"item_ids": [chosen]}}
+
+    def fake_answer(system, user, *, config=None, **_kwargs):
+        answer_calls.append((config.provider_id, system, user))
+        return "A short grounded answer."
+
+    monkeypatch.setattr(ai_module, "complete_json", fake_plan)
+    monkeypatch.setattr(ai_module, "complete_text", fake_answer)
+
+    context = {
+        "scope_key": _scope_key_for([first_id, second_id]),
+        "resolved_items": [
+            {"id": first_item["id"], "name": "A-only drill sentinel"},
+            {"id": second_item["id"], "name": "B-only drill sentinel"},
+        ],
+        "candidate_items": [
+            {"id": first_item["id"], "name": "A-only drill sentinel"},
+            {"id": second_item["id"], "name": "B-only drill sentinel"},
+        ],
+        "loans": [
+            {
+                "id": first_loan["id"],
+                "item_id": first_item["id"],
+                "item_name": "A-only drill sentinel",
+                "borrower_name": "A-borrower-sentinel",
+            },
+            {
+                "id": second_loan["id"],
+                "item_id": second_item["id"],
+                "item_name": "B-only drill sentinel",
+                "borrower_name": "B-borrower-sentinel",
+            },
+        ],
+    }
+    history = [
+        {"role": "user", "content": "Tell me about A-only drill sentinel"},
+        {
+            "role": "assistant",
+            "content": "A-only drill sentinel and A-borrower-sentinel and A-doc-sentinel.",
+        },
+        {"role": "user", "content": "Tell me about B-only drill sentinel"},
+        {
+            "role": "assistant",
+            "content": "B-only drill sentinel and B-borrower-sentinel and B-doc-sentinel.",
+        },
+    ]
+    body = query(
+        owner_client,
+        {
+            "query": "which one of these do you have?",
+            "history": history,
+            "context": context,
+        },
+    )
+    assert body["mode"] == "ai"
+    assert {provider_id for provider_id, _system, _user in plan_calls} == {
+        first_provider,
+        second_provider,
+    }
+    assert {provider_id for provider_id, _system, _user in answer_calls} == {
+        first_provider,
+        second_provider,
+    }
+    foreign_first = (
+        "B-only drill sentinel",
+        "B-borrower-sentinel",
+        "B-doc-sentinel",
+    )
+    foreign_second = (
+        "A-only drill sentinel",
+        "A-borrower-sentinel",
+        "A-doc-sentinel",
+    )
+    for provider_id, system, user in [*plan_calls, *answer_calls]:
+        payload = f"{system}\n{user}"
+        foreign = foreign_first if provider_id == first_provider else foreign_second
+        for sentinel in foreign:
+            assert sentinel not in payload
+    for _provider_id, system, user in answer_calls:
+        normalized_system = " ".join(system.lower().split())
+        assert "never loaned" in normalized_system
+        assert "anyone" in normalized_system
+        assert "internal field names" in normalized_system
+        assert "on_loan_quantity" not in user
+        assert "condition" not in user
+
+    # Property scope: the same household's other property must not reach the
+    # provider through prior history or context.
+    auth = current_headers(owner_client)
+    first_property = owner_client.get(
+        "/api/v1/properties", headers=auth
+    ).json()["items"][0]
+    second_property = owner_client.post(
+        "/api/v1/properties",
+        headers=auth,
+        json={"name": "Privacy other property"},
+    ).json()
+    first_prop_room = owner_client.post(
+        "/api/v1/rooms",
+        headers=auth,
+        json={"name": "Privacy property room A", "property_id": first_property["id"]},
+    ).json()
+    second_prop_room = owner_client.post(
+        "/api/v1/rooms",
+        headers=auth,
+        json={"name": "Privacy property room B", "property_id": second_property["id"]},
+    ).json()
+    first_prop_item = owner_client.post(
+        "/api/v1/items",
+        headers=auth,
+        json={"name": "Property-A drill sentinel", "room_id": first_prop_room["id"]},
+    ).json()["item"]
+    second_prop_item = owner_client.post(
+        "/api/v1/items",
+        headers=auth,
+        json={"name": "Property-B drill sentinel", "room_id": second_prop_room["id"]},
+    ).json()["item"]
+
+    plan_calls.clear()
+    answer_calls.clear()
+
+    def property_plan(system, prompt, *, config):
+        plan_calls.append((config.provider_id, system, prompt))
+        return {"tool": "locate_item", "arguments": {"item_ids": [first_prop_item["id"]]}}
+
+    monkeypatch.setattr(ai_module, "complete_json", property_plan)
+    property_context = {
+        "scope_key": _scope_key_for([first_id], uuid.UUID(first_property["id"])),
+        "resolved_items": [
+            {"id": first_prop_item["id"], "name": "Property-A drill sentinel"},
+            {"id": second_prop_item["id"], "name": "Property-B drill sentinel"},
+        ],
+        "candidate_items": [
+            {"id": first_prop_item["id"], "name": "Property-A drill sentinel"},
+            {"id": second_prop_item["id"], "name": "Property-B drill sentinel"},
+        ],
+        "loans": [],
+    }
+    property_body = query(
+        owner_client,
+        {
+            "query": "which one of these do you have?",
+            "household_id": str(first_id),
+            "property_id": first_property["id"],
+            "history": [
+                {
+                    "role": "user",
+                    "content": "Tell me about Property-B drill sentinel",
+                },
+                {
+                    "role": "assistant",
+                    "content": "Property-B drill sentinel is in the other property.",
+                },
+            ],
+            "context": property_context,
+        },
+    )
+    assert property_body["mode"] == "ai"
+    assert len(plan_calls) == 1
+    assert len(answer_calls) == 1
+    for _provider_id, system, user in [*plan_calls, *answer_calls]:
+        payload = f"{system}\n{user}"
+        assert "Property-B drill sentinel" not in payload
+        assert "other property" not in payload
+
+
+def test_plain_named_lookup_stays_direct_with_context_and_reads_fresh_loans(
+    owner_client, monkeypatch
+):
+    room = create_room_simple(owner_client, "Direct context room")
+    drill = create_item_simple(
+        owner_client, "Heavy drill", room_id=room["id"], quantity=1
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("plain named lookup must not call a provider")
+
+    monkeypatch.setattr(ai_module, "complete_json", forbidden)
+    monkeypatch.setattr(ai_module, "complete_text", forbidden)
+
+    first = query(owner_client, {"query": "Heavy drill"})
+    assert first["mode"] == "direct"
+    assert first["ai_attempted"] is False
+    assert first["items"][0]["id"] == drill["id"]
+
+    create_loan_simple(
+        owner_client,
+        drill["id"],
+        borrower="Fresh borrower",
+        lent_on="2026-10-01",
+        due_on="2026-11-20",
+    )
+    reloaded = query(
+        owner_client, {"query": "Heavy drill", "context": first["context"]}
+    )
+    assert reloaded["mode"] == "direct"
+    assert reloaded["ai_attempted"] is False
+    assert reloaded["items"][0]["id"] == drill["id"]
+    quick = next(
+        result for result in reloaded["quick_results"] if result["id"] == drill["id"]
+    )
+    assert quick["loan"]["on_loan_quantity"] == 1
+    assert quick["loan"]["borrower_names"] == ["Fresh borrower"]
+
+    repeated = query(
+        owner_client, {"query": "Heavy drill", "context": reloaded["context"]}
+    )
+    assert repeated["mode"] == "direct"
+    assert repeated["ai_attempted"] is False
+
+    self_contained = query(
+        owner_client,
+        {
+            "query": "Where is my heavy drill?",
+            "context": repeated["context"],
+        },
+    )
+    assert self_contained["mode"] == "direct"
+    assert self_contained["ai_attempted"] is False
+    assert self_contained["facts"]["whereabouts"]["on_loan_quantity"] == 1

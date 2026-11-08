@@ -137,7 +137,10 @@ conversation.
   direct facts from AI-assisted answers and AI-unavailable results.
 - Follow-up context is bounded and re-authorised per household. Candidate items,
   loans and borrower references from one household/property are discarded when
-  the scope changes.
+  the scope changes. In all-my-places or property scopes, raw mixed conversation
+  prose is not sent to any provider; each provider receives only that
+  household/property's validated structured context. A single household without
+  a property filter may reuse its own recent dialogue.
 - Loans preserve quantity facts. A unique whereabouts answer can include the
   borrower and household-qualified home path. Duplicate names across households
   produce distinct matches and ask which one the person meant. Ambiguity is never

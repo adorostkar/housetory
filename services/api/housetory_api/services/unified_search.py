@@ -14,6 +14,7 @@ another household's provider.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -44,6 +45,7 @@ from .query_text import (
     clean_subject,
     contains_non_latin,
     looks_like_question,
+    normalize_for_match,
     normalize_text,
 )
 
@@ -227,6 +229,223 @@ def _sanitise_context(
         candidate_items=candidates,
         loans=loans,
     )
+
+
+def _property_item_conditions(property_id: uuid.UUID | None) -> list[Any]:
+    if property_id is None:
+        return []
+    return [
+        or_(
+            Item.room.has(Room.property_id == property_id),
+            Item.storage_location.has(
+                StorageLocation.room.has(Room.property_id == property_id)
+            ),
+        )
+    ]
+
+
+def _context_for_household(
+    db: Session,
+    household: Household,
+    scope: global_search.SearchScope,
+    context: SearchConversationContext,
+) -> SearchConversationContext:
+    """Build a provider input containing only this household/property context.
+
+    Names and borrowers are re-read from authorised rows; client-supplied labels
+    are never trusted. This runs before every provider planning and answer call.
+    """
+    property_id = scope.property.id if scope.property is not None else None
+    ref_ids = {
+        ref.id for ref in [*context.resolved_items, *context.candidate_items]
+    }
+    loan_ids = [ref.id for ref in context.loans]
+    loan_rows: list[Loan] = []
+    if loan_ids:
+        loan_rows = list(
+            db.scalars(
+                select(Loan).where(
+                    Loan.household_id == household.id,
+                    Loan.id.in_(loan_ids[:12]),
+                )
+            ).all()
+        )
+        ref_ids.update(
+            loan.item_id for loan in loan_rows if loan.item_id is not None
+        )
+    items = (
+        list(
+            db.scalars(
+                select(Item).where(
+                    Item.household_id == household.id,
+                    Item.is_archived.is_(False),
+                    Item.id.in_(ref_ids),
+                    *_property_item_conditions(property_id),
+                )
+            ).all()
+        )
+        if ref_ids
+        else []
+    )
+    item_by_id = {item.id: item for item in items}
+    resolved_ids = {ref.id for ref in context.resolved_items}
+    candidate_ids = {ref.id for ref in context.candidate_items}
+    resolved = [
+        SearchContextItemRef(id=item.id, name=item.name)
+        for item in items
+        if item.id in resolved_ids
+    ][:6]
+    candidates = [
+        SearchContextItemRef(id=item.id, name=item.name)
+        for item in items
+        if item.id in candidate_ids
+    ][:12]
+    loans: list[SearchContextLoanRef] = []
+    for loan in loan_rows:
+        if loan.item_id is None or loan.item_id not in item_by_id:
+            continue
+        item = item_by_id[loan.item_id]
+        loans.append(
+            SearchContextLoanRef(
+                id=loan.id,
+                item_id=loan.item_id,
+                item_name=item.name,
+                borrower_name=loan.borrower_name,
+            )
+        )
+    return SearchConversationContext(
+        scope_key=_scope_key(scope),
+        last_query=None,
+        resolved_items=resolved,
+        candidate_items=candidates,
+        loans=loans[:12],
+    )
+
+
+def _raw_history_allowed(scope: global_search.SearchScope) -> bool:
+    """Only a single household without a property filter is provably safe.
+
+    In wider scopes, prior assistant prose can mix household/property facts with
+    no sound provenance. Raw history is withheld and the validated per-household
+    structured context is used instead; the current user question is still sent
+    because the user authored it intentionally.
+    """
+    return len(scope.households) == 1 and scope.property is None
+
+
+_CONTEXT_REFERENCE_WORDS = {
+    # English
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "them",
+    "they",
+    "one",
+    "another",
+    "same",
+    "previous",
+    "earlier",
+    "before",
+    "former",
+    "latter",
+    "due",
+    "returned",
+    "return",
+    "still",
+    "current",
+    "history",
+    "loan",
+    "loaned",
+    "lent",
+    "borrow",
+    "borrowed",
+    "borrower",
+    "had",
+    "has",
+    "have",
+    "more",
+    "other",
+    # Persian
+    "این",
+    "آن",
+    "اون",
+    "اونی",
+    "همان",
+    "همون",
+    "همین",
+    "دیگه",
+    "دیگر",
+    "قبلی",
+    "قبلا",
+    "قبل",
+    "قرض",
+    "امانت",
+    "برگرد",
+    "پس",
+    "تحویل",
+    "دست",
+    "مهلت",
+    "سررسید",
+    "چند",
+    "چقدر",
+    "مدت",
+    "سابقه",
+    "داشت",
+    "داشته",
+    "دارد",
+    "کی",
+    # Arabic
+    "هذا",
+    "هذه",
+    "ذلك",
+    "تلك",
+    "هو",
+    "هي",
+    "نفسه",
+    "نفسها",
+    "اخر",
+    "آخر",
+    "سابق",
+    "اقرض",
+    "أمانة",
+    "امانة",
+    "ارجع",
+    "أرجع",
+    "متى",
+    "كم",
+    "مدة",
+    "تاريخ",
+    "لديه",
+    "لديها",
+}
+
+_CONTEXT_REFERENCE_PHRASES = (
+    "which one",
+    "the one",
+    "same one",
+    "how long",
+    "how many",
+    "which item",
+    "that one",
+    "this one",
+    "یکی دیگه",
+    "یکی دیگر",
+    "همان یکی",
+    "همون یکی",
+    "چند تا",
+    "چه مدت",
+)
+
+
+def _has_contextual_reference(query: str) -> bool:
+    normalized = normalize_for_match(query)
+    tokens = set(re.findall(r"[\w]+", normalized, flags=re.UNICODE))
+    if tokens & _CONTEXT_REFERENCE_WORDS:
+        return True
+    return any(phrase in normalized for phrase in _CONTEXT_REFERENCE_PHRASES)
 
 
 def _context_for_prompt(context: SearchConversationContext) -> dict[str, Any]:
@@ -843,6 +1062,7 @@ def execute_search(
         or safe_context.candidate_items
         or safe_context.loans
     )
+    contextual_reference = _has_contextual_reference(raw_query)
     direct_term = clean_subject(raw_query) if question_like else raw_query
     if not direct_term:
         direct_term = raw_query
@@ -856,12 +1076,20 @@ def execute_search(
     any_ai_configured = bool(configured_household_names)
 
     # A simple named search with a confident direct match is answered without a
-    # paid/model call. Meaningful questions and multilingual input escalate.
+    # paid/model call. Populated context alone must not force AI: "Heavy drill"
+    # remains a direct lookup even after an earlier question or a reload.
+    plain_direct_match = bool(
+        direct_items or direct_borrowed or quick_results
+    ) and not contextual_reference
+    self_contained_question = (
+        question_like
+        and bool(direct_items or direct_borrowed)
+        and not contextual_reference
+    )
     simple_direct = (
         not explicit_ask
-        and not has_context
         and not question_like
-        and bool(direct_items or direct_borrowed or quick_results)
+        and plain_direct_match
     )
     if simple_direct:
         interpretation = f"direct inventory match: {direct_term}"
@@ -931,7 +1159,11 @@ def execute_search(
     # structured context, AI interpretation is attempted first instead.
     deterministic_outcomes: list[HouseholdOutcome] = []
     structured_exists = False
-    if not explicit_ask and not non_latin and not has_context:
+    if (
+        not explicit_ask
+        and not non_latin
+        and (not has_context or self_contained_question)
+    ):
         deterministic_outcomes, structured_exists = _structured_scope_outcomes(
             db,
             scope,
@@ -1206,8 +1438,11 @@ def execute_search(
             property=_scope_property(scope),
         )
 
-    # Configured AI path: one provider boundary per household.
+    # Configured AI path: one provider boundary per household. Structured
+    # context is partitioned before any planning/answer call; raw prose history
+    # is only reused in a single household without a property filter.
     ai_outcomes: list[HouseholdOutcome] = []
+    allow_raw_history = _raw_history_allowed(scope)
     for household, role in scope.households:
         ai_outcomes.append(
             _ai_outcome(
@@ -1216,8 +1451,8 @@ def execute_search(
                 role,
                 scope=scope,
                 question=raw_query,
-                history=safe_history,
-                context=safe_context,
+                history=safe_history if allow_raw_history else [],
+                context=_context_for_household(db, household, scope, safe_context),
                 explicit_ask=explicit_ask,
             )
         )

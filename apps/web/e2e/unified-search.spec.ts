@@ -220,16 +220,26 @@ test("persian question renders an AI-assisted answer with actionable items", asy
       body: JSON.stringify(
         searchPayload(detail, {
           query: "دریل من کجاست؟",
-          answer: `دریل شما در کارگاه است. نام ثبت‌شده: Heavy drill ${id}.`,
+          answer:
+            `**Heavy drill ${id}** در کارگاه ثبت شده است.\n\n` +
+            "- یک واحد در کارگاه ثبت شده است.\n" +
+            "- قرض باز برای آن ثبت نشده است.\n\n" +
+            "مسیر: Home / Workshop / BOX-001",
         }),
       ),
     });
   });
 
   await page.goto(`/search?q=${encodeURIComponent("دریل من کجاست؟")}&ask=1&r=1`);
+  const answer = page.getByTestId("answer-text").first();
+  await expect(answer).toHaveAttribute("dir", "auto");
   await expect(
-    page.getByText(`دریل شما در کارگاه است. نام ثبت‌شده: Heavy drill ${id}.`),
+    answer.locator("strong").filter({ hasText: `Heavy drill ${id}` }),
   ).toBeVisible();
+  await expect(answer.getByRole("listitem")).toHaveCount(2);
+  await expect(answer).toContainText("در کارگاه ثبت شده است");
+  await expect(answer).toContainText("Home / Workshop / BOX-001");
+  await expect(page.getByText(/\*\*/)).toHaveCount(0);
   await expect(page.getByText("AI-assisted answer")).toBeVisible();
   await expect(
     page.getByRole("link", { name: new RegExp(`Heavy drill ${id}`) }).first(),
@@ -318,6 +328,104 @@ test("follow-up submit carries bounded history and resolved item context", async
   };
   expect(context.resolved_items?.[0]?.id).toBe(item.id);
   await shot(page, "04-follow-up-ai");
+});
+
+test("only one visible search entry is tabbable at phone, tablet and desktop widths", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+    window.localStorage.removeItem("housetory-search-scope");
+  });
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({
+      width,
+      height: width <= 430 ? 844 : width === 768 ? 1024 : 1000,
+    });
+    await page.goto("/items");
+    const allInputs = page.locator('input[data-quick-search-input="true"]');
+    const visibleInputs = page.locator(
+      'input[data-quick-search-input="true"]:visible',
+    );
+    await expect(visibleInputs).toHaveCount(1);
+    const expectedVariant = width >= 1024 ? "top" : "mobile";
+    await page.keyboard.press("ControlOrMeta+K");
+    const active = await page.evaluate(() => ({
+      variant: document.activeElement?.getAttribute(
+        "data-quick-search-variant",
+      ),
+      visible:
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement.getClientRects().length > 0,
+    }));
+    expect(active.visible).toBe(true);
+    expect(active.variant).toBe(expectedVariant);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+      ),
+    ).toBe(true);
+    if (width <= 768) {
+      const fontSize = await visibleInputs
+        .first()
+        .evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).fontSize),
+        );
+      expect(fontSize).toBeGreaterThanOrEqual(16);
+    }
+    await visibleInputs.first().fill("دریل DCD791");
+    await expect(visibleInputs.first()).toHaveValue("دریل DCD791");
+    await expect(visibleInputs.first()).toHaveAttribute("dir", "auto");
+    expect(await allInputs.count()).toBeGreaterThanOrEqual(1);
+  }
+});
+
+test("plain named reload stays direct and does not duplicate dialogue turns", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+    window.localStorage.removeItem("housetory-search-scope");
+  });
+  const id = suffix();
+  const roomId = await createRoom(request, `Reload room ${id}`);
+  const item = await createItem(request, `Heavy drill ${id}`, roomId);
+  const detail = await itemDetail(request, item.id);
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/search/query", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    requests.push(body);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        searchPayload(detail, {
+          query: body.query,
+          mode: "direct",
+          ai_used: false,
+          ai_attempted: false,
+          answer: null,
+        }),
+      ),
+    });
+  });
+  const url = `/search?q=${encodeURIComponent(`Heavy drill ${id}`)}&r=1`;
+  await page.goto(url);
+  await expect(page.getByText("Direct inventory lookup")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Direct inventory lookup")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("Direct inventory lookup")).toBeVisible();
+  expect(requests).toHaveLength(3);
+  const sessions = await page.evaluate(() =>
+    Object.entries(window.sessionStorage)
+      .filter(([key]) => key.startsWith("housetory-search-session:"))
+      .map(([, value]) => JSON.parse(value) as { turns: unknown[] }),
+  );
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0]?.turns).toHaveLength(2);
 });
 
 test("no-provider persian fallback keeps direct records and is honestly labelled", async ({

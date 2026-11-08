@@ -16,6 +16,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AddItemsButton } from "@/components/add-items";
+import { AnswerText } from "@/components/answer-text";
 import { PageHeader } from "@/components/page-header";
 import { SearchScopeSelect } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
@@ -392,9 +393,10 @@ function AssistantAnswer({
           </Badge>
         )}
       </div>
-      <div className="mt-3 whitespace-pre-line text-[0.86rem] leading-[1.8] text-foreground/85">
-        {text}
-      </div>
+      <AnswerText
+        text={text}
+        className="mt-3 text-[0.86rem] leading-[1.8] text-foreground/85"
+      />
       {response && response.notices.length > 0 && (
         <ul className="mt-3 space-y-1 text-[0.72rem] leading-relaxed text-muted-foreground">
           {response.notices.map((notice) => (

@@ -389,6 +389,7 @@ export function QuickSearch({
         ref={inputRef}
         type="search"
         data-quick-search-input="true"
+        data-quick-search-variant={variant}
         value={query}
         maxLength={2000}
         autoComplete="off"

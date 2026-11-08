@@ -98,8 +98,15 @@ function AppShellLayout() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        const input = document.querySelector<HTMLInputElement>(
-          '[data-quick-search-input="true"]',
+        const inputs = Array.from(
+          document.querySelectorAll<HTMLInputElement>(
+            '[data-quick-search-input="true"]',
+          ),
+        );
+        const input = inputs.find(
+          (candidate) =>
+            candidate.getClientRects().length > 0 &&
+            window.getComputedStyle(candidate).visibility !== "hidden",
         );
         if (input) {
           input.focus();

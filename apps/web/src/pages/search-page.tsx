@@ -11,6 +11,7 @@ import {
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { AnswerText } from "@/components/answer-text";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard } from "@/components/item-card";
 import { SearchScopeSelect } from "@/components/search-scope-select";
@@ -263,9 +264,10 @@ export function SearchPage() {
                 </span>
               </div>
               {response.answer && (
-                <p className="mt-3 whitespace-pre-line text-[0.92rem] leading-[1.8] text-foreground/90">
-                  {response.answer}
-                </p>
+                <AnswerText
+                  text={response.answer}
+                  className="mt-3 text-[0.92rem] leading-[1.8]"
+                />
               )}
               {response.needs_clarification && response.items.length > 1 && (
                 <p className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3 py-2 text-[0.75rem] leading-relaxed text-muted-foreground">
