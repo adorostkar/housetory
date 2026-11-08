@@ -340,6 +340,80 @@ describe("AiSettingsPage", () => {
     );
   });
 
+  it("sets the first saved provider model as the default when none exists", async () => {
+    settingsData = {
+      ...settings,
+      tasks: settings.tasks.map((entry) =>
+        ["assistant", "documents", "imports", "search"].includes(entry.task)
+          ? {
+              ...entry,
+              provider_id: null,
+              provider_label: null,
+              model: null,
+              inherits_text_default: true,
+            }
+          : entry,
+      ),
+      default_text: {
+        ...settings.default_text,
+        provider_id: null,
+        provider_label: null,
+        model: null,
+        model_label: null,
+        model_listed: false,
+        configured: false,
+        inherited_tasks: [],
+        derived_from: "none",
+      },
+    };
+    const created: AiProviderRecord = {
+      ...settings.providers[0]!,
+      id: "provider-first",
+      display_name: "First provider",
+      default_model: null,
+    };
+    vi.mocked(api.post).mockResolvedValue(created);
+    vi.mocked(api.get).mockResolvedValue({
+      provider_id: created.id,
+      models: [providerModel("gpt-4o", "GPT-4o")],
+      error: null,
+      cached: false,
+    });
+    vi.mocked(api.patch).mockResolvedValue({
+      ...created,
+      default_model: "gpt-4o",
+    });
+    vi.mocked(api.put).mockResolvedValue(settingsData);
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Add provider" }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.clear(within(dialog).getByLabelText("Display name"));
+    await userEvent.type(
+      within(dialog).getByLabelText("Display name"),
+      "First provider",
+    );
+    await userEvent.type(within(dialog).getByLabelText("API key"), "sk-first-secret");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Save provider & discover models/ }),
+    );
+    const defaultModel = await within(dialog).findByRole("combobox", {
+      name: "Default model",
+    });
+    await userEvent.click(defaultModel);
+    await userEvent.click(
+      within(dialog).getByRole("option", { name: /GPT-4o/ }),
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Save selected model/ }),
+    );
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith("/ai/default-text", {
+        provider_id: "provider-first",
+        model: "gpt-4o",
+      }),
+    );
+  });
+
   it("discovers models when editing with a saved key and keeps the key write-only", async () => {
     const modelCatalog = {
       provider_id: settings.providers[0]!.id,

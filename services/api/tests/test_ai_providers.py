@@ -1356,6 +1356,38 @@ def test_default_text_rejects_missing_disabled_and_incompatible_routes(
     )
 
 
+def test_first_provider_model_finishes_setup_by_seeding_the_default(owner_client):
+    created = owner_client.post(
+        "/api/v1/ai/providers",
+        json=provider_payload(default_model=None),
+    )
+    assert created.status_code == 201, created.text
+    provider = created.json()
+    empty = owner_client.get("/api/v1/ai/settings").json()
+    assert empty["default_text"]["derived_from"] == "none"
+    assert all(
+        task["provider_id"] is None and task["model"] is None
+        for task in empty["tasks"]
+        if task["task"] in {"assistant", "documents", "imports", "search"}
+    )
+
+    updated = owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}",
+        json={"default_model": "gpt-4o"},
+    )
+    assert updated.status_code == 200, updated.text
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    assert settings["default_text"]["derived_from"] == "saved"
+    assert settings["default_text"]["provider_id"] == provider["id"]
+    assert settings["default_text"]["model"] == "gpt-4o"
+    assert set(settings["default_text"]["inherited_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
+
+
 def test_editing_an_existing_provider_does_not_seed_a_cleared_default(owner_client):
     first = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
     assert owner_client.delete(f"/api/v1/ai/providers/{first['id']}").status_code == 204

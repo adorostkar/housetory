@@ -145,6 +145,7 @@ async function configureProviders(request: APIRequestContext) {
     },
   });
   expect(provider.ok()).toBeTruthy();
+  const providerBody = (await provider.json()) as { id: string };
   const online = await request.put("/api/v1/settings/online-search", {
     headers: await headers(request),
     data: {
@@ -153,6 +154,7 @@ async function configureProviders(request: APIRequestContext) {
     },
   });
   expect(online.ok()).toBeTruthy();
+  return providerBody.id;
 }
 
 async function itemDetail(request: APIRequestContext, itemId: string) {
@@ -194,7 +196,7 @@ test("on-demand item valuation previews, purpose separation, manual entry and re
     window.localStorage.setItem("housetory-theme", "light");
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await configureProviders(request);
+  const valuationProviderId = await configureProviders(request);
   const room = await createRoom(request, "Valuation E2E room");
   const item = await createItem(request, "Mirrorless camera", room.id, 2);
   const manualItem = await createItem(request, "Manual value tripod", room.id, 1);
@@ -288,4 +290,14 @@ test("on-demand item valuation previews, purpose separation, manual entry and re
     if (width === 390) await shot(page, "04-valuation-mobile");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
   }
+
+  // Leave the shared disposable stack's online-search fixture unconfigured so
+  // later specs that intentionally skip without Brave stay deterministic.
+  await request.put("/api/v1/settings/online-search", {
+    headers: await headers(request),
+    data: { manual_enabled: false, reference_enabled: false, clear_api_key: true },
+  });
+  await request.delete(`/api/v1/ai/providers/${valuationProviderId}`, {
+    headers: await headers(request),
+  });
 });

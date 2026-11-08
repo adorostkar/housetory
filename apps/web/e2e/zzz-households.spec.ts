@@ -97,6 +97,20 @@ async function createSecondHousehold(
   await expect(page).toHaveURL(/\/$/);
 }
 
+async function clearConfiguredProviders(request: APIRequestContext) {
+  const settings = await request.get("/api/v1/ai/settings", {
+    headers: await currentHeaders(request),
+  });
+  expect(settings.ok()).toBeTruthy();
+  const body = (await settings.json()) as { providers: Array<{ id: string }> };
+  for (const provider of body.providers) {
+    const deleted = await request.delete(`/api/v1/ai/providers/${provider.id}`, {
+      headers: await currentHeaders(request),
+    });
+    expect(deleted.status()).toBe(204);
+  }
+}
+
 async function switchHousehold(
   page: import("@playwright/test").Page,
   name: string,
@@ -111,6 +125,7 @@ test("creates, switches and searches authorised all-my-places; opens a result in
   request,
 }) => {
   await fs.mkdir("../../docs/walkthrough/households", { recursive: true });
+  await clearConfiguredProviders(request);
   await page.addInitScript(() => {
     window.localStorage.removeItem("housetory-property-filter");
     window.localStorage.removeItem("housetory-search-scope");

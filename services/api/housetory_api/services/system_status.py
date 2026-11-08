@@ -32,6 +32,9 @@ from . import ai_settings as settings_service
 from .inventory_review_schedule import schedule_summary
 
 TASK_ORDER = tuple(task.value for task in ACTIVE_AI_TASKS)
+# These handlers are retained only so historical rows can be retried safely.
+# Their old failures must not keep the live system in a core-attention state.
+RETIRED_JOB_TASKS = frozenset({"maintenance.prune_item_images"})
 
 
 def _release() -> ReleaseStatus:
@@ -123,12 +126,21 @@ def _jobs(db: Session, household_id: uuid.UUID) -> JobStatusOut:
     counts = {
         str(status): int(count or 0)
         for status, count in db.execute(
-            select(Job.status, func.count(Job.id)).where(scope).group_by(Job.status)
+            select(Job.status, func.count(Job.id))
+            .where(
+                scope,
+                Job.task.not_in(RETIRED_JOB_TASKS),
+            )
+            .group_by(Job.status)
         ).all()
     }
     recent_failed = db.scalars(
         select(Job)
-        .where(Job.status == JobStatus.FAILED.value, scope)
+        .where(
+            Job.status == JobStatus.FAILED.value,
+            scope,
+            Job.task.not_in(RETIRED_JOB_TASKS),
+        )
         .order_by(Job.finished_at.desc().nullslast(), Job.created_at.desc())
         .limit(10)
     ).all()
@@ -248,6 +260,7 @@ def _failed_job_count(db: Session, household_id: uuid.UUID) -> int:
             select(func.count(Job.id)).where(
                 _job_scope(household_id),
                 Job.status == JobStatus.FAILED.value,
+                Job.task.not_in(RETIRED_JOB_TASKS),
             )
         )
         or 0

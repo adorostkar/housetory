@@ -151,7 +151,7 @@ test("owned item provides contents while retaining purchase, warranty and value"
   await expect(
     lendDialog.getByText("Include the contents in this loan"),
   ).toBeVisible();
-  await lendDialog.getByRole("textbox", { name: "Borrower" }).fill("Jo");
+  await lendDialog.getByRole("combobox", { name: "Borrower" }).fill("Jo");
   await lendDialog.getByRole("button", { name: "Record loan" }).click();
   await expect(lendDialog).toBeHidden();
   const auth = await headers(request);
@@ -184,7 +184,7 @@ test("owned item provides contents while retaining purchase, warranty and value"
   const includeDialog = page.getByRole("dialog");
   await includeDialog.getByText("Include the contents in this loan").click();
   await expect(includeDialog.getByText(`Torque wrench ${id}`)).toBeVisible();
-  await includeDialog.getByRole("textbox", { name: "Borrower" }).fill("Jo");
+  await includeDialog.getByRole("combobox", { name: "Borrower" }).fill("Jo");
   await screenshot(page, "02-lend-with-contents");
   await includeDialog.getByRole("button", { name: "Record loan" }).click();
   await expect(includeDialog).toBeHidden();

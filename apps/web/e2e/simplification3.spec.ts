@@ -320,4 +320,8 @@ test("saved default text model and explicit task inheritance stay stable", async
     ),
   ).toBe(true);
   await shot(defaultSection(page), "06-ai-default-text-mobile");
+
+  // Do not leave a configured provider behind for later no-provider search
+  // specs in the shared disposable suite.
+  await request.delete(`/api/v1/ai/providers/${provider.id}`);
 });

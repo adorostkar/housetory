@@ -12,6 +12,19 @@ async function headers(request: APIRequestContext) {
   return { "X-Household-Id": state.household.id };
 }
 
+async function removeConfiguredProviders(request: APIRequestContext) {
+  const auth = await headers(request);
+  const settings = await request.get("/api/v1/ai/settings", { headers: auth });
+  expect(settings.ok()).toBeTruthy();
+  const body = (await settings.json()) as { providers: Array<{ id: string }> };
+  for (const provider of body.providers) {
+    const deleted = await request.delete(`/api/v1/ai/providers/${provider.id}`, {
+      headers: auth,
+    });
+    expect(deleted.status()).toBe(204);
+  }
+}
+
 async function createRoom(request: APIRequestContext, name: string) {
   const auth = await headers(request);
   const properties = await request.get("/api/v1/properties", { headers: auth });
@@ -436,6 +449,7 @@ test("no-provider persian fallback keeps direct records and is honestly labelled
   page,
   request,
 }) => {
+  await removeConfiguredProviders(request);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.addInitScript(() => {
     window.localStorage.setItem("housetory-theme", "light");

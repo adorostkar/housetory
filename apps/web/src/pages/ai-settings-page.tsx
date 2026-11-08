@@ -240,11 +240,33 @@ export function AiSettingsPage() {
   });
 
   const finishProvider = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!editing) throw new Error("Save the provider before choosing its model.");
-      return api.patch<AiProviderRecord>(`/ai/providers/${editing.id}`, {
-        default_model: draft.default_model.trim() || null,
-      });
+      const selectedModel = draft.default_model.trim();
+      const updated = await api.patch<AiProviderRecord>(
+        `/ai/providers/${editing.id}`,
+        { default_model: selectedModel || null },
+      );
+      const defaultUnset =
+        !settings?.default_text.provider_id || !settings?.default_text.model;
+      const discovered = models[editing.id]?.find(
+        (model) => model.id === selectedModel,
+      );
+      const supportsText = !discovered || discovered.capabilities.includes("text");
+      if (defaultUnset && selectedModel && supportsText) {
+        try {
+          await api.put<AiSettings>("/ai/default-text", {
+            provider_id: editing.id,
+            model: selectedModel,
+          });
+        } catch {
+          toast.error(
+            "Provider saved, but the default text model could not be set. " +
+              "Choose it in the Default text model panel.",
+          );
+        }
+      }
+      return updated;
     },
     onSuccess: () => {
       refresh();

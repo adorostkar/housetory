@@ -413,19 +413,18 @@ def _assign_default_tasks(
         return
     capabilities = model_capabilities(provider.provider, provider.default_model)
     default = _default_row(db, household_id)
-    configured_text_rows = db.scalars(
+    existing_text_rows = db.scalars(
         select(AiTaskSetting).where(
             AiTaskSetting.household_id == household_id,
             AiTaskSetting.task.in_(TEXT_TASKS),
-            AiTaskSetting.provider_id.is_not(None),
-            AiTaskSetting.model.is_not(None),
         )
     ).all()
+    configured_text_rows = [row for row in existing_text_rows if row.provider_id and row.model]
+    can_seed = (seed_default and not configured_text_rows) or not existing_text_rows
     if (
-        seed_default
-        and default.provider_id is None
+        default.provider_id is None
         and not default.model
-        and not configured_text_rows
+        and can_seed
         and TASK_CAPABILITY[AiTask.ASSISTANT.value] in capabilities
     ):
         default.provider_id = provider.id

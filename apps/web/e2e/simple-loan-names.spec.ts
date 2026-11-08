@@ -407,7 +407,9 @@ test("returned person filters survive detail links, browser Back and composed ta
     "Mohsen",
   );
   await expect(page.getByText("Heavy drill")).toBeVisible();
-  await expect(page.getByText("Returned hose")).toBeVisible();
+  await expect(
+    page.getByTestId("borrowed-row").filter({ hasText: "Returned hose" }),
+  ).toBeVisible();
 
   // Browser Back from a lent-out detail restores the returned person view.
   await page
@@ -447,17 +449,20 @@ test("returned person filters survive detail links, browser Back and composed ta
   await expect(page).toHaveURL(/direction=borrowed/);
   expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
   expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
-  await expect(page.getByText("Returned hose")).toBeVisible();
-  await page
+  const returnedHoseRow = page
     .getByTestId("borrowed-row")
-    .filter({ hasText: "Returned hose" })
+    .filter({ hasText: "Returned hose" });
+  await expect(returnedHoseRow).toBeVisible();
+  await returnedHoseRow
     .getByRole("link", { name: "View details" })
     .click();
   await page.goBack();
   await expect(page).toHaveURL(/direction=borrowed/);
   expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
   expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
-  await expect(page.getByText("Returned hose")).toBeVisible();
+  await expect(
+    page.getByTestId("borrowed-row").filter({ hasText: "Returned hose" }),
+  ).toBeVisible();
 
   await page
     .getByTestId("borrowed-row")
@@ -468,7 +473,9 @@ test("returned person filters survive detail links, browser Back and composed ta
   await expect(page).toHaveURL(/direction=borrowed/);
   expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
   expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
-  await expect(page.getByText("Returned hose")).toBeVisible();
+  await expect(
+    page.getByTestId("borrowed-row").filter({ hasText: "Returned hose" }),
+  ).toBeVisible();
 
   // All-direction tab keeps the person and status; text, overdue and direction
   // filters compose together without clearing each other.

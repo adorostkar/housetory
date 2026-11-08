@@ -384,6 +384,23 @@ def test_system_status_summary_keeps_optional_configuration_out_of_attention(
     owner_client,
 ):
     _healthy_heartbeat()
+    with SessionLocal() as db:
+        db.add(
+            Job(
+                queue="default",
+                task="maintenance.prune_item_images",
+                payload={},
+                status="failed",
+                attempts=5,
+                max_attempts=5,
+                last_error=(
+                    "OSError: [Errno 30] Read-only file system "
+                    "(historical retired illustration prune)"
+                ),
+                finished_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
     summary = owner_client.get("/api/v1/system/status/summary")
     assert summary.status_code == 200, summary.text
     body = summary.json()
@@ -400,6 +417,13 @@ def test_system_status_summary_keeps_optional_configuration_out_of_attention(
         "Reference-image search",
         "AI tasks",
     } <= optional
+
+    status = owner_client.get("/api/v1/system/status").json()
+    assert status["jobs"]["counts"].get("failed", 0) == 0
+    assert all(
+        job["task"] != "maintenance.prune_item_images"
+        for job in status["jobs"]["recent_failed"]
+    )
 
 
 def test_system_status_summary_distinguishes_core_and_configured_feature_issues(
