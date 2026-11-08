@@ -105,7 +105,7 @@ async function focusQuickSearch(page: Page) {
   return input;
 }
 
-test("desktop sidebar and mobile overview quick search find and open records", async ({
+test("desktop global and mobile quick search find and open records", async ({
   page,
   browser,
   request,
@@ -136,17 +136,14 @@ test("desktop sidebar and mobile overview quick search find and open records", a
 
   await page.goto("/");
   const addItem = page.locator("aside").getByRole("button", { name: "Add items" });
-  const sidebarInput = page
-    .locator("aside")
-    .getByRole("combobox", { name: "Search or ask about your inventory" });
+  const globalInput = page
+    .getByRole("combobox", { name: "Search or ask about your inventory" })
+    .first();
   await expect(addItem).toBeVisible();
-  await expect(sidebarInput).toBeVisible();
-  const addBox = await addItem.boundingBox();
-  const inputBox = await sidebarInput.boundingBox();
-  expect(addBox && inputBox && inputBox.y >= addBox.y + addBox.height).toBeTruthy();
+  await expect(globalInput).toBeVisible();
 
-  await sidebarInput.click();
-  await sidebarInput.fill(`Camera ${suffix}`);
+  await globalInput.click();
+  await globalInput.fill(`Camera ${suffix}`);
   const panel = page.getByRole("listbox", { name: "Quick search results" });
   await expect(panel).toBeVisible();
   await expect(
@@ -195,11 +192,10 @@ test("desktop sidebar and mobile overview quick search find and open records", a
     page.getByRole("option", { name: new RegExp(`Camera ${suffix}`) }),
   ).toBeVisible();
   await page.getByRole("button", { name: /View all results/ }).click();
-  await expect(page).toHaveURL(
-    new RegExp(`/search\\?q=${encodeURIComponent(`Camera ${suffix}`)}`),
-  );
+  await expect(page).toHaveURL(/\/search\?q=/);
+  expect(new URL(page.url()).searchParams.get("q")).toBe(`Camera ${suffix}`);
   await expect(
-    page.getByRole("textbox", { name: "Search or ask about your inventory" }),
+    page.getByRole("combobox", { name: "Search or ask about your inventory" }),
   ).toHaveValue(`Camera ${suffix}`);
 
   await page.goto(`/search?q=${encodeURIComponent(shelf.name)}`);
@@ -225,13 +221,15 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   });
   const mobilePage = await mobile.newPage();
   await mobilePage.goto("/");
-  const mobileInput = mobilePage.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const mobileInput = mobilePage
+    .locator('input[data-quick-search-input="true"]:visible')
+    .first();
   await expect(mobileInput).toBeVisible();
-  const purchaseSummary = mobilePage.getByText("Purchase value", { exact: true });
+  const mainHeading = mobilePage.locator("main h1").first();
   const mobileInputBox = await mobileInput.boundingBox();
-  const summaryBox = await purchaseSummary.boundingBox();
+  const headingBox = await mainHeading.boundingBox();
   expect(
-    mobileInputBox && summaryBox && mobileInputBox.y < summaryBox.y,
+    mobileInputBox && headingBox && mobileInputBox.y < headingBox.y,
   ).toBeTruthy();
   await mobileInput.fill(container.identifier);
   await expect(
@@ -239,7 +237,7 @@ test("desktop sidebar and mobile overview quick search find and open records", a
   ).toBeVisible();
   await mobilePage.goto("/items");
   await expect(
-    mobilePage.getByRole("link", { name: "Search or ask about your inventory" }),
+    mobilePage.locator('input[data-quick-search-input="true"]:visible').first(),
   ).toBeVisible();
   await mobile.close();
 });

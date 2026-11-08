@@ -1,3 +1,7 @@
+> **Current behaviour:** the sidebar/mobile quick-search entry and the separate
+> Ask Housetory handoff described below were superseded by the unified global
+> search flow. See [`UNIFIED_SEARCH.md`](UNIFIED_SEARCH.md).
+
 # Single-home polish: unified search, grounded assistant and everyday refinements
 
 This milestone makes the existing single-household inventory easier to search and

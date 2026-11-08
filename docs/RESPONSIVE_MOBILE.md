@@ -133,7 +133,7 @@ Results:
 
 - Chromium mobile/tablet matrix: pass
 - WebKit 27.2 mobile/tablet matrix with touch and DPR 3: pass
-- Full checked-in Playwright suite: **85 workflows, 84 passed, 1 fixture-dependent skip**
+- Full checked-in Playwright suite: **89 workflows, 88 passed, 1 fixture-dependent skip**
 - Desktop 1440 regression: compact controls and no mobile bar
 
 ## Screenshots

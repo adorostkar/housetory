@@ -23,7 +23,6 @@ import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useCanWrite } from "@/lib/queries";
+import { SearchSessionProvider } from "@/lib/search-session";
 import { cn } from "@/lib/utils";
 
 const primaryNav = [
@@ -75,9 +75,11 @@ function mobileTabClass(active: boolean) {
 
 export function AppShell() {
   return (
-    <AddItemsProvider>
-      <AppShellLayout />
-    </AddItemsProvider>
+    <SearchSessionProvider>
+      <AddItemsProvider>
+        <AppShellLayout />
+      </AddItemsProvider>
+    </SearchSessionProvider>
   );
 }
 
@@ -129,8 +131,6 @@ function AppShellLayout() {
 
         <AddItemsButton className="mt-4 w-full justify-start pl-4" />
 
-        <QuickSearch className="mt-3" variant="sidebar" />
-
         <nav className="mt-8 space-y-1" aria-label="Primary">
           <p className="eyebrow mb-3 px-3">Everything has a place</p>
           {primaryNav.map((item) => (
@@ -169,16 +169,6 @@ function AppShellLayout() {
               </span>
             </Link>
             <div className="flex items-center gap-0.5">
-              <Button
-                asChild
-                variant="ghost"
-                size="icon"
-                aria-label="Search or ask about your inventory"
-              >
-                <Link to="/search">
-                  <Search className="size-[1.1rem]" />
-                </Link>
-              </Button>
               <ThemeToggle />
               {location.pathname !== "/" && (
                 <AddItemsButton
@@ -193,7 +183,20 @@ function AppShellLayout() {
           </div>
         </header>
 
-        <main className="mx-auto min-h-[calc(100dvh-4rem)] w-full max-w-[1320px] px-5 pb-28 pt-7 sm:px-8 sm:pt-9 lg:min-h-dvh lg:px-12 lg:pb-20 lg:pt-12">
+        {location.pathname !== "/assistant" && (
+          <header className="sticky top-0 z-30 hidden border-b border-border/50 bg-background/70 backdrop-blur-xl lg:block">
+            <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-12">
+              <QuickSearch variant="top" className="w-full max-w-2xl" />
+            </div>
+          </header>
+        )}
+
+        <main className="mx-auto min-h-[calc(100dvh-4rem)] w-full max-w-[1320px] px-5 pb-28 pt-5 sm:px-8 sm:pt-7 lg:min-h-dvh lg:px-12 lg:pb-20 lg:pt-8">
+          {location.pathname !== "/assistant" && (
+            <div className="mb-5 lg:hidden">
+              <QuickSearch variant="mobile" />
+            </div>
+          )}
           {!canWrite && (
             <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
               <span className="font-medium text-brass">Viewer access.</span> You can browse

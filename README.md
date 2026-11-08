@@ -106,9 +106,11 @@ Tailscale is optional.
   property, room and place; duplicate names across households stay distinct and
   ambiguous. Multi-household mutations require a current household context, so a
   stale tab cannot write to a newly selected household. Revoked access falls back
-  immediately. All-my-places assistant answers are deterministic and never send
-  one household's data through another household's AI provider or consent. See
-  [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md).
+  immediately. All-my-places search and assistant answers interpret each
+  household only with that household's own configured provider and consent; an
+  unconfigured household stays deterministic and never inherits another
+  household's provider. See [`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md) and
+  [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - **Item images and references**: actual photos always take priority, followed by
   labelled public reference images and existing legacy AI illustrations, then a
   compact category-icon fallback. New AI illustration generation was retired;
@@ -194,8 +196,10 @@ Tailscale is optional.
 - First-class Obsidian parsing: YAML frontmatter, properties, wikilinks and
   aliases, embeds, nested tags, Markdown tables, checklists, nested folders,
   attachment resolution, broken-link reporting and vault structure.
-- A read-only grounded assistant using real household tools, with deterministic
-  answers when no model is available, plus natural-language smart search.
+- One unified search and read-only grounded assistant flow: direct inventory
+  lookup first, configured consented AI only when interpretation is needed, and
+  honest direct-only results when no provider is available. See
+  [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - One clear **Add items** chooser for manual entry, **Scan a photo** and
   importing a list or file. This replaces separate primary Import/AI Scan
   navigation while keeping every focused workflow and import history.
@@ -205,9 +209,10 @@ Tailscale is optional.
   values or shared-purchase relationships. Contextual Add items preserves the
   source place and a useful return origin. See
   [`docs/ITEM_FORM_AND_FILES.md`](docs/ITEM_FORM_AND_FILES.md).
-- A persistent quick search beneath **Add items** on desktop and near the top
-  of the mobile overview, with grouped items, containers and locations, keyboard
-  navigation and a link to full results.
+- One prominent global search box in the desktop top bar and near the top of
+  every mobile inventory page, with grouped local suggestions while typing and
+  the same submit-time result flow everywhere. There is no competing sidebar
+  search box or separate keyword/Ask mode on the results page.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
   quantities, duplicate review, room-only or room-plus-container destinations,
   per-suggestion overrides and approved bulk creation. Fixed fixtures are flagged
@@ -273,15 +278,20 @@ Tailscale is optional.
   a receipt does not increase stock unless explicitly requested, and manuals are not
   treated as proof of purchase. See
   [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md).
-- **Unified search and grounded assistant**: one sidebar/mobile input labelled
-  “Search or ask about your inventory…”. Typing shows ordinary item/box/place
-  matches without AI; Enter submits the full query. Questions such as “where is
-  my heavy drill?” resolve current loan records first and distinguish owned,
-  on-loan and at-home quantities, borrower, recorded due date and usual home
-  location. Structured questions use validated household-scoped database queries;
-  open-ended questions can continue on the Assistant page. Reviewed search and
-  assistant answers are read-only and never invent inventory facts. See
-  [`docs/SINGLE_HOME_POLISH.md`](docs/SINGLE_HOME_POLISH.md).
+- **Unified search and grounded assistant**: one prominent global input labelled
+  “Search or ask about your inventory…”, shared by the desktop top bar, mobile
+  pages, results page and secondary Assistant. Typing shows cheap direct
+  item/container/place matches; Enter submits one flow that resolves direct
+  inventory first and automatically uses the configured consented assistant only
+  when interpretation or fallback matching is needed. Persian/Arabic question
+  marks, letter variants and ZWNJ are normalised without stripping scripts;
+  plain multilingual questions need no punctuation. Answers are in the user's
+  language, preserve original names/models/IDs and are grounded only in current
+  authorised records. Short follow-ups retain bounded resolved items, candidates
+  and loan references, and all-my-places answers use each household's own
+  provider. Direct lookup, AI-assisted answers and AI-unavailable fallbacks are
+  visibly distinct. See
+  [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
   then review structured item groups. Repeated mentions such as “ethernet cable,
@@ -325,7 +335,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 432 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 447 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -398,9 +408,11 @@ stack, not just unit mocks:
   explicit parent-only versus contents-included loans with independent returns,
   collapsed item-form summaries preserving shared purchase, warranty, current
   value and document links, contextual Add origin, combined document/manual
-  de-duplication and image-source technical disclosure.
+  de-duplication and image-source technical disclosure, one global search box,
+  Unicode/Persian/Arabic matching, direct/AI/fallback modes, bounded multilingual
+  follow-ups and per-household all-places AI provider boundaries.
 - 220 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 85 checked-in Playwright workflows (84 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 89 checked-in Playwright workflows (88 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -413,10 +425,11 @@ stack, not just unit mocks:
   save, page-original access and cancel, OCR-to-line-item review with exact
   household matching, optional AI-refined fields/lines, reviewed apply and persisted
   purchase allocations, the actual Inventory.md hierarchy,
-  duplicate prevention, PWA/service-worker/deep-link routing, quick search, the
-  exact loaned Heavy drill question, mobile keyword search with no inference,
-  missing-purchase filter parity, assistant conversation handoff, item title /
-  usual-home loan state, authorized return, viewer restrictions, compact and
+  duplicate prevention, PWA/service-worker/deep-link routing, one global search
+  box, the exact loaned Heavy drill question, mobile keyword search with no
+  inference, missing-purchase filter parity, bounded search follow-up context,
+  Persian AI-assisted and no-provider fallback UI, item title / usual-home loan
+  state, authorized return, viewer restrictions, compact and
   populated photo galleries, the unified Add items chooser with contextual
   destinations, manual upload/attach/answer citations and a fixture Brave
   provider exercised through the real adapter for gated search/review/save at
@@ -505,9 +518,9 @@ and unallocated by design, and there is no barcode field. Legacy purchases witho
 allocation rows do not receive fabricated historical splits. Purchase information
 can be explicitly Unknown or Not applicable; missing-information counts exclude
 items marked Not applicable and use the same rule across overview, search,
-assistant and filters. Search and assistant are single-household and use fixed,
-validated database queries rather than generated SQL. Live paid-provider
-extraction, search and assistant quality was not tested. See
+assistant and filters. Search and assistant use validated read-only tools rather
+than generated SQL. Live paid-provider extraction, search and assistant quality
+was not tested. See
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), which separates shipped work
 from remaining work and states the OCR, AI and multi-currency limitations
 honestly.

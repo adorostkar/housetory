@@ -1419,6 +1419,8 @@ export interface AssistantResponse {
 
 export interface NaturalSearchFilters {
   q: string | null;
+  household_id?: UUID | null;
+  property_id?: UUID | null;
   room_id: UUID | null;
   room_name: string | null;
   exclude_room_id: UUID | null;
@@ -1445,6 +1447,75 @@ export interface NaturalSearchFilters {
   min_purchase_cents: number | null;
   max_purchase_cents: number | null;
   sort: "relevance" | "purchase_desc" | "purchase_asc" | "name_asc";
+}
+
+export interface SearchContextItemRef {
+  id: UUID;
+  name: string;
+}
+
+export interface SearchContextLoanRef {
+  id: UUID;
+  item_id: UUID | null;
+  item_name: string | null;
+  borrower_name: string | null;
+}
+
+export interface SearchConversationContext {
+  scope_key: string | null;
+  last_query: string | null;
+  resolved_items: SearchContextItemRef[];
+  candidate_items: SearchContextItemRef[];
+  loans: SearchContextLoanRef[];
+}
+
+export interface SearchQueryResponse {
+  query: string;
+  mode: "direct" | "ai" | "fallback";
+  ai_used: boolean;
+  ai_attempted: boolean;
+  direct_match: boolean;
+  ambiguous: boolean;
+  needs_clarification: boolean;
+  answer: string | null;
+  answer_kind: string | null;
+  interpretation: string;
+  filters: NaturalSearchFilters;
+  items: ItemSummary[];
+  quick_results: QuickSearchResult[];
+  borrowed: BorrowedRecord[];
+  borrowed_total: number;
+  total: number;
+  documents: Array<{
+    id: string;
+    title: string;
+    type: string;
+    merchant: string | null;
+    document_date: string | null;
+    items: string[];
+    url: string;
+    household_id?: string;
+    household_name?: string;
+  }>;
+  locations: Array<{
+    id: string;
+    type: "room" | "storage_location";
+    name: string;
+    url: string;
+    room?: string | null;
+    item_count?: number;
+    household_id?: string;
+    household_name?: string;
+  }>;
+  references: AssistantReference[];
+  notices: string[];
+  facts: Record<string, unknown>;
+  tool: string | null;
+  ai_status: AiStatus;
+  context: SearchConversationContext;
+  scope_label?: string;
+  households?: SearchHousehold[];
+  property?: SearchProperty | null;
 }
 
 export interface NaturalSearchResponse {

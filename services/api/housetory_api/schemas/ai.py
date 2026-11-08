@@ -8,7 +8,7 @@ from ..domain import PurchaseInfoFilter
 from ..schemas.borrowed import BorrowedOut
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.items import ItemSummary
-from ..schemas.search import SearchHousehold, SearchProperty
+from ..schemas.search import QuickSearchResult, SearchHousehold, SearchProperty
 
 AssistantTool = Literal[
     "search_items",
@@ -26,6 +26,7 @@ AssistantTool = Literal[
     "find_borrowed_owner",
     "locate_item",
     "count_items",
+    "get_loan_history",
 ]
 
 
@@ -289,6 +290,72 @@ class AssistantResponse(BaseModel):
     notices: list[str] = Field(default_factory=list)
     facts: dict[str, Any] = Field(default_factory=dict)
     ai_status: AiStatus
+    scope_label: str = "All my places"
+    households: list[SearchHousehold] = Field(default_factory=list)
+    property: SearchProperty | None = None
+
+
+class SearchContextItemRef(BaseModel):
+    id: uuid.UUID
+    name: str = Field(max_length=200)
+
+
+class SearchContextLoanRef(BaseModel):
+    id: uuid.UUID
+    item_id: uuid.UUID | None = None
+    item_name: str | None = Field(default=None, max_length=200)
+    borrower_name: str | None = Field(default=None, max_length=120)
+
+
+class SearchConversationContext(BaseModel):
+    """Small structured state carried between submit-time search turns.
+
+    Only validated ids and bounded labels are retained. The server re-authorises
+    every id and re-reads mutable loan/location facts on each turn.
+    """
+
+    scope_key: str | None = None
+    last_query: str | None = Field(default=None, max_length=2000)
+    resolved_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=6)
+    candidate_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=12)
+    loans: list[SearchContextLoanRef] = Field(default_factory=list, max_length=12)
+
+
+class SearchQueryRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    explicit_ask: bool = False
+    history: list[AssistantHistoryMessage] = Field(default_factory=list, max_length=20)
+    context: SearchConversationContext | None = None
+    household_id: uuid.UUID | None = None
+    property_id: uuid.UUID | None = None
+    limit: int = Field(default=30, ge=1, le=100)
+
+
+class SearchQueryResponse(BaseModel):
+    query: str
+    mode: Literal["direct", "ai", "fallback"]
+    ai_used: bool
+    ai_attempted: bool
+    direct_match: bool
+    ambiguous: bool = False
+    needs_clarification: bool = False
+    answer: str | None = None
+    answer_kind: str | None = None
+    interpretation: str = ""
+    filters: NaturalSearchFilters = Field(default_factory=NaturalSearchFilters)
+    items: list[ItemSummary] = Field(default_factory=list)
+    quick_results: list[QuickSearchResult] = Field(default_factory=list)
+    borrowed: list[BorrowedOut] = Field(default_factory=list)
+    borrowed_total: int = 0
+    total: int = 0
+    documents: list[dict[str, Any]] = Field(default_factory=list)
+    locations: list[dict[str, Any]] = Field(default_factory=list)
+    references: list[AssistantReference] = Field(default_factory=list)
+    notices: list[str] = Field(default_factory=list)
+    facts: dict[str, Any] = Field(default_factory=dict)
+    tool: str | None = None
+    ai_status: AiStatus
+    context: SearchConversationContext = Field(default_factory=SearchConversationContext)
     scope_label: str = "All my places"
     households: list[SearchHousehold] = Field(default_factory=list)
     property: SearchProperty | None = None

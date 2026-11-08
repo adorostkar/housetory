@@ -150,7 +150,7 @@ describe("QuickSearch", () => {
     );
   });
 
-  it("routes a question to grounded answer results and offers the assistant", async () => {
+  it("sends every query to the same submit-time result flow", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
       const query = queryFromPath(path);
       return {
@@ -182,14 +182,18 @@ describe("QuickSearch", () => {
       screen.getByRole("button", { name: "Ask Housetory" }),
     ).toBeVisible();
     await userEvent.keyboard("{Enter}");
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        `/search?q=${encodeURIComponent("where is my heavy drill")}&ask=1`,
-      ),
-    );
+    await waitFor(() => {
+      const url = new URL(
+        screen.getByTestId("location").textContent ?? "/",
+        "http://localhost",
+      );
+      expect(url.pathname).toBe("/search");
+      expect(url.searchParams.get("q")).toBe("where is my heavy drill");
+      expect(url.searchParams.get("ask")).toBeNull();
+    });
   });
 
-  it("keeps longer conversations on the assistant page from the quick panel", async () => {
+  it("offers an explicit Ask path that bypasses heuristics", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
       const query = queryFromPath(path);
       return response(query, [result({ title: "Heavy drill" })]);
@@ -201,11 +205,15 @@ describe("QuickSearch", () => {
     await userEvent.type(input, "where is my heavy drill");
     const ask = await screen.findByRole("button", { name: "Ask Housetory" });
     await userEvent.click(ask);
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
-      ),
-    );
+    await waitFor(() => {
+      const url = new URL(
+        screen.getByTestId("location").textContent ?? "/",
+        "http://localhost",
+      );
+      expect(url.pathname).toBe("/search");
+      expect(url.searchParams.get("q")).toBe("where is my heavy drill");
+      expect(url.searchParams.get("ask")).toBe("1");
+    });
   });
 
   it("opens all results with Enter before selecting a result and preserves the query", async () => {
@@ -216,11 +224,14 @@ describe("QuickSearch", () => {
     await userEvent.type(input, "Blue box");
     expect(await screen.findByText("Searching your places…")).toBeVisible();
     await userEvent.keyboard("{Enter}");
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        `/search?q=${encodeURIComponent("Blue box")}`,
-      ),
-    );
+    await waitFor(() => {
+      const url = new URL(
+        screen.getByTestId("location").textContent ?? "/",
+        "http://localhost",
+      );
+      expect(url.pathname).toBe("/search");
+      expect(url.searchParams.get("q")).toBe("Blue box");
+    });
   });
 
   it("closes on Escape, clears stale state and handles empty and error states", async () => {

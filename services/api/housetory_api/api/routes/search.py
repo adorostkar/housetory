@@ -5,12 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ...db import get_db
+from ...schemas.ai import SearchQueryRequest, SearchQueryResponse
 from ...schemas.search import (
     QuickSearchResponse,
     SearchItemList,
     SearchScopeList,
 )
-from ...services import global_search
+from ...services import global_search, unified_search
 from ...services.query_text import clean_subject, looks_like_question
 from ..abuse import enforce_search_limit
 from ..deps import AccountContext, require_account
@@ -25,6 +26,27 @@ def search_scopes(
 ) -> SearchScopeList:
     enforce_search_limit(account.user.id)
     return global_search.list_search_scope_options(db, account.user.id)
+
+
+@router.post("/query", response_model=SearchQueryResponse)
+def unified_query(
+    payload: SearchQueryRequest,
+    account: AccountContext = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> SearchQueryResponse:
+    """The single submit-time flow shared by every search/assistant entry point."""
+    enforce_search_limit(account.user.id)
+    return unified_search.execute_search(
+        db,
+        user_id=account.user.id,
+        query=payload.query,
+        explicit_ask=payload.explicit_ask,
+        history=payload.history,
+        context=payload.context,
+        household_id=payload.household_id,
+        property_id=payload.property_id,
+        limit=payload.limit,
+    )
 
 
 @router.get("/quick", response_model=QuickSearchResponse)

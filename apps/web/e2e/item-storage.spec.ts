@@ -6,6 +6,12 @@ function suffix() {
   return `${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 5)}`;
 }
 
+function localIsoDate() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
 async function headers(request: APIRequestContext) {
   const response = await request.get("/api/v1/auth/session");
   const state = (await response.json()) as { household: { id: string } };
@@ -159,14 +165,18 @@ test("owned item provides contents while retaining purchase, warranty and value"
   expect(loanRows.items[0]?.includes_contents).toBe(false);
   const childLoans = await request.get(`/api/v1/items/${childId}/loans`, { headers: auth });
   expect(((await childLoans.json()) as { on_loan_quantity: number }).on_loan_quantity).toBe(0);
-  await request.post(`/api/v1/loans/${loanRows.items[0]!.id}/returns`, {
-    headers: auth,
-    data: {
-      quantity: 1,
-      returned_on: new Date().toISOString().slice(0, 10),
-      request_id: crypto.randomUUID(),
+  const returned = await request.post(
+    `/api/v1/loans/${loanRows.items[0]!.id}/returns`,
+    {
+      headers: auth,
+      data: {
+        quantity: 1,
+        returned_on: localIsoDate(),
+        request_id: crypto.randomUUID(),
+      },
     },
-  });
+  );
+  expect(returned.ok(), await returned.text()).toBeTruthy();
   await page.reload();
 
   // A fresh loan can explicitly include available contents.

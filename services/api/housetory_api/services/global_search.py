@@ -38,7 +38,11 @@ from .container_serializers import location_path_map
 from .hierarchy import descendant_ids
 from .lending import loan_overview_for_items
 from .properties import get_property
-from .query_text import search_term_variants
+from .query_text import (
+    contains_non_latin,
+    search_term_variants,
+    text_contains_term,
+)
 from .serializers import item_load_options
 
 MAX_SEARCH_HOUSEHOLDS = 20
@@ -375,13 +379,58 @@ def _quick_household(
                 Item.storage_location_id.in_(property_location_ids or set()),
             )
         )
-    items = db.scalars(
-        select(Item)
-        .options(*item_load_options())
-        .where(*item_conditions)
-        .order_by(func.lower(Item.name))
-        .limit(limit)
-    ).all()
+    items = list(
+        db.scalars(
+            select(Item)
+            .options(*item_load_options())
+            .where(*item_conditions)
+            .order_by(func.lower(Item.name))
+            .limit(limit)
+        ).all()
+    )
+    if not items and contains_non_latin(effective_term):
+        # SQL collation does not fold Persian/Arabic variants, ZWNJ or
+        # Arabic-Indic digits. Scan a bounded authorised set and compare in
+        # Python without changing the stored names.
+        text_conditions = [
+            Item.household_id == household_id,
+            Item.is_archived.is_(False),
+        ]
+        if property_room_ids is not None:
+            text_conditions.append(
+                or_(
+                    Item.room_id.in_(property_room_ids),
+                    Item.storage_location_id.in_(property_location_ids or set()),
+                )
+            )
+        candidates = db.scalars(
+            select(Item)
+            .options(*item_load_options())
+            .where(*text_conditions)
+            .order_by(func.lower(Item.name))
+            .limit(600)
+        ).all()
+        for item in candidates:
+            labels = [
+                item.name,
+                item.brand or "",
+                item.model or "",
+                item.serial_number or "",
+                item.description or "",
+                *(tag.name for tag in item.tags),
+            ]
+            if item.category is not None:
+                labels.append(item.category.name)
+            if item.room is not None:
+                labels.append(item.room.name)
+            if item.storage_location is not None:
+                labels.extend(
+                    [item.storage_location.name, item.storage_location.identifier or ""]
+                )
+            if text_contains_term(" ".join(labels), effective_term):
+                items.append(item)
+                if len(items) >= limit:
+                    break
     path_map = location_path_map(db, household_id)
     loan_overview = loan_overview_for_items(db, household_id, [item.id for item in items])
     item_results: list[QuickSearchResult] = []
@@ -477,6 +526,70 @@ def _quick_household(
                 household=_scope_household(household, role),
             )
         )
+    if (
+        not container_results
+        and not location_results
+        and contains_non_latin(effective_term)
+    ):
+        place_conditions = [
+            StorageLocation.household_id == household_id,
+            StorageLocation.active(),
+        ]
+        if property_location_ids is not None:
+            place_conditions.append(StorageLocation.id.in_(property_location_ids))
+        for location in db.scalars(
+            select(StorageLocation)
+            .where(*place_conditions)
+            .order_by(func.lower(StorageLocation.name))
+            .limit(400)
+        ).all():
+            labels = [
+                location.name,
+                location.identifier or "",
+                location.legacy_identifier or "",
+                *(location.aliases or []),
+            ]
+            if not text_contains_term(" ".join(labels), effective_term):
+                continue
+            path = path_map.get(location.id, [])[:-1]
+            if location.is_container:
+                title = location.identifier or location.name
+                subtitle_parts = []
+                if location.name and location.name != title:
+                    subtitle_parts.append(location.name)
+                for alias in [location.legacy_identifier, *(location.aliases or [])]:
+                    cleaned = str(alias).strip() if alias else ""
+                    if cleaned and cleaned != title and cleaned not in subtitle_parts:
+                        subtitle_parts.append(cleaned)
+                container_results.append(
+                    QuickSearchResult(
+                        id=location.id,
+                        kind="container",
+                        title=title,
+                        subtitle=" · ".join(subtitle_parts[:3])
+                        or location.container_type
+                        or "container",
+                        context=_context(location.room_id, path, rooms),
+                        url=f"/containers/{location.id}",
+                        household=_scope_household(household, role),
+                    )
+                )
+            else:
+                location_results.append(
+                    QuickSearchResult(
+                        id=location.id,
+                        kind="location",
+                        title=location.name,
+                        subtitle=location.identifier
+                        or re.sub(r"[_-]+", " ", location.kind),
+                        context=_context(location.room_id, path, rooms),
+                        url=f"/rooms/{location.room_id}?location_id={location.id}",
+                        household=_scope_household(household, role),
+                    )
+                )
+            if len(container_results) + len(location_results) >= limit * 2:
+                break
+
     borrowed_rows, _borrowed_total = borrowed_service.quick_search_records(
         db,
         household.id,

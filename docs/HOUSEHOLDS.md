@@ -120,19 +120,24 @@ household/property choice in local storage and the URL.
 The assistant is read-only. It never creates, edits or deletes inventory from a
 conversation.
 
-- **All my places and property-scoped requests** use deterministic retrieval only.
-  Each household's records are queried separately and merged with household
-  labels. No AI provider is called, so one household's data can never be sent
-  through another household's provider or consent.
-- **One household without a property filter** uses the existing assistant path
-  for that household. It may call that household's own configured provider under
-  that household's task/cloud-consent settings. Selecting another household does
-  not reuse the workspace household's provider or consent.
-- If the selected household has no provider, provider consent is absent, or the
-  task is disabled, deterministic answers still work. The response reports the
-  actual provider state instead of claiming an AI answer was used.
-- All-my-places/property answers include a notice explaining that AI
-  interpretation is only used after narrowing to one household.
+- **All my places and property-scoped requests** execute the unified submit-time
+  flow one household at a time. Each household's bounded labels and facts may be
+  interpreted only by that household's own configured provider and consent. The
+  results are merged with household labels, so one household's data is never
+  sent through another household's provider.
+- **One household** uses that household's configured search task, or its
+  configured assistant task when no search task is assigned. A property filter
+  narrows the same household-scoped tools and provider boundary.
+- If a household has no provider, provider consent is absent, or the task is
+  disabled, direct deterministic retrieval still runs for that household. The
+  response reports the actual mode and never falls back to an unapproved
+  provider.
+- All-my-places/property notices state when only part of the scope could use a
+  provider, and the visible `direct`, `ai` and `fallback` labels distinguish
+  direct facts from AI-assisted answers and AI-unavailable results.
+- Follow-up context is bounded and re-authorised per household. Candidate items,
+  loans and borrower references from one household/property are discarded when
+  the scope changes.
 - Loans preserve quantity facts. A unique whereabouts answer can include the
   borrower and household-qualified home path. Duplicate names across households
   produce distinct matches and ask which one the person meant. Ambiguity is never

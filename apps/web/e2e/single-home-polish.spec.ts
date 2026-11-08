@@ -85,7 +85,8 @@ test("unified search answers the heavy drill loan question without claiming it i
   await expect(panel.getByText(new RegExp(`On loan to Alex`))).toBeVisible();
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/search\?q=.*ask=1/);
+  await expect(page).toHaveURL(/\/search\?q=.*r=/);
+  await expect(page).not.toHaveURL(/ask=1/);
   await expect(
     page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
   ).toBeVisible();
@@ -95,18 +96,14 @@ test("unified search answers the heavy drill loan question without claiming it i
   await expect(page.getByText(/On loan: 1 with Alex/)).toHaveCount(0);
   await expect(page.getByText(/guarantee of return/)).toHaveCount(0);
 
-  await page.getByRole("link", { name: /Continue in Assistant/ }).click();
-  await expect(page).toHaveURL(/\/assistant\?q=/);
-  await expect(
-    page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
-  ).toBeVisible();
-  await expect(page.getByText("Privacy & model details")).toBeVisible();
-  const assistantInput = page.getByRole("textbox", {
-    name: "Ask the Housetory assistant",
-  });
-  await assistantInput.fill("when is it due?");
-  await page.getByRole("button", { name: "Send question" }).click();
+  const followupInput = visibleQuickSearch(page);
+  await followupInput.fill("when is it due?");
+  await followupInput.press("Enter");
+  await expect(page).toHaveURL(/\/search\?q=when/);
   await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
+  await expect(
+    page.getByText(/AI unavailable · direct results only|AI-assisted answer/).first(),
+  ).toBeVisible();
 });
 
 test("mobile keyword search stays local and missing-purchase filters match the answer", async ({

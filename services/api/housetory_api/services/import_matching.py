@@ -71,7 +71,9 @@ def build_index(
 
 
 def _normalize(value: str) -> str:
-    lowered = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    from .query_text import normalize_for_match
+
+    lowered = re.sub(r"[^\w]+", " ", normalize_for_match(value), flags=re.UNICODE).strip()
     return re.sub(r"\s+", " ", lowered)
 
 

@@ -49,19 +49,19 @@ test("search examples and immediate submit keep their query", async ({ page }) =
   const example = "Which items have no purchase information?";
   await page.getByRole("button", { name: example }).click();
   await expect(
-    page.getByRole("textbox", { name: "Search or ask about your inventory" }),
+    page.getByRole("combobox", { name: "Search or ask about your inventory" }),
   ).toHaveValue(example);
   await page.waitForTimeout(550);
   let url = new URL(page.url());
   expect(url.searchParams.get("q")).toBe(example);
-  expect(url.searchParams.get("ask")).toBe("1");
+  expect(url.searchParams.get("ask")).toBeNull();
   await page.screenshot({
     path: "../../docs/walkthrough/release-stabilisation/01-search-example-light.png",
     fullPage: false,
   });
 
   await page.goto("/search");
-  const input = page.getByRole("textbox", {
+  const input = page.getByRole("combobox", {
     name: "Search or ask about your inventory",
   });
   await input.fill("PS5");

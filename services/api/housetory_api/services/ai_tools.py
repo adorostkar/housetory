@@ -1,5 +1,6 @@
 """Read-only, household-scoped tools used by the assistant and smart search."""
 
+import contextlib
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from ..models import (
     Document,
     Item,
     Loan,
+    LoanReturn,
     Purchase,
     Room,
     StorageLocation,
@@ -30,7 +32,14 @@ from ..services.purchase_info import (
     missing_purchase_info_clause,
     purchase_info_filter_clause,
 )
-from ..services.query_text import clean_subject, search_term_variants
+from ..services.query_text import (
+    clean_subject,
+    contains_non_latin,
+    item_words,
+    normalize_for_match,
+    normalize_label,
+    search_term_variants,
+)
 from ..services.serializers import (
     item_detail,
     item_load_options,
@@ -295,7 +304,7 @@ def _resolve_room(
     if not name:
         return None
     normalized = name.strip().lower()
-    return db.scalar(
+    found = db.scalar(
         select(Room)
         .where(
             Room.household_id == household_id,
@@ -308,6 +317,18 @@ def _resolve_room(
         .order_by(func.length(Room.name))
         .limit(1)
     )
+    if found is not None or not contains_non_latin(name):
+        return found
+    target = normalize_for_match(name)
+    candidates = db.scalars(
+        select(Room).where(Room.household_id == household_id)
+    ).all()
+    matches = [
+        room
+        for room in candidates
+        if target in normalize_for_match(room.name)
+    ]
+    return min(matches, key=lambda room: len(room.name), default=None)
 
 
 def _resolve_location(
@@ -339,7 +360,7 @@ def _resolve_location(
         )
         if exact is not None:
             return exact
-    return db.scalar(
+    found = db.scalar(
         select(StorageLocation)
         .where(
             StorageLocation.household_id == household_id,
@@ -357,6 +378,23 @@ def _resolve_location(
         .order_by(func.length(StorageLocation.name))
         .limit(1)
     )
+    if found is not None or not contains_non_latin(name):
+        return found
+    target = normalize_for_match(name)
+    candidates = db.scalars(
+        select(StorageLocation).where(
+            StorageLocation.household_id == household_id,
+            StorageLocation.active(),
+        )
+    ).all()
+    matches = []
+    for location in candidates:
+        labels = [location.name, location.identifier or "", *(location.aliases or [])]
+        if any(
+            target in normalize_for_match(label) for label in labels if label
+        ):
+            matches.append(location)
+    return min(matches, key=lambda entry: len(entry.name), default=None)
 
 
 def _resolve_category(
@@ -375,7 +413,7 @@ def _resolve_category(
     if not name:
         return None
     normalized = name.strip().lower()
-    return db.scalar(
+    found = db.scalar(
         select(Category)
         .where(
             Category.household_id == household_id,
@@ -387,6 +425,18 @@ def _resolve_category(
         .order_by(func.length(Category.name))
         .limit(1)
     )
+    if found is not None or not contains_non_latin(name):
+        return found
+    target = normalize_for_match(name)
+    candidates = db.scalars(
+        select(Category).where(Category.household_id == household_id)
+    ).all()
+    matches = [
+        category
+        for category in candidates
+        if target in normalize_for_match(category.name)
+    ]
+    return min(matches, key=lambda category: len(category.name), default=None)
 
 
 def _inventory_conditions(
@@ -395,6 +445,7 @@ def _inventory_conditions(
     filters: NaturalSearchFilters,
     *,
     household_reminder_days: int,
+    include_q: bool = True,
 ) -> list[Any] | None:
     conditions: list[Any] = [
         Item.household_id == household_id,
@@ -447,7 +498,7 @@ def _inventory_conditions(
         conditions.append(Item.category_id == category.id)
     if filters.tag:
         conditions.append(Item.tags.any(Tag.name.ilike(f"%{filters.tag}%")))
-    if filters.q:
+    if filters.q and include_q:
         term_conditions = []
         for value in search_term_variants(filters.q.strip()):
             search = f"%{value}%"
@@ -524,6 +575,66 @@ def _inventory_conditions(
     return conditions
 
 
+def _item_matches_text(item: Item, query: str) -> bool:
+    labels = [
+        item.name,
+        item.brand or "",
+        item.model or "",
+        item.serial_number or "",
+        item.description or "",
+    ]
+    if item.category is not None:
+        labels.append(item.category.name)
+    if item.room is not None:
+        labels.append(item.room.name)
+    if item.storage_location is not None:
+        labels.append(item.storage_location.name)
+        labels.append(item.storage_location.identifier or "")
+    labels.extend(tag.name for tag in item.tags)
+    haystack = normalize_for_match(" ".join(label for label in labels if label))
+    tokens = item_words(query)
+    if not tokens:
+        return False
+    return all(token in haystack for token in tokens)
+
+
+def _unicode_q_fallback(
+    db: Session,
+    household_id: uuid.UUID,
+    filters: NaturalSearchFilters,
+    *,
+    household_reminder_days: int,
+    limit: int | None = None,
+) -> tuple[list[Item], int] | None:
+    if not filters.q or not contains_non_latin(filters.q):
+        return None
+    conditions = _inventory_conditions(
+        db,
+        household_id,
+        filters,
+        household_reminder_days=household_reminder_days,
+        include_q=False,
+    )
+    if conditions is None:
+        return None
+    candidates = list(
+        db.scalars(
+            select(Item)
+            .options(*item_load_options())
+            .where(*conditions)
+            .order_by(func.lower(Item.name))
+            .limit(800)
+        ).all()
+    )
+    matched = [item for item in candidates if _item_matches_text(item, filters.q)]
+    total = len(matched)
+    if filters.sort == "name_asc":
+        matched.sort(key=lambda item: item.name.casefold())
+    if limit is not None:
+        matched = matched[:limit]
+    return matched, total
+
+
 def search_inventory(
     db: Session,
     household_id: uuid.UUID,
@@ -550,7 +661,18 @@ def search_inventory(
         "name_asc": [func.lower(Item.name).asc()],
         "relevance": [Item.updated_at.desc()],
     }[filters.sort]
-    return list(db.scalars(query.order_by(*ordering).limit(limit)).all()), total
+    rows = list(db.scalars(query.order_by(*ordering).limit(limit)).all())
+    if total == 0:
+        fallback = _unicode_q_fallback(
+            db,
+            household_id,
+            filters,
+            household_reminder_days=household_reminder_days,
+            limit=limit,
+        )
+        if fallback is not None:
+            return fallback
+    return rows, total
 
 
 def inventory_totals(
@@ -573,7 +695,18 @@ def inventory_totals(
             func.coalesce(func.sum(Item.quantity), 0),
         ).where(*conditions)
     ).one()
-    return int(row[0] or 0), int(row[1] or 0)
+    total, quantity = int(row[0] or 0), int(row[1] or 0)
+    if total == 0:
+        fallback = _unicode_q_fallback(
+            db,
+            household_id,
+            filters,
+            household_reminder_days=household_reminder_days,
+        )
+        if fallback is not None:
+            items, fallback_total = fallback
+            return fallback_total, sum(item.quantity for item in items)
+    return total, quantity
 
 
 def _add_item(items: list[ItemSummary], seen: set[uuid.UUID], item: Item, reminder: int) -> None:
@@ -1613,31 +1746,27 @@ def _locate_candidates(
     )
     if exact:
         return exact
-    tokens: list[str] = []
-    for variant in search_term_variants(cleaned):
-        for token in re.findall(r"[a-z0-9]+", variant.lower()):
-            if len(token) < 2 or token in {
-                "my",
-                "our",
-                "the",
-                "a",
-                "an",
-                "is",
-                "are",
-                "where",
-                "what",
-                "which",
-                "of",
-                "in",
-                "on",
-                "for",
-                "to",
-                "item",
-                "items",
-            }:
-                continue
-            if token not in tokens:
-                tokens.append(token)
+    # Normalised exact match catches ZWNJ, Persian/Arabic letter variants and
+    # Arabic-Indic digits without changing the stored name.
+    target = normalize_label(cleaned)
+    exact_candidates = db.scalars(
+        select(Item)
+        .options(*item_load_options())
+        .where(
+            Item.household_id == household_id,
+            Item.is_archived.is_(False),
+            *property_conditions,
+        )
+        .order_by(func.lower(Item.name))
+        .limit(400)
+    ).all()
+    normalized_exact = [
+        item for item in exact_candidates if normalize_label(item.name) == target
+    ]
+    if normalized_exact:
+        return normalized_exact[:12]
+
+    tokens = item_words(cleaned)
     if not tokens:
         return []
     token_conditions = [
@@ -1648,7 +1777,7 @@ def _locate_candidates(
         )
         for token in tokens
     ]
-    return list(
+    matches = list(
         db.scalars(
             select(Item)
             .options(*item_load_options())
@@ -1662,6 +1791,30 @@ def _locate_candidates(
             .limit(12)
         ).all()
     )
+    if matches:
+        return matches
+    # Python fallback for any script/spelling the SQL collation did not fold.
+    normalized_tokens = tokens
+    fuzzy = []
+    for item in exact_candidates:
+        labels = [item.name, item.brand or "", item.model or "", item.description or ""]
+        normalized_labels = normalize_for_match(" ".join(labels))
+        if all(token in normalized_labels for token in normalized_tokens):
+            fuzzy.append(item)
+    return fuzzy[:12]
+
+
+def _property_item_conditions(household_id: uuid.UUID, property_id: Any) -> list[Any]:
+    if property_id is None:
+        return []
+    return [
+        or_(
+            Item.room.has(Room.property_id == property_id),
+            Item.storage_location.has(
+                StorageLocation.room.has(Room.property_id == property_id)
+            ),
+        )
+    ]
 
 
 def tool_locate_item(
@@ -1673,9 +1826,9 @@ def tool_locate_item(
 ) -> ToolResult:
     query = str(args.get("q") or args.get("item_name") or "").strip()
     item_id = args.get("item_id")
+    property_id = args.get("property_id")
     if item_id:
         item = get_item(db, household_id, uuid.UUID(str(item_id)))
-        property_id = args.get("property_id")
         if property_id is not None:
             property_rooms = {
                 row[0]
@@ -1689,6 +1842,30 @@ def tool_locate_item(
             candidates = [] if item.room_id not in property_rooms else [item]
         else:
             candidates = [item]
+    elif args.get("item_ids"):
+        requested_ids: list[uuid.UUID] = []
+        for raw_id in args.get("item_ids") or []:
+            try:
+                requested_ids.append(uuid.UUID(str(raw_id)))
+            except (ValueError, TypeError):
+                continue
+        candidates = list(
+            db.scalars(
+                select(Item)
+                .options(*item_load_options())
+                .where(
+                    Item.household_id == household_id,
+                    Item.is_archived.is_(False),
+                    Item.id.in_(requested_ids[:12]),
+                    *_property_item_conditions(household_id, property_id),
+                )
+                .order_by(func.lower(Item.name))
+            ).all()
+        )
+        if not candidates:
+            candidates = _locate_candidates(
+                db, household_id, query, property_id=property_id
+            )
     else:
         candidates = _locate_candidates(
             db, household_id, query, property_id=args.get("property_id")
@@ -1843,6 +2020,236 @@ def tool_locate_item(
     )
 
 
+def tool_get_loan_history(
+    db: Session,
+    household_id: uuid.UUID,
+    args: dict[str, Any],
+    *,
+    household_reminder_days: int,
+) -> ToolResult:
+    """Historical loan rows, including returned loans and completed durations.
+
+    Mutable facts are always read fresh. A returned loan is never reported as
+    still with the borrower, and no damage/loss causality is inferred.
+    """
+    subject = clean_subject(str(args.get("q") or args.get("item_name") or ""))
+    property_id = args.get("property_id")
+    requested_ids: list[uuid.UUID] = []
+    for raw_id in args.get("item_ids") or []:
+        try:
+            requested_ids.append(uuid.UUID(str(raw_id)))
+        except (ValueError, TypeError):
+            continue
+    if args.get("item_id"):
+        with contextlib.suppress(ValueError, TypeError):
+            requested_ids.append(uuid.UUID(str(args["item_id"])))
+
+    items: list[Item] = []
+    if requested_ids:
+        items = list(
+            db.scalars(
+                select(Item)
+                .options(*item_load_options())
+                .where(
+                    Item.household_id == household_id,
+                    Item.is_archived.is_(False),
+                    Item.id.in_(requested_ids[:12]),
+                    *_property_item_conditions(household_id, property_id),
+                )
+                .order_by(func.lower(Item.name))
+            ).all()
+        )
+    if not items and subject:
+        items = _locate_candidates(db, household_id, subject, property_id=property_id)
+    if not items:
+        return ToolResult(
+            tool="get_loan_history",
+            summary=(
+                f"I couldn't find an owned item matching “{subject or 'that description'}” "
+                "to check its loan history."
+                if subject
+                else "Tell me which item to check for past or current loans."
+            ),
+            filters={"q": subject} if subject else {},
+            facts={"total": 0, "ambiguous": False, "loan_history": []},
+        )
+
+    item_ids = [item.id for item in items]
+    loans = list(
+        db.scalars(
+            select(Loan)
+            .where(
+                Loan.household_id == household_id,
+                Loan.item_id.in_(item_ids),
+                Loan.status != "cancelled",
+            )
+            .order_by(Loan.lent_on.desc(), Loan.created_at.desc())
+            .limit(100)
+        ).all()
+    )
+    borrower_filter = normalize_for_match(str(args.get("borrower_name") or ""))
+    if borrower_filter:
+        loans = [
+            loan
+            for loan in loans
+            if borrower_filter in normalize_for_match(loan.borrower_name)
+        ]
+
+    item_by_id = {item.id: item for item in items}
+    returns_by_loan: dict[uuid.UUID, list[Any]] = {}
+    if loans:
+        returns = db.scalars(
+            select(LoanReturn)
+            .where(
+                LoanReturn.household_id == household_id,
+                LoanReturn.loan_id.in_([loan.id for loan in loans]),
+                LoanReturn.reversed_at.is_(None),
+            )
+            .order_by(LoanReturn.returned_on.asc(), LoanReturn.created_at.asc())
+        ).all()
+        for record in returns:
+            returns_by_loan.setdefault(record.loan_id, []).append(record)
+
+    today = date.today()
+    history: list[dict[str, Any]] = []
+    for loan in loans:
+        returned_records = returns_by_loan.get(loan.id, [])
+        latest_return = returned_records[-1].returned_on if returned_records else None
+        is_open = loan.status in {"outstanding", "partially_returned"}
+        end_date = None if is_open else latest_return
+        duration_days = (
+            max(0, (end_date - loan.lent_on).days)
+            if end_date is not None
+            else (max(0, (today - loan.lent_on).days) if is_open else None)
+        )
+        item = item_by_id.get(loan.item_id) if loan.item_id else None
+        history.append(
+            {
+                "loan_id": str(loan.id),
+                "item_id": str(loan.item_id) if loan.item_id else None,
+                "item_name": item.name if item is not None else loan.item_name_snapshot,
+                "borrower_name": loan.borrower_name,
+                "quantity": loan.quantity,
+                "outstanding_quantity": (
+                    max(0, loan.quantity - loan.returned_quantity) if is_open else 0
+                ),
+                "status": loan.status,
+                "lent_on": loan.lent_on.isoformat(),
+                "returned_on": (
+                None
+                if is_open
+                else (latest_return.isoformat() if latest_return else None)
+            ),
+                "due_on": loan.due_on.isoformat() if loan.due_on else None,
+                "open": is_open,
+                "duration_days": duration_days,
+            }
+        )
+
+    distinct_items = {entry["item_id"] for entry in history if entry["item_id"]}
+    ambiguous = (
+        len(items) > 1
+        or len(distinct_items) > 1
+        or (len(history) > 1 and not borrower_filter)
+        or (bool(borrower_filter) and len(history) > 1)
+    )
+    if not history:
+        borrower_text = (
+            f" with borrower “{args.get('borrower_name')}”" if borrower_filter else ""
+        )
+        summary = (
+            f"No loan history{borrower_text} was found for "
+            f"{', '.join(item.name for item in items[:6])}."
+        )
+    elif ambiguous:
+        pieces = []
+        for entry in history[:10]:
+            state = (
+                f"currently with {entry['borrower_name']} for {entry['duration_days']} days"
+                if entry["open"]
+                else (
+                    f"{entry['borrower_name']} had it for {entry['duration_days']} days"
+                    + (
+                        f" and returned it on {entry['returned_on']}"
+                        if entry["returned_on"]
+                        else ""
+                    )
+                )
+            )
+            pieces.append(f"{entry['item_name']}: {state} (loan {entry['loan_id'][:8]})")
+        summary = (
+            "Several matching loans need clarification: "
+            + "; ".join(pieces)
+            + ". Which item or loan did you mean?"
+        )
+    else:
+        entry = history[0]
+        if entry["open"]:
+            summary = (
+                f"{entry['borrower_name']} has had {entry['item_name']} since "
+                f"{entry['lent_on']} ({entry['duration_days']} days so far)"
+                + (f", due {entry['due_on']}." if entry["due_on"] else ".")
+            )
+        else:
+            duration_text = (
+                f"for {entry['duration_days']} days"
+                if entry["duration_days"] is not None
+                else "for an unrecorded duration"
+            )
+            summary = (
+                f"{entry['borrower_name']} had {entry['item_name']} since "
+                f"{entry['lent_on']} {duration_text}"
+                + (
+                    f" and returned it on {entry['returned_on']}."
+                    if entry["returned_on"]
+                    else "; the return date was not recorded."
+                )
+                + " It is not currently with them."
+            )
+
+    summaries = _summaries_with_paths(
+        db, household_id, items[:12], household_reminder_days=household_reminder_days
+    )
+    references = [_item_reference(summary) for summary in summaries]
+    references.extend(
+        AssistantReference(
+            type="loan",
+            id=uuid.UUID(entry["loan_id"]),
+            title=f"{entry['item_name']} loan to {entry['borrower_name']}",
+            subtitle=(
+                f"{entry['status']} · "
+                + (
+                    f"{entry['duration_days']} days"
+                    if entry["duration_days"] is not None
+                    else "duration not recorded"
+                )
+                + (f" · due {entry['due_on']}" if entry["due_on"] else "")
+            ),
+            url=f"/loans/{entry['loan_id']}",
+        )
+        for entry in history[:12]
+    )
+    return ToolResult(
+        tool="get_loan_history",
+        summary=summary,
+        filters={
+            "q": subject or None,
+            "borrower_name": args.get("borrower_name"),
+            "item_ids": [str(item.id) for item in items],
+        },
+        items=summaries,
+        references=references,
+        facts={
+            "total": len(history),
+            "ambiguous": ambiguous,
+            "loan_history": history,
+            "candidates": [
+                {"id": str(item.id), "name": item.name} for item in items[:12]
+            ],
+        },
+    )
+
+
 def tool_count_items(
     db: Session,
     household_id: uuid.UUID,
@@ -1973,6 +2380,9 @@ def execute_tool(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
         "count_items": lambda: tool_count_items(
+            db, household_id, arguments, household_reminder_days=household_reminder_days
+        ),
+        "get_loan_history": lambda: tool_get_loan_history(
             db, household_id, arguments, household_reminder_days=household_reminder_days
         ),
     }

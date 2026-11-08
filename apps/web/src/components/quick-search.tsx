@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,6 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRememberedSearchScope } from "@/hooks/use-search-scope";
 import { withHousehold } from "@/lib/household-links";
 import { useQuickSearch } from "@/lib/queries";
-import { looksLikeQuestion } from "@/lib/search";
 import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -61,14 +60,15 @@ function contextLine(result: QuickSearchResult) {
 }
 
 export function QuickSearch({
-  variant = "sidebar",
+  variant = "top",
   className,
 }: {
-  variant?: "sidebar" | "mobile";
+  variant?: "top" | "mobile";
   className?: string;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -78,7 +78,6 @@ export function QuickSearch({
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
   const debounced = useDebouncedValue(query, 220);
   const term = query.trim();
-  const questionLike = looksLikeQuestion(term);
   const debouncedTerm = debounced.trim();
   const waiting = term.length >= 2 && term !== debouncedTerm;
   const searchScope = useRememberedSearchScope();
@@ -108,6 +107,13 @@ export function QuickSearch({
   React.useEffect(() => {
     setFocused(false);
   }, [location.pathname]);
+
+  const urlQuery =
+    location.pathname === "/search" ? (searchParams.get("q") ?? "") : null;
+  React.useEffect(() => {
+    if (urlQuery === null) return;
+    setQuery((current) => (current === urlQuery ? current : urlQuery));
+  }, [urlQuery]);
 
   React.useEffect(() => {
     if (!focused) setActiveIndex(-1);
@@ -149,17 +155,14 @@ export function QuickSearch({
       const rect = anchor.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
-      const width =
-        variant === "sidebar"
-          ? Math.min(360, viewportWidth - 24)
-          : Math.min(Math.max(rect.width, 320), viewportWidth - 24);
+      const width = Math.min(Math.max(rect.width, 320), viewportWidth - 24);
       const left = Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
-      const panelHeight = Math.min(420, viewportHeight - 24);
+      const panelHeight = Math.min(440, viewportHeight - 24);
       const below = viewportHeight - rect.bottom - 12;
       const top =
         below >= 220
-          ? rect.bottom + 6
-          : Math.max(12, rect.top - Math.min(panelHeight, rect.top - 12) - 6);
+          ? rect.bottom + 8
+          : Math.max(12, rect.top - Math.min(panelHeight, rect.top - 12) - 8);
       setPanelStyle({
         position: "fixed",
         left,
@@ -176,19 +179,17 @@ export function QuickSearch({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [showPanel, variant, term]);
+  }, [showPanel, term]);
 
-  const goToAllResults = () => {
+  const submitToResults = (explicitAsk: boolean) => {
     if (!term) return;
     setFocused(false);
-    const ask = questionLike ? "&ask=1" : "";
-    navigate(`/search?q=${encodeURIComponent(term)}${ask}`);
-  };
-
-  const askAssistant = () => {
-    if (!term) return;
-    setFocused(false);
-    navigate(`/assistant?q=${encodeURIComponent(term)}`);
+    const params = new URLSearchParams({
+      q: term,
+      r: Date.now().toString(),
+    });
+    if (explicitAsk) params.set("ask", "1");
+    navigate(`/search?${params.toString()}`);
   };
 
   const choose = (result: QuickSearchResult) => {
@@ -220,8 +221,8 @@ export function QuickSearch({
     if (event.key === "Enter") {
       event.preventDefault();
       const active = flatResults[activeIndex];
-      if (active) choose(active);
-      else goToAllResults();
+      if (active && !event.shiftKey) choose(active);
+      else submitToResults(event.shiftKey);
     }
   };
 
@@ -236,7 +237,7 @@ export function QuickSearch({
           >
             {term.length < 2 ? (
               <p className="px-4 py-3 text-[0.75rem] text-muted-foreground" role="status">
-                Keep typing to search items, boxes and places — or ask a question.
+                Keep typing to find items, boxes and places — then press Enter.
               </p>
             ) : error ? (
               <div className="flex items-start gap-2.5 px-4 py-4 text-[0.78rem]" role="alert">
@@ -276,12 +277,19 @@ export function QuickSearch({
                   <Search className="size-4" />
                   No quick matches for “{term}”.
                 </p>
-                {questionLike && (
-                  <Button size="sm" onClick={askAssistant}>
-                    <Sparkles />
-                    Ask Housetory about this
-                  </Button>
-                )}
+                <p className="text-[0.7rem] leading-relaxed">
+                  Press Enter to search all records. Housetory will interpret the
+                  question with the configured assistant when needed.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => submitToResults(true)}
+                >
+                  <Sparkles />
+                  Ask Housetory
+                </Button>
               </div>
             ) : (
               <>
@@ -341,30 +349,28 @@ export function QuickSearch({
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
                   <span className="text-[0.65rem] text-muted-foreground">
                     {results.length} quick match{results.length === 1 ? "" : "es"}
-                    {questionLike ? " · question detected" : ""}
                     {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}
                   </span>
                   <div className="flex items-center gap-1">
-                    {questionLike && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-[0.68rem]"
-                        onClick={askAssistant}
-                      >
-                        <Sparkles className="size-3" />
-                        Ask Housetory
-                      </Button>
-                    )}
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       className="h-7 px-2 text-[0.68rem]"
-                      onClick={goToAllResults}
+                      onClick={() => submitToResults(true)}
+                      title="Ask the configured assistant (Shift+Enter)"
                     >
-                      {questionLike ? "Answer & results" : "View all results"}{" "}
+                      <Sparkles className="size-3" />
+                      Ask Housetory
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[0.68rem]"
+                      onClick={() => submitToResults(false)}
+                    >
+                      View all results
                       <ArrowRight className="size-3" />
                     </Button>
                   </div>
@@ -378,17 +384,19 @@ export function QuickSearch({
 
   return (
     <div ref={wrapperRef} className={cn("relative", className)}>
-      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <input
         ref={inputRef}
         type="search"
         data-quick-search-input="true"
         value={query}
-        maxLength={200}
+        maxLength={2000}
         autoComplete="off"
         spellCheck={false}
+        dir="auto"
         placeholder="Search or ask about your inventory…"
         aria-label="Search or ask about your inventory"
+        aria-keyshortcuts="Meta+K Control+K"
         role="combobox"
         aria-expanded={showPanel}
         aria-controls={
@@ -406,12 +414,15 @@ export function QuickSearch({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "quick-search-input w-full rounded-xl border border-input/90 bg-card/70 pl-9 pr-8 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
-          variant === "sidebar"
-            ? "h-10 text-[0.8rem]"
-            : "h-12 rounded-xl border-border/80 bg-card/80 pl-10 pr-10 text-[0.95rem] shadow-soft",
+          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-11 pr-16 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
+          variant === "top"
+            ? "h-12 text-[0.95rem]"
+            : "h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft",
         )}
       />
+      <kbd className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-[0.6rem] font-medium text-muted-foreground sm:block">
+        ⌘K
+      </kbd>
       {query ? (
         <button
           type="button"
@@ -420,10 +431,10 @@ export function QuickSearch({
             setActiveIndex(-1);
             inputRef.current?.focus();
           }}
-          className="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
           aria-label="Clear search"
         >
-          <X className="size-3.5" />
+          <X className="size-4" />
         </button>
       ) : null}
       {panel}

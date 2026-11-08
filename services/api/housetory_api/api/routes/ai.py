@@ -24,11 +24,12 @@ from ...schemas.ai import (
 )
 from ...schemas.items import ItemSummary
 from ...services import ai as ai_service
-from ...services import global_assistant, global_search, storage
+from ...services import global_assistant, global_search, storage, unified_search
 from ...services.ai_tools import document_relations
 from ...services.assistant import answer_question, natural_search
 from ...services.documents import get_document
 from ...services.items import resolve_location
+from ...services.query_text import contains_non_latin
 from ...services.recognition import (
     apply_recognition,
     enqueue_recognition,
@@ -79,6 +80,53 @@ def ai_status(
     )
 
 
+def _unified_assistant_response(response) -> AssistantResponse:  # noqa: ANN001
+    return AssistantResponse(
+        answer=response.answer or "No grounded answer was produced.",
+        mode="ai" if response.ai_used else "deterministic",
+        tool=response.tool,
+        filters=response.filters.model_dump(mode="json", exclude_none=True),
+        items=response.items,
+        borrowed=response.borrowed,
+        documents=response.documents,
+        locations=response.locations,
+        references=response.references,
+        notices=response.notices,
+        facts=response.facts,
+        ai_status=response.ai_status,
+        scope_label=response.scope_label,
+        households=response.households,
+        property=response.property,
+    )
+
+
+def _unified_natural_response(response) -> NaturalSearchResponse:  # noqa: ANN001
+    return NaturalSearchResponse(
+        question=response.query,
+        interpretation=response.interpretation,
+        filters=response.filters,
+        items=response.items,
+        borrowed=response.borrowed,
+        borrowed_total=response.borrowed_total,
+        total=response.total,
+        mode="ai" if response.ai_used else "deterministic",
+        ai_available=response.ai_status.configured,
+        answer=response.answer,
+        answer_kind=response.answer_kind,
+        tool=response.tool,
+        facts=response.facts,
+        notices=response.notices,
+        references=response.references,
+        needs_assistant=response.mode == "fallback"
+        and not response.items
+        and not response.borrowed,
+        suggested_question=response.query,
+        scope_label=response.scope_label,
+        households=response.households,
+        property=response.property,
+    )
+
+
 @router.post("/assistant/query", response_model=AssistantResponse)
 def assistant_query(
     payload: AssistantRequest,
@@ -86,6 +134,18 @@ def assistant_query(
     db: Session = Depends(get_db),
 ) -> AssistantResponse:
     enforce_search_limit(auth.user.id)
+    if contains_non_latin(payload.question):
+        return _unified_assistant_response(
+            unified_search.execute_search(
+                db,
+                user_id=auth.user.id,
+                query=payload.question,
+                explicit_ask=True,
+                history=payload.history,
+                household_id=payload.household_id,
+                property_id=payload.property_id,
+            )
+        )
     scope = global_search.resolve_search_scope(
         db,
         auth.user.id,
@@ -117,6 +177,18 @@ def natural_search_route(
     db: Session = Depends(get_db),
 ) -> NaturalSearchResponse:
     enforce_search_limit(auth.user.id)
+    if contains_non_latin(payload.question):
+        return _unified_natural_response(
+            unified_search.execute_search(
+                db,
+                user_id=auth.user.id,
+                query=payload.question,
+                explicit_ask=False,
+                limit=payload.limit,
+                household_id=payload.household_id,
+                property_id=payload.property_id,
+            )
+        )
     scope = global_search.resolve_search_scope(
         db,
         auth.user.id,

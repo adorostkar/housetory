@@ -6,6 +6,7 @@ import {
   HandCoins,
   Loader2,
   MapPin,
+  RotateCcw,
   Send,
   ShieldCheck,
   Sparkles,
@@ -23,8 +24,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSearchScope } from "@/hooks/use-search-scope";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { withHousehold } from "@/lib/household-links";
-import { useAiStatus, useSession } from "@/lib/queries";
-import type { AssistantResponse } from "@/lib/types";
+import { useAiStatus } from "@/lib/queries";
+import { useSearchSession } from "@/lib/search-session";
+import type { SearchQueryResponse } from "@/lib/types";
 import {
   borrowedLocationPrefix,
   borrowedPlaceLabel,
@@ -45,40 +47,52 @@ const SUGGESTIONS = [
 interface Message {
   role: "user" | "assistant";
   text: string;
-  response?: AssistantResponse;
+  response?: SearchQueryResponse;
 }
 
 export function AssistantPage() {
   const aiStatus = useAiStatus();
-  const session = useSession();
   const { selection, scopesQuery } = useSearchScope(true);
+  const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [question, setQuestion] = React.useState("");
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
+  const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
+  const lastScopeRef = React.useRef(scopeSignature);
+
+  React.useEffect(() => {
+    if (lastScopeRef.current === scopeSignature) return;
+    lastScopeRef.current = scopeSignature;
+    setMessages([]);
+    setQuestion("");
+  }, [scopeSignature]);
 
   const ask = useMutation({
-    mutationFn: (value: string) => {
-      const history = messages.slice(-8).map((message) => ({
-        role: message.role,
-        content: message.text,
-      }));
-      return api.post<AssistantResponse>("/assistant/query", {
-        question: value,
-        history,
+    mutationFn: (value: string) =>
+      api.post<SearchQueryResponse>("/search/query", {
+        query: value,
+        explicit_ask: true,
+        history: searchSession.turns,
+        ...(searchSession.context ? { context: searchSession.context } : {}),
         ...(selection.householdId
           ? { household_id: selection.householdId }
           : {}),
         ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
-      });
-    },
+        limit: 40,
+      }),
     onSuccess: (response, value) => {
       setMessages((current) => [
         ...current,
         { role: "user", text: value },
-        { role: "assistant", text: response.answer, response },
+        {
+          role: "assistant",
+          text: response.answer ?? "No matching inventory records were returned.",
+          response,
+        },
       ]);
+      searchSession.record(value, response);
       setQuestion("");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
@@ -116,6 +130,14 @@ export function AssistantPage() {
     ask.mutate(value);
   };
 
+  const newConversation = () => {
+    if (ask.isPending) return;
+    setMessages([]);
+    setQuestion("");
+    searchSession.reset();
+    autoAskedRef.current = null;
+  };
+
   const askSuggestion = (value: string) => {
     setQuestion("");
     ask.mutate(value);
@@ -125,30 +147,15 @@ export function AssistantPage() {
   const lastResponse = [...messages]
     .reverse()
     .find((message) => message.response)?.response;
-  const workspaceHouseholdId = session.data?.household?.id;
-  const aiScope =
-    Boolean(selection.householdId) &&
-    selection.householdId === workspaceHouseholdId &&
-    !selection.propertyId;
-  const lastScope = lastResponse
-    ? {
-        mode: lastResponse.mode,
-        ai_status: lastResponse.ai_status,
-        scope_label: lastResponse.scope_label,
-      }
-    : null;
-  const displayStatus = aiScope ? status : lastScope?.ai_status;
+  const displayStatus = lastResponse?.ai_status ?? status;
   const allPlacesScope = !selection.householdId || Boolean(selection.propertyId);
-  const modeLabel =
-    allPlacesScope || lastScope?.mode === "deterministic"
-      ? "Grounded across your places"
-      : displayStatus?.mode === "local"
-        ? "Local AI"
-        : displayStatus?.mode === "private"
-          ? "Private-network AI"
-          : displayStatus?.mode === "cloud"
-            ? "Remote AI"
-            : "Grounded mode";
+  const modeLabel = lastResponse
+    ? lastResponse.mode === "ai"
+      ? "AI-assisted answer"
+      : lastResponse.mode === "direct"
+        ? "Direct inventory lookup"
+        : "AI unavailable · direct results"
+    : "AI when needed · grounded in records";
 
   return (
     <div className="animate-fade-up">
@@ -165,6 +172,15 @@ export function AssistantPage() {
                 AI settings
               </Link>
             </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={newConversation}
+              disabled={ask.isPending || messages.length === 0}
+            >
+              <RotateCcw />
+              New conversation
+            </Button>
           </>
         }
       />
@@ -173,8 +189,8 @@ export function AssistantPage() {
         <SearchScopeSelect compact />
         <p className="text-[0.72rem] text-muted-foreground">
           {allPlacesScope
-            ? "Read-only retrieval across every current membership. AI is not sent across households."
-            : "This answer may use the selected household's own provider and consent."}
+            ? "Each household's records are interpreted only with that household's own configured provider and consent."
+            : "This answer uses the selected household's own provider and consent."}
         </p>
       </div>
 
@@ -209,29 +225,24 @@ export function AssistantPage() {
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[0.68rem] text-muted-foreground">
           <Badge
             variant={
-              allPlacesScope
-                ? "sage"
-                : displayStatus?.mode === "local"
-                  ? "sage"
-                  : displayStatus?.mode === "private" ||
-                      displayStatus?.mode === "cloud"
-                    ? "brass"
-                    : "outline"
+              lastResponse?.mode === "ai"
+                ? "brass"
+                : lastResponse?.mode === "fallback"
+                  ? "outline"
+                  : "sage"
             }
           >
             <Sparkles className="size-3" />
             {modeLabel}
           </Badge>
           <span>
-            {allPlacesScope
-              ? "Deterministic answers across current memberships"
-              : displayStatus?.available
-                ? "Provider available for this household"
-                : displayStatus?.configured
-                  ? "Provider configured; deterministic answers still work"
-                  : "No model configured; grounded answers stay available"}
+            {displayStatus?.available
+              ? "Provider available for this scope"
+              : displayStatus?.configured
+                ? "Provider configured; direct search still works"
+                : "No model configured; direct grounded results stay available"}
           </span>
-          {!allPlacesScope && displayStatus?.data_leaves_server && (
+          {displayStatus?.data_leaves_server && (
             <Badge variant="brass">Remote transmission enabled with consent</Badge>
           )}
           <details className="ml-auto">
@@ -241,7 +252,7 @@ export function AssistantPage() {
             <div className="mt-2 max-w-xl space-y-1.5 rounded-lg border border-border/60 bg-background/50 p-3 text-[0.7rem] leading-relaxed">
               <p>
                 {allPlacesScope
-                  ? "All-my-places answers execute read-only deterministic tools in each current household. No household's records are sent to another household's AI provider."
+                  ? "All-my-places answers are interpreted one household at a time using only that household's configured provider and consent. Read-only deterministic retrieval remains available when a household has no provider; no household's records are sent through another household's provider."
                   : (displayStatus?.privacy_note ??
                     "The assistant executes read-only household tools and answers from real records.")}
               </p>
@@ -270,9 +281,10 @@ export function AssistantPage() {
             </h2>
           </div>
           <p className="mt-2 max-w-2xl text-[0.8rem] leading-relaxed text-muted-foreground">
-            Housetory retrieves current records first, then answers. Structured
-            questions such as loans and missing information are resolved directly from
-            the database.
+            Housetory retrieves current records first, then uses the configured
+            assistant only when interpretation is needed. Follow-up questions keep
+            resolved items and loans without carrying facts across a household or
+            property boundary.
           </p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {SUGGESTIONS.map((suggestion) => (
@@ -314,7 +326,7 @@ export function AssistantPage() {
   );
 }
 
-function contextualLink(response: AssistantResponse): string | null {
+function contextualLink(response: SearchQueryResponse): string | null {
   let path: string | null = null;
   if (response.tool === "find_missing_information") {
     const criterion = String(response.facts.criterion ?? "");
@@ -346,7 +358,7 @@ function AssistantAnswer({
   response,
   text,
 }: {
-  response?: AssistantResponse;
+  response?: SearchQueryResponse;
   text: string;
 }) {
   const link = response ? contextualLink(response) : null;
@@ -362,6 +374,23 @@ function AssistantAnswer({
         <Badge variant="outline">
           {response?.scope_label ?? "All my places"}
         </Badge>
+        {response && (
+          <Badge
+            variant={
+              response.mode === "ai"
+                ? "brass"
+                : response.mode === "fallback"
+                  ? "outline"
+                  : "sage"
+            }
+          >
+            {response.mode === "ai"
+              ? "AI-assisted"
+              : response.mode === "fallback"
+                ? "AI unavailable · grounded records"
+                : "Direct lookup"}
+          </Badge>
+        )}
       </div>
       <div className="mt-3 whitespace-pre-line text-[0.86rem] leading-[1.8] text-foreground/85">
         {text}

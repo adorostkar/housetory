@@ -6,7 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
 import { api } from "@/lib/api";
-import type { AiStatus, AssistantResponse, ItemSummary } from "@/lib/types";
+import { SearchSessionProvider } from "@/lib/search-session";
+import type {
+  AiStatus,
+  ItemSummary,
+  SearchQueryResponse,
+} from "@/lib/types";
 import { AssistantPage } from "@/pages/assistant-page";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -90,14 +95,46 @@ const item: ItemSummary = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-const firstAnswer: AssistantResponse = {
+const firstAnswer: SearchQueryResponse = {
+  query: "where is my heavy drill",
+  mode: "direct",
+  ai_used: false,
+  ai_attempted: false,
+  direct_match: true,
+  ambiguous: false,
+  needs_clarification: false,
   answer:
     "Alex has 1 of your 2 units of Makita Heavy drill. Due 15 Nov 2026. The other 1 is at home in Workshop → BOX-006 · Power tools.",
-  mode: "deterministic",
-  tool: "locate_item",
-  filters: { q: "heavy drill" },
+  answer_kind: "locate_item",
+  interpretation: "item: heavy drill",
+  filters: {
+    q: "heavy drill",
+    property_id: null,
+    room_id: null,
+    room_name: null,
+    exclude_room_id: null,
+    location_id: null,
+    location_name: null,
+    category_id: null,
+    category_name: null,
+    tag: null,
+    missing_purchase: false,
+    missing_purchase_date: false,
+    missing_purchase_price: false,
+    purchase_info_status: null,
+    missing_serial: false,
+    warranty_status: null,
+    purchased_after: null,
+    purchased_before: null,
+    min_purchase_cents: null,
+    max_purchase_cents: null,
+    sort: "relevance",
+  },
   items: [item],
+  quick_results: [],
   borrowed: [],
+  borrowed_total: 0,
+  total: 1,
   documents: [],
   locations: [],
   references: [
@@ -118,13 +155,53 @@ const firstAnswer: AssistantResponse = {
   ],
   notices: [],
   facts: { total: 1 },
+  tool: "locate_item",
   ai_status: aiStatus,
+  context: {
+    scope_key: "|",
+    last_query: "where is my heavy drill",
+    resolved_items: [{ id: "item-drill", name: "Heavy drill" }],
+    candidate_items: [{ id: "item-drill", name: "Heavy drill" }],
+    loans: [
+      {
+        id: "loan-1",
+        item_id: "item-drill",
+        item_name: "Heavy drill",
+        borrower_name: "Alex",
+      },
+    ],
+  },
+  scope_label: "All my places",
+  households: [],
+  property: null,
 };
 
-const secondAnswer: AssistantResponse = {
+const secondAnswer: SearchQueryResponse = {
   ...firstAnswer,
+  query: "when is it due?",
   answer: "That loan is recorded as due on 2026-11-15.",
-  tool: "list_outstanding_loans",
+  mode: "ai",
+  ai_used: true,
+  ai_attempted: true,
+  tool: "locate_item",
+};
+
+const sessionState = {
+  authenticated: true,
+  setup_required: false,
+  user: {
+    id: "user-1",
+    name: "Owner",
+    email: "owner@example.com",
+    created_at: "2026-01-01T00:00:00Z",
+  },
+  household: {
+    id: "house-1",
+    name: "Home",
+    warranty_reminder_days: 30,
+  },
+  role: "owner",
+  households: [],
 };
 
 function renderPage(entry: string) {
@@ -134,19 +211,23 @@ function renderPage(entry: string) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
-        <AddItemsProvider>
-          <AssistantPage />
-        </AddItemsProvider>
+        <SearchSessionProvider>
+          <AddItemsProvider>
+            <AssistantPage />
+          </AddItemsProvider>
+        </SearchSessionProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.get).mockImplementation(async (path) => {
     if (path.startsWith("/search/scopes")) return { items: [] };
+    if (path.startsWith("/auth/session")) return sessionState;
     return aiStatus;
   });
   vi.mocked(api.post)
@@ -155,26 +236,30 @@ beforeEach(() => {
 });
 
 describe("AssistantPage", () => {
-  it("answers a handed-off whereabouts question and keeps privacy details secondary", async () => {
+  it("answers a handed-off question through the shared submit endpoint", async () => {
     renderPage(
       `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
     );
     expect(
       await screen.findByText(/Alex has 1 of your 2 units/),
     ).toBeVisible();
-    expect(api.post).toHaveBeenCalledWith("/assistant/query", {
-      question: "where is my heavy drill",
-      history: [],
-    });
+    expect(api.post).toHaveBeenCalledWith(
+      "/search/query",
+      expect.objectContaining({
+        query: "where is my heavy drill",
+        explicit_ask: true,
+        history: [],
+        limit: 40,
+      }),
+    );
     expect(screen.getByText("Privacy & model details")).toBeVisible();
-    expect(screen.getByText("Grounded across your places")).toBeVisible();
-    expect(screen.queryByText("Grounded answer")).not.toBeInTheDocument();
+    expect(screen.getByText("Direct lookup")).toBeVisible();
     expect(screen.getByText("Heavy drill loan to Alex")).toBeVisible();
     expect(api.patch).not.toHaveBeenCalled();
     expect(api.delete).not.toHaveBeenCalled();
   });
 
-  it("continues the conversation with prior messages as history", async () => {
+  it("continues the conversation with bounded prior turns and context", async () => {
     renderPage(
       `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
     );
@@ -187,10 +272,16 @@ describe("AssistantPage", () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
     const secondCall = vi.mocked(api.post).mock.calls[1] as [
       string,
-      { question: string; history: Array<{ role: string; content: string }> },
+      {
+        query: string;
+        explicit_ask: boolean;
+        history: Array<{ role: string; content: string }>;
+        context?: { resolved_items: Array<{ id: string }> };
+      },
     ];
-    expect(secondCall[0]).toBe("/assistant/query");
-    expect(secondCall[1].question).toBe("when is it due?");
+    expect(secondCall[0]).toBe("/search/query");
+    expect(secondCall[1].query).toBe("when is it due?");
+    expect(secondCall[1].explicit_ask).toBe(true);
     expect(secondCall[1].history).toEqual([
       { role: "user", content: "where is my heavy drill" },
       {
@@ -198,8 +289,10 @@ describe("AssistantPage", () => {
         content: firstAnswer.answer,
       },
     ]);
+    expect(secondCall[1].context?.resolved_items[0]?.id).toBe("item-drill");
     expect(
       await screen.findByText("That loan is recorded as due on 2026-11-15."),
     ).toBeVisible();
+    expect(screen.getByText("AI-assisted")).toBeVisible();
   });
 });
