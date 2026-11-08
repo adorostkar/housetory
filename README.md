@@ -289,10 +289,12 @@ Tailscale is optional.
   language, preserve original names/models/IDs and are grounded only in current
   authorised records. Short follow-ups retain bounded resolved items, candidates
   and loan references, and all-my-places answers use each household's own
-  provider. Wider scopes send only validated per-household context, never raw
-  mixed-household conversation prose. Answers render through a safe RTL-aware
-  prose subset. Direct lookup, AI-assisted answers and AI-unavailable fallbacks
-  are visibly distinct. See
+  provider. Wider scopes send only validated per-household context and bounded
+  per-partition dialogue memory, never raw mixed-household conversation prose.
+  Answers render through a safe prose subset whose direction follows the
+  question, with original Latin names/models/paths isolated for mixed RTL text.
+  Direct lookup, AI-assisted answers and AI-unavailable fallbacks are visibly
+  distinct. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
@@ -337,7 +339,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 449 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 452 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -412,8 +414,9 @@ stack, not just unit mocks:
   value and document links, contextual Add origin, combined document/manual
   de-duplication and image-source technical disclosure, one global search box,
   Unicode/Persian/Arabic matching, direct/AI/fallback modes, bounded multilingual
-  follow-ups and per-household all-places AI provider boundaries.
-- 224 Vitest tests pass; strict TypeScript typecheck and production build pass.
+  follow-ups, provider-safe per-partition dialogue memory, mixed-direction
+  rendering and per-household all-places AI provider boundaries.
+- 226 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - 91 checked-in Playwright workflows (90 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and

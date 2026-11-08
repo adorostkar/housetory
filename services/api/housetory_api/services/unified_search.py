@@ -17,13 +17,14 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..domain import AiTask
-from ..models import Household, Item, Loan, Room, StorageLocation
+from ..models import Document, Household, Item, Loan, Room, StorageLocation
 from ..schemas.ai import (
     AiStatus,
     AssistantPlan,
@@ -31,6 +32,7 @@ from ..schemas.ai import (
     NaturalSearchFilters,
     SearchContextItemRef,
     SearchContextLoanRef,
+    SearchContextMemoryEntry,
     SearchConversationContext,
     SearchQueryResponse,
 )
@@ -222,12 +224,49 @@ def _sanitise_context(
                     borrower_name=loan.borrower_name,
                 )
             )
+    memory: list[SearchContextMemoryEntry] = []
+    if context.dialogue_memory:
+        own_terms, foreign_terms = _partition_terms(db, scope)
+        household_ids = {household.id for household, _role in scope.households}
+        property_id = scope.property.id if scope.property is not None else None
+        for entry in context.dialogue_memory[-24:]:
+            if entry.household_id not in household_ids:
+                continue
+            if property_id is not None and entry.property_id != property_id:
+                continue
+            key = (entry.household_id, property_id)
+            own = own_terms.get(key, set())
+            foreign = foreign_terms.get(key, set())
+            memory.append(
+                SearchContextMemoryEntry(
+                    household_id=entry.household_id,
+                    property_id=entry.property_id,
+                    user_intent=_redact_memory_text(
+                        entry.user_intent,
+                        foreign_terms=foreign,
+                        own_terms=own,
+                        limit=800,
+                    )
+                    or "Earlier request",
+                    answer_meaning=(
+                        _redact_memory_text(
+                            entry.answer_meaning,
+                            foreign_terms=foreign,
+                            own_terms=own,
+                            limit=1200,
+                        )
+                        if entry.answer_meaning
+                        else None
+                    ),
+                )
+            )
     return SearchConversationContext(
         scope_key=current_key,
         last_query=(context.last_query or "")[:2000] or None,
         resolved_items=resolved,
         candidate_items=candidates,
         loans=loans,
+        dialogue_memory=memory,
     )
 
 
@@ -242,6 +281,296 @@ def _property_item_conditions(property_id: uuid.UUID | None) -> list[Any]:
             ),
         )
     ]
+
+
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
+
+def _household_terms(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    property_id: uuid.UUID | None = None,
+) -> set[str]:
+    item_conditions: list[Any] = [
+        Item.household_id == household_id,
+        Item.is_archived.is_(False),
+    ]
+    if property_id is not None:
+        item_conditions.extend(_property_item_conditions(property_id))
+    items = db.scalars(select(Item).where(*item_conditions)).all()
+    terms: set[str] = set()
+    for item in items:
+        for value in (item.name, item.brand, item.model, item.serial_number):
+            if value and len(value.strip()) >= 3:
+                terms.add(value.strip())
+    location_conditions: list[Any] = [
+        StorageLocation.household_id == household_id,
+        StorageLocation.active(),
+    ]
+    if property_id is not None:
+        location_conditions.append(StorageLocation.room.has(Room.property_id == property_id))
+    for location in db.scalars(select(StorageLocation).where(*location_conditions)).all():
+        for value in [
+            location.name,
+            location.identifier,
+            location.legacy_identifier,
+            *(location.aliases or []),
+        ]:
+            cleaned = str(value).strip() if value else ""
+            if len(cleaned) >= 3:
+                terms.add(cleaned)
+    document_conditions: list[Any] = [Document.household_id == household_id]
+    if property_id is not None:
+        item_ids = [item.id for item in items]
+        if not item_ids:
+            return terms
+        document_conditions.append(Document.items.any(Item.id.in_(item_ids)))
+    documents = db.scalars(select(Document).where(*document_conditions)).all()
+    for document in documents:
+        if document.title and len(document.title.strip()) >= 3:
+            terms.add(document.title.strip())
+    loan_conditions: list[Any] = [Loan.household_id == household_id]
+    if property_id is not None:
+        item_ids = [item.id for item in items]
+        if not item_ids:
+            return terms
+        loan_conditions.append(Loan.item_id.in_(item_ids))
+    for borrower in db.scalars(select(Loan.borrower_name).where(*loan_conditions)).all():
+        if borrower and len(borrower.strip()) >= 3:
+            terms.add(borrower.strip())
+    return terms
+
+
+def _partition_terms(
+    db: Session,
+    scope: global_search.SearchScope,
+) -> tuple[
+    dict[tuple[uuid.UUID, uuid.UUID | None], set[str]],
+    dict[tuple[uuid.UUID, uuid.UUID | None], set[str]],
+]:
+    property_id = scope.property.id if scope.property is not None else None
+    all_by_household = {
+        household.id: _household_terms(db, household.id)
+        for household, _role in scope.households
+    }
+    own_terms: dict[tuple[uuid.UUID, uuid.UUID | None], set[str]] = {}
+    foreign_terms: dict[tuple[uuid.UUID, uuid.UUID | None], set[str]] = {}
+    for household, _role in scope.households:
+        key = (household.id, property_id)
+        own = _household_terms(db, household.id, property_id=property_id)
+        own_terms[key] = own
+        foreign: set[str] = set()
+        for other_id, other_terms in all_by_household.items():
+            if other_id != household.id:
+                foreign.update(other_terms)
+        if property_id is not None:
+            foreign.update(all_by_household[household.id] - own)
+        foreign_terms[key] = foreign - own
+    return own_terms, foreign_terms
+
+
+def _redact_memory_text(
+    text: str,
+    *,
+    foreign_terms: set[str],
+    own_terms: set[str],
+    limit: int,
+) -> str:
+    cleaned = _UUID_RE.sub("[id]", text.strip())
+    own_lower = [term.casefold() for term in own_terms]
+    for term in sorted(foreign_terms, key=len, reverse=True):
+        lowered = term.casefold()
+        if len(term) < 3:
+            continue
+        # Do not destroy a shared generic word that is already part of an
+        # authorised label in this partition (e.g. a foreign "Drill" versus
+        # this partition's "Heavy drill").
+        if any(lowered in own for own in own_lower):
+            continue
+        cleaned = re.sub(re.escape(term), "[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:limit]
+
+
+def _partition_answer_meaning(
+    outcome: HouseholdOutcome | None,
+    direct_items: list[ItemSummary],
+    household_id: uuid.UUID,
+) -> str | None:
+    if outcome is not None:
+        if outcome.answer:
+            return " ".join(outcome.answer.split())[:1200]
+        if outcome.result is not None:
+            names = [item.name for item in outcome.result.items[:8]]
+            if names:
+                return "Matching records: " + ", ".join(names)
+            return outcome.result.summary[:1200]
+    names = [
+        item.name
+        for item in direct_items
+        if item.household is not None and item.household.id == household_id
+    ]
+    if names:
+        return "Direct matches: " + ", ".join(names[:8])
+    return None
+
+
+def _build_dialogue_memory(
+    db: Session,
+    scope: global_search.SearchScope,
+    prior: SearchConversationContext,
+    query: str,
+    outcomes: list[HouseholdOutcome] | None,
+    direct_items: list[ItemSummary],
+) -> list[SearchContextMemoryEntry]:
+    property_id = scope.property.id if scope.property is not None else None
+    own_terms, foreign_terms = _partition_terms(db, scope)
+    outcome_by_household = {
+        outcome.household.id: outcome for outcome in (outcomes or [])
+    }
+    memory: list[SearchContextMemoryEntry] = []
+    for household, _role in scope.households:
+        key = (household.id, property_id)
+        own = own_terms.get(key, set())
+        foreign = foreign_terms.get(key, set())
+        entries = [
+            entry
+            for entry in prior.dialogue_memory
+            if entry.household_id == household.id
+            and (property_id is None or entry.property_id == property_id)
+        ]
+        user_intent = _redact_memory_text(
+            query,
+            foreign_terms=foreign,
+            own_terms=own,
+            limit=800,
+        ) or "Earlier request"
+        meaning = _partition_answer_meaning(
+            outcome_by_household.get(household.id), direct_items, household.id
+        )
+        answer_meaning = (
+            _redact_memory_text(
+                meaning,
+                foreign_terms=foreign,
+                own_terms=own,
+                limit=1200,
+            )
+            if meaning
+            else None
+        )
+        entry = SearchContextMemoryEntry(
+            household_id=household.id,
+            property_id=property_id,
+            user_intent=user_intent,
+            answer_meaning=answer_meaning,
+        )
+        if entries and entries[-1].user_intent == user_intent:
+            entries[-1] = entry
+        else:
+            entries.append(entry)
+        memory.extend(entries[-3:])
+    return memory[-24:]
+
+
+def _history_from_memory(
+    context: SearchConversationContext,
+) -> list[Any]:
+    messages: list[Any] = []
+    for entry in context.dialogue_memory:
+        messages.append(SimpleNamespace(role="user", content=entry.user_intent))
+        if entry.answer_meaning:
+            messages.append(
+                SimpleNamespace(role="assistant", content=entry.answer_meaning)
+            )
+    return messages[-8:]
+
+
+def _answer_direction(query: str) -> str:
+    rtl = 0
+    ltr = 0
+    for character in query:
+        codepoint = ord(character)
+        if (
+            0x0590 <= codepoint <= 0x08FF
+            or 0xFB1D <= codepoint <= 0xFDFF
+            or 0xFE70 <= codepoint <= 0xFEFF
+        ) and character.isalpha():
+            rtl += 1
+        elif character.isalpha() and codepoint < 128:
+            ltr += 1
+    if rtl > ltr:
+        return "rtl"
+    if ltr > 0:
+        return "ltr"
+    return "auto"
+
+
+def _preserve_terms(
+    items: list[ItemSummary],
+    quick_results: list[QuickSearchResult],
+    borrowed: list[BorrowedOut],
+    facts: dict[str, Any],
+    documents: list[dict[str, Any]],
+    locations: list[dict[str, Any]],
+) -> list[str]:
+    terms: set[str] = set()
+    for item in items:
+        terms.add(item.name)
+        if item.model:
+            terms.add(item.model)
+        if item.brand:
+            terms.add(f"{item.brand} {item.model}".strip() if item.model else item.brand)
+        path = [segment.name for segment in item.location_path]
+        if item.room is not None:
+            path.insert(0, item.room.name)
+        if len(path) > 1:
+            terms.add(" / ".join(path))
+    whereabouts = facts.get("whereabouts")
+    if isinstance(whereabouts, dict) and whereabouts.get("home_path"):
+        terms.add(str(whereabouts["home_path"]))
+    for result in quick_results:
+        if result.kind != "item":
+            terms.add(result.title)
+        if result.context:
+            terms.add(result.context)
+    for record in borrowed:
+        terms.add(record.item_name)
+    for document in documents:
+        title = str(document.get("title") or "").strip()
+        if title:
+            terms.add(title)
+    for location in locations:
+        name = str(location.get("name") or "").strip()
+        if name:
+            terms.add(name)
+    cleaned = [
+        term.strip()
+        for term in terms
+        if term and 2 <= len(term.strip()) <= 200 and "\n" not in term
+    ]
+    return sorted(dict.fromkeys(cleaned), key=len, reverse=True)[:40]
+
+
+def _answer_metadata(
+    query: str,
+    *,
+    items: list[ItemSummary],
+    quick_results: list[QuickSearchResult],
+    borrowed: list[BorrowedOut],
+    facts: dict[str, Any],
+    documents: list[dict[str, Any]],
+    locations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "answer_direction": _answer_direction(query),
+        "preserve_terms": _preserve_terms(
+            items, quick_results, borrowed, facts, documents, locations
+        ),
+    }
 
 
 def _context_for_household(
@@ -313,12 +642,19 @@ def _context_for_household(
                 borrower_name=loan.borrower_name,
             )
         )
+    memory = [
+        entry
+        for entry in context.dialogue_memory
+        if entry.household_id == household.id
+        and (property_id is None or entry.property_id == property_id)
+    ][-3:]
     return SearchConversationContext(
         scope_key=_scope_key(scope),
         last_query=None,
         resolved_items=resolved,
         candidate_items=candidates,
         loans=loans[:12],
+        dialogue_memory=memory,
     )
 
 
@@ -913,10 +1249,13 @@ def _merge_result_facts(
 
 
 def _context_from_outcomes(
+    db: Session,
     scope: global_search.SearchScope,
     outcomes: list[HouseholdOutcome],
+    prior_context: SearchConversationContext,
+    query: str,
     *,
-    last_query: str,
+    direct_items: list[ItemSummary] | None = None,
 ) -> SearchConversationContext:
     items = _dedupe_items(
         [item for outcome in outcomes if outcome.result for item in outcome.result.items]
@@ -990,10 +1329,18 @@ def _context_from_outcomes(
             )
     return SearchConversationContext(
         scope_key=_scope_key(scope),
-        last_query=last_query[:2000],
+        last_query=query[:2000],
         resolved_items=resolved,
         candidate_items=candidates,
         loans=loans[:12],
+        dialogue_memory=_build_dialogue_memory(
+            db,
+            scope,
+            prior_context,
+            query,
+            outcomes,
+            direct_items or [],
+        ),
     )
 
 
@@ -1093,8 +1440,26 @@ def execute_search(
     )
     if simple_direct:
         interpretation = f"direct inventory match: {direct_term}"
+        direct_facts = {
+            "scope": "property" if scope.property is not None else (
+                "all_places" if multi_household else "household"
+            ),
+            "total": direct_total,
+            "borrowed_total": direct_borrowed_total,
+            "direct_query": direct_term,
+        }
+        answer_meta = _answer_metadata(
+            query,
+            items=direct_items,
+            quick_results=quick_results,
+            borrowed=direct_borrowed,
+            facts=direct_facts,
+            documents=[],
+            locations=[],
+        )
         return SearchQueryResponse(
             query=query,
+            **answer_meta,
             mode="direct",
             ai_used=False,
             ai_attempted=False,
@@ -1126,14 +1491,7 @@ def execute_search(
                 for item in direct_items[:12]
             ],
             notices=notices,
-            facts={
-                "scope": "property" if scope.property is not None else (
-                    "all_places" if multi_household else "household"
-                ),
-                "total": direct_total,
-                "borrowed_total": direct_borrowed_total,
-                "direct_query": direct_term,
-            },
+            facts=direct_facts,
             tool="direct_lookup",
             ai_status=aggregate_status,
             context=SearchConversationContext(
@@ -1148,6 +1506,9 @@ def execute_search(
                     for item in direct_items[:12]
                 ],
                 loans=[],
+                dialogue_memory=_build_dialogue_memory(
+                    db, scope, safe_context, query, None, direct_items
+                ),
             ),
             scope_label=scope.label,
             households=_scope_households(scope),
@@ -1229,11 +1590,37 @@ def execute_search(
                 )
             combined = _combined_facts(scope, deterministic_outcomes, mode="direct")
             facts = {**facts, **combined}
+            result_documents = [
+                document
+                for outcome in deterministic_outcomes
+                if outcome.result
+                for document in outcome.result.documents
+            ]
+            result_locations = [
+                location
+                for outcome in deterministic_outcomes
+                if outcome.result
+                for location in outcome.result.locations
+            ]
+            answer_meta = _answer_metadata(
+                query,
+                items=result_items,
+                quick_results=quick_results[:12],
+                borrowed=result_borrowed,
+                facts=facts,
+                documents=result_documents,
+                locations=result_locations,
+            )
             context_out = _context_from_outcomes(
-                scope, deterministic_outcomes, last_query=query
+                db,
+                scope,
+                deterministic_outcomes,
+                safe_context,
+                query,
             )
             return SearchQueryResponse(
                 query=query,
+                **answer_meta,
                 mode="direct",
                 ai_used=False,
                 ai_attempted=False,
@@ -1259,18 +1646,8 @@ def execute_search(
                 borrowed=result_borrowed,
                 borrowed_total=len(result_borrowed),
                 total=int(facts.get("total", len(result_items))),
-                documents=[
-                    document
-                    for outcome in deterministic_outcomes
-                    if outcome.result
-                    for document in outcome.result.documents
-                ],
-                locations=[
-                    location
-                    for outcome in deterministic_outcomes
-                    if outcome.result
-                    for location in outcome.result.locations
-                ],
+                documents=result_documents,
+                locations=result_locations,
                 references=_dedupe_references(
                     [
                         reference
@@ -1389,10 +1766,41 @@ def execute_search(
             ),
         ]
         context_out = _context_from_outcomes(
-            scope, fallback_outcomes, last_query=query
+            db,
+            scope,
+            fallback_outcomes,
+            safe_context,
+            query,
+            direct_items=fallback_items,
+        )
+        fallback_documents = [
+            document
+            for outcome in fallback_outcomes
+            if outcome.result
+            for document in outcome.result.documents
+        ]
+        fallback_locations = [
+            location
+            for outcome in fallback_outcomes
+            if outcome.result
+            for location in outcome.result.locations
+        ]
+        fallback_facts = _merge_result_facts(
+            _combined_facts(scope, fallback_outcomes, mode="fallback"),
+            fallback_outcomes,
+        )
+        answer_meta = _answer_metadata(
+            query,
+            items=fallback_items,
+            quick_results=quick_results,
+            borrowed=fallback_borrowed,
+            facts=fallback_facts,
+            documents=fallback_documents,
+            locations=fallback_locations,
         )
         return SearchQueryResponse(
             query=query,
+            **answer_meta,
             mode="fallback",
             ai_used=False,
             ai_attempted=False,
@@ -1426,10 +1834,7 @@ def execute_search(
                 ]
             ),
             notices=fallback_notices,
-            facts=_merge_result_facts(
-                _combined_facts(scope, fallback_outcomes, mode="fallback"),
-                fallback_outcomes,
-            ),
+            facts=fallback_facts,
             tool=fallback_tool or "fallback",
             ai_status=aggregate_status,
             context=context_out,
@@ -1444,6 +1849,7 @@ def execute_search(
     ai_outcomes: list[HouseholdOutcome] = []
     allow_raw_history = _raw_history_allowed(scope)
     for household, role in scope.households:
+        scoped_context = _context_for_household(db, household, scope, safe_context)
         ai_outcomes.append(
             _ai_outcome(
                 db,
@@ -1451,8 +1857,12 @@ def execute_search(
                 role,
                 scope=scope,
                 question=raw_query,
-                history=safe_history if allow_raw_history else [],
-                context=_context_for_household(db, household, scope, safe_context),
+                history=(
+                    safe_history
+                    if allow_raw_history
+                    else _history_from_memory(scoped_context)
+                ),
+                context=scoped_context,
                 explicit_ask=explicit_ask,
             )
         )
@@ -1514,7 +1924,30 @@ def execute_search(
             if outcome.interpretation
         )
     )
-    context_out = _context_from_outcomes(scope, ai_outcomes, last_query=query)
+    context_out = _context_from_outcomes(
+        db, scope, ai_outcomes, safe_context, query, direct_items=result_items
+    )
+    ai_documents = [
+        document
+        for outcome in ai_outcomes
+        if outcome.result
+        for document in outcome.result.documents
+    ]
+    ai_locations = [
+        location
+        for outcome in ai_outcomes
+        if outcome.result
+        for location in outcome.result.locations
+    ]
+    answer_meta = _answer_metadata(
+        query,
+        items=result_items,
+        quick_results=quick_results,
+        borrowed=result_borrowed,
+        facts=combined,
+        documents=ai_documents,
+        locations=ai_locations,
+    )
     ai_status = next(
         (
             outcome.ai_status
@@ -1525,6 +1958,7 @@ def execute_search(
     )
     return SearchQueryResponse(
         query=query,
+        **answer_meta,
         mode=mode,
         ai_used=ai_used,
         ai_attempted=ai_attempted,
@@ -1546,18 +1980,8 @@ def execute_search(
         borrowed=result_borrowed,
         borrowed_total=len(result_borrowed),
         total=len(result_items),
-        documents=[
-            document
-            for outcome in ai_outcomes
-            if outcome.result
-            for document in outcome.result.documents
-        ],
-        locations=[
-            location
-            for outcome in ai_outcomes
-            if outcome.result
-            for location in outcome.result.locations
-        ],
+        documents=ai_documents,
+        locations=ai_locations,
         references=_dedupe_references(
             [
                 reference

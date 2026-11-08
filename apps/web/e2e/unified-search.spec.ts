@@ -83,6 +83,8 @@ function searchPayload(
 ) {
   return {
     query: String(overrides.query ?? "PS5"),
+    answer_direction: "auto",
+    preserve_terms: [],
     mode: "ai",
     ai_used: true,
     ai_attempted: true,
@@ -225,6 +227,8 @@ test("persian question renders an AI-assisted answer with actionable items", asy
             "- یک واحد در کارگاه ثبت شده است.\n" +
             "- قرض باز برای آن ثبت نشده است.\n\n" +
             "مسیر: Home / Workshop / BOX-001",
+          answer_direction: "rtl",
+          preserve_terms: [item.name, "HP-2", "Home / Workshop / BOX-001"],
         }),
       ),
     });
@@ -232,7 +236,7 @@ test("persian question renders an AI-assisted answer with actionable items", asy
 
   await page.goto(`/search?q=${encodeURIComponent("دریل من کجاست؟")}&ask=1&r=1`);
   const answer = page.getByTestId("answer-text").first();
-  await expect(answer).toHaveAttribute("dir", "auto");
+  await expect(answer).toHaveAttribute("dir", "rtl");
   await expect(
     answer.locator("strong").filter({ hasText: `Heavy drill ${id}` }),
   ).toBeVisible();

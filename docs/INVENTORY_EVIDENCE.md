@@ -300,7 +300,7 @@ Representative screenshots and rendered PDF pages are in
 
 ## Verification
 
-- **449 PostgreSQL backend tests**, **224 Vitest tests** and **91 disposable-stack
+- **452 PostgreSQL backend tests**, **226 Vitest tests** and **91 disposable-stack
   Playwright workflows** pass (90 passed, 1 fixture-dependent skip); Ruff, strict
   TypeScript typecheck, production build and Alembic drift checks pass.
 - PostgreSQL backend tests cover item/room/container/home/overlap scope resolution,

@@ -76,13 +76,20 @@ has and an explicit limitation; it does not claim a conclusive no-result.
 - Provider inputs are partitioned before planning and answer synthesis. Item
   names, borrowers and loan references are re-read from authorised rows for that
   household and property; client-supplied labels are not trusted.
-- Raw prior conversation prose is only reused when the scope is one household
-  without a property filter. In all-places or property scopes it can mix facts
-  with no sound provenance, so it is withheld from every provider and replaced
-  by that household's validated structured context. The current user question is
-  still sent because the user authored it intentionally. This preserves useful
-  follow-ups from resolved items, candidates and loan references without
-  broadcasting another household's names, borrowers, documents or answers.
+- Raw prior conversation prose is reused directly when the scope is one
+  household without a property filter. In all-places or property scopes, each
+  provider receives a bounded per-household/property dialogue memory instead of
+  mixed raw prose. It records the prior user intent (including filters,
+  preferences, exclusions and selected alternatives) and that partition's own
+  prior answer meaning, alongside verified item/candidate/loan references.
+- Memory is generated server-side from that partition's outcome, then
+  re-sanitised before every provider call. Known item names, borrowers, document
+  titles, location labels and UUIDs from other households or the other property
+  are redacted. Client-supplied memory cannot bypass this redaction. The current
+  user question is still sent because the user authored it intentionally.
+- Memory keeps the most recent three turns per household/property and at most 24
+  entries overall. It is not an unbounded chat archive. Scope changes discard
+  entries outside the current household/property and current authorisation.
 - Changing household or property resets browser session context and invalidates
   server-side candidate/loan references.
 
@@ -134,10 +141,15 @@ execution. No assistant path creates, edits, moves, lends or deletes records.
 
 AI answers are rendered through a small safe renderer that supports paragraphs,
 simple bullet lists, bold, italic and inline code only. Raw HTML and Markdown
-links are never interpreted; they remain text. The answer block uses `dir="auto"`
-and `text-start` so Persian/Arabic answers are RTL while embedded LTR item names,
-model numbers, identifiers and paths stay readable. Reference links remain in the
-separate grounded links area.
+links are never interpreted; they remain text.
+
+Direction comes from the question/dominant script hint returned by the server, not
+from the first character of the answer. A Persian answer that starts with an
+English item name therefore keeps an RTL base direction. Known original item
+names, model numbers, identifiers and path segments are wrapped in `bdi dir=auto`
+so their internal LTR order survives inside RTL prose. Reference links remain in
+the separate grounded links area. The results heading isolates the user's
+question with `bdi` as well.
 
 The answer prompt asks for concise natural prose in the user's language, forbids
 JSON/internal field names/condition codes/technical rationale, and asks the model
@@ -155,15 +167,21 @@ claim the item was never loaned to anyone.
   property isolation and per-household provider boundaries.
 - Privacy tests inspect the full captured system/user payload for every planning
   and answer call across two providers. Distinct item, borrower and document
-  sentinels from prior history/context never appear in the other household's
-  provider payload, including property scope.
+  sentinels from prior history/context and dialogue memory never appear in the
+  other household's provider payload, including property scope.
+- Capability tests prove a prior constraint that is not encoded in item/loan IDs
+  (for example “only the corded one, not the battery drill”) is retained and
+  materially changes the next ambiguous follow-up, in both multi-household and
+  property scopes. A single-household default all-places turn also retains its
+  relevant recent dialogue.
 - Direct-context tests prove a plain named lookup remains direct with populated
   context, re-reads newly created loan facts, and does not call a provider. The
   browser test reloads the same named URL three times and keeps one dialogue
   pair.
 - Frontend tests cover the direct submit flow, AI-assisted rendering, fallback
-  labelling, reset, duplicate-turn prevention, safe Markdown subset rendering and
-  HTML/link non-interpretation.
+  labelling, reset, duplicate-turn prevention, safe Markdown subset rendering,
+  HTML/link non-interpretation, RTL direction with a leading English item name,
+  bullet lists, numeric text and normal LTR answers.
 - Playwright workflows cover one global box at 320/390/768/1440 widths, the only
   visible/tabbable search entry and Cmd/Ctrl+K target, RTL/mixed input, direct
   results, an RTL Markdown-format AI answer, follow-up history/context and the

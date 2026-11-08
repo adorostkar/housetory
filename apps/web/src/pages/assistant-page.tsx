@@ -306,7 +306,10 @@ export function AssistantPage() {
           {messages.map((message, index) =>
             message.role === "user" ? (
               <div key={index} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[0.84rem] leading-relaxed text-primary-foreground">
+                <div
+                  dir="auto"
+                  className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-start text-[0.84rem] leading-relaxed text-primary-foreground"
+                >
                   {message.text}
                 </div>
               </div>
@@ -395,6 +398,8 @@ function AssistantAnswer({
       </div>
       <AnswerText
         text={text}
+        direction={response?.answer_direction ?? "auto"}
+        preserveTerms={response?.preserve_terms ?? []}
         className="mt-3 text-[0.86rem] leading-[1.8] text-foreground/85"
       />
       {response && response.notices.length > 0 && (

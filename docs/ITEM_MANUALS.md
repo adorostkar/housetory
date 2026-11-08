@@ -451,10 +451,10 @@ ask and online-discovery actions. See
 
 ## Verification
 
-- **449 PostgreSQL-backed backend tests** pass, including household online-search
+- **452 PostgreSQL-backed backend tests** pass, including household online-search
   credential lifecycle/fallback/domain tests plus manual attachment,
   identity-gate, citation, idempotency, duplicate, provider-output and SSRF tests.
-- **224 Vitest frontend tests** pass, including the write-only online-search
+- **226 Vitest frontend tests** pass, including the write-only online-search
   Settings card, bulk AI-task progress/skips/confirmation, manual card/actions,
   Ask dialogs, real-page citations, no-AI/unconfigured states, identity
   confirmation, candidate review/download and viewer controls.

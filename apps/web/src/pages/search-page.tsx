@@ -192,7 +192,13 @@ export function SearchPage() {
         <div className="min-w-0">
           <p className="eyebrow">Search</p>
           <h1 className="mt-1 truncate font-display text-[1.75rem] tracking-[-0.02em] sm:text-[2.1rem]">
-            {q ? `Results for “${q}”` : "Find anything"}
+            {q ? (
+              <>
+                Results for “<bdi dir="auto">{q}</bdi>”
+              </>
+            ) : (
+              "Find anything"
+            )}
           </h1>
           <p className="mt-1 text-[0.76rem] text-muted-foreground">
             {q
@@ -266,6 +272,8 @@ export function SearchPage() {
               {response.answer && (
                 <AnswerText
                   text={response.answer}
+                  direction={response.answer_direction ?? "auto"}
+                  preserveTerms={response.preserve_terms ?? []}
                   className="mt-3 text-[0.92rem] leading-[1.8]"
                 />
               )}

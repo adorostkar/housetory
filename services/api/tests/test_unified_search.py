@@ -116,6 +116,7 @@ def test_direct_ps5_lookup_needs_no_model_call(owner_client, monkeypatch):
     body = query(owner_client, {"query": "PS5"})
     assert body["mode"] == "direct"
     assert body["ai_used"] is False
+    assert body["answer_direction"] == "ltr"
     assert body["items"][0]["id"] == item["id"]
     assert body["quick_results"][0]["id"] == item["id"]
     assert body["total"] >= 1
@@ -157,6 +158,8 @@ def test_persian_drill_question_uses_configured_ai_with_or_without_punctuation(
         assert body["ai_used"] is True
         assert body["items"][0]["id"] == drill["id"]
         assert "محسن" in (body["answer"] or "")
+        assert body["answer_direction"] == "rtl"
+        assert any("Heavy drill" in term for term in body["preserve_terms"])
         assert body["context"]["resolved_items"][0]["id"] == drill["id"]
         assert body["facts"]["whereabouts"]["on_loan_quantity"] == 1
 
@@ -746,6 +749,20 @@ def test_provider_payloads_are_partitioned_by_household_and_property(
                 "borrower_name": "B-borrower-sentinel",
             },
         ],
+        "dialogue_memory": [
+            {
+                "household_id": str(first_id),
+                "property_id": None,
+                "user_intent": "Use A-only drill sentinel and ignore B-only drill sentinel.",
+                "answer_meaning": "A-only drill sentinel with A-borrower-sentinel.",
+            },
+            {
+                "household_id": str(second_id),
+                "property_id": None,
+                "user_intent": "Use B-only drill sentinel and ignore A-only drill sentinel.",
+                "answer_meaning": "B-only drill sentinel with B-borrower-sentinel.",
+            },
+        ],
     }
     history = [
         {"role": "user", "content": "Tell me about A-only drill sentinel"},
@@ -850,6 +867,14 @@ def test_provider_payloads_are_partitioned_by_household_and_property(
             {"id": second_prop_item["id"], "name": "Property-B drill sentinel"},
         ],
         "loans": [],
+        "dialogue_memory": [
+            {
+                "household_id": str(first_id),
+                "property_id": first_property["id"],
+                "user_intent": "Use Property-A drill sentinel, not Property-B drill sentinel.",
+                "answer_meaning": "Property-A drill sentinel is the current match.",
+            }
+        ],
     }
     property_body = query(
         owner_client,
@@ -933,3 +958,215 @@ def test_plain_named_lookup_stays_direct_with_context_and_reads_fresh_loans(
     assert self_contained["mode"] == "direct"
     assert self_contained["ai_attempted"] is False
     assert self_contained["facts"]["whereabouts"]["on_loan_quantity"] == 1
+
+
+def test_mixed_scope_memory_preserves_prior_constraint_without_foreign_broadcast(
+    owner_client, monkeypatch
+):
+    first_id = household_id(owner_client)
+    first_room = create_room(owner_client, "Constraint first room")
+    corded = create_item(owner_client, "Corded drill", first_room["id"], 1)
+    create_item(owner_client, "Battery drill", first_room["id"], 1)
+
+    created = create_household(owner_client, "Constraint cabin")
+    second_id = uuid.UUID(created["household"]["id"])
+    second_room = create_room(owner_client, "Constraint second room")
+    second_item = create_item(owner_client, "B-only drill", second_room["id"], 1)
+    switch(owner_client, first_id)
+    first_provider = _configure_provider(first_id, 11601, "Constraint first")
+    second_provider = _configure_provider(second_id, 11602, "Constraint second")
+    plan_calls: list[tuple[uuid.UUID | None, str]] = []
+    turn = {"value": 1}
+
+    def fake_plan(_system, prompt, *, config):
+        plan_calls.append((config.provider_id, prompt))
+        if turn["value"] == 1:
+            return {"tool": "search_items", "arguments": {"q": "drill"}}
+        if (
+            config.provider_id == first_provider
+            and "not the battery drill" in prompt
+        ):
+            return {"tool": "locate_item", "arguments": {"item_ids": [corded["id"]]}}
+        return {"tool": "locate_item", "arguments": {"item_ids": [second_item["id"]]}}
+
+    monkeypatch.setattr(ai_module, "complete_json", fake_plan)
+    monkeypatch.setattr(
+        ai_module, "complete_text", lambda *_a, **_k: "Grounded constraint answer."
+    )
+
+    first = query(
+        owner_client,
+        {"query": "I need the corded drill, not the battery drill."},
+    )
+    assert first["mode"] == "ai"
+    assert first["context"]["dialogue_memory"]
+    history = [
+        {"role": "user", "content": "I need the corded drill, not the battery drill."},
+        {"role": "assistant", "content": first["answer"] or ""},
+    ]
+    turn["value"] = 2
+    plan_calls.clear()
+    followup = query(
+        owner_client,
+        {
+            "query": "which one of those should I check first?",
+            "history": history,
+            "context": first["context"],
+        },
+    )
+    assert followup["mode"] == "ai"
+    assert {item["name"] for item in followup["items"]} == {
+        "Corded drill",
+        "B-only drill",
+    }
+    assert "Battery drill" not in {item["name"] for item in followup["items"]}
+    first_prompt = next(
+        prompt for provider_id, prompt in plan_calls if provider_id == first_provider
+    )
+    second_prompt = next(
+        prompt for provider_id, prompt in plan_calls if provider_id == second_provider
+    )
+    assert "not the battery drill" in first_prompt
+    assert "Corded drill" in first_prompt
+    assert "Corded drill" not in second_prompt
+    assert "Battery drill" not in second_prompt
+    assert "B-only drill" in second_prompt
+
+
+def test_property_scope_memory_preserves_constraint_and_redacts_other_property(
+    owner_client, monkeypatch
+):
+    auth = current_headers(owner_client)
+    household_id_value = household_id(owner_client)
+    first_property = owner_client.get(
+        "/api/v1/properties", headers=auth
+    ).json()["items"][0]
+    second_property = owner_client.post(
+        "/api/v1/properties",
+        headers=auth,
+        json={"name": "Constraint other property"},
+    ).json()
+    first_room = owner_client.post(
+        "/api/v1/rooms",
+        headers=auth,
+        json={"name": "Constraint property A room", "property_id": first_property["id"]},
+    ).json()
+    second_room = owner_client.post(
+        "/api/v1/rooms",
+        headers=auth,
+        json={"name": "Constraint property B room", "property_id": second_property["id"]},
+    ).json()
+    corded = owner_client.post(
+        "/api/v1/items",
+        headers=auth,
+        json={"name": "Corded drill", "room_id": first_room["id"]},
+    ).json()["item"]
+    owner_client.post(
+        "/api/v1/items",
+        headers=auth,
+        json={"name": "Battery drill", "room_id": first_room["id"]},
+    )
+    owner_client.post(
+        "/api/v1/items",
+        headers=auth,
+        json={"name": "Property-B drill sentinel", "room_id": second_room["id"]},
+    )
+    _configure_provider(household_id_value, 11603, "Constraint property")
+    plan_calls: list[tuple[uuid.UUID | None, str]] = []
+    turn = {"value": 1}
+
+    def fake_plan(_system, prompt, *, config):
+        plan_calls.append((config.provider_id, prompt))
+        if turn["value"] == 1:
+            return {"tool": "search_items", "arguments": {"q": "drill"}}
+        if "not the battery drill" in prompt:
+            return {"tool": "locate_item", "arguments": {"item_ids": [corded["id"]]}}
+        return {"tool": "search_items", "arguments": {"q": "drill"}}
+
+    monkeypatch.setattr(ai_module, "complete_json", fake_plan)
+    monkeypatch.setattr(
+        ai_module, "complete_text", lambda *_a, **_k: "Property constraint remembered."
+    )
+
+    first = query(
+        owner_client,
+        {
+            "query": "I need the corded drill, not the battery drill.",
+            "household_id": str(household_id_value),
+            "property_id": first_property["id"],
+        },
+    )
+    assert first["mode"] == "ai"
+    assert first["context"]["dialogue_memory"]
+    turn["value"] = 2
+    plan_calls.clear()
+    followup = query(
+        owner_client,
+        {
+            "query": "which one of those should I check first?",
+            "history": [
+                {
+                    "role": "user",
+                    "content": "Property-B drill sentinel is in the other property.",
+                }
+            ],
+            "context": first["context"],
+            "household_id": str(household_id_value),
+            "property_id": first_property["id"],
+        },
+    )
+    assert followup["mode"] == "ai"
+    assert {item["name"] for item in followup["items"]} == {"Corded drill"}
+    assert plan_calls
+    for _provider_id, prompt in plan_calls:
+        assert "not the battery drill" in prompt
+        assert "Property-B drill sentinel" not in prompt
+        assert "other property" not in prompt
+
+
+def test_default_all_places_with_one_household_keeps_relevant_recent_dialogue(
+    owner_client, monkeypatch
+):
+    room = create_room_simple(owner_client, "Single scope room")
+    create_item_simple(owner_client, "Corded drill", room_id=room["id"])
+    create_item_simple(owner_client, "Battery drill", room_id=room["id"])
+    household_id_value = household_id(owner_client)
+    _configure_provider(household_id_value, 11604, "Single scope provider")
+    prompts: list[str] = []
+
+    def fake_plan(_system, prompt, *, config):
+        prompts.append(prompt)
+        return {"tool": "search_items", "arguments": {"q": "drill"}}
+
+    monkeypatch.setattr(ai_module, "complete_json", fake_plan)
+    monkeypatch.setattr(
+        ai_module,
+        "complete_text",
+        lambda *_a, **_k: "Keep the corded-only constraint in mind.",
+    )
+    first = query(
+        owner_client,
+        {"query": "Look only at the corded drill and not the battery drill."},
+    )
+    assert first["mode"] == "ai"
+    prompts.clear()
+    query(
+        owner_client,
+        {
+            "query": "which one should I check first?",
+            "history": [
+                {
+                    "role": "user",
+                    "content": "Look only at the corded drill and not the battery drill.",
+                },
+                {
+                    "role": "assistant",
+                    "content": "Keep the corded-only constraint in mind.",
+                },
+            ],
+            "context": first["context"],
+        },
+    )
+    assert len(prompts) == 1
+    assert "Look only at the corded drill and not the battery drill." in prompts[0]
+    assert "Keep the corded-only constraint in mind." in prompts[0]

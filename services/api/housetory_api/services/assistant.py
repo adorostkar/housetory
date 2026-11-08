@@ -668,6 +668,13 @@ def _answer_context_text(context: Any | None) -> str:
             item = loan.get("item_name") or "an item"
             loan_lines.append(f"{borrower} — {item}")
         lines.append("Recorded loan references: " + "; ".join(loan_lines))
+    for entry in payload.get("dialogue_memory") or []:
+        intent = str(entry.get("user_intent") or "").strip()
+        meaning = str(entry.get("answer_meaning") or "").strip()
+        if intent:
+            lines.append("Earlier user intent: " + intent)
+        if meaning:
+            lines.append("Earlier recorded answer meaning: " + meaning)
     return "\n".join(lines) or "(none)"
 
 

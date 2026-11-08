@@ -307,6 +307,19 @@ class SearchContextLoanRef(BaseModel):
     borrower_name: str | None = Field(default=None, max_length=120)
 
 
+class SearchContextMemoryEntry(BaseModel):
+    """Bounded, provider-safe per-household/property turn memory.
+
+    The server generates and re-sanitises these entries; they never contain a
+    combined multi-household assistant answer.
+    """
+
+    household_id: uuid.UUID
+    property_id: uuid.UUID | None = None
+    user_intent: str = Field(min_length=1, max_length=800)
+    answer_meaning: str | None = Field(default=None, max_length=1200)
+
+
 class SearchConversationContext(BaseModel):
     """Small structured state carried between submit-time search turns.
 
@@ -319,6 +332,9 @@ class SearchConversationContext(BaseModel):
     resolved_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=6)
     candidate_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=12)
     loans: list[SearchContextLoanRef] = Field(default_factory=list, max_length=12)
+    dialogue_memory: list[SearchContextMemoryEntry] = Field(
+        default_factory=list, max_length=24
+    )
 
 
 class SearchQueryRequest(BaseModel):
@@ -333,6 +349,8 @@ class SearchQueryRequest(BaseModel):
 
 class SearchQueryResponse(BaseModel):
     query: str
+    answer_direction: Literal["ltr", "rtl", "auto"] = "auto"
+    preserve_terms: list[str] = Field(default_factory=list, max_length=40)
     mode: Literal["direct", "ai", "fallback"]
     ai_used: bool
     ai_attempted: bool

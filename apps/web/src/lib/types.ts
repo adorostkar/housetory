@@ -1461,16 +1461,26 @@ export interface SearchContextLoanRef {
   borrower_name: string | null;
 }
 
+export interface SearchContextMemoryEntry {
+  household_id: UUID;
+  property_id: UUID | null;
+  user_intent: string;
+  answer_meaning: string | null;
+}
+
 export interface SearchConversationContext {
   scope_key: string | null;
   last_query: string | null;
   resolved_items: SearchContextItemRef[];
   candidate_items: SearchContextItemRef[];
   loans: SearchContextLoanRef[];
+  dialogue_memory?: SearchContextMemoryEntry[];
 }
 
 export interface SearchQueryResponse {
   query: string;
+  answer_direction?: "ltr" | "rtl" | "auto";
+  preserve_terms?: string[];
   mode: "direct" | "ai" | "fallback";
   ai_used: boolean;
   ai_attempted: boolean;
