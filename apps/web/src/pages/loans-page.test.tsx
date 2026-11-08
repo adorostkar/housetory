@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   canWrite: true,
   loans: null as unknown,
   borrowed: null as unknown,
+  loanFilters: null as Record<string, unknown> | null,
+  borrowedFilters: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -35,18 +37,41 @@ vi.mock("@/lib/queries", async (importOriginal) => {
   return {
     ...actual,
     useCanWrite: () => state.canWrite,
-    useLoans: () => ({
-      data: state.loans,
+    useLoanPeople: () => ({
+      data: {
+        items: [
+          {
+            name: "Jack",
+            lent_open: 1,
+            borrowed_open: 1,
+            lent_total: 2,
+            borrowed_total: 1,
+            last_activity_on: "2026-01-01",
+          },
+        ],
+        total: 1,
+      },
       isPending: false,
       isError: false,
-      refetch: vi.fn(),
     }),
-    useBorrowedList: () => ({
-      data: state.borrowed,
-      isPending: false,
-      isError: false,
-      refetch: vi.fn(),
-    }),
+    useLoans: (filters: Record<string, unknown>) => {
+      state.loanFilters = filters;
+      return {
+        data: state.loans,
+        isPending: false,
+        isError: false,
+        refetch: vi.fn(),
+      };
+    },
+    useBorrowedList: (filters: Record<string, unknown>) => {
+      state.borrowedFilters = filters;
+      return {
+        data: state.borrowed,
+        isPending: false,
+        isError: false,
+        refetch: vi.fn(),
+      };
+    },
     useProperties: () => ({ data: { items: [] }, isPending: false, isError: false }),
     useRooms: () => ({ data: { items: [] }, isPending: false, isError: false }),
     useLocations: () => ({ data: { items: [] }, isPending: false, isError: false }),
@@ -187,13 +212,13 @@ const emptyBorrowedList: BorrowedList = {
   physically_held_quantity: 0,
 };
 
-function renderPage() {
+function renderPage(initialEntries: string[] = ["/"]) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <LoansPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -202,6 +227,8 @@ function renderPage() {
 
 beforeEach(() => {
   state.canWrite = true;
+  state.loanFilters = null;
+  state.borrowedFilters = null;
   state.loans = {
     items: [loan],
     total: 1,
@@ -235,6 +262,24 @@ describe("LoansPage", () => {
       "/loans/loan-1",
     );
     expect(screen.getByRole("button", { name: "Record return" })).toBeVisible();
+  });
+
+  it("keeps a person filter in the URL and applies it to both directions", async () => {
+    renderPage(["/loans?person=Jack"]);
+    const input = screen.getByLabelText("Filter loans by person");
+    expect(input).toHaveValue("Jack");
+    expect(state.loanFilters?.person).toBe("Jack");
+    expect(state.borrowedFilters?.person).toBe("Jack");
+    expect(
+      screen.getByText(/Showing lent-out and borrowed records for/),
+    ).toHaveTextContent("Jack");
+
+    await userEvent.clear(input);
+    await waitFor(() => expect(state.loanFilters?.person).toBeUndefined());
+    expect(state.borrowedFilters?.person).toBeUndefined();
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Clear person filter")).not.toBeInTheDocument(),
+    );
   });
 
   it("records a partial return directly from the outstanding row", async () => {

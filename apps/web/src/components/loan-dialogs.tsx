@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import { Field, FormError } from "@/components/form-field";
+import { PersonNameInput } from "@/components/person-name-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -202,11 +203,10 @@ export function LendLoanDialog({
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Borrower" htmlFor="loan-borrower">
-              <Input
+              <PersonNameInput
                 id="loan-borrower"
                 value={borrower}
-                maxLength={120}
-                onChange={(event) => setBorrower(event.target.value)}
+                onChange={setBorrower}
                 placeholder="Name to show on the loan"
                 autoFocus
               />
@@ -461,11 +461,10 @@ export function CorrectLoanDialog({
         >
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Borrower" htmlFor="correct-borrower">
-              <Input
+              <PersonNameInput
                 id="correct-borrower"
                 value={borrower}
-                maxLength={120}
-                onChange={(event) => setBorrower(event.target.value)}
+                onChange={setBorrower}
               />
             </Field>
             <Field label="Loan quantity" htmlFor="correct-quantity">

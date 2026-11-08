@@ -26,7 +26,7 @@ from ..schemas.lending import (
     LoanReturnCreate,
     LoanReturnOut,
 )
-from . import history
+from . import history, loan_people
 
 OPEN_STATUSES = {
     LoanStatus.OUTSTANDING.value,
@@ -327,6 +327,7 @@ def _loan_conditions(
     status: str,
     item_id: uuid.UUID | None,
     q: str | None,
+    person_names: list[str] | None = None,
 ) -> list[Any]:
     conditions: list[Any] = [Loan.household_id == household_id]
     if status == "open":
@@ -335,6 +336,8 @@ def _loan_conditions(
         conditions.append(Loan.status == status)
     if item_id is not None:
         conditions.append(Loan.item_id == item_id)
+    if person_names is not None:
+        conditions.append(Loan.borrower_name.in_(person_names))
     term = (q or "").strip()
     if term:
         search = f"%{term}%"
@@ -359,13 +362,25 @@ def list_loans(
     status: str = "open",
     item_id: uuid.UUID | None = None,
     q: str | None = None,
+    person: str | None = None,
     overdue: bool = False,
     on_date: date | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> LoanListOut:
     today = on_date or date.today()
-    conditions = _loan_conditions(household_id, status=status, item_id=item_id, q=q)
+    person_names = (
+        loan_people.matching_person_names(db, household_id, person)
+        if (person or "").strip()
+        else None
+    )
+    conditions = _loan_conditions(
+        household_id,
+        status=status,
+        item_id=item_id,
+        q=q,
+        person_names=person_names,
+    )
     if overdue:
         conditions.append(Loan.status.in_(OPEN_STATUSES))
         conditions.append(Loan.due_on.is_not(None))

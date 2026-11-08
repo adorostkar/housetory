@@ -41,7 +41,7 @@ from ..schemas.borrowed import (
     BorrowedReturnCreate,
     BorrowedReturnOut,
 )
-from . import history, storage
+from . import history, loan_people, storage
 from .query_text import search_term_variants
 
 OPEN_STATUSES = {
@@ -461,6 +461,7 @@ def _search_conditions(
     room_id: uuid.UUID | None = None,
     storage_location_id: uuid.UUID | None = None,
     include_cancelled: bool = True,
+    person_names: list[str] | None = None,
 ) -> list[Any]:
     conditions = _place_conditions(
         household_id,
@@ -474,6 +475,8 @@ def _search_conditions(
         conditions.append(BorrowedRecord.status == status)
     elif not include_cancelled:
         conditions.append(BorrowedRecord.status != LoanStatus.CANCELLED.value)
+    if person_names is not None:
+        conditions.append(BorrowedRecord.owner_name.in_(person_names))
     term = (q or "").strip()
     if term:
         term_conditions = []
@@ -561,6 +564,7 @@ def list_records(
     *,
     status: str = "open",
     q: str | None = None,
+    person: str | None = None,
     overdue: bool = False,
     property_id: uuid.UUID | None = None,
     room_id: uuid.UUID | None = None,
@@ -571,6 +575,11 @@ def list_records(
     offset: int = 0,
 ) -> BorrowedListOut:
     today = on_date or date.today()
+    person_names = (
+        loan_people.matching_person_names(db, household_id, person)
+        if (person or "").strip()
+        else None
+    )
     conditions = _search_conditions(
         household_id,
         status=status,
@@ -581,6 +590,7 @@ def list_records(
         room_id=room_id,
         storage_location_id=storage_location_id,
         include_cancelled=include_cancelled,
+        person_names=person_names,
     )
     total = int(db.scalar(select(func.count(BorrowedRecord.id)).where(*conditions)) or 0)
     records = list(

@@ -47,6 +47,7 @@ def _validate_place(
 def list_borrowed_records(
     status: BorrowedFilterStatus = "open",
     q: Annotated[str | None, Query(max_length=200)] = None,
+    person: Annotated[str | None, Query(max_length=120)] = None,
     overdue: bool = False,
     property_id: uuid.UUID | None = None,
     room_id: uuid.UUID | None = None,
@@ -69,6 +70,7 @@ def list_borrowed_records(
         auth.household.id,
         status=status,
         q=q,
+        person=person,
         overdue=overdue,
         property_id=property_id,
         room_id=room_id,

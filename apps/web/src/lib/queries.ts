@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
 import { localDateISO } from "@/lib/utils";
@@ -66,6 +72,7 @@ import type {
   LoanFilterStatus,
   LoanList,
   LoanOptions,
+  LoanPersonList,
   WarrantyList,
   WarrantyStatus,
 } from "@/lib/types";
@@ -124,6 +131,7 @@ export const queryKeys = {
   voiceConfig: ["voice", "config"] as const,
   voiceNote: (noteId: string) => ["voice", "note", noteId] as const,
   loans: ["loans"] as const,
+  loanPeople: ["loans", "people"] as const,
   loan: (loanId: string) => ["loans", loanId] as const,
   borrowed: ["borrowed"] as const,
   borrowedRecord: (recordId: string) => ["borrowed", recordId] as const,
@@ -174,6 +182,7 @@ export interface LoanFilters {
   status?: LoanFilterStatus;
   item_id?: string;
   q?: string;
+  person?: string;
   overdue?: boolean;
   on_date?: string;
 }
@@ -187,11 +196,28 @@ export function useLoans(filters: LoanFilters = {}, limit = 50) {
           status: filters.status ?? "open",
           item_id: filters.item_id,
           q: filters.q,
+          person: filters.person,
           overdue: filters.overdue ? "true" : undefined,
           on_date: filters.on_date ?? localDateISO(),
           limit,
         })}`,
       ),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useLoanPeople(q: string, enabled = true, limit = 8) {
+  return useQuery({
+    queryKey: [...queryKeys.loanPeople, q, limit],
+    queryFn: () =>
+      api.get<LoanPersonList>(
+        `/loans/people${buildQuery({
+          q: q.trim() || undefined,
+          limit,
+        })}`,
+      ),
+    enabled,
+    staleTime: 30_000,
   });
 }
 
@@ -203,6 +229,7 @@ export function useBorrowedList(filters: BorrowedFilters = {}, limit = 50, enabl
         `/borrowed${buildQuery({
           status: filters.status ?? "open",
           q: filters.q,
+          person: filters.person,
           overdue: filters.overdue ? "true" : undefined,
           property_id: filters.property_id,
           room_id: filters.room_id,
@@ -212,6 +239,7 @@ export function useBorrowedList(filters: BorrowedFilters = {}, limit = 50, enabl
         })}`,
       ),
     enabled,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -8,7 +8,7 @@ import {
   XCircle,
 } from "lucide-react";
 import * as React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
 import {
@@ -37,6 +37,12 @@ export function BorrowedDetailPage() {
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const loansOrigin =
+    typeof (location.state as { loansOrigin?: unknown } | null)?.loansOrigin ===
+    "string"
+      ? ((location.state as { loansOrigin: string }).loansOrigin)
+      : "/loans";
   const [returnOpen, setReturnOpen] = React.useState(false);
   const [correctOpen, setCorrectOpen] = React.useState(false);
   const [cancelOpen, setCancelOpen] = React.useState(false);
@@ -69,7 +75,7 @@ export function BorrowedDetailPage() {
         eyebrow="Loans · Borrowed"
         title={record.item_name}
         description={`Belongs to ${record.owner_name} · ${borrowedWhereLabel(record)}`}
-        backTo="/loans"
+        backTo={loansOrigin}
         backLabel="All loans"
         actions={
           <>
@@ -262,7 +268,7 @@ export function BorrowedDetailPage() {
         record={record}
         onCancelled={() => {
           refresh();
-          navigate("/loans", { replace: true });
+          navigate(loansOrigin, { replace: true });
         }}
       />
     </div>

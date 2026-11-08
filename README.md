@@ -228,17 +228,25 @@ Tailscale is optional.
   Record return, separate View details and item navigation. The item title area
   prominently states the borrower and quantity truth, labels the stored
   room/container as the usual home while units are out, and offers Record return
-  directly (choosing the relevant loan when several are open). No borrower accounts,
-  contact fields, automatic reminders or emails. See
+  directly (choosing the relevant loan when several are open). Borrower inputs
+  suggest existing household names from prior loan records, while any directly
+  typed name is saved only with that loan; there is no person directory or Add
+  person step. The Loans page has a person filter that composes with direction,
+  Outstanding/Returned/All and past-due filters and remains in the URL. No borrower
+  accounts, contact fields, automatic reminders or emails. See
   [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md),
-  [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md) and
+  [`docs/ITEM_LOAN_STATUS.md`](docs/ITEM_LOAN_STATUS.md),
+  [`docs/SIMPLE_LOAN_NAMES.md`](docs/SIMPLE_LOAN_NAMES.md) and
   [`docs/LOANS_USABILITY.md`](docs/LOANS_USABILITY.md).
 - **Borrowed from others, kept separate from owned stock**: record possessions
   temporarily held from an external owner with item/brand/model, quantity, owner
   display name, borrowed/due dates, keeping property/room/container, optional
   private notes and one private actual photo. One mixed Loans list uses protected
   **Lent out** / **Borrowed** direction badges and All / Lent out / Borrowed
-  filters, with distinct Record return and Return to owner actions. Partial
+  filters, with distinct Record return and Return to owner actions. Owner display
+  names use the same household-scoped suggestions; the simple person filter shows
+  what a person currently has from you and what you have borrowed from them,
+  including returned history. Partial
   returns, corrections, cancellation, request-id/payload binding, concurrency
   guards and append-only history are supported. Borrowed quantities never enter
   owned counts, values, evidence, search-as-owned results or stocktake. Search and
@@ -347,7 +355,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 463 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 469 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -424,10 +432,11 @@ stack, not just unit mocks:
   Unicode/Persian/Arabic matching, direct/AI/fallback modes, bounded multilingual
   follow-ups, provider-safe per-partition dialogue memory, mixed-direction
   rendering, per-household all-places AI provider boundaries, default text-model
-  inheritance/override preservation, calmer desktop/mobile navigation and
+  inheritance/override preservation, household-scoped borrower/lender name
+  suggestions and normalized person filters, calmer desktop/mobile navigation and
   optional scheduled-review disclosure.
-- 230 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 95 checked-in Playwright workflows (94 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+- 234 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 96 checked-in Playwright workflows run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

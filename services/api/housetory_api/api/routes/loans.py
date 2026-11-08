@@ -18,12 +18,13 @@ from ...schemas.lending import (
     LoanFilterStatus,
     LoanListOut,
     LoanOptionsOut,
+    LoanPersonListOut,
     LoanReturnCreate,
     RestoreAssistedUndoOut,
     UndoRequest,
     UndoResult,
 )
-from ...services import history, lending
+from ...services import history, lending, loan_people
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -54,6 +55,7 @@ def list_loans(
     status: LoanFilterStatus = "open",
     item_id: uuid.UUID | None = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    person: Annotated[str | None, Query(max_length=120)] = None,
     overdue: bool = False,
     on_date: date | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -69,10 +71,26 @@ def list_loans(
         status=status,
         item_id=item_id,
         q=q,
+        person=person,
         overdue=overdue,
         on_date=on_date,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/loans/people", response_model=LoanPersonListOut)
+def list_loan_people(
+    q: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 8,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> LoanPersonListOut:
+    return loan_people.suggest_people(
+        db,
+        auth.household.id,
+        query=q,
+        limit=limit,
     )
 
 

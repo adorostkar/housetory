@@ -4,9 +4,10 @@ import {
   Package,
   RotateCcw,
   Search,
+  X,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
   BorrowRecordDialog,
@@ -18,11 +19,13 @@ import { ErrorState } from "@/components/error-state";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { LoanItemPickerDialog } from "@/components/loan-item-picker";
 import { PageHeader } from "@/components/page-header";
+import { PersonNameInput } from "@/components/person-name-input";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useBorrowedList, useCanWrite, useLoans } from "@/lib/queries";
 import type {
@@ -49,8 +52,9 @@ const DIRECTIONS: Array<{ value: Direction; label: string }> = [
 ];
 
 export function LoansPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const itemId = searchParams.get("item_id") ?? undefined;
+  const personParam = searchParams.get("person") ?? "";
   const canWrite = useCanWrite();
   const [direction, setDirection] = React.useState<Direction>(
     itemId ? "lent_out" : "all",
@@ -58,6 +62,7 @@ export function LoansPage() {
   const [status, setStatus] = React.useState<LoanFilterStatus>("open");
   const [overdue, setOverdue] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  const [person, setPerson] = React.useState(personParam);
   const [choiceOpen, setChoiceOpen] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [borrowOpen, setBorrowOpen] = React.useState(false);
@@ -68,15 +73,33 @@ export function LoansPage() {
   );
   const newLoanButtonRef = React.useRef<HTMLButtonElement>(null);
   const deferredSearch = React.useDeferredValue(search);
+  const debouncedPerson = useDebouncedValue(person, 250);
+  const personFilter = debouncedPerson.trim();
+
+  React.useEffect(() => {
+    if (personFilter === personParam) return;
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (personFilter) next.set("person", personFilter);
+        else next.delete("person");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [personFilter, personParam, setSearchParams]);
+
   const loansQuery = useLoans({
     status,
     item_id: itemId,
+    person: personFilter || undefined,
     overdue,
     q: deferredSearch.trim() || undefined,
   });
   const borrowedQuery = useBorrowedList(
     {
       status,
+      person: personFilter || undefined,
       overdue,
       q: deferredSearch.trim() || undefined,
     },
@@ -104,7 +127,11 @@ export function LoansPage() {
   const loans = loanData?.items ?? [];
   const borrowed = borrowedData?.items ?? [];
   const hasFilters =
-    Boolean(deferredSearch.trim()) || Boolean(itemId) || overdue || status !== "open";
+    Boolean(deferredSearch.trim()) ||
+    Boolean(personFilter) ||
+    Boolean(itemId) ||
+    overdue ||
+    status !== "open";
 
   const rows: Array<
     { kind: "loan"; loan: Loan } | { kind: "borrowed"; record: BorrowedRecord }
@@ -281,6 +308,29 @@ export function LoansPage() {
                 />
                 Past due only
               </label>
+              <div className="relative min-w-0 sm:w-48">
+                <PersonNameInput
+                  id="loans-person-filter"
+                  ariaLabel="Filter loans by person"
+                  value={person}
+                  onChange={setPerson}
+                  placeholder="Filter by person"
+                  className={cn(
+                    "h-9 text-[0.78rem]",
+                    person.trim() && "pr-8",
+                  )}
+                />
+                {person.trim() && (
+                  <button
+                    type="button"
+                    aria-label="Clear person filter"
+                    className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                    onClick={() => setPerson("")}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </div>
               <div className="relative min-w-0 sm:w-64">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -293,6 +343,19 @@ export function LoansPage() {
               </div>
             </div>
           </div>
+          {personFilter && (
+            <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+              Showing{" "}
+              {direction === "all"
+                ? "lent-out and borrowed records"
+                : direction === "lent_out"
+                  ? "lent-out records"
+                  : "borrowed records"}{" "}
+              for{" "}
+              <span className="font-medium text-foreground">{personFilter}</span>.
+              Outstanding, returned, all and past-due filters still apply.
+            </p>
+          )}
         </div>
 
         <div className="mt-4 space-y-2.5">
@@ -493,6 +556,7 @@ export function LoanRow({
   canWrite: boolean;
   onReturn: (loan: Loan) => void;
 }) {
+  const location = useLocation();
   const itemLabel = loan.item_name || loan.item_name_snapshot;
   const home =
     [loan.home_room_name_snapshot, loan.home_location_name_snapshot]
@@ -550,7 +614,12 @@ export function LoanRow({
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
           <Button variant="ghost" size="sm" asChild>
-            <Link to={`/loans/${loan.id}`}>View details</Link>
+            <Link
+              to={`/loans/${loan.id}`}
+              state={{ loansOrigin: `${location.pathname}${location.search}` }}
+            >
+              View details
+            </Link>
           </Button>
           {canWrite && open && loan.outstanding_quantity > 0 && (
             <Button variant="outline" size="sm" onClick={() => onReturn(loan)}>
@@ -573,6 +642,7 @@ export function BorrowedRow({
   canWrite: boolean;
   onReturn: (record: BorrowedRecord) => void;
 }) {
+  const location = useLocation();
   const place = borrowedPlaceLabel(record);
   const open =
     record.status === "outstanding" || record.status === "partially_returned";
@@ -631,7 +701,12 @@ export function BorrowedRow({
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
           <Button variant="ghost" size="sm" asChild>
-            <Link to={`/borrowed/${record.id}`}>View details</Link>
+            <Link
+              to={`/borrowed/${record.id}`}
+              state={{ loansOrigin: `${location.pathname}${location.search}` }}
+            >
+              View details
+            </Link>
           </Button>
           {canWrite && open && record.outstanding_quantity > 0 && (
             <Button variant="outline" size="sm" onClick={() => onReturn(record)}>

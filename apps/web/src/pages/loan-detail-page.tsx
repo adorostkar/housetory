@@ -9,7 +9,7 @@ import {
   XCircle,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
@@ -34,6 +34,12 @@ export function LoanDetailPage() {
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const loansOrigin =
+    typeof (location.state as { loansOrigin?: unknown } | null)?.loansOrigin ===
+    "string"
+      ? ((location.state as { loansOrigin: string }).loansOrigin)
+      : "/loans";
   const [returnOpen, setReturnOpen] = React.useState(false);
   const [correctOpen, setCorrectOpen] = React.useState(false);
   const [cancelOpen, setCancelOpen] = React.useState(false);
@@ -84,7 +90,7 @@ export function LoanDetailPage() {
             ? ` / ${loan.home_location_name_snapshot}`
             : ""
         }`}
-        backTo="/loans"
+        backTo={loansOrigin}
         backLabel="All loans"
         actions={
           <>
@@ -339,7 +345,7 @@ export function LoanDetailPage() {
         onConfirm={async () => {
           try {
             await cancel.mutateAsync();
-            navigate("/loans", { replace: true });
+            navigate(loansOrigin, { replace: true });
           } catch (error) {
             toast.error(getApiErrorMessage(error));
             throw error;

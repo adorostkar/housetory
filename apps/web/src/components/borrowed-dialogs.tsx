@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { CameraUpload } from "@/components/camera-upload";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Field, FormError } from "@/components/form-field";
+import { PersonNameInput } from "@/components/person-name-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -341,11 +342,10 @@ export function BorrowRecordDialog({
               />
             </Field>
             <Field label="Owner display name" htmlFor="borrowed-owner">
-              <Input
+              <PersonNameInput
                 id="borrowed-owner"
                 value={ownerName}
-                maxLength={120}
-                onChange={(event) => setOwnerName(event.target.value)}
+                onChange={setOwnerName}
                 placeholder="Who owns it"
               />
             </Field>
@@ -675,11 +675,10 @@ export function CorrectBorrowedDialog({
               />
             </Field>
             <Field label="Owner display name" htmlFor="borrowed-correct-owner">
-              <Input
+              <PersonNameInput
                 id="borrowed-correct-owner"
                 value={ownerName}
-                maxLength={120}
-                onChange={(event) => setOwnerName(event.target.value)}
+                onChange={setOwnerName}
               />
             </Field>
             <Field label="Brand" htmlFor="borrowed-correct-brand" optional>

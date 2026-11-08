@@ -209,6 +209,20 @@ class LoanListOut(BaseModel):
     on_loan_quantity: int
 
 
+class LoanPersonOut(BaseModel):
+    name: str
+    lent_open: int = 0
+    borrowed_open: int = 0
+    lent_total: int = 0
+    borrowed_total: int = 0
+    last_activity_on: date | None = None
+
+
+class LoanPersonListOut(BaseModel):
+    items: list[LoanPersonOut] = Field(default_factory=list)
+    total: int = 0
+
+
 class ItemLoanSummaryOut(BaseModel):
     item_id: uuid.UUID
     item_name: str

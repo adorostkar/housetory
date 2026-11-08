@@ -11,6 +11,18 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@/lib/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/queries")>();
+  return {
+    ...actual,
+    useLoanPeople: () => ({
+      data: { items: [], total: 0 },
+      isPending: false,
+      isError: false,
+    }),
+  };
+});
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {

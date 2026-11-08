@@ -2537,6 +2537,20 @@ export interface LoanList {
   on_loan_quantity: number;
 }
 
+export interface LoanPerson {
+  name: string;
+  lent_open: number;
+  borrowed_open: number;
+  lent_total: number;
+  borrowed_total: number;
+  last_activity_on: string | null;
+}
+
+export interface LoanPersonList {
+  items: LoanPerson[];
+  total: number;
+}
+
 export interface ItemLoanSummary {
   item_id: UUID;
   item_name: string;
@@ -2662,6 +2676,7 @@ export type BorrowedFilterStatus =
 export interface BorrowedFilters {
   status?: BorrowedFilterStatus;
   q?: string;
+  person?: string;
   overdue?: boolean;
   property_id?: string;
   room_id?: string;
