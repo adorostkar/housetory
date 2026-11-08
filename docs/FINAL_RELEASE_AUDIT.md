@@ -17,7 +17,7 @@ then server release.
 | Backend lint | PASS | `uv run ruff check housetory_api tests` |
 | Frontend tests | PASS | `npx vitest run`: **242 passed** |
 | TypeScript / production build | PASS | `npx tsc -b --pretty false`, `npm run build` |
-| Full disposable browser suite | PASS | Fresh project `housetory-final-audit`, fresh volumes, port 8094: **97 passed, 1 documented skip** in 7.7 min |
+| Full disposable browser suite | PASS | Fresh project `housetory-final-audit`, fresh volumes, port 8094: **97 passed, 1 documented skip** in 7.7 min; the skipped Brave-fixture workflow then passed in a targeted 2/2 manuals run with a mock Brave adapter |
 | Focused audit regressions | PASS | 14/14 targeted E2E after fixes |
 | Actual `Inventory.md` parser/import | PASS | 7 backend tests; actual user file comparison; E2E phase6 import of sanitized fixture |
 | Responsive matrix | PASS | `/tmp/housetory-final-responsive-audit.json`: 33/33 page/width checks, no page errors, no horizontal overflow; mobile inputs ≥16px |
@@ -42,6 +42,11 @@ npm run build
 
 # fresh disposable browser stack (project housetory-final-audit, port 8094)
 npx playwright test
+
+# targeted Brave-fixture manual discovery on a separate fresh stack
+MANUAL_SEARCH_PROVIDER=brave BRAVE_SEARCH_API_KEY=e2e-fixture-key \
+  BRAVE_SEARCH_BASE_URL=http://host.docker.internal:4789 \
+  npx playwright test e2e/manuals.spec.ts
 ```
 
 The fresh stack was created with fresh named volumes and did not touch the existing
@@ -98,7 +103,7 @@ boundary; **NOT RUN** means intentionally skipped to avoid paid or destructive a
 | Search and scoped follow-ups, current loan truth | PASS | unified-search backend/UI tests, `unified-search.spec.ts`, `single-home-polish.spec.ts` |
 | Actual `Inventory.md` hierarchy/quantity | PASS | `test_actual_inventory.py` (7 passed; compares live readable user file to fixture when present) and phase6 actual-hierarchy E2E; no external send, no real-household apply |
 | Local OCR, documents, receipts, scans, manuals/citations | PASS | backend OCR/scan/manual suites and document-scanning/manuals/document-extraction E2E on disposable storage |
-| Online exact make/model manual discovery | PASS with fixture skip | manuals E2E runs with configured Brave fixture; otherwise explicitly skips when Brave provider is not configured |
+| Online exact make/model manual discovery | PASS with mock Brave | `manuals.spec.ts` 2/2 in a disposable stack configured with `MANUAL_SEARCH_PROVIDER=brave`, a fixture key and a local mock Brave server; verified exact DeWalt DCD791B query, source review, citation and saved manual; no live Brave call |
 | QR labels excluding item contents | PASS | label/QR backend tests and phase5/responsive E2E |
 | Purchases, allocations, warranty, per-unit value math | PASS | `test_financial.py`, `test_evidence_exports.py`, current-values/item-valuation specs |
 | Evidence PDF/CSV/ZIP real artifact + permissions | PASS | backend PyPDF assertions and `inventory-evidence.spec.ts` actual download; authenticated no-store checks |
@@ -238,13 +243,14 @@ Unverified or supplied from the prior accepted helper run (not re-read in this a
 
 ## Exact skips / limits
 
-- One Playwright case skips by design: `apps/web/e2e/manuals.spec.ts:139`
-  (`discovers through the concrete Brave adapter…`) skips when
-  `/api/v1/items/{id}/manuals` reports that the online-search provider is not
-  `brave`. The audit stack deliberately ran without a Brave credential, so the
-  concrete-adapter path was covered by backend fixtures and the UI path by the
-  configured-fixture test history, not by a live Brave call. This is an explicit
-  fixture guard, not a silent pass.
+- In the 98-workflow full suite, one Playwright case skipped by design:
+  `apps/web/e2e/manuals.spec.ts:139` (`discovers through the concrete Brave
+  adapter…`) skips when `/api/v1/items/{id}/manuals` reports that the online-search
+  provider is not `brave`. The main audit stack deliberately ran without a Brave
+  credential. A follow-up fresh stack with `MANUAL_SEARCH_PROVIDER=brave`, fixture
+  key and a local mock Brave adapter ran `manuals.spec.ts` **2/2 passed**, including
+  the skipped case. All 98 checked-in workflows therefore executed successfully
+  across the two fresh-stack runs; no live Brave or paid call was made.
 - No live paid AI, live Brave search, real SMTP delivery, external SMS/Telegram,
   real iPhone hardware camera/microphone or insurer integration was used.
 - The server privileged state above remains unverified until operator-assisted release.
