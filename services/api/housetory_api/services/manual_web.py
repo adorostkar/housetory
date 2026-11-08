@@ -576,6 +576,62 @@ def _plain_text(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
+@dataclass(frozen=True)
+class GenericWebResult:
+    """One Brave search snippet used for optional price comparisons.
+
+    Result pages are never fetched here. The URL is only a citation the user may
+    open; prices parsed from snippets are labelled by the caller as asking/listed
+    prices, never confirmed sold prices.
+    """
+
+    title: str
+    url: str
+    snippet: str | None
+    retrieved_at: datetime
+
+
+def search_generic_web(
+    db: Session,
+    household_id: uuid.UUID,
+    query: str,
+    *,
+    count: int = 5,
+) -> list[GenericWebResult]:
+    provider = resolve_search_provider(db, household_id)
+    if provider.kind != "brave":
+        raise ManualSearchUnavailable(
+            provider.reason or "Online price comparisons require Brave Search."
+        )
+    raw_results = _brave_search_results(provider, _limit_query(query), min(max(count, 1), 5))
+    results: list[GenericWebResult] = []
+    for entry in raw_results:
+        title = _plain_text(entry.get("title"), 300)
+        if not title:
+            continue
+        try:
+            source_url = _validated_url(str(entry.get("url") or ""), field="comparison")
+        except ManualWebError:
+            continue
+        description = _plain_text(entry.get("description"), 1200)
+        extras = entry.get("extra_snippets")
+        if isinstance(extras, list):
+            extra_text = " · ".join(
+                _plain_text(value, 400) for value in extras[:2] if str(value).strip()
+            )
+            if extra_text:
+                description = f"{description} · {extra_text}".strip(" ·")
+        results.append(
+            GenericWebResult(
+                title=title,
+                url=source_url,
+                snippet=description or None,
+                retrieved_at=datetime.now(UTC),
+            )
+        )
+    return results
+
+
 def _registrable_labels(host: str) -> list[str]:
     labels = [_compact(part) for part in host.lower().split(".") if part]
     if len(labels) >= 3 and labels[-2] in COMMON_SECOND_LEVEL_LABELS:

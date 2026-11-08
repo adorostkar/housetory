@@ -37,6 +37,7 @@ from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseOut
 from ..schemas.warranties import WarrantyOut
 from . import current_value as current_value_service
+from . import valuation as valuation_service
 from .item_images import representative_image_out
 from .purchase_info import effective_purchase_info_status, missing_purchase_info_fields
 from .warranties import effective_reminder_days, warranty_status
@@ -391,6 +392,9 @@ def item_summary(
         current_value_basis=current_value_service.effective_basis(item),
         current_value_total_cents=current_value_service.total_value_cents(item),
         current_value_estimated_at=item.current_value_estimated_at,
+        current_value_estimate=(
+            valuation_service.stored_value_estimate(item)
+        ),
         created_at=item.created_at,
         updated_at=item.updated_at,
         last_verified=last_verified_out(item, on_loan_quantity),
@@ -415,6 +419,7 @@ def item_detail(
         **summary.model_dump(exclude={"location_path"}),
         location_path=location_path or [],
         serial_number=item.serial_number,
+        valuation_fingerprint=valuation_service.valuation_fingerprint(item),
         import_source=import_source,
         storage=storage,
         photos=[

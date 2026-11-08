@@ -794,6 +794,7 @@ export interface ItemSummary {
   current_value_basis: "per_unit" | "legacy_record_total" | null;
   current_value_total_cents: number | null;
   current_value_estimated_at: string | null;
+  current_value_estimate?: ItemValueEstimate | null;
   created_at: string;
   updated_at: string;
   last_verified?: LastVerified | null;
@@ -836,6 +837,7 @@ export interface ItemStorage {
 
 export interface ItemDetail extends ItemSummary {
   serial_number: string | null;
+  valuation_fingerprint?: string;
   photos: Photo[];
   documents: DocumentRecord[];
   import_source: ImportSourceBrief | null;
@@ -851,6 +853,74 @@ export interface ItemList {
 
 export interface ItemDetailResponse {
   item: ItemDetail;
+}
+
+export type ValuationPurpose = "resale" | "replacement";
+export type ValuationSourceKind = "ai" | "ai_web" | "manual";
+export type ValuationConfidence = "low" | "medium" | "high";
+
+export interface ValuationSource {
+  title: string;
+  url: string;
+  snippet: string | null;
+  price_text: string | null;
+  price_cents: number | null;
+  currency: string | null;
+  currency_inferred: boolean;
+  price_kind: "asking";
+  retrieved_on: string;
+}
+
+export interface ItemValueEstimate {
+  purpose: ValuationPurpose;
+  source: ValuationSourceKind;
+  currency: string;
+  low_cents: number | null;
+  high_cents: number | null;
+  as_of: string;
+  confidence: ValuationConfidence | null;
+  reasoning: string | null;
+  assumptions: string[];
+  web_used: boolean;
+  web_reason: string | null;
+  sources: ValuationSource[];
+}
+
+export interface ItemValuationPreview {
+  estimate_id: UUID;
+  item_id: UUID;
+  item_name: string;
+  fingerprint: string;
+  purpose: ValuationPurpose;
+  source: ValuationSourceKind;
+  currency: string;
+  low_cents: number;
+  suggested_cents: number;
+  high_cents: number;
+  owned_quantity: number;
+  low_total_cents: number;
+  suggested_total_cents: number;
+  high_total_cents: number;
+  as_of: string;
+  confidence: ValuationConfidence;
+  reasoning: string;
+  assumptions: string[];
+  web_used: boolean;
+  web_reason: string | null;
+  web_query: string | null;
+  sources: ValuationSource[];
+  existing_value_cents: number | null;
+  existing_value_basis: "per_unit" | "legacy_record_total" | null;
+  existing_value_currency: string | null;
+  disclaimer: string;
+}
+
+export interface ItemValuationApplyInput {
+  estimate_id: UUID | null;
+  purpose: ValuationPurpose;
+  amount_cents: number;
+  currency: string;
+  expected_fingerprint: string;
 }
 
 export interface PhotoList {

@@ -237,6 +237,10 @@ def _apply_current_value_update(
         item.current_value_estimated_at = None
     elif changed:
         item.current_value_estimated_at = datetime.now(UTC)
+    if changed:
+        # Manual edits and legacy conversions are no longer the reviewed AI/manual
+        # provenance that produced the previous estimate metadata.
+        item.current_value_estimate_metadata = None
     if not changed:
         return None
     return {

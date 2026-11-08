@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -368,6 +369,7 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     current_value_basis: Mapped[str | None] = mapped_column(String(32))
     current_value_estimated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_value_estimate_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     purchase_info_status: Mapped[str | None] = mapped_column(String(20))
 
     household: Mapped["Household"] = relationship(back_populates="items")
@@ -401,6 +403,54 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_verification: Mapped["StocktakeItemState | None"] = relationship(
         back_populates="item", cascade="all, delete-orphan", uselist=False
     )
+
+
+class ItemValuationPreview(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "item_valuation_previews"
+    __table_args__ = (
+        CheckConstraint(
+            "low_cents >= 0 and suggested_cents >= 0 and high_cents >= 0",
+            name="non_negative",
+        ),
+        CheckConstraint(
+            "low_cents <= suggested_cents and suggested_cents <= high_cents",
+            name="range_in_order",
+        ),
+        Index("ix_item_valuation_previews_household_item", "household_id", "item_id"),
+        Index("ix_item_valuation_previews_expires", "expires_at"),
+    )
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    low_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    suggested_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    high_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    reasoning: Mapped[str | None] = mapped_column(Text)
+    assumptions: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    web_used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    web_reason: Mapped[str | None] = mapped_column(Text)
+    sources: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    item_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -892,6 +942,7 @@ __all__ = [
     "Item",
     "ItemCustomValue",
     "ItemPhoto",
+    "ItemValuationPreview",
     "Purchase",
     "PurchaseAllocation",
     "Room",

@@ -27,6 +27,7 @@ import { ErrorState } from "@/components/error-state";
 import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { ItemLoanStatus } from "@/components/item-loan-status";
 import { ItemStorageSection } from "@/components/item-storage-section";
+import { ItemValuationDialog } from "@/components/item-valuation-dialog";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { ItemImageControls } from "@/components/item-image-controls";
@@ -68,7 +69,7 @@ import {
   locationPath,
   roomPath,
 } from "@/lib/utils";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 export function ItemDetailPage() {
   const { itemId = "" } = useParams();
@@ -84,6 +85,7 @@ export function ItemDetailPage() {
   const historyQuery = useItemHistory(itemId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [lendOpen, setLendOpen] = useState(false);
+  const [valuationOpen, setValuationOpen] = useState(false);
   const [returnLoan, setReturnLoan] = useState<Loan | null>(null);
 
   const archive = useMutation({
@@ -466,6 +468,78 @@ export function ItemDetailPage() {
                     </span>
                   </span>
                 )}
+                {item.current_value_estimate && (
+                  <span className="mt-1.5 block rounded-lg border border-border/50 bg-secondary/20 px-2.5 py-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+                    <span className="block">
+                      {item.current_value_estimate.purpose === "resale"
+                        ? "Resale"
+                        : "Replacement"}{" "}
+                      estimate · as of{" "}
+                      {formatDate(item.current_value_estimate.as_of)}
+                      {item.current_value_estimate.confidence
+                        ? ` · ${item.current_value_estimate.confidence} confidence`
+                        : ""}
+                      {" · "}
+                      {item.current_value_estimate.source === "ai_web"
+                        ? "AI with web search snippets"
+                        : item.current_value_estimate.source === "ai"
+                          ? "AI rough estimate"
+                          : "manual entry"}
+                    </span>
+                    {item.current_value_estimate.low_cents != null &&
+                      item.current_value_estimate.high_cents != null && (
+                        <span className="mt-0.5 block">
+                          Range{" "}
+                          {formatCurrency(
+                            item.current_value_estimate.low_cents,
+                            item.current_value_estimate.currency,
+                          )}{" "}
+                          –{" "}
+                          {formatCurrency(
+                            item.current_value_estimate.high_cents,
+                            item.current_value_estimate.currency,
+                          )}{" "}
+                          per unit. Estimate only; not an appraisal or guaranteed
+                          insurer payout.
+                        </span>
+                      )}
+                    {item.current_value_estimate.sources.length > 0 && (
+                      <span className="mt-0.5 block">
+                        {item.current_value_estimate.sources.length} supporting web{" "}
+                        {item.current_value_estimate.sources.length === 1
+                          ? "snippet"
+                          : "snippets"}{" "}
+                        saved with this estimate:{" "}
+                        {item.current_value_estimate.sources.slice(0, 3).map(
+                          (source, index) => (
+                            <Fragment key={source.url}>
+                              {index > 0 ? " · " : ""}
+                              <a
+                                href={source.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="underline underline-offset-4 hover:text-foreground"
+                              >
+                                {source.title}
+                              </a>
+                            </Fragment>
+                          ),
+                        )}
+                      </span>
+                    )}
+                  </span>
+                )}
+                {canWrite && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => setValuationOpen(true)}
+                  >
+                    <Wallet />
+                    Estimate value
+                  </Button>
+                )}
               </InfoRow>
 
               {item.serial_number && (
@@ -844,6 +918,16 @@ export function ItemDetailPage() {
         available={available}
         onCreated={() => {
           void loansQuery.refetch();
+          void historyQuery.refetch();
+        }}
+      />
+
+      <ItemValuationDialog
+        open={valuationOpen}
+        onOpenChange={setValuationOpen}
+        item={item}
+        onApplied={() => {
+          void itemQuery.refetch();
           void historyQuery.refetch();
         }}
       />

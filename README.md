@@ -184,6 +184,15 @@ Tailscale is optional.
 - Per-unit current values with explicit `unit × owned quantity = record total`,
   separate original purchase totals, audited legacy record-total conversion,
   missing values kept unknown, and matching item/PDF/CSV/ZIP/JSON semantics.
+- **On-demand item valuation** for one item at a time: choose used-market
+  **Resale** or today's **Replacement** purpose, optionally use the existing
+  consented Assistant/text provider and configured Brave search, review the
+  per-unit range and owned total, and apply or cancel explicitly. Manual entry
+  works without AI. Preview metadata, real asking/listed source links, purpose,
+  date and uncertainty are stored with the value and shown in the evidence PDF;
+  shared purchase totals, legacy totals, owned storage contents and borrowed
+  records are not double-counted. No automatic, bulk or periodic valuation. See
+  [`docs/ITEM_VALUATION.md`](docs/ITEM_VALUATION.md).
 - Multi-currency reporting that never adds currencies together; there is no
   implicit exchange rate.
 - CSV exports for documents, purchases, warranties and inventory.
@@ -357,7 +366,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 469 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 478 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -435,10 +444,11 @@ stack, not just unit mocks:
   follow-ups, provider-safe per-partition dialogue memory, mixed-direction
   rendering, per-household all-places AI provider boundaries, default text-model
   inheritance/override preservation, household-scoped borrower/lender name
-  suggestions and normalized person filters, calmer desktop/mobile navigation and
-  optional scheduled-review disclosure.
-- 236 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 97 checked-in Playwright workflows run on disposable Compose stacks, covering
+  suggestions and normalized person filters, on-demand resale/replacement item
+  valuation preview/apply and evidence metadata, calmer desktop/mobile navigation
+  and optional scheduled-review disclosure.
+- 241 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 98 checked-in Playwright workflows run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,
@@ -505,7 +515,9 @@ bulk selection boundaries, batch semantics and compact-list behavior are in
 limits, original/derivative storage, cleanup and OCR artifact behavior are in
 [`docs/DOCUMENT_SCANNING.md`](docs/DOCUMENT_SCANNING.md), and item-image
 sources, provenance, consent and batch limits are in
-[`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md), and reviewed line-item
+[`docs/ITEM_IMAGES.md`](docs/ITEM_IMAGES.md), on-demand resale/replacement
+valuation, manual fallback and evidence metadata are in
+[`docs/ITEM_VALUATION.md`](docs/ITEM_VALUATION.md), and reviewed line-item
 extraction, matching, AI fallback and apply semantics are in
 [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md), and manual
 attachment, grounded citations, identity gates, reviewed online search/download,

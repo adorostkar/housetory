@@ -788,6 +788,7 @@ def build_snapshot(
                 if item.current_value_estimated_at is not None
                 else None
             ),
+            "current_value_estimate": item.current_value_estimate_metadata,
             "warranty": (
                 {
                     "provider": warranty.provider,
@@ -1478,6 +1479,71 @@ def _pdf_item_flowables(
     if current.get("estimated_at"):
         current_text += f" Estimated {str(current['estimated_at'])[:10]}."
     lines.append(_paragraph(current_text, styles["small"]))
+    estimate = item.get("current_value_estimate")
+    if isinstance(estimate, dict) and current["basis"] == current_value_service.PER_UNIT:
+        purpose = str(estimate.get("purpose") or "unknown").title()
+        source = {
+            "ai_web": "AI with public web search snippets",
+            "ai": "AI without verified current comparisons",
+            "manual": "manual household entry",
+        }.get(str(estimate.get("source") or ""), "household estimate")
+        estimate_bits = [
+            f"{purpose} estimate ({source})",
+            f"as of {estimate.get('as_of') or 'date not recorded'}",
+        ]
+        if estimate.get("confidence"):
+            estimate_bits.append(f"{str(estimate['confidence']).title()} confidence")
+        lines.append(_paragraph(" · ".join(estimate_bits) + ".", styles["small"]))
+        low_cents = estimate.get("low_cents")
+        high_cents = estimate.get("high_cents")
+        if low_cents is not None and high_cents is not None:
+            lines.append(
+                _paragraph(
+                    "Estimated per-unit range: "
+                    f"{_money(low_cents, current['currency'])} – "
+                    f"{_money(high_cents, current['currency'])}. "
+                    "The applied per-unit estimate above is the reviewed value.",
+                    styles["small"],
+                )
+            )
+        if estimate.get("reasoning"):
+            lines.append(_paragraph(str(estimate["reasoning"]), styles["tiny"]))
+        assumptions = estimate.get("assumptions")
+        if isinstance(assumptions, list) and assumptions:
+            lines.append(
+                _paragraph(
+                    "Assumptions: " + " · ".join(str(value) for value in assumptions[:5]),
+                    styles["tiny"],
+                )
+            )
+        sources = estimate.get("sources")
+        if isinstance(sources, list) and sources:
+            for source_entry in sources[:5]:
+                if not isinstance(source_entry, dict):
+                    continue
+                price = (
+                    _money(source_entry.get("price_cents"), source_entry.get("currency"))
+                    if source_entry.get("price_cents") is not None
+                    else "price not extracted"
+                )
+                if source_entry.get("currency_inferred"):
+                    price += " (currency inferred from symbol)"
+                lines.append(
+                    _paragraph(
+                        "Supporting source (asking/listed search snippet, not a "
+                        f"confirmed sold price): {source_entry.get('title') or 'untitled'}"
+                        f" — {source_entry.get('url')} ({price}; retrieved "
+                        f"{source_entry.get('retrieved_on') or 'date not recorded'}).",
+                        styles["tiny"],
+                    )
+                )
+        lines.append(
+            _paragraph(
+                "Estimate only; not a professional appraisal or guaranteed insurer "
+                "payout. Verify the item, condition, model and local prices.",
+                styles["tiny"],
+            )
+        )
     warranty = item.get("warranty")
     if warranty:
         lines.append(

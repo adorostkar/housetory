@@ -28,9 +28,15 @@ from ...schemas.items import (
     PhotoList,
     PhotoOrderRequest,
 )
+from ...schemas.valuation import (
+    ItemValuationApplyIn,
+    ItemValuationEstimateIn,
+    ItemValuationPreviewOut,
+)
 from ...services import items as item_service
 from ...services import lending, storage, storage_items
 from ...services import properties as property_service
+from ...services import valuation as valuation_service
 from ...services.container_serializers import location_path_map
 from ...services.containers import location_breadcrumb
 from ...services.hierarchy import descendant_ids
@@ -321,6 +327,56 @@ def update_item(
             on_loan_quantity=loan_quantities.get(item.id, 0),
         )
     )
+
+
+@router.post(
+    "/items/{item_id}/valuation/estimate",
+    response_model=ItemValuationPreviewOut,
+)
+def estimate_item_value(
+    item_id: uuid.UUID,
+    payload: ItemValuationEstimateIn,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ItemValuationPreviewOut:
+    try:
+        result = valuation_service.create_preview(
+            db,
+            auth.household.id,
+            item_id,
+            payload,
+            actor_user_id=auth.user.id,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return result
+
+
+@router.post("/items/{item_id}/valuation/apply", response_model=ItemDetailResponse)
+def apply_item_valuation(
+    item_id: uuid.UUID,
+    payload: ItemValuationApplyIn,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ItemDetailResponse:
+    try:
+        item = valuation_service.apply_valuation(
+            db,
+            auth.household.id,
+            item_id,
+            payload,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.expire_all()
+    item = _get_item(db, auth.household.id, item.id)
+    return _detail_response(db, auth.household.id, item)
 
 
 @router.delete("/items/{item_id}", status_code=204)

@@ -12,6 +12,7 @@ from ..schemas.imports import ImportSourceBrief
 from ..schemas.item_images import ItemImageOut
 from ..schemas.properties import PropertyBrief
 from ..schemas.purchases import PurchaseIn, PurchaseOut
+from ..schemas.valuation import ItemValueEstimateOut
 from ..schemas.warranties import WarrantyIn, WarrantyOut
 
 
@@ -184,6 +185,7 @@ class ItemSummary(ORMModel):
     current_value_basis: Literal["per_unit", "legacy_record_total"] | None = None
     current_value_total_cents: int | None = None
     current_value_estimated_at: datetime | None = None
+    current_value_estimate: ItemValueEstimateOut | None = None
     created_at: datetime
     updated_at: datetime
     last_verified: LastVerifiedOut | None = None
@@ -191,6 +193,7 @@ class ItemSummary(ORMModel):
 
 class ItemDetail(ItemSummary):
     serial_number: str | None
+    valuation_fingerprint: str
     photos: list[PhotoOut]
     documents: list[DocumentOut]
     import_source: ImportSourceBrief | None = None
