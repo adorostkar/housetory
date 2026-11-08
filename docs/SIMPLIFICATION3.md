@@ -14,22 +14,27 @@ The normal **Settings → AI providers** screen now presents:
   transcription;
 - collapsed **Advanced task overrides** for the four text tasks.
 
-The default is derived from existing stored task rows without a migration:
+The default is a saved household choice, not a value recomputed from task rows:
 
-1. a provider/model pair used by multiple text tasks;
-2. otherwise the Assistant route;
-3. otherwise the only configured text route;
-4. otherwise no default.
+1. the owner saves one provider/model pair as the household default;
+2. existing installations are bootstrapped once from their stored text
+   assignments — a common pair or strict majority becomes the saved default;
+3. a tie or non-committed plurality leaves no default, and every configured
+   text task remains an explicit override;
+4. afterwards, edits to individual tasks never move the saved default.
 
-Tasks matching the chosen pair are labelled **Inherited**. Different configured
-pairs are labelled **Custom override**. A task with no assignment is **Not
+Text tasks have an explicit inheritance flag. **Inherited** tasks follow the
+saved default. Saving any custom provider/model marks that task as a **Custom
+override**, even when the saved pair happens to equal the current default.
+**Reset to default** explicitly returns that task to inheritance. A task with no
+assignment inherits the saved default when one exists; otherwise it is **Not
 configured**.
 
 Changing the default writes only inherited tasks. Explicit overrides, vision,
 voice, provider credentials, provider default model and cloud consent are not
 changed. Disabled inherited tasks stay disabled; saving the default does not
-silently enable them. **Reset to default** on an override returns that one task to
-the current default.
+silently enable them. The saved default remains visible even when all four text
+tasks are explicit overrides.
 
 ![Default text model with inherited and custom tasks](walkthrough/simplification3/01-ai-default-text.png)
 
@@ -87,14 +92,16 @@ household data automatically.
 
 ## Verification
 
-- 455 backend tests pass, including default derivation, inherited-task updates,
-  preserved overrides, disabled/missing/incompatible routes and owner-only access.
-- 230 frontend tests pass, including default save/reset, advanced disclosure,
-  navigation and existing schedule consent tests.
-- 95 disposable-stack Playwright workflows pass (94 passed, 1 fixture-dependent
-  skip), covering desktop/mobile navigation and More reachability, AI settings at
-  320/390/768/1440, focused default/override screenshots, active schedule,
-  reload-only system status and enabled-task bulk testing.
+- 463 backend tests pass, including the persisted-default migration/bootstrap,
+  explicit same-default overrides, reset/inherit, preserved disabled tasks,
+  provider deletion/rollback and cross-household permissions.
+- 230 frontend tests pass, including default save/reset, explicit inheritance,
+  advanced disclosure, navigation and existing schedule consent tests.
+- The focused disposable-stack Playwright workflow passes, covering saved-default
+  persistence, an explicit override equal to the default, default changes,
+  reset/inherit, reload and the all-overrides default state. The mocked
+  bulk-task-test and system-status summary regressions also pass. The checked-in
+  95-workflow suite remains the broader regression gate.
 - No paid inference calls were made by automated tests. AI provider output was
   mocked/disposable; no real keys or main data were copied.
 
@@ -102,9 +109,11 @@ household data automatically.
 
 - There is no new user-facing token, budget, subscription or follow-up model
   setting. Existing providers, models and consent are reused.
-- The default text model is derived from stored assignments; it is not a new
-  database field. Tasks are classified as inherited when they match the derived
-  pair, and existing different pairs remain explicit overrides.
+- The saved default is a household-level `ai_text_defaults` row and each text
+  task stores an explicit `inherits_text_default` flag. The migration bootstraps
+  existing assignments once without rewriting provider, model, enabled or
+  consent values; ties and non-committed pluralities leave no default. Later
+  reads never recompute the default from task majority.
 - Unverified compatible model IDs remain allowed and must be verified by the
   owner when desired; hard incompatible IDs are rejected.
 - A schedule that was explicitly disabled remains visible but off; it is not

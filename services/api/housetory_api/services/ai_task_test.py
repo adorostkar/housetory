@@ -24,7 +24,7 @@ from ..domain import RETIRED_AI_TASKS, AiTask
 from ..models import AiTaskSetting
 from ..schemas.ai_settings import AiTaskTestOut
 from . import ai, transcription
-from .ai_runtime import resolve_config
+from .ai_runtime import TEXT_TASKS, resolve_config
 from .task_capabilities import (
     adapter_gap_message,
     provider_adapter_supported,
@@ -146,14 +146,55 @@ def run_task_test(
         )
     )
     tested_at = datetime.now(UTC)
-    if setting is None or not setting.enabled or setting.provider_id is None:
-        return AiTaskTestOut(
-            task=task,
-            status="unsupported",
-            message="Configure and enable this task before running a live test.",
-            tested_at=tested_at,
-        )
-    config = resolve_config(db, household_id, task)
+    if task in TEXT_TASKS:
+        # Text tasks may inherit the household default even when no per-task
+        # row exists yet, so use the same effective runtime resolution as the
+        # settings and status screens.
+        config = resolve_config(db, household_id, task)
+        if (setting is not None and not setting.enabled) or not config.enabled:
+            return AiTaskTestOut(
+                task=task,
+                status="unsupported",
+                message=(
+                    config.error
+                    or "Configure and enable this task before running a live test."
+                ),
+                tested_at=tested_at,
+                model=config.model,
+                provider_label=config.display_name,
+            )
+        if setting is None:
+            if not config.configured:
+                return AiTaskTestOut(
+                    task=task,
+                    status="unsupported",
+                    message=(
+                        config.error
+                        or "Configure and enable this task before running a live test."
+                    ),
+                    tested_at=tested_at,
+                    model=config.model,
+                    provider_label=config.display_name,
+                )
+            setting = AiTaskSetting(
+                household_id=household_id,
+                task=task,
+                provider_id=config.provider_id,
+                model=config.model,
+                enabled=True,
+                inherits_text_default=config.provider_id is not None,
+            )
+            if config.provider_id is not None:
+                db.add(setting)
+    else:
+        if setting is None or not setting.enabled or setting.provider_id is None:
+            return AiTaskTestOut(
+                task=task,
+                status="unsupported",
+                message="Configure and enable this task before running a live test.",
+                tested_at=tested_at,
+            )
+        config = resolve_config(db, household_id, task)
     if not config.configured:
         message = config.error or "The task is not configured."
         setting.last_test_status = "unsupported"

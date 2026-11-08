@@ -1111,7 +1111,7 @@ def test_default_text_route_derives_common_pair_and_preserves_existing_overrides
         "search",
     }
     assert default["override_tasks"] == []
-    assert default["derived_from"] == "common"
+    assert default["derived_from"] == "saved"
     assert default["configured"] is True
 
     override = owner_client.put(
@@ -1134,8 +1134,8 @@ def test_default_text_route_derives_common_pair_and_preserves_existing_overrides
     assert disabled_search.status_code == 200, disabled_search.text
     settings = owner_client.get("/api/v1/ai/settings").json()
     default = settings["default_text"]
-    assert set(default["inherited_tasks"]) == {"assistant", "imports", "search"}
-    assert default["override_tasks"] == ["documents"]
+    assert set(default["inherited_tasks"]) == {"assistant", "imports"}
+    assert default["override_tasks"] == ["documents", "search"]
 
     changed = owner_client.put(
         "/api/v1/ai/default-text",
@@ -1146,18 +1146,150 @@ def test_default_text_route_derives_common_pair_and_preserves_existing_overrides
     tasks = {entry["task"]: entry for entry in changed_body["tasks"]}
     assert tasks["assistant"]["model"] == "gpt-4o-mini"
     assert tasks["imports"]["model"] == "gpt-4o-mini"
-    assert tasks["search"]["model"] == "gpt-4o-mini"
+    assert tasks["search"]["model"] == "gpt-4o"
     assert tasks["search"]["enabled"] is False
     assert tasks["documents"]["model"] == "o3-mini"
     assert tasks["vision"]["model"] == "gpt-4o"
     assert tasks["transcription"]["provider_id"] is None
     assert changed_body["default_text"]["model"] == "gpt-4o-mini"
-    assert changed_body["default_text"]["override_tasks"] == ["documents"]
+    assert changed_body["default_text"]["override_tasks"] == ["documents", "search"]
 
     providers = owner_client.get("/api/v1/ai/settings").json()["providers"]
     assert providers[0]["default_model"] == "gpt-4o"
     assert providers[0]["cloud_consent"] is True
     assert providers[0]["has_api_key"] is True
+
+
+def test_three_custom_text_tasks_do_not_replace_saved_default(owner_client):
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    for task in ("documents", "imports", "search"):
+        response = owner_client.put(
+            f"/api/v1/ai/tasks/{task}",
+            json={
+                "provider_id": provider["id"],
+                "model": "gpt-4o-mini",
+                "enabled": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    default = settings["default_text"]
+    assert default["provider_id"] == provider["id"]
+    assert default["model"] == "gpt-4o"
+    assert default["inherited_tasks"] == ["assistant"]
+    assert set(default["override_tasks"]) == {"documents", "imports", "search"}
+    tasks = {entry["task"]: entry for entry in settings["tasks"]}
+    assert tasks["assistant"]["model"] == "gpt-4o"
+    assert tasks["documents"]["model"] == "gpt-4o-mini"
+    assert tasks["documents"]["inherits_text_default"] is False
+
+
+def test_explicit_override_equal_to_default_survives_and_reset_inherits(owner_client):
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    explicit = owner_client.put(
+        "/api/v1/ai/tasks/documents",
+        json={
+            "provider_id": provider["id"],
+            "model": "gpt-4o",
+            "enabled": True,
+        },
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert explicit.json()["inherits_text_default"] is False
+
+    changed = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
+    )
+    assert changed.status_code == 200, changed.text
+    tasks = {entry["task"]: entry for entry in changed.json()["tasks"]}
+    assert tasks["assistant"]["model"] == "gpt-4o-mini"
+    assert tasks["imports"]["model"] == "gpt-4o-mini"
+    assert tasks["documents"]["model"] == "gpt-4o"
+    assert tasks["documents"]["inherits_text_default"] is False
+    assert {"documents"} == set(changed.json()["default_text"]["override_tasks"])
+
+    reset = owner_client.put(
+        "/api/v1/ai/tasks/documents",
+        json={"inherit_default": True, "enabled": True},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["model"] == "gpt-4o-mini"
+    assert reset.json()["inherits_text_default"] is True
+    persisted = owner_client.get("/api/v1/ai/settings").json()
+    assert persisted["default_text"]["model"] == "gpt-4o-mini"
+    assert set(persisted["default_text"]["inherited_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
+
+
+def test_all_text_overrides_keep_saved_default_visible_and_change_isolated(owner_client):
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    for task in ("assistant", "documents", "imports", "search"):
+        response = owner_client.put(
+            f"/api/v1/ai/tasks/{task}",
+            json={
+                "provider_id": provider["id"],
+                "model": "gpt-4o-mini",
+                "enabled": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    assert settings["default_text"]["model"] == "gpt-4o"
+    assert settings["default_text"]["inherited_tasks"] == []
+    assert set(settings["default_text"]["override_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
+
+    changed = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "o3-mini"},
+    )
+    assert changed.status_code == 200, changed.text
+    tasks = {entry["task"]: entry for entry in changed.json()["tasks"]}
+    assert all(
+        tasks[task]["model"] == "gpt-4o-mini"
+        and tasks[task]["inherits_text_default"] is False
+        for task in ("assistant", "documents", "imports", "search")
+    )
+    assert changed.json()["default_text"]["model"] == "o3-mini"
+    assert changed.json()["default_text"]["inherited_tasks"] == []
+
+    reset = owner_client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={"inherit_default": True, "enabled": True},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["model"] == "o3-mini"
+    assert reset.json()["inherits_text_default"] is True
+
+
+def test_inherited_disabled_state_survives_default_change(owner_client):
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    disabled = owner_client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={"inherit_default": True, "enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["inherits_text_default"] is True
+    assert disabled.json()["enabled"] is False
+
+    changed = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
+    )
+    assert changed.status_code == 200, changed.text
+    tasks = {entry["task"]: entry for entry in changed.json()["tasks"]}
+    assert tasks["assistant"]["model"] == "gpt-4o-mini"
+    assert tasks["assistant"]["inherits_text_default"] is True
+    assert tasks["assistant"]["enabled"] is False
 
 
 def test_default_text_rejects_missing_disabled_and_incompatible_routes(
@@ -1209,6 +1341,84 @@ def test_default_text_rejects_missing_disabled_and_incompatible_routes(
     )
     assert incompatible.status_code == 422
     assert incompatible.json()["detail"]["code"] == "model_capability_mismatch"
+    unchanged = owner_client.get("/api/v1/ai/settings").json()
+    assert unchanged["default_text"]["model"] == "gpt-4o"
+    assert set(unchanged["default_text"]["inherited_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
+    assert all(
+        task["model"] == "gpt-4o"
+        for task in unchanged["tasks"]
+        if task["task"] in {"assistant", "documents", "imports", "search"}
+    )
+
+
+def test_editing_an_existing_provider_does_not_seed_a_cleared_default(owner_client):
+    first = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    assert owner_client.delete(f"/api/v1/ai/providers/{first['id']}").status_code == 204
+    cleared = owner_client.get("/api/v1/ai/settings").json()
+    assert cleared["default_text"]["derived_from"] == "none"
+    assert cleared["default_text"]["provider_id"] is None
+
+    second = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "ollama",
+            "display_name": "Vision provider",
+            "base_url": "http://host.docker.internal:11434",
+            "default_model": None,
+            "enabled": True,
+            "cloud_consent": False,
+        },
+    )
+    assert second.status_code == 201, second.text
+    updated = owner_client.patch(
+        f"/api/v1/ai/providers/{second.json()['id']}",
+        json={"default_model": "llama3.2"},
+    )
+    assert updated.status_code == 200, updated.text
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    assert settings["default_text"]["derived_from"] == "none"
+    assert settings["default_text"]["provider_id"] is None
+    assert all(
+        task["provider_id"] is None and task["model"] is None
+        for task in settings["tasks"]
+        if task["task"] in {"assistant", "documents", "imports", "search"}
+    )
+
+
+def test_default_text_and_task_assignments_are_household_scoped(owner_client):
+    from tests.test_cross_household import _other_household_headers
+
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    other = _other_household_headers()
+    denied_default = owner_client.put(
+        "/api/v1/ai/default-text",
+        headers=other["headers"],
+        json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
+    )
+    assert denied_default.status_code == 404
+    denied_task = owner_client.put(
+        "/api/v1/ai/tasks/documents",
+        headers=other["headers"],
+        json={
+            "provider_id": provider["id"],
+            "model": "gpt-4o-mini",
+            "enabled": True,
+        },
+    )
+    assert denied_task.status_code == 404
+    unchanged = owner_client.get("/api/v1/ai/settings").json()
+    assert unchanged["default_text"]["model"] == "gpt-4o"
+    assert set(unchanged["default_text"]["inherited_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
 
 
 def test_default_text_endpoint_is_owner_only(owner_client):

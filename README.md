@@ -314,9 +314,11 @@ Tailscale is optional.
   OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
   **Settings → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
-- One default text model for Assistant, document interpretation, smart imports and
-  natural-language search, with preserved optional advanced overrides; changing
-  the default updates only inherited text tasks. Core navigation keeps
+- One saved default text model for Assistant, document interpretation, smart
+  imports and natural-language search, with preserved advanced overrides. Text
+  tasks explicitly inherit the saved default or keep their own provider/model;
+  saving an override survives default changes even when it equals the default.
+  Changing the default updates only inherited text tasks. Core navigation keeps
   Items/Rooms/Loans prominent and moves occasional Review/Purchases/Warranties/
   Assistant routes into calm sections/More. Unconfigured scheduled review stays
   behind Advanced and off by default. Vision and
@@ -345,7 +347,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 455 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 463 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -807,9 +809,11 @@ household owner and open **Settings → AI providers**.
    Tailscale and external Ollama endpoints are private-network/remote and require
    consent. TLS certificate verification is never disabled and redirects are not
    followed.
-4. Assign a provider and model to assistant, smart imports, document
-   interpretation, natural-language search, image recognition and voice
-   transcription. Each task uses the searchable discovered catalog and switches
+4. Choose the saved **Default text model** for assistant, smart imports, document
+   interpretation and natural-language search. Optional advanced overrides keep
+   their own provider/model and survive default changes. Assign separate
+   capability-specific choices for image recognition and voice transcription.
+   Each task uses the searchable discovered catalog and switches
    catalogs when its provider changes. Known non-chat models are excluded, vision
    tasks require image input, and voice transcription requires STT/audio input.
    Retired illustration and label-headline tasks are not offered. Unknown

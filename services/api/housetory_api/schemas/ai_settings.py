@@ -97,6 +97,7 @@ class AiTaskSettingOut(BaseModel):
     model_label: str | None = None
     model_listed: bool = False
     compatibility: TaskCompatibility = "not_configured"
+    inherits_text_default: bool = False
     enabled: bool
     capabilities: list[str] = Field(default_factory=list)
     last_test_status: Literal["passed", "failed", "unsupported"] | None = None
@@ -109,6 +110,7 @@ class AiTaskSettingUpdate(BaseModel):
     provider_id: uuid.UUID | None = None
     model: trimmed(1, 160) | None = None
     enabled: bool = True
+    inherit_default: bool = False
 
 
 class AiDefaultTextOut(BaseModel):
@@ -121,7 +123,7 @@ class AiDefaultTextOut(BaseModel):
     configured: bool = False
     inherited_tasks: list[str] = Field(default_factory=list)
     override_tasks: list[str] = Field(default_factory=list)
-    derived_from: Literal["common", "assistant", "single", "none"] = "none"
+    derived_from: Literal["common", "assistant", "single", "saved", "none"] = "none"
 
 
 class AiDefaultTextUpdate(BaseModel):

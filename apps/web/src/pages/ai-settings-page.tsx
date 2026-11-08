@@ -334,11 +334,12 @@ export function AiSettingsPage() {
   });
 
   const saveTask = useMutation({
-    mutationFn: (task: AiTaskSetting) =>
-      api.put<AiTaskSetting>(`/ai/tasks/${task.task}`, {
-        provider_id: task.provider_id,
-        model: task.model,
-        enabled: task.enabled,
+    mutationFn: (input: AiTaskSetting & { inherit_default?: boolean }) =>
+      api.put<AiTaskSetting>(`/ai/tasks/${input.task}`, {
+        provider_id: input.provider_id,
+        model: input.model,
+        enabled: input.enabled,
+        inherit_default: input.inherit_default ?? false,
       }),
     onSuccess: (task) => {
       setTasks((current) => ({ ...current, [task.task]: task }));
@@ -447,30 +448,10 @@ export function AiSettingsPage() {
   const isTextTask = (task: string) =>
     (TEXT_TASKS as readonly string[]).includes(task);
   const isInheritedTask = (task: AiTaskSetting) =>
-    Boolean(
-      isTextTask(task.task) &&
-        settings.default_text.provider_id &&
-        settings.default_text.model &&
-        task.provider_id === settings.default_text.provider_id &&
-        task.model === settings.default_text.model,
-    );
-  const isOverrideTask = (task: AiTaskSetting) =>
-    Boolean(
-      isTextTask(task.task) &&
-        task.provider_id &&
-        task.model &&
-        !isInheritedTask(task),
-    );
+    Boolean(isTextTask(task.task) && task.inherits_text_default);
   const resetTaskToDefault = (task: AiTaskSetting) => {
     if (!settings.default_text.provider_id || !settings.default_text.model) return;
-    const next: AiTaskSetting = {
-      ...task,
-      provider_id: settings.default_text.provider_id,
-      provider_label: settings.default_text.provider_label,
-      model: settings.default_text.model,
-    };
-    setTasks((current) => ({ ...current, [task.task]: next }));
-    saveTask.mutate(next);
+    saveTask.mutate({ ...task, inherit_default: true });
   };
   const inheritedLabels = settings.default_text.inherited_tasks.map(
     (task) => TASK_LABELS[task] ?? task,
@@ -479,13 +460,15 @@ export function AiSettingsPage() {
     (task) => TASK_LABELS[task] ?? task,
   );
   const derivedLabel =
-    settings.default_text.derived_from === "common"
-      ? "Inferred from existing common assignments"
-      : settings.default_text.derived_from === "assistant"
-        ? "Based on the Assistant route"
-        : settings.default_text.derived_from === "single"
-          ? "Based on the only configured text route"
-          : "No text default configured yet";
+    settings.default_text.derived_from === "saved"
+      ? "Saved household default"
+      : settings.default_text.derived_from === "common"
+        ? "Inferred from existing common assignments"
+        : settings.default_text.derived_from === "assistant"
+          ? "Based on the Assistant route"
+          : settings.default_text.derived_from === "single"
+            ? "Based on the only configured text route"
+            : "No text default configured yet";
   const renderTaskRow = (task: AiTaskSetting) => {
   const provider = settings.providers.find((entry) => entry.id === task.provider_id);
   const providerModels = provider ? models[provider.id] ?? [] : [];
@@ -537,17 +520,17 @@ export function AiSettingsPage() {
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
           {isTextTask(task.task) ? (
-            isInheritedTask(task) ? (
+            !task.provider_id || !task.model ? (
+              <Badge variant="outline" className="text-[0.55rem]">
+                Not configured
+              </Badge>
+            ) : isInheritedTask(task) ? (
               <Badge variant="sage" className="text-[0.55rem]">
                 Inherited
               </Badge>
-            ) : isOverrideTask(task) ? (
+            ) : (
               <Badge variant="brass" className="text-[0.55rem]">
                 Custom override
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-[0.55rem]">
-                Not configured
               </Badge>
             )
           ) : null}
@@ -658,7 +641,7 @@ export function AiSettingsPage() {
         className="flex min-w-0 flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-self-end"
       >
         {isTextTask(task.task) &&
-        isOverrideTask(task) &&
+        !isInheritedTask(task) &&
         settings.default_text.provider_id &&
         settings.default_text.model ? (
           <Button

@@ -47,10 +47,10 @@ const settings: AiSettings = {
     },
   ],
   tasks: [
-    task("assistant", "provider-openai", "gpt-4o"),
-    task("imports", "provider-openai", "gpt-4o"),
-    task("documents", "provider-openai", "gpt-4o"),
-    task("search", "provider-openai", "gpt-4o"),
+    { ...task("assistant", "provider-openai", "gpt-4o"), inherits_text_default: true },
+    { ...task("imports", "provider-openai", "gpt-4o"), inherits_text_default: true },
+    { ...task("documents", "provider-openai", "gpt-4o"), inherits_text_default: true },
+    { ...task("search", "provider-openai", "gpt-4o"), inherits_text_default: true },
     task("vision", "provider-openai", "gpt-4o"),
     task("transcription", "provider-openai", "gpt-4o"),
   ],
@@ -89,6 +89,7 @@ function task(name: string, providerId: string, model: string): AiTaskSetting {
     provider_id: providerId,
     provider_label: "OpenAI household",
     model,
+    inherits_text_default: false,
     enabled: true,
     capabilities: ["text", "vision", "structured", "tools"],
     updated_at: "2026-01-01T00:00:00Z",
@@ -223,7 +224,11 @@ describe("AiSettingsPage", () => {
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith(
         "/ai/tasks/assistant",
-        expect.objectContaining({ model: "gpt-4o-mini", enabled: true }),
+        expect.objectContaining({
+          model: "gpt-4o-mini",
+          enabled: true,
+          inherit_default: false,
+        }),
       ),
     );
     await waitFor(() =>
@@ -397,7 +402,7 @@ describe("AiSettingsPage", () => {
       ...settings,
       tasks: settings.tasks.map((entry) =>
         entry.task === "documents"
-          ? { ...entry, model: "o3-mini" }
+          ? { ...entry, model: "o3-mini", inherits_text_default: false }
           : entry,
       ),
       default_text: {
@@ -425,7 +430,7 @@ describe("AiSettingsPage", () => {
       ...settings,
       tasks: settings.tasks.map((entry) =>
         entry.task === "documents"
-          ? { ...entry, model: "o3-mini" }
+          ? { ...entry, model: "o3-mini", inherits_text_default: false }
           : entry,
       ),
       default_text: {
@@ -443,8 +448,9 @@ describe("AiSettingsPage", () => {
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith("/ai/tasks/documents", {
         provider_id: "provider-openai",
-        model: "gpt-4o",
+        model: "o3-mini",
         enabled: true,
+        inherit_default: true,
       }),
     );
   });

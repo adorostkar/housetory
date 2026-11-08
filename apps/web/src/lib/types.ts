@@ -1861,6 +1861,7 @@ export interface AiTaskSetting {
   model_label?: string | null;
   model_listed?: boolean;
   compatibility?: AiTaskCompatibility;
+  inherits_text_default?: boolean;
   enabled: boolean;
   capabilities: string[];
   last_test_status?: "passed" | "failed" | "unsupported" | null;
@@ -1879,7 +1880,7 @@ export interface AiDefaultText {
   configured: boolean;
   inherited_tasks: string[];
   override_tasks: string[];
-  derived_from: "common" | "assistant" | "single" | "none";
+  derived_from: "common" | "assistant" | "single" | "saved" | "none";
 }
 
 export interface AiSettings {

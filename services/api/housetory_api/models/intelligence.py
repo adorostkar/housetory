@@ -52,6 +52,23 @@ class AiProvider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     cloud_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
 
+class AiTextDefault(Base):
+    __tablename__ = "ai_text_defaults"
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("households.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="SET NULL")
+    )
+    model: Mapped[str | None] = mapped_column(String(160))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AiTaskSetting(Base):
     __tablename__ = "ai_task_settings"
     __table_args__ = (
@@ -75,6 +92,9 @@ class AiTaskSetting(Base):
     )
     model: Mapped[str | None] = mapped_column(String(160))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    inherits_text_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     last_test_status: Mapped[str | None] = mapped_column(String(24))
     last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_test_error: Mapped[str | None] = mapped_column(Text)

@@ -136,6 +136,79 @@ def test_explicit_task_test_requires_confirmation_and_records_live_result(
     assert "malformed" in (assistant["last_test_error"] or "").lower()
 
 
+def test_inherited_text_task_without_row_matches_settings_status_and_live_test(
+    owner_client, monkeypatch
+):
+    provider = owner_client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "openai",
+            "display_name": "Inherited task provider",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "gpt-inherited",
+            "api_key": "sk-test-inherited-secret",
+            "enabled": True,
+            "cloud_consent": True,
+        },
+    ).json()
+    session = owner_client.get("/api/v1/auth/session").json()
+    household_id = uuid.UUID(session["household"]["id"])
+    with SessionLocal() as db:
+        setting = db.scalar(
+            select(AiTaskSetting).where(
+                AiTaskSetting.household_id == household_id,
+                AiTaskSetting.task == "documents",
+            )
+        )
+        assert setting is not None
+        db.delete(setting)
+        db.commit()
+
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    documents = next(
+        task for task in settings["tasks"] if task["task"] == "documents"
+    )
+    assert documents["inherits_text_default"] is True
+    assert documents["enabled"] is True
+    assert documents["provider_id"] == provider["id"]
+    assert documents["model"] == "gpt-inherited"
+    assert "documents" in settings["default_text"]["inherited_tasks"]
+
+    status = owner_client.get("/api/v1/system/status").json()
+    status_documents = next(
+        task for task in status["tasks"] if task["task"] == "documents"
+    )
+    assert status_documents["enabled"] is True
+    assert status_documents["configured"] is True
+    assert status_documents["model"] == "gpt-inherited"
+
+    monkeypatch.setattr(
+        ai_task_test.ai,
+        "complete_json",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+    passed = owner_client.post(
+        "/api/v1/ai/tasks/documents/test",
+        json={"confirm": True},
+    )
+    assert passed.status_code == 200, passed.text
+    assert passed.json()["status"] == "passed"
+    assert passed.json()["model"] == "gpt-inherited"
+
+    with SessionLocal() as db:
+        recreated = db.scalar(
+            select(AiTaskSetting).where(
+                AiTaskSetting.household_id == household_id,
+                AiTaskSetting.task == "documents",
+            )
+        )
+        assert recreated is not None
+        assert recreated.inherits_text_default is True
+        assert recreated.enabled is True
+        assert recreated.provider_id == uuid.UUID(provider["id"])
+        assert recreated.model == "gpt-inherited"
+
+
 def test_bulk_live_task_test_endpoint_remains_owner_only(owner_client):
     from housetory_api.services.auth import create_session
 

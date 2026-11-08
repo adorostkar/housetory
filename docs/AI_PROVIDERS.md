@@ -27,16 +27,25 @@ The normal screen has one text provider/model picker and two separate
 capability-specific rows for image recognition and voice transcription. Advanced
 text overrides stay collapsed until opened.
 
-- The initial default is inferred from existing assignments. A common pair used by
-  multiple text tasks is preferred; otherwise the Assistant route is the primary
-  default. A different configured pair is marked **Custom override**.
-- Changing the default updates only tasks currently inherited from the old default.
-  Explicit overrides, vision, voice, provider credentials and consent are not
-  changed.
-- **Reset to default** returns an override to the current default without changing
-  the rest of the page.
-- Disabled or unconfigured tasks can be skipped; saving a default never silently
-  enables a task that was explicitly disabled.
+- The default is a saved household provider/model choice. Existing installations
+  are bootstrapped once from stored text assignments: an unambiguous common pair
+  or strict majority becomes the saved default; a tie or non-committed plurality
+  leaves no default and keeps configured tasks explicit. Later per-task edits
+  never move the saved default.
+- Each text task explicitly inherits the default or stores its own override.
+  Saving a custom provider/model makes it an override even when it equals the
+  current default, so a later default change does not overwrite that choice.
+  A task with no row inherits the saved default when one exists.
+- Changing the default updates only inherited tasks. Explicit overrides, vision,
+  voice, provider credentials and consent are not changed. The saved default
+  stays visible even when every text task is overridden.
+- **Reset to default** explicitly returns an override to the current default
+  without changing the rest of the page.
+- Disabled inherited tasks stay disabled when the default changes; saving a
+  default never silently enables a task that was explicitly disabled.
+- Deleting, disabling or invalidating a provider never selects a different
+  provider silently. A deleted default is cleared and affected tasks fail closed
+  until the owner saves a replacement.
 
 Provider discovery still lists only hard-compatible models in the task picker.
 Unverified compatible IDs remain selectable and are validated when saved.

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..domain import AiProviderType, AiTask
-from ..models import AiProvider, AiTaskSetting
+from ..models import AiProvider, AiTaskSetting, AiTextDefault
 from ..schemas.ai import AiStatus
 from .ai_credentials import CredentialError, decrypt_secret
 from .task_capabilities import adapter_gap_message, provider_adapter_supported
@@ -31,6 +31,13 @@ CLOUD_PROVIDERS = {
     AiProviderType.GEMINI.value,
     AiProviderType.XAI.value,
     AiProviderType.OPENROUTER.value,
+}
+
+TEXT_TASKS = {
+    AiTask.ASSISTANT.value,
+    AiTask.DOCUMENTS.value,
+    AiTask.IMPORTS.value,
+    AiTask.SEARCH.value,
 }
 
 
@@ -293,8 +300,101 @@ def config_for_provider(
     )
 
 
+def _disabled_text_config(task: str, error: str) -> AiRuntimeConfig:
+    return AiRuntimeConfig(
+        provider="disabled",
+        base_url="",
+        api_key=None,
+        model=None,
+        task=task,
+        provider_id=None,
+        display_name=None,
+        mode="disabled",
+        source="database",
+        enabled=False,
+        cloud_consent=False,
+        configured=False,
+        error=error,
+    )
+
+
+def _resolve_text_config(
+    db: Session, household_id: uuid.UUID, task: str
+) -> AiRuntimeConfig:
+    setting = db.scalar(
+        select(AiTaskSetting).where(
+            AiTaskSetting.household_id == household_id,
+            AiTaskSetting.task == task,
+        )
+    )
+    default = db.get(AiTextDefault, household_id)
+    default_unset = default is None or (
+        default.provider_id is None and not default.model
+    )
+    if setting is None and default_unset:
+        # Legacy installs that were configured entirely through environment
+        # variables have no database AI configuration at all. Keep that
+        # fallback narrow: any database text assignment or provider disables
+        # it, so deleting a provider never selects a silent substitute.
+        has_text_rows = db.scalar(
+            select(AiTaskSetting.task)
+            .where(
+                AiTaskSetting.household_id == household_id,
+                AiTaskSetting.task.in_(TEXT_TASKS),
+            )
+            .limit(1)
+        )
+        has_providers = db.scalar(
+            select(AiProvider.id)
+            .where(AiProvider.household_id == household_id)
+            .limit(1)
+        )
+        if has_text_rows is None and has_providers is None:
+            return _env_config(task)
+    if setting is not None and not setting.enabled:
+        provider = (
+            db.get(AiProvider, setting.provider_id)
+            if setting.provider_id
+            else (
+                db.get(AiProvider, default.provider_id)
+                if setting.inherits_text_default and default and default.provider_id
+                else None
+            )
+        )
+        if provider is None:
+            return _disabled_text_config(task, "AI is disabled for this task.")
+        return replace(
+            _provider_config(provider, task, setting.model or provider.default_model),
+            configured=False,
+            error="AI is disabled for this task.",
+        )
+    if setting is not None and not setting.inherits_text_default:
+        provider_id = setting.provider_id
+        model = setting.model
+        provider = db.get(AiProvider, provider_id) if provider_id else None
+        if provider is None:
+            return _disabled_text_config(
+                task, "The selected provider no longer exists."
+            )
+        return _provider_config(provider, task, model or provider.default_model)
+    if default is None or default.provider_id is None or not default.model:
+        return _disabled_text_config(
+            task,
+            "No default text model is configured. Choose one under Settings → "
+            "AI providers → Default text model.",
+        )
+    provider = db.get(AiProvider, default.provider_id)
+    if provider is None:
+        return _disabled_text_config(
+            task, "The saved default text provider no longer exists."
+        )
+    return _provider_config(provider, task, default.model)
+
+
 def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntimeConfig:
     task = AiTask(task).value
+    if task in TEXT_TASKS:
+        return _resolve_text_config(db, household_id, task)
     providers = list(
         db.scalars(
             select(AiProvider)
@@ -313,7 +413,7 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
                 error=(
                     "No transcription task is configured. Choose OpenAI, OpenRouter "
                     "(STT/audio input) or Google Gemini (audio input) under Settings → "
-                    "AI providers → Task defaults."
+                    "AI providers → Vision & voice."
                 ),
             )
         return config
@@ -375,7 +475,7 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             configured=False,
             error=(
                 "No vision task is configured. Choose a vision-capable provider and "
-                "model under Settings → AI providers → Task defaults."
+                "model under Settings → AI providers → Vision & voice."
             ),
         )
     if task == AiTask.TRANSCRIPTION.value:
@@ -397,10 +497,11 @@ def resolve_config(db: Session, household_id: uuid.UUID, task: str) -> AiRuntime
             error=(
                 "No transcription task is configured. Choose OpenAI, OpenRouter "
                 "(STT/audio input) or Google Gemini (audio input) under Settings → "
-                "AI providers → Task defaults."
+                "AI providers → Vision & voice."
             ),
         )
-    # A single configured provider is a convenient default for text tasks.
+    # A single configured provider remains a last-resort fallback for any
+    # caller that reaches this generic path.
     enabled = [provider for provider in providers if provider.enabled]
     if len(enabled) == 1:
         provider = enabled[0]

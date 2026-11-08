@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from ..api.errors import ApiError
 from ..config import get_settings
 from ..domain import ACTIVE_AI_TASKS, RETIRED_AI_TASKS, AiProviderType, AiTask
-from ..models import AiProvider, AiTaskSetting, HouseholdOnlineSearchSettings
+from ..models import (
+    AiProvider,
+    AiTaskSetting,
+    AiTextDefault,
+    HouseholdOnlineSearchSettings,
+)
 from ..schemas.ai_settings import (
     AiDefaultTextOut,
     AiModelOut,
@@ -119,12 +124,19 @@ TASK_CAPABILITY = {
 }
 
 
-def _provider_or_404(db: Session, household_id: uuid.UUID, provider_id: uuid.UUID) -> AiProvider:
-    provider = db.scalar(
-        select(AiProvider).where(
-            AiProvider.id == provider_id, AiProvider.household_id == household_id
-        )
+def _provider_or_404(
+    db: Session,
+    household_id: uuid.UUID,
+    provider_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+) -> AiProvider:
+    query = select(AiProvider).where(
+        AiProvider.id == provider_id, AiProvider.household_id == household_id
     )
+    if for_update:
+        query = query.with_for_update()
+    provider = db.scalar(query)
     if provider is None:
         raise ApiError(404, "ai_provider_not_found", "AI provider not found.")
     return provider
@@ -176,7 +188,45 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
             AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
         )
     )
-    if setting is None:
+    default_row = db.get(AiTextDefault, household_id) if task in TEXT_TASKS else None
+    inherits = False
+    effective_provider_id: uuid.UUID | None = None
+    effective_model: str | None = None
+    enabled = setting.enabled if setting is not None else False
+    if task in TEXT_TASKS:
+        if setting is not None and setting.inherits_text_default:
+            inherits = True
+            if default_row is not None and default_row.provider_id and default_row.model:
+                effective_provider_id = default_row.provider_id
+                effective_model = default_row.model
+        elif setting is not None:
+            effective_provider_id = setting.provider_id
+            effective_model = setting.model
+        elif default_row is not None and default_row.provider_id and default_row.model:
+            inherits = True
+            enabled = True
+            effective_provider_id = default_row.provider_id
+            effective_model = default_row.model
+    else:
+        effective_provider_id = setting.provider_id if setting is not None else None
+        effective_model = setting.model if setting is not None else None
+    provider = (
+        db.get(AiProvider, effective_provider_id)
+        if effective_provider_id
+        else None
+    )
+    if (
+        task in TEXT_TASKS
+        and setting is not None
+        and not inherits
+        and provider is not None
+        and not effective_model
+    ):
+        # Runtime falls back to the provider's default model for an explicit
+        # text assignment whose stored model is empty. Mirror that here so the
+        # settings screen, status screen and runtime agree.
+        effective_model = provider.default_model
+    if task in TEXT_TASKS and (effective_provider_id is None or not effective_model):
         return AiTaskSettingOut(
             task=task,
             provider_id=None,
@@ -185,6 +235,24 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
             model_label=None,
             model_listed=False,
             compatibility="not_configured",
+            inherits_text_default=inherits,
+            enabled=enabled,
+            capabilities=[],
+            last_test_status=setting.last_test_status if setting else None,
+            last_test_at=setting.last_test_at if setting else None,
+            last_test_error=setting.last_test_error if setting else None,
+            updated_at=setting.updated_at if setting else None,
+        )
+    if setting is None and effective_provider_id is None:
+        return AiTaskSettingOut(
+            task=task,
+            provider_id=None,
+            provider_label=None,
+            model=None,
+            model_label=None,
+            model_listed=False,
+            compatibility="not_configured",
+            inherits_text_default=False,
             enabled=False,
             capabilities=[],
             last_test_status=None,
@@ -192,8 +260,7 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
             last_test_error=None,
             updated_at=None,
         )
-    provider = db.get(AiProvider, setting.provider_id) if setting.provider_id else None
-    cached = _cached_model(provider, setting.model) if provider is not None else None
+    cached = _cached_model(provider, effective_model) if provider is not None else None
     if provider is None:
         compatibility = "not_configured"
     elif cached is not None:
@@ -204,116 +271,109 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
         compatibility = "adapter_unavailable"
     return AiTaskSettingOut(
         task=task,
-        provider_id=setting.provider_id,
+        provider_id=effective_provider_id,
         provider_label=provider.display_name if provider else None,
-        model=setting.model,
+        model=effective_model,
         model_label=cached.display_name if cached is not None else None,
         model_listed=cached is not None,
         compatibility=compatibility,
-        enabled=setting.enabled,
-        capabilities=(_capabilities_for(provider, setting.model) if provider else []),
-        last_test_status=setting.last_test_status,
-        last_test_at=setting.last_test_at,
-        last_test_error=setting.last_test_error,
-        updated_at=setting.updated_at,
+        inherits_text_default=inherits,
+        enabled=enabled,
+        capabilities=(
+            _capabilities_for(provider, effective_model) if provider else []
+        ),
+        last_test_status=setting.last_test_status if setting else None,
+        last_test_at=setting.last_test_at if setting else None,
+        last_test_error=setting.last_test_error if setting else None,
+        updated_at=setting.updated_at if setting else None,
     )
 
 
-def derive_default_text(
+def _default_row(db: Session, household_id: uuid.UUID) -> AiTextDefault:
+    row = db.get(AiTextDefault, household_id)
+    if row is None:
+        row = AiTextDefault(household_id=household_id)
+        db.add(row)
+        db.flush()
+    return row
+
+
+def get_default_text(
     db: Session,
     household_id: uuid.UUID,
     tasks: list[AiTaskSettingOut] | None = None,
 ) -> AiDefaultTextOut:
-    """Derive one effective text default without adding a settings table.
-
-    Existing per-task assignments remain the source of truth. The most common
-    text pair wins when unambiguous; otherwise the assistant pair is the primary
-    default. Tasks sharing the chosen pair are labelled inherited, while
-    different configured pairs remain explicit overrides.
-    """
     task_list = tasks or [
-        serialize_task(db, household_id, task) for task in TEXT_TASKS
+        serialize_task(db, household_id, task) for task in TASK_LABELS
     ]
     by_name = {task.task: task for task in task_list if task.task in TEXT_TASKS}
-    pairs: dict[tuple[uuid.UUID, str], list[AiTaskSettingOut]] = {}
-    for task_name in TEXT_TASKS:
-        task = by_name.get(task_name)
-        if task and task.provider_id and task.model:
-            pairs.setdefault((task.provider_id, task.model), []).append(task)
-    if not pairs:
-        return AiDefaultTextOut(derived_from="none")
-    ordered_pairs = sorted(
-        pairs.items(),
-        key=lambda entry: (
-            -len(entry[1]),
-            TEXT_TASKS.index(entry[1][0].task),
-        ),
-    )
-    chosen_pair, chosen_tasks = ordered_pairs[0]
-    assistant_pair = None
-    assistant = by_name.get(AiTask.ASSISTANT.value)
-    if assistant and assistant.provider_id and assistant.model:
-        assistant_pair = (assistant.provider_id, assistant.model)
-    if len(chosen_tasks) >= 2:
-        derived_from = "common"
-    elif assistant_pair == chosen_pair:
-        derived_from = "assistant"
-    else:
-        derived_from = "single"
-        if assistant_pair:
-            chosen_pair = assistant_pair
-            chosen_tasks = pairs.get(assistant_pair, chosen_tasks)
-            derived_from = "assistant"
-    provider = db.get(AiProvider, chosen_pair[0])
+    row = db.get(AiTextDefault, household_id)
     inherited = [
-        task_name
-        for task_name in TEXT_TASKS
-        if (
-            (task := by_name.get(task_name))
-            and task.provider_id == chosen_pair[0]
-            and task.model == chosen_pair[1]
-        )
+        task for task in TEXT_TASKS if by_name.get(task) and by_name[task].inherits_text_default
     ]
     overrides = [
-        task_name
-        for task_name in TEXT_TASKS
-        if (
-            (task := by_name.get(task_name))
-            and task.provider_id
-            and task.model
-            and (task.provider_id, task.model) != chosen_pair
-        )
+        task
+        for task in TEXT_TASKS
+        if by_name.get(task)
+        and by_name[task].provider_id
+        and by_name[task].model
+        and not by_name[task].inherits_text_default
     ]
-    representative = next(
-        (task for task in chosen_tasks if task.task in inherited),
-        chosen_tasks[0],
+    if row is None or row.provider_id is None or not row.model:
+        return AiDefaultTextOut(
+            inherited_tasks=inherited,
+            override_tasks=overrides,
+            derived_from="none",
+        )
+    provider = db.get(AiProvider, row.provider_id)
+    if provider is None:
+        return AiDefaultTextOut(
+            inherited_tasks=inherited,
+            override_tasks=overrides,
+            derived_from="none",
+        )
+    cached = _cached_model(provider, row.model)
+    compatibility = (
+        model_task_state(provider.provider, AiTask.ASSISTANT.value, cached)
+        if cached is not None
+        else (
+            "unverified"
+            if provider_adapter_supported(provider.provider, AiTask.ASSISTANT.value)
+            else "adapter_unavailable"
+        )
     )
-    compatibility = representative.compatibility or "not_configured"
-    runtime_configured = False
-    if provider is not None:
-        runtime_configured = config_for_provider(
-            provider,
-            AiTask.ASSISTANT.value,
-            model=chosen_pair[1],
-        ).configured
+    runtime = config_for_provider(
+        provider,
+        AiTask.ASSISTANT.value,
+        model=row.model,
+    )
     configured = bool(
-        provider
-        and provider.enabled
-        and runtime_configured
+        provider.enabled
+        and runtime.configured
         and compatibility
         not in {"incompatible", "adapter_unavailable", "not_configured"}
     )
+    representative = next(
+        (by_name[task] for task in inherited if by_name.get(task)),
+        None,
+    )
     return AiDefaultTextOut(
-        provider_id=chosen_pair[0],
-        provider_label=representative.provider_label,
-        model=chosen_pair[1],
-        model_label=representative.model_label,
-        model_listed=representative.model_listed,
+        provider_id=row.provider_id,
+        provider_label=provider.display_name,
+        model=row.model,
+        model_label=(
+            cached.display_name
+            if cached is not None
+            else representative.model_label
+            if representative
+            else None
+        ),
+        model_listed=cached is not None,
         compatibility=compatibility,
         configured=configured,
         inherited_tasks=inherited,
         override_tasks=overrides,
-        derived_from=derived_from,
+        derived_from="saved",
     )
 
 
@@ -335,21 +395,67 @@ def ai_settings(db: Session, household_id: uuid.UUID) -> AiSettingsOut:
     return AiSettingsOut(
         providers=[serialize_provider(provider) for provider in providers],
         tasks=task_outputs,
-        default_text=derive_default_text(db, household_id, task_outputs),
+        default_text=get_default_text(db, household_id, task_outputs),
         credential_key_configured=key_configured(),
         environment_provider=get_settings().ai_provider,
         warning=warning,
     )
 
 
-def _assign_default_tasks(db: Session, household_id: uuid.UUID, provider: AiProvider) -> None:
+def _assign_default_tasks(
+    db: Session,
+    household_id: uuid.UUID,
+    provider: AiProvider,
+    *,
+    seed_default: bool = False,
+) -> None:
     if not provider.default_model or not provider.enabled:
         return
     capabilities = model_capabilities(provider.provider, provider.default_model)
+    default = _default_row(db, household_id)
+    configured_text_rows = db.scalars(
+        select(AiTaskSetting).where(
+            AiTaskSetting.household_id == household_id,
+            AiTaskSetting.task.in_(TEXT_TASKS),
+            AiTaskSetting.provider_id.is_not(None),
+            AiTaskSetting.model.is_not(None),
+        )
+    ).all()
+    if (
+        seed_default
+        and default.provider_id is None
+        and not default.model
+        and not configured_text_rows
+        and TASK_CAPABILITY[AiTask.ASSISTANT.value] in capabilities
+    ):
+        default.provider_id = provider.id
+        default.model = provider.default_model
+    default_provider_id = default.provider_id
+    default_model = default.model
+    for task in TEXT_TASKS:
+        setting = db.scalar(
+            select(AiTaskSetting).where(
+                AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
+            )
+        )
+        if setting is None:
+            if default_provider_id and default_model:
+                db.add(
+                    AiTaskSetting(
+                        household_id=household_id,
+                        task=task,
+                        provider_id=default_provider_id,
+                        model=default_model,
+                        enabled=True,
+                        inherits_text_default=True,
+                    )
+                )
+            continue
+        if setting.inherits_text_default and default_provider_id and default_model:
+            setting.provider_id = default_provider_id
+            setting.model = default_model
     for task in (entry.value for entry in ACTIVE_AI_TASKS):
-        # Audio transcription is deliberately opt-in: a chat model is not proof
-        # that the account can transcribe audio.
-        if task == AiTask.TRANSCRIPTION.value:
+        if task in TEXT_TASKS or task == AiTask.TRANSCRIPTION.value:
             continue
         if TASK_CAPABILITY[task] not in capabilities:
             continue
@@ -359,14 +465,15 @@ def _assign_default_tasks(db: Session, household_id: uuid.UUID, provider: AiProv
             )
         )
         if setting is None:
-            setting = AiTaskSetting(
-                household_id=household_id,
-                task=task,
-                provider_id=provider.id,
-                model=provider.default_model,
-                enabled=True,
+            db.add(
+                AiTaskSetting(
+                    household_id=household_id,
+                    task=task,
+                    provider_id=provider.id,
+                    model=provider.default_model,
+                    enabled=True,
+                )
             )
-            db.add(setting)
         elif setting.provider_id is None:
             setting.provider_id = provider.id
             setting.model = provider.default_model
@@ -407,7 +514,7 @@ def create_provider(db: Session, household_id: uuid.UUID, payload: AiProviderCre
     )
     db.add(provider)
     db.flush()
-    _assign_default_tasks(db, household_id, provider)
+    _assign_default_tasks(db, household_id, provider, seed_default=True)
     _clear_model_cache(provider.id)
     db.commit()
     db.refresh(provider)
@@ -455,11 +562,27 @@ def update_provider(
 
 
 def delete_provider(db: Session, household_id: uuid.UUID, provider_id: uuid.UUID) -> None:
-    provider = _provider_or_404(db, household_id, provider_id)
+    provider = _provider_or_404(db, household_id, provider_id, for_update=True)
+    default = db.get(AiTextDefault, household_id)
+    if default is not None and default.provider_id == provider.id:
+        default.provider_id = None
+        default.model = None
+    text_rows = db.scalars(
+        select(AiTaskSetting).where(
+            AiTaskSetting.household_id == household_id,
+            AiTaskSetting.task.in_(TEXT_TASKS),
+            AiTaskSetting.provider_id == provider.id,
+        )
+    ).all()
+    for setting in text_rows:
+        setting.provider_id = None
+        if setting.inherits_text_default:
+            setting.model = None
     db.execute(
         delete(AiTaskSetting).where(
             AiTaskSetting.household_id == household_id,
             AiTaskSetting.provider_id == provider.id,
+            AiTaskSetting.task.not_in(TEXT_TASKS),
         )
     )
     _clear_model_cache(provider.id)
@@ -484,6 +607,46 @@ def update_task(
             "This AI task was retired. Existing results remain readable, but it "
             "cannot be configured or tested anymore.",
         )
+    if payload.inherit_default and task not in TEXT_TASKS:
+        raise ApiError(
+            422,
+            "default_inheritance_unavailable",
+            "Only the four text tasks can inherit the default text model.",
+        )
+    default = None
+    if payload.inherit_default:
+        default = db.scalar(
+            select(AiTextDefault)
+            .where(AiTextDefault.household_id == household_id)
+            .with_for_update()
+        )
+        if default is None or default.provider_id is None or not default.model:
+            raise ApiError(
+                422,
+                "default_text_not_configured",
+                "Save a default text provider and model before resetting a text task to it.",
+            )
+    setting = db.scalar(
+        select(AiTaskSetting)
+        .where(
+            AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
+        )
+        .with_for_update()
+    )
+    if payload.inherit_default:
+        assert default is not None
+        provider = _provider_or_404(db, household_id, default.provider_id)
+        if setting is None:
+            setting = AiTaskSetting(household_id=household_id, task=task)
+            db.add(setting)
+        setting.provider_id = provider.id
+        setting.model = default.model
+        setting.enabled = payload.enabled
+        setting.inherits_text_default = True
+        db.commit()
+        db.refresh(setting)
+        return serialize_task(db, household_id, task)
+
     provider = None
     if payload.provider_id is not None:
         provider = _provider_or_404(db, household_id, payload.provider_id)
@@ -519,17 +682,13 @@ def update_task(
                 "implemented API/input/output requirements. Choose a compatible model "
                 "or refresh discovery.",
             )
-    setting = db.scalar(
-        select(AiTaskSetting).where(
-            AiTaskSetting.household_id == household_id, AiTaskSetting.task == task
-        )
-    )
     if setting is None:
         setting = AiTaskSetting(household_id=household_id, task=task)
         db.add(setting)
     setting.provider_id = provider.id if provider else None
     setting.model = payload.model or (provider.default_model if provider else None)
     setting.enabled = payload.enabled and provider is not None
+    setting.inherits_text_default = False
     db.commit()
     db.refresh(setting)
     return serialize_task(db, household_id, task)
@@ -542,7 +701,16 @@ def update_default_text(
     provider_id: uuid.UUID,
     model: str | None,
 ) -> AiSettingsOut:
-    provider = _provider_or_404(db, household_id, provider_id)
+    provider = db.scalar(
+        select(AiProvider)
+        .where(
+            AiProvider.id == provider_id,
+            AiProvider.household_id == household_id,
+        )
+        .with_for_update()
+    )
+    if provider is None:
+        raise ApiError(404, "ai_provider_not_found", "AI provider not found.")
     if not provider.enabled:
         raise ApiError(
             422,
@@ -573,39 +741,28 @@ def update_default_text(
                 "implemented API/input/output requirements. Choose a compatible model "
                 "or refresh discovery.",
             )
-    before_tasks = [serialize_task(db, household_id, task) for task in TEXT_TASKS]
-    old_default = derive_default_text(db, household_id, before_tasks)
-    old_pair = (
-        (old_default.provider_id, old_default.model)
-        if old_default.provider_id and old_default.model
-        else None
+    default = db.scalar(
+        select(AiTextDefault)
+        .where(AiTextDefault.household_id == household_id)
+        .with_for_update()
     )
-    for task in TEXT_TASKS:
-        setting = db.scalar(
-            select(AiTaskSetting).where(
-                AiTaskSetting.household_id == household_id,
-                AiTaskSetting.task == task,
-            )
+    if default is None:
+        default = AiTextDefault(household_id=household_id)
+        db.add(default)
+    default.provider_id = provider.id
+    default.model = selected_model
+    inherited_rows = db.scalars(
+        select(AiTaskSetting)
+        .where(
+            AiTaskSetting.household_id == household_id,
+            AiTaskSetting.task.in_(TEXT_TASKS),
+            AiTaskSetting.inherits_text_default.is_(True),
         )
-        if setting is not None:
-            pair = (setting.provider_id, setting.model)
-            inherited = setting.provider_id is None or (old_pair and pair == old_pair)
-        else:
-            inherited = True
-        if not inherited:
-            continue
-        if setting is None:
-            setting = AiTaskSetting(
-                household_id=household_id,
-                task=task,
-                provider_id=provider.id,
-                model=selected_model,
-                enabled=True,
-            )
-            db.add(setting)
-        else:
-            setting.provider_id = provider.id
-            setting.model = selected_model
+        .with_for_update()
+    ).all()
+    for setting in inherited_rows:
+        setting.provider_id = provider.id
+        setting.model = selected_model
     db.commit()
     return ai_settings(db, household_id)
 
