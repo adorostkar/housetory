@@ -232,8 +232,8 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText(/Whole household · weekly/)).toBeVisible();
     expect(screen.getByText(/Next due:/)).toBeVisible();
     expect(screen.getByRole("link", { name: "Open Review schedule" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Refresh status" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Test all AI tasks" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reload status snapshot" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Test all enabled AI tasks" })).toBeEnabled();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -254,7 +254,7 @@ describe("SystemStatusPanel", () => {
     expect(screen.queryByText("abc123release")).not.toBeInTheDocument();
     expect(screen.queryByText("fixture.failed")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Test all AI tasks" }),
+      screen.queryByRole("button", { name: "Test all enabled AI tasks" }),
     ).not.toBeInTheDocument();
   });
 
@@ -281,7 +281,7 @@ describe("SystemStatusPanel", () => {
   it("requires one confirmation and sends no live request when cancelled", async () => {
     renderPanel();
     await userEvent.click(
-      screen.getByRole("button", { name: "Test all AI tasks" }),
+      screen.getByRole("button", { name: "Test all enabled AI tasks" }),
     );
     const dialog = screen.getByRole("dialog");
     expect(
@@ -338,7 +338,7 @@ describe("SystemStatusPanel", () => {
     const { client } = renderPanel();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await userEvent.click(
-      screen.getByRole("button", { name: "Test all AI tasks" }),
+      screen.getByRole("button", { name: "Test all enabled AI tasks" }),
     );
     await userEvent.click(
       screen.getByRole("button", { name: "Run 3 task tests" }),
@@ -378,7 +378,7 @@ describe("SystemStatusPanel", () => {
       queryKey: queryKeys.systemStatus,
     });
     expect(
-      screen.getByRole("button", { name: "Test all AI tasks" }),
+      screen.getByRole("button", { name: "Test all enabled AI tasks" }),
     ).toBeEnabled();
     expect(screen.getByText("3 of 3 live tasks finished")).toBeVisible();
   });

@@ -93,7 +93,11 @@ applied/skipped/stale/unsupported outcomes.
 Scheduling is optional and **off by default** for existing and new households.
 The migration creates no enabled schedule and does not change on-demand review.
 
-Only the household owner can read or change the schedule:
+When no schedule has ever been configured, the setup panel sits behind an
+**Advanced · Scheduled review** disclosure on the Review page. Existing configured
+schedules remain visible, including disabled or consent-needed ones, so an active
+or previously configured routine is never hidden. Only the household owner can
+read or change the schedule:
 
 - **Enable/disable** is explicit. Offline rules are the base of every scheduled
   run; optional AI is a separate choice.
@@ -159,7 +163,9 @@ clear disabled, not-configured, consent-needed and attention states.
 - Viewers can read suggestions but cannot run, apply, dismiss or undo.
 - Members can run offline reviews and apply/dismiss; only owners can request the
   optional AI pass.
-- Scheduling is opt-in, owner-only and off by default; enabling a schedule does
+- Scheduling is opt-in, owner-only and off by default. On the Review page an
+  unconfigured schedule is collapsed behind **Advanced · Scheduled review**;
+  configured schedules remain visible. Enabling a schedule does
   not enable AI or trigger a provider call.
 - Existing item ownership, borrowing records, locations, quantities, loans,
   documents, receipts, history and household permissions are preserved. Review

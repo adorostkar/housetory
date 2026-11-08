@@ -314,9 +314,15 @@ Tailscale is optional.
   OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
   **Settings → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
-- Separate task models for assistant, imports, documents, search, vision and
-  voice transcription, with capability warnings and explicit remote-processing
-  consent. Local, private-network and remote endpoints are labelled separately.
+- One default text model for Assistant, document interpretation, smart imports and
+  natural-language search, with preserved optional advanced overrides; changing
+  the default updates only inherited text tasks. Core navigation keeps
+  Items/Rooms/Loans prominent and moves occasional Review/Purchases/Warranties/
+  Assistant routes into calm sections/More. Unconfigured scheduled review stays
+  behind Advanced and off by default. Vision and
+  voice remain separate capability-specific choices, with capability warnings and
+  explicit remote-processing consent. Local, private-network and remote endpoints are labelled separately.
+  See [`docs/SIMPLIFICATION3.md`](docs/SIMPLIFICATION3.md).
   Voice transcription is opt-in and supports OpenAI/Gemini audio plus OpenRouter
   STT or audio-input models. Item illustrations and label/container AI headlines
   were retired. Each active task has a specific minimum capability (text, image
@@ -339,7 +345,7 @@ Tailscale is optional.
 The foundation in this repository has been exercised against the real Compose
 stack, not just unit mocks:
 
-- 452 pytest tests pass against PostgreSQL, including the full Alembic chain,
+- 455 pytest tests pass against PostgreSQL, including the full Alembic chain,
   authentication/abuse controls, hierarchy semantics, concurrent identifier
   allocation, container conversion, cross-room movement, rollback, cycles,
   summaries, PDF geometry, label calibration, archive security,
@@ -415,9 +421,11 @@ stack, not just unit mocks:
   de-duplication and image-source technical disclosure, one global search box,
   Unicode/Persian/Arabic matching, direct/AI/fallback modes, bounded multilingual
   follow-ups, provider-safe per-partition dialogue memory, mixed-direction
-  rendering and per-household all-places AI provider boundaries.
-- 226 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 91 checked-in Playwright workflows (90 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
+  rendering, per-household all-places AI provider boundaries, default text-model
+  inheritance/override preservation, calmer desktop/mobile navigation and
+  optional scheduled-review disclosure.
+- 230 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 95 checked-in Playwright workflows (94 pass, 1 fixture-dependent skip) run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

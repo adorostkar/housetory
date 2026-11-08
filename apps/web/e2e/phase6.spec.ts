@@ -289,7 +289,7 @@ test("configures an Ollama provider through Settings with a mocked local service
   await expect(page.getByText(/Configuring a cloud API key/)).toBeVisible();
 
   const taskModel = page.getByRole("combobox", {
-    name: "General assistant model",
+    name: "Default text model",
   });
   await expect(taskModel).toHaveValue("llava:latest");
   await taskModel.click();
@@ -297,6 +297,14 @@ test("configures an Ollama provider through Settings with a mocked local service
     page.getByRole("option", { name: /llava:latest/ }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("heading", { name: "Default text model" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Inherited:/)).toContainText("Assistant");
+  await page.getByText("Advanced task overrides").click();
+  await expect(
+    page.getByRole("combobox", { name: "Assistant model" }),
+  ).toHaveValue("llava:latest");
 
   await page.setViewportSize({ width: 393, height: 852 });
   await page.getByRole("button", { name: "Edit provider" }).first().click();

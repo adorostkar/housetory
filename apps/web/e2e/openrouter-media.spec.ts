@@ -299,7 +299,9 @@ test("OpenRouter audio models configure and transcribe locally", async ({
     ["Image Test", "Text Chat"],
   );
   await page.setViewportSize({ width: 1440, height: 1400 });
-  await page.getByText("Task defaults", { exact: true }).scrollIntoViewIfNeeded();
+  await page
+    .getByRole("heading", { name: "Default text model" })
+    .scrollIntoViewIfNeeded();
   await page.screenshot({
     path: "../../docs/walkthrough/openrouter-media/01-settings-light.png",
     fullPage: false,

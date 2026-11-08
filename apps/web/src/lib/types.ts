@@ -1869,9 +1869,23 @@ export interface AiTaskSetting {
   updated_at: string | null;
 }
 
+export interface AiDefaultText {
+  provider_id: UUID | null;
+  provider_label: string | null;
+  model: string | null;
+  model_label: string | null;
+  model_listed: boolean;
+  compatibility: AiTaskCompatibility;
+  configured: boolean;
+  inherited_tasks: string[];
+  override_tasks: string[];
+  derived_from: "common" | "assistant" | "single" | "none";
+}
+
 export interface AiSettings {
   providers: AiProviderRecord[];
   tasks: AiTaskSetting[];
+  default_text: AiDefaultText;
   credential_key_configured: boolean;
   environment_provider: string;
   warning: string | null;

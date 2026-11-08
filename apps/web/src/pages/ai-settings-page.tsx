@@ -45,6 +45,7 @@ import type {
   AiProviderModel,
   AiProviderRecord,
   AiProviderTest,
+  AiSettings,
   AiTaskSetting,
   AiTaskTestResult,
 } from "@/lib/types";
@@ -59,8 +60,10 @@ const PROVIDERS = [
   { value: "ollama", label: "Ollama", local: true },
 ] as const;
 
+const TEXT_TASKS = ["assistant", "documents", "imports", "search"] as const;
+
 const TASK_LABELS: Record<string, string> = {
-  assistant: "General assistant",
+  assistant: "Assistant",
   imports: "Smart imports",
   documents: "Document interpretation",
   search: "Natural-language search",
@@ -160,12 +163,16 @@ export function AiSettingsPage() {
   const [tasks, setTasks] = React.useState<Record<string, AiTaskSetting>>({});
   const [catalogStale, setCatalogStale] = React.useState(false);
   const [testTarget, setTestTarget] = React.useState<AiTaskSetting | null>(null);
+  const [defaultProviderId, setDefaultProviderId] = React.useState("");
+  const [defaultModel, setDefaultModel] = React.useState("");
 
   React.useEffect(() => {
     if (settings) {
       setTasks(
         Object.fromEntries(settings.tasks.map((task) => [task.task, task])),
       );
+      setDefaultProviderId(settings.default_text.provider_id ?? "");
+      setDefaultModel(settings.default_text.model ?? "");
     }
   }, [settings]);
 
@@ -341,6 +348,27 @@ export function AiSettingsPage() {
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
+  const saveDefaultText = useMutation({
+    mutationFn: () =>
+      api.put<AiSettings>("/ai/default-text", {
+        provider_id: defaultProviderId,
+        model: defaultModel || null,
+      }),
+    onSuccess: (next) => {
+      queryClient.setQueryData(queryKeys.aiSettings, next);
+      setTasks(
+        Object.fromEntries(next.tasks.map((task) => [task.task, task])),
+      );
+      setDefaultProviderId(next.default_text.provider_id ?? "");
+      setDefaultModel(next.default_text.model ?? "");
+      refresh();
+      toast.success(
+        "Default text model saved. Inherited text tasks were updated; custom overrides were kept.",
+      );
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
   const testTask = useMutation({
     mutationFn: (task: string) =>
       api.post<AiTaskTestResult>(`/ai/tasks/${task}/test`, { confirm: true }),
@@ -393,6 +421,299 @@ export function AiSettingsPage() {
   const dialogProviderModels =
     editing && !catalogStale ? models[editing.id] ?? [] : [];
   const dialogModelStatus = editing ? modelStatus[editing.id] : undefined;
+
+  const textTaskRows = TEXT_TASKS.map((task) => tasks[task]).filter(
+    (task): task is AiTaskSetting => Boolean(task),
+  );
+  const defaultProvider =
+    defaultProviderId
+      ? settings.providers.find((provider) => provider.id === defaultProviderId)
+      : undefined;
+  const defaultProviderModels = defaultProvider ? models[defaultProvider.id] ?? [] : [];
+  const defaultProviderModelStatus = defaultProvider
+    ? modelStatus[defaultProvider.id]
+    : undefined;
+  const defaultSelectedModel = defaultProviderModels.find(
+    (model) => model.id === defaultModel,
+  );
+  const defaultTaskState = defaultSelectedModel?.task_states?.assistant;
+  const defaultCompatible =
+    !defaultSelectedModel ||
+    (defaultTaskState
+      ? defaultTaskState !== "incompatible" &&
+        defaultTaskState !== "adapter_unavailable"
+      : defaultSelectedModel.kind === "chat" &&
+        defaultSelectedModel.capabilities.includes("text"));
+  const isTextTask = (task: string) =>
+    (TEXT_TASKS as readonly string[]).includes(task);
+  const isInheritedTask = (task: AiTaskSetting) =>
+    Boolean(
+      isTextTask(task.task) &&
+        settings.default_text.provider_id &&
+        settings.default_text.model &&
+        task.provider_id === settings.default_text.provider_id &&
+        task.model === settings.default_text.model,
+    );
+  const isOverrideTask = (task: AiTaskSetting) =>
+    Boolean(
+      isTextTask(task.task) &&
+        task.provider_id &&
+        task.model &&
+        !isInheritedTask(task),
+    );
+  const resetTaskToDefault = (task: AiTaskSetting) => {
+    if (!settings.default_text.provider_id || !settings.default_text.model) return;
+    const next: AiTaskSetting = {
+      ...task,
+      provider_id: settings.default_text.provider_id,
+      provider_label: settings.default_text.provider_label,
+      model: settings.default_text.model,
+    };
+    setTasks((current) => ({ ...current, [task.task]: next }));
+    saveTask.mutate(next);
+  };
+  const inheritedLabels = settings.default_text.inherited_tasks.map(
+    (task) => TASK_LABELS[task] ?? task,
+  );
+  const overrideLabels = settings.default_text.override_tasks.map(
+    (task) => TASK_LABELS[task] ?? task,
+  );
+  const derivedLabel =
+    settings.default_text.derived_from === "common"
+      ? "Inferred from existing common assignments"
+      : settings.default_text.derived_from === "assistant"
+        ? "Based on the Assistant route"
+        : settings.default_text.derived_from === "single"
+          ? "Based on the only configured text route"
+          : "No text default configured yet";
+  const renderTaskRow = (task: AiTaskSetting) => {
+  const provider = settings.providers.find((entry) => entry.id === task.provider_id);
+  const providerModels = provider ? models[provider.id] ?? [] : [];
+  const providerModelStatus = provider ? modelStatus[provider.id] : undefined;
+  const selectedModel = providerModels.find((model) => model.id === task.model);
+  const requiredCapability =
+    task.task === "vision"
+      ? "vision"
+      : task.task === "transcription"
+        ? "audio"
+        : undefined;
+  const allowedKinds =
+    requiredCapability === "audio" ? ["chat", "speech"] : ["chat"];
+  const selectedTaskState =
+    selectedModel?.task_states?.[task.task];
+  const selectedCompatible =
+    !selectedModel ||
+    (selectedTaskState
+      ? selectedTaskState !== "incompatible" &&
+        selectedTaskState !== "adapter_unavailable"
+      : !requiredCapability ||
+        (allowedKinds.includes(selectedModel.kind) &&
+          selectedModel.capabilities.includes(requiredCapability)));
+  const noCompatibleDiscovered = Boolean(
+    provider &&
+      providerModels.length > 0 &&
+      requiredCapability &&
+      !providerModels.some((model) => {
+        const state = model.task_states?.[task.task];
+        if (state) {
+          return (
+            state !== "incompatible" &&
+            state !== "adapter_unavailable"
+          );
+        }
+        return (
+          allowedKinds.includes(model.kind) &&
+          model.capabilities.includes(requiredCapability)
+        );
+      }),
+  );
+  return (
+    <div
+      key={task.task}
+      data-testid="ai-task-row"
+      className="grid gap-3 rounded-xl border border-border/60 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start xl:grid-cols-[minmax(140px,0.7fr)_minmax(160px,1fr)_minmax(180px,1.2fr)_auto] xl:items-center"
+    >
+      <div data-testid="ai-task-name" className="min-w-0 break-words">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
+          {isTextTask(task.task) ? (
+            isInheritedTask(task) ? (
+              <Badge variant="sage" className="text-[0.55rem]">
+                Inherited
+              </Badge>
+            ) : isOverrideTask(task) ? (
+              <Badge variant="brass" className="text-[0.55rem]">
+                Custom override
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[0.55rem]">
+                Not configured
+              </Badge>
+            )
+          ) : null}
+        </div>
+        <p className="text-[0.65rem] text-muted-foreground">
+          {task.enabled
+            ? (selectedModel?.capabilities ?? task.capabilities).join(" · ") ||
+              "Capabilities need verification"
+            : "Disabled"}
+        </p>
+        {task.model && !selectedModel ? (
+          <p className="mt-0.5 text-[0.62rem] leading-relaxed text-brass">
+            Saved ID is not in the provider catalog. It is not rewritten
+            automatically; choose a discovered model or run Test model to
+            verify the exact ID.
+          </p>
+        ) : null}
+      </div>
+      <Select
+        aria-label={`${TASK_LABELS[task.task]} provider`}
+        data-testid="ai-task-provider"
+        value={task.provider_id ?? ""}
+        onChange={(event) => {
+          const nextProvider = settings.providers.find(
+            (entry) => entry.id === event.target.value,
+          );
+          setTasks((current) => ({
+            ...current,
+            [task.task]: {
+              ...task,
+              provider_id: nextProvider?.id ?? null,
+              provider_label: nextProvider?.display_name ?? null,
+              model: null,
+            },
+          }));
+          if (nextProvider && !models[nextProvider.id]) {
+            discoverModels.mutate({
+              provider: nextProvider,
+              refresh: false,
+              quiet: true,
+            });
+          }
+        }}
+      >
+        <option value="">Not configured</option>
+        {settings.providers.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {entry.display_name}
+          </option>
+        ))}
+      </Select>
+      <div
+        data-testid="ai-task-model"
+        className="min-w-0 md:col-span-2 xl:col-span-1"
+      >
+        <ModelPicker
+          id={`task-${task.task}-model`}
+          ariaLabel={`${TASK_LABELS[task.task]} model`}
+          value={task.model ?? ""}
+          models={providerModels}
+          disabled={!provider}
+          requiredCapability={requiredCapability}
+          taskKey={task.task}
+          loading={providerModelStatus?.loading}
+          error={providerModelStatus?.error}
+          cached={providerModelStatus?.cached}
+          onDiscover={
+            provider
+              ? () =>
+                  discoverModels.mutate({
+                    provider,
+                    refresh: false,
+                    quiet: false,
+                  })
+              : undefined
+          }
+          onRefresh={
+            provider
+              ? () =>
+                  discoverModels.mutate({
+                    provider,
+                    refresh: true,
+                    quiet: false,
+                  })
+              : undefined
+          }
+          onChange={(value) =>
+            setTasks((current) => ({
+              ...current,
+              [task.task]: { ...task, model: value || null },
+            }))
+          }
+          placeholder={
+            provider
+              ? "Search models or type an exact ID"
+              : "Choose a provider first"
+          }
+        />
+        {noCompatibleDiscovered ? (
+          <p className="mt-1 text-[0.64rem] leading-relaxed text-brass">
+            No discovered model supports this task. Refresh models or
+            choose another provider.
+          </p>
+        ) : null}
+      </div>
+      <div
+        data-testid="ai-task-actions"
+        className="flex min-w-0 flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-self-end"
+      >
+        {isTextTask(task.task) &&
+        isOverrideTask(task) &&
+        settings.default_text.provider_id &&
+        settings.default_text.model ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0"
+            disabled={saveTask.isPending}
+            onClick={() => resetTaskToDefault(task)}
+          >
+            Reset to default
+          </Button>
+        ) : null}
+        <label className="flex shrink-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+          <input
+            type="checkbox"
+            className="size-3.5 accent-primary"
+            checked={task.enabled}
+            onChange={(event) =>
+              setTasks((current) => ({
+                ...current,
+                [task.task]: { ...task, enabled: event.target.checked },
+              }))
+            }
+          />
+          On
+        </label>
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          disabled={saveTask.isPending || !selectedCompatible}
+          onClick={() => saveTask.mutate(task)}
+        >
+          {saveTask.isPending ? <Spinner /> : <Check />}
+          Save
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0"
+          disabled={
+            testTask.isPending ||
+            !task.enabled ||
+            !task.provider_id ||
+            !task.model
+          }
+          onClick={() => setTestTarget(task)}
+        >
+          {testTask.isPending ? <Spinner /> : <Sparkles />}
+          Test
+        </Button>
+      </div>
+    </div>
+  );
+  };
 
   return (
     <div className="animate-fade-up">
@@ -570,216 +891,197 @@ export function AiSettingsPage() {
       <section className="surface mt-5 p-5 sm:p-6">
         <div className="flex items-center gap-2">
           <SparklesIcon />
-          <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Task defaults</h2>
+          <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+            Default text model
+          </h2>
         </div>
-        <p className="mt-1 text-[0.75rem] text-muted-foreground">
-          Choose a provider and model per task. Vision requires image input; voice
-          transcription requires OpenAI/Gemini audio support or an OpenRouter STT/audio-input
-          model. Capability detection uses provider metadata where available and
-          validates manual IDs when you save.
+        <p className="mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-muted-foreground">
+          One provider and model for the Assistant, document interpretation, smart
+          imports and natural-language search. Capability-specific vision and voice
+          remain separate below. Advanced text overrides keep their own settings.
         </p>
-        <div className="mt-5 space-y-3">
-          {Object.values(tasks)
-            .sort((left, right) => left.task.localeCompare(right.task))
-            .map((task) => {
-              const provider = settings.providers.find((entry) => entry.id === task.provider_id);
-              const providerModels = provider ? models[provider.id] ?? [] : [];
-              const providerModelStatus = provider ? modelStatus[provider.id] : undefined;
-              const selectedModel = providerModels.find((model) => model.id === task.model);
-              const requiredCapability =
-                task.task === "vision"
-                  ? "vision"
-                  : task.task === "transcription"
-                    ? "audio"
-                    : undefined;
-              const allowedKinds =
-                requiredCapability === "audio" ? ["chat", "speech"] : ["chat"];
-              const selectedTaskState =
-                selectedModel?.task_states?.[task.task];
-              const selectedCompatible =
-                !selectedModel ||
-                (selectedTaskState
-                  ? selectedTaskState !== "incompatible" &&
-                    selectedTaskState !== "adapter_unavailable"
-                  : !requiredCapability ||
-                    (allowedKinds.includes(selectedModel.kind) &&
-                      selectedModel.capabilities.includes(requiredCapability)));
-              const noCompatibleDiscovered = Boolean(
-                provider &&
-                  providerModels.length > 0 &&
-                  requiredCapability &&
-                  !providerModels.some((model) => {
-                    const state = model.task_states?.[task.task];
-                    if (state) {
-                      return (
-                        state !== "incompatible" &&
-                        state !== "adapter_unavailable"
-                      );
-                    }
-                    return (
-                      allowedKinds.includes(model.kind) &&
-                      model.capabilities.includes(requiredCapability)
+        {settings.providers.length === 0 ? (
+          <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-[0.74rem] text-muted-foreground">
+            Add a provider to configure a default text model.
+          </p>
+        ) : (
+          <>
+            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_auto] lg:items-start">
+              <label className="space-y-1.5 text-[0.72rem]">
+                <span className="field-label">Default text provider</span>
+                <Select
+                  aria-label="Default text provider"
+                  value={defaultProviderId}
+                  onChange={(event) => {
+                    const nextProvider = settings.providers.find(
+                      (entry) => entry.id === event.target.value,
                     );
-                  }),
-              );
-              return (
-                <div
-                  key={task.task}
-                  data-testid="ai-task-row"
-                  className="grid gap-3 rounded-xl border border-border/60 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-start xl:grid-cols-[minmax(140px,0.7fr)_minmax(160px,1fr)_minmax(180px,1.2fr)_auto] xl:items-center"
+                    setDefaultProviderId(nextProvider?.id ?? "");
+                    setDefaultModel(nextProvider?.default_model ?? "");
+                    if (nextProvider && !models[nextProvider.id]) {
+                      discoverModels.mutate({
+                        provider: nextProvider,
+                        refresh: false,
+                        quiet: true,
+                      });
+                    }
+                  }}
                 >
-                  <div data-testid="ai-task-name" className="min-w-0 break-words">
-                    <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
-                    <p className="text-[0.65rem] text-muted-foreground">
-                      {task.enabled
-                        ? (selectedModel?.capabilities ?? task.capabilities).join(" · ") ||
-                          "Capabilities need verification"
-                        : "Disabled"}
-                    </p>
-                    {task.model && !selectedModel ? (
-                      <p className="mt-0.5 text-[0.62rem] leading-relaxed text-brass">
-                        Saved ID is not in the provider catalog. It is not rewritten
-                        automatically; choose a discovered model or run Test model to
-                        verify the exact ID.
-                      </p>
-                    ) : null}
-                  </div>
-                  <Select
-                    aria-label={`${TASK_LABELS[task.task]} provider`}
-                    data-testid="ai-task-provider"
-                    value={task.provider_id ?? ""}
-                    onChange={(event) => {
-                      const nextProvider = settings.providers.find(
-                        (entry) => entry.id === event.target.value,
-                      );
-                      setTasks((current) => ({
-                        ...current,
-                        [task.task]: {
-                          ...task,
-                          provider_id: nextProvider?.id ?? null,
-                          provider_label: nextProvider?.display_name ?? null,
-                          model: null,
-                        },
-                      }));
-                      if (nextProvider && !models[nextProvider.id]) {
-                        discoverModels.mutate({
-                          provider: nextProvider,
-                          refresh: false,
-                          quiet: true,
-                        });
-                      }
-                    }}
-                  >
-                    <option value="">Not configured</option>
-                    {settings.providers.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.display_name}
-                      </option>
-                    ))}
-                  </Select>
-                  <div
-                    data-testid="ai-task-model"
-                    className="min-w-0 md:col-span-2 xl:col-span-1"
-                  >
-                    <ModelPicker
-                      id={`task-${task.task}-model`}
-                      ariaLabel={`${TASK_LABELS[task.task]} model`}
-                      value={task.model ?? ""}
-                      models={providerModels}
-                      disabled={!provider}
-                      requiredCapability={requiredCapability}
-                      taskKey={task.task}
-                      loading={providerModelStatus?.loading}
-                      error={providerModelStatus?.error}
-                      cached={providerModelStatus?.cached}
-                      onDiscover={
-                        provider
-                          ? () =>
-                              discoverModels.mutate({
-                                provider,
-                                refresh: false,
-                                quiet: false,
-                              })
-                          : undefined
-                      }
-                      onRefresh={
-                        provider
-                          ? () =>
-                              discoverModels.mutate({
-                                provider,
-                                refresh: true,
-                                quiet: false,
-                              })
-                          : undefined
-                      }
-                      onChange={(value) =>
-                        setTasks((current) => ({
-                          ...current,
-                          [task.task]: { ...task, model: value || null },
-                        }))
-                      }
-                      placeholder={
-                        provider
-                          ? "Search models or type an exact ID"
-                          : "Choose a provider first"
-                      }
-                    />
-                    {noCompatibleDiscovered ? (
-                      <p className="mt-1 text-[0.64rem] leading-relaxed text-brass">
-                        No discovered model supports this task. Refresh models or
-                        choose another provider.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div
-                    data-testid="ai-task-actions"
-                    className="flex min-w-0 flex-wrap items-center gap-2 md:col-span-2 xl:col-span-1 xl:justify-self-end"
-                  >
-                    <label className="flex shrink-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        className="size-3.5 accent-primary"
-                        checked={task.enabled}
-                        onChange={(event) =>
-                          setTasks((current) => ({
-                            ...current,
-                            [task.task]: { ...task, enabled: event.target.checked },
-                          }))
-                        }
-                      />
-                      On
-                    </label>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      disabled={saveTask.isPending || !selectedCompatible}
-                      onClick={() => saveTask.mutate(task)}
-                    >
-                      {saveTask.isPending ? <Spinner /> : <Check />}
-                      Save
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="shrink-0"
-                      disabled={
-                        testTask.isPending ||
-                        !task.enabled ||
-                        !task.provider_id ||
-                        !task.model
-                      }
-                      onClick={() => setTestTarget(task)}
-                    >
-                      {testTask.isPending ? <Spinner /> : <Sparkles />}
-                      Test
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
+                  <option value="">Not configured</option>
+                  {settings.providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.display_name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <div className="space-y-1.5">
+                <span className="field-label">Default text model</span>
+                <ModelPicker
+                  id="default-text-model"
+                  ariaLabel="Default text model"
+                  value={defaultModel}
+                  models={defaultProviderModels}
+                  disabled={!defaultProvider}
+                  requiredCapability="text"
+                  taskKey="assistant"
+                  loading={defaultProviderModelStatus?.loading}
+                  error={defaultProviderModelStatus?.error}
+                  cached={defaultProviderModelStatus?.cached}
+                  onDiscover={
+                    defaultProvider
+                      ? () =>
+                          discoverModels.mutate({
+                            provider: defaultProvider,
+                            refresh: false,
+                            quiet: false,
+                          })
+                      : undefined
+                  }
+                  onRefresh={
+                    defaultProvider
+                      ? () =>
+                          discoverModels.mutate({
+                            provider: defaultProvider,
+                            refresh: true,
+                            quiet: false,
+                          })
+                      : undefined
+                  }
+                  onChange={(value) => setDefaultModel(value)}
+                  placeholder={
+                    defaultProvider
+                      ? "Search compatible text models or type an exact ID"
+                      : "Choose a provider first"
+                  }
+                />
+              </div>
+              <Button
+                type="button"
+                className="lg:mt-6"
+                disabled={
+                  saveDefaultText.isPending ||
+                  !defaultProviderId ||
+                  !defaultModel ||
+                  !defaultCompatible
+                }
+                onClick={() => saveDefaultText.mutate()}
+              >
+                {saveDefaultText.isPending ? <Spinner /> : <Check />}
+                Save default
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.68rem] text-muted-foreground">
+              <Badge
+                variant={settings.default_text.configured ? "sage" : "outline"}
+              >
+                {settings.default_text.configured
+                  ? "Effective default"
+                  : defaultProviderId
+                    ? "Needs verification"
+                    : "Not configured"}
+              </Badge>
+              <span>{derivedLabel}</span>
+              {settings.default_text.compatibility === "incompatible" ||
+              settings.default_text.compatibility === "adapter_unavailable" ? (
+                <Badge variant="destructive">Incompatible</Badge>
+              ) : null}
+            </div>
+            <p className="mt-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+              Inherited:{" "}
+              <span className="text-foreground/80">
+                {inheritedLabels.length > 0 ? inheritedLabels.join(", ") : "None"}
+              </span>
+              {" · "}Custom overrides:{" "}
+              <span className="text-foreground/80">
+                {overrideLabels.length > 0 ? overrideLabels.join(", ") : "None"}
+              </span>
+            </p>
+            <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+              Changing the default updates only inherited text tasks. Existing custom
+              overrides, vision, voice, provider credentials and consent are not changed.
+            </p>
+            {!defaultCompatible && defaultModel ? (
+              <p className="mt-2 text-[0.68rem] text-destructive">
+                The selected model is confirmed incompatible with Housetory's text
+                task API/input/output contract. Choose another model.
+              </p>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="surface mt-5 p-5 sm:p-6">
+        <div className="flex items-center gap-2">
+          <SparklesIcon />
+          <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+            Vision &amp; voice
+          </h2>
+        </div>
+        <p className="mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-muted-foreground">
+          These tasks need their own capability-specific choices. Vision requires image
+          input; voice transcription requires OpenAI/Gemini audio support or an
+          OpenRouter STT/audio-input model. They are never switched by the text default.
+        </p>
+        <div className="mt-4 space-y-3">
+          {["vision", "transcription"]
+            .map((task) => tasks[task])
+            .filter((task): task is AiTaskSetting => Boolean(task))
+            .map((task) => (
+              <React.Fragment key={task.task}>{renderTaskRow(task)}</React.Fragment>
+            ))}
         </div>
       </section>
+
+      <details
+        className="surface mt-5 p-5 sm:p-6"
+        data-testid="advanced-task-overrides"
+      >
+        <summary className="cursor-pointer list-none">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-[1.35rem] tracking-[-0.02em]">
+              Advanced task overrides
+            </span>
+            <Badge variant={overrideLabels.length > 0 ? "brass" : "outline"}>
+              {overrideLabels.length > 0
+                ? `${overrideLabels.length} custom`
+                : "Using default"}
+            </Badge>
+          </span>
+          <span className="mt-1 block max-w-3xl text-[0.72rem] leading-relaxed text-muted-foreground">
+            Optional per-task provider and model. Overrides stay unchanged when the
+            default text model changes. Reset an override to return that task to the
+            current default.
+          </span>
+        </summary>
+        <div className="mt-4 space-y-3">
+          {textTaskRows.map((task) => (
+            <React.Fragment key={task.task}>
+              {renderTaskRow(task)}
+            </React.Fragment>
+          ))}
+        </div>
+      </details>
 
       <section className="surface mt-5 p-5 text-[0.73rem] leading-relaxed text-muted-foreground">
         <p className="flex items-center gap-1.5 font-medium text-foreground/80">

@@ -354,10 +354,11 @@ export function SystemStatusPanel({
           </h2>
           <p className="mt-1 max-w-2xl text-[0.76rem] leading-relaxed text-muted-foreground">
             Release identity, local readiness, worker jobs and task readiness.{" "}
-            <span className="text-foreground/80">Refresh status</span> only reads stored
-            and runtime evidence and never calls a provider.{" "}
-            <span className="text-foreground/80">Test all AI tasks</span> is a separate,
-            explicitly confirmed live action that may incur provider usage or cost.
+            <span className="text-foreground/80">Reload status snapshot</span> only
+            reads stored and runtime evidence and never calls a provider.{" "}
+            <span className="text-foreground/80">Test all enabled AI tasks</span> is a
+            separate, explicitly confirmed live action that may incur provider usage or
+            cost.
           </p>
         </div>
         {isOwner ? (
@@ -369,7 +370,7 @@ export function SystemStatusPanel({
             onClick={() => void statusQuery.refetch()}
           >
             {statusQuery.isFetching ? <Spinner /> : <RefreshCw />}
-            Refresh status
+            Reload status snapshot
           </Button>
         ) : null}
       </div>
@@ -582,7 +583,7 @@ export function SystemStatusPanel({
                   onClick={openBulkTest}
                 >
                   {bulkRunning ? <Spinner /> : <Play />}
-                  {bulkRunning ? "Testing AI tasks…" : "Test all AI tasks"}
+                  {bulkRunning ? "Testing AI tasks…" : "Test all enabled AI tasks"}
                 </Button>
               </div>
             </div>
@@ -685,7 +686,7 @@ export function SystemStatusPanel({
           <p className="text-[0.66rem] text-muted-foreground">
             Last generated {formatTimestamp(statusQuery.data.generated_at)}. Discovery
             and catalog checks are not live inference tests. Individual Test buttons and
-            Test all AI tasks run bounded, explicitly confirmed live requests.
+            Test all enabled AI tasks runs bounded, explicitly confirmed live requests.
           </p>
         </div>
       )}
@@ -696,7 +697,7 @@ export function SystemStatusPanel({
           setBulkConfirmOpen(open);
           if (!open) setBulkPlan(null);
         }}
-        title="Run live tests for configured AI tasks?"
+        title="Run live tests for enabled AI tasks?"
         description={
           bulkPlan
             ? `This runs ${requestedTestCount} sequential, minimal synthetic probe${

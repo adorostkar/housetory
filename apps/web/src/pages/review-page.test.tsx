@@ -308,6 +308,17 @@ beforeEach(() => {
 });
 
 describe("ReviewPage", () => {
+  it("keeps the optional schedule behind Advanced when none is configured", () => {
+    renderPage();
+    expect(screen.getByText("Advanced · Scheduled review")).toBeVisible();
+    expect(screen.getByTestId("review-schedule-advanced")).not.toHaveAttribute(
+      "open",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Scheduled review" }),
+    ).not.toBeVisible();
+  });
+
   it("renders persisted suggestions without making AI calls on open", () => {
     renderPage();
     expect(screen.getByText("Assign category “Tools”")).toBeVisible();

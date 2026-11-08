@@ -54,6 +54,18 @@ const settings: AiSettings = {
     task("vision", "provider-openai", "gpt-4o"),
     task("transcription", "provider-openai", "gpt-4o"),
   ],
+  default_text: {
+    provider_id: "provider-openai",
+    provider_label: "OpenAI household",
+    model: "gpt-4o",
+    model_label: "GPT-4o",
+    model_listed: true,
+    compatibility: "compatible",
+    configured: true,
+    inherited_tasks: ["assistant", "documents", "imports", "search"],
+    override_tasks: [],
+    derived_from: "common",
+  },
 };
 
 function providerModel(
@@ -87,6 +99,8 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+let settingsData: AiSettings = settings;
+
 vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
   return {
@@ -96,7 +110,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
       isPending: false,
     }),
     useAiSettings: () => ({
-      data: settings,
+      data: settingsData,
       isPending: false,
       isError: false,
       error: null,
@@ -134,6 +148,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  settingsData = settings;
   vi.mocked(api.get).mockReset();
   vi.mocked(api.put).mockReset();
   vi.mocked(api.post).mockReset();
@@ -197,7 +212,10 @@ describe("AiSettingsPage", () => {
     });
     const client = renderPage();
     client.setQueryData(["ai", "status", "assistant"], { available: true });
-    const input = screen.getByLabelText("General assistant model");
+    await userEvent.click(
+      screen.getByText("Advanced task overrides"),
+    );
+    const input = screen.getByLabelText("Assistant model");
     await userEvent.click(input);
     await userEvent.type(input, "gpt-4o-mini{Enter}");
     const row = input.closest("div.grid") as HTMLElement;
@@ -225,7 +243,10 @@ describe("AiSettingsPage", () => {
       provider_label: "OpenAI household",
     });
     renderPage();
-    const label = screen.getByText("General assistant");
+    await userEvent.click(
+      screen.getByText("Advanced task overrides"),
+    );
+    const label = screen.getByText("Assistant");
     const row = label.closest("div.grid") as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Test" }));
     expect(
@@ -359,6 +380,75 @@ describe("AiSettingsPage", () => {
     expect(vi.mocked(api.patch).mock.calls[0]?.[1]).not.toHaveProperty("api_key");
   });
 
+  it("shows one default text model and hides advanced overrides by default", async () => {
+    renderPage();
+    expect(
+      screen.getByRole("heading", { name: "Default text model" }),
+    ).toBeVisible();
+    expect(screen.getByText(/Inherited:/)).toHaveTextContent(
+      "Assistant, Document interpretation, Smart imports, Natural-language search",
+    );
+    expect(screen.getByText("Advanced task overrides")).toBeVisible();
+    expect(screen.queryByLabelText("Assistant model")).not.toBeVisible();
+  });
+
+  it("saves the default text route without touching advanced overrides", async () => {
+    const withOverride: AiSettings = {
+      ...settings,
+      tasks: settings.tasks.map((entry) =>
+        entry.task === "documents"
+          ? { ...entry, model: "o3-mini" }
+          : entry,
+      ),
+      default_text: {
+        ...settings.default_text!,
+        override_tasks: ["documents"],
+      },
+    };
+    settingsData = withOverride;
+    vi.mocked(api.put).mockResolvedValue(withOverride);
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Save default" }));
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith("/ai/default-text", {
+        provider_id: "provider-openai",
+        model: "gpt-4o",
+      }),
+    );
+    expect(screen.getByText(/Custom overrides:/)).toHaveTextContent(
+      "Document interpretation",
+    );
+  });
+
+  it("resets a custom text override back to the effective default", async () => {
+    const withOverride: AiSettings = {
+      ...settings,
+      tasks: settings.tasks.map((entry) =>
+        entry.task === "documents"
+          ? { ...entry, model: "o3-mini" }
+          : entry,
+      ),
+      default_text: {
+        ...settings.default_text!,
+        override_tasks: ["documents"],
+      },
+    };
+    settingsData = withOverride;
+    vi.mocked(api.put).mockResolvedValue({
+      ...task("documents", "provider-openai", "gpt-4o"),
+    });
+    renderPage();
+    await userEvent.click(screen.getByText("Advanced task overrides"));
+    await userEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith("/ai/tasks/documents", {
+        provider_id: "provider-openai",
+        model: "gpt-4o",
+        enabled: true,
+      }),
+    );
+  });
+
   it("clears a task model and discovers the new provider catalog on provider switch", async () => {
     vi.mocked(api.get).mockResolvedValue({
       provider_id: "provider-ollama",
@@ -367,9 +457,12 @@ describe("AiSettingsPage", () => {
       cached: false,
     });
     renderPage();
-    const providerSelect = screen.getByLabelText("General assistant provider");
+    await userEvent.click(
+      screen.getByText("Advanced task overrides"),
+    );
+    const providerSelect = screen.getByLabelText("Assistant provider");
     await userEvent.selectOptions(providerSelect, "provider-ollama");
-    const modelInput = screen.getByLabelText("General assistant model");
+    const modelInput = screen.getByLabelText("Assistant model");
     expect(modelInput).toHaveValue("");
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith("/ai/providers/provider-ollama/models"),

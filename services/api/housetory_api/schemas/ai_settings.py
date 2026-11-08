@@ -111,9 +111,28 @@ class AiTaskSettingUpdate(BaseModel):
     enabled: bool = True
 
 
+class AiDefaultTextOut(BaseModel):
+    provider_id: uuid.UUID | None = None
+    provider_label: str | None = None
+    model: str | None = None
+    model_label: str | None = None
+    model_listed: bool = False
+    compatibility: TaskCompatibility = "not_configured"
+    configured: bool = False
+    inherited_tasks: list[str] = Field(default_factory=list)
+    override_tasks: list[str] = Field(default_factory=list)
+    derived_from: Literal["common", "assistant", "single", "none"] = "none"
+
+
+class AiDefaultTextUpdate(BaseModel):
+    provider_id: uuid.UUID
+    model: trimmed(1, 160) | None = None
+
+
 class AiSettingsOut(BaseModel):
     providers: list[AiProviderOut]
     tasks: list[AiTaskSettingOut]
+    default_text: AiDefaultTextOut = Field(default_factory=AiDefaultTextOut)
     credential_key_configured: bool
     environment_provider: str
     warning: str | None = None

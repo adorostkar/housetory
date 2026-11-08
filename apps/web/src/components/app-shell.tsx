@@ -1,5 +1,6 @@
 import {
   Boxes,
+  ChevronDown,
   ClipboardCheck,
   DoorOpen,
   FileText,
@@ -13,7 +14,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { AccountMenu } from "@/components/account-menu";
@@ -35,28 +36,34 @@ import { useCanWrite } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { cn } from "@/lib/utils";
 
-const primaryNav = [
+const coreNav = [
   { to: "/", label: "Overview", icon: House, end: true },
-  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/items", label: "Items", icon: Package, end: false },
-  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
+  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/loans", label: "Loans", icon: HandCoins, end: false },
+] as const;
+
+const libraryNav = [
   { to: "/documents", label: "Documents", icon: FileText, end: false },
+  { to: "/containers", label: "Containers", icon: Boxes, end: false },
+] as const;
+
+const occasionalNav = [
+  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
   { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
-  { to: "/containers", label: "Containers", icon: Boxes, end: false },
 ] as const;
 
 const mobileNav = [
   { to: "/", label: "Home", icon: House, end: true },
   { to: "/items", label: "Items", icon: Package, end: false },
-  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
+  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
   { to: "/loans", label: "Loans", icon: HandCoins, end: false },
 ] as const;
 
 const mobileMoreNav = [
-  { to: "/rooms", label: "Rooms", icon: DoorOpen },
+  { to: "/review", label: "Review", icon: ClipboardCheck },
   { to: "/documents", label: "Documents", icon: FileText },
   { to: "/purchases", label: "Purchases", icon: ReceiptText },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck },
@@ -93,6 +100,16 @@ function AppShellLayout() {
       location.pathname === item.to ||
       location.pathname.startsWith(`${item.to}/`),
   );
+  const desktopMoreActive = occasionalNav.some(
+    (item) =>
+      location.pathname === item.to ||
+      location.pathname.startsWith(`${item.to}/`),
+  );
+  const [desktopMoreOpen, setDesktopMoreOpen] = useState(desktopMoreActive);
+
+  useEffect(() => {
+    if (desktopMoreActive) setDesktopMoreOpen(true);
+  }, [desktopMoreActive]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -140,7 +157,7 @@ function AppShellLayout() {
 
         <nav className="mt-8 space-y-1" aria-label="Primary">
           <p className="eyebrow mb-3 px-3">Everything has a place</p>
-          {primaryNav.map((item) => (
+          {coreNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -151,6 +168,51 @@ function AppShellLayout() {
               {item.label}
             </NavLink>
           ))}
+          <p className="eyebrow mb-2 mt-6 px-3">Library</p>
+          {libraryNav.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => cn("nav-link", isActive && "nav-link-active")}
+            >
+              <item.icon className="size-[1.05rem]" strokeWidth={1.8} />
+              {item.label}
+            </NavLink>
+          ))}
+          <details
+            className="group mt-4 border-t border-border/60 pt-3"
+            open={desktopMoreOpen}
+            onToggle={(event) => setDesktopMoreOpen(event.currentTarget.open)}
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-secondary/45 hover:text-foreground">
+              <span className="flex items-center gap-1.5">
+                More
+                {desktopMoreActive ? (
+                  <span className="size-1.5 rounded-full bg-sage" aria-hidden />
+                ) : null}
+              </span>
+              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="mt-1 space-y-1">
+              {occasionalNav.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "nav-link text-[0.78rem]",
+                      isActive && "nav-link-active",
+                    )
+                  }
+                >
+                  <item.icon className="size-4" strokeWidth={1.8} />
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          </details>
         </nav>
 
         <div className="mt-auto">

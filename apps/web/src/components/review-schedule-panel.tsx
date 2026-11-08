@@ -657,10 +657,12 @@ export function ReviewSchedulePanel({
   isOwner,
   schedule: summarySchedule,
   onChanged,
+  embedded = false,
 }: {
   isOwner: boolean;
   schedule: ReviewScheduleSummary | null | undefined;
   onChanged?: () => void;
+  embedded?: boolean;
 }) {
   const queryClient = useQueryClient();
   const scheduleQuery = useReviewSchedule(isOwner);
@@ -688,7 +690,14 @@ export function ReviewSchedulePanel({
   };
 
   return (
-    <section className="surface mb-5 p-4 sm:p-5" aria-labelledby="review-schedule-heading">
+    <section
+      className={
+        embedded
+          ? "border-t border-border/60 pt-4"
+          : "surface mb-5 p-4 sm:p-5"
+      }
+      aria-labelledby="review-schedule-heading"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">

@@ -1,10 +1,16 @@
 # AI providers, tasks and modalities
 
-Housetory routes each task through the provider/model selected under
-**Settings → AI providers → Task defaults**. Provider names do not imply support:
-the server validates discovered input/output modalities, API endpoints and model
-capabilities before saving a task, and revalidates audio routing before sending a
+Housetory routes the four text tasks — Assistant, document interpretation, smart
+imports and natural-language search — through one **Default text model** in
+**Settings → AI providers**. Optional **Advanced task overrides** keep their own
+provider/model and remain unchanged when the default changes. **Vision & voice**
+has separate capability-specific choices. Provider names do not imply support: the
+server validates discovered input/output modalities, API endpoints and model
+capabilities before saving, and revalidates audio routing before sending a
 recording.
+
+The default/override and navigation walkthrough is in
+[`SIMPLIFICATION3.md`](SIMPLIFICATION3.md).
 
 ## Task/provider compatibility
 
@@ -14,6 +20,26 @@ recording.
 | Vision / image recognition | Yes | Yes | Yes | Yes | Yes, image-input models | Yes, vision models |
 | Voice transcription | Yes, `/audio/transcriptions` | No | Yes, inline audio | No | Yes, STT-output or audio-input chat models | No native adapter |
 | Local/private endpoint | OpenAI-compatible base URL | — | — | — | — | Native chat |
+
+## Default text model and overrides
+
+The normal screen has one text provider/model picker and two separate
+capability-specific rows for image recognition and voice transcription. Advanced
+text overrides stay collapsed until opened.
+
+- The initial default is inferred from existing assignments. A common pair used by
+  multiple text tasks is preferred; otherwise the Assistant route is the primary
+  default. A different configured pair is marked **Custom override**.
+- Changing the default updates only tasks currently inherited from the old default.
+  Explicit overrides, vision, voice, provider credentials and consent are not
+  changed.
+- **Reset to default** returns an override to the current default without changing
+  the rest of the page.
+- Disabled or unconfigured tasks can be skipped; saving a default never silently
+  enables a task that was explicitly disabled.
+
+Provider discovery still lists only hard-compatible models in the task picker.
+Unverified compatible IDs remain selectable and are validated when saved.
 
 ## Task-specific selection contract
 
@@ -55,7 +81,7 @@ that the provider may incur usage/cost and that no inventory, borrower, document
 private note data is used. Results and bounded errors are stored for the status
 screen. No test runs on typing, discovery, page load or model recommendation.
 
-System status also offers **Test all AI tasks**. One confirmation explains the
+System status also offers **Test all enabled AI tasks**. One confirmation explains the
 count and names of enabled/configured tasks, external provider calls and possible
 credits/cost. It then calls the same owner-only task-test endpoint sequentially for
 each enabled/configured task using that task's saved provider and model; tasks that
@@ -77,7 +103,7 @@ separately and do not count as outages. The summary links to the dedicated
 The detailed page shows the deployed release commit/build/channel/identity,
 database/storage/worker readiness, job counts and recent failures with explicit
 retry, per-task configured/compatible/live-tested state and last error/time, plus
-configured/not-configured optional external services. **Refresh status** is passive:
+configured/not-configured optional external services. **Reload status snapshot** is passive:
 it only rereads stored/runtime evidence and never calls a provider. **Test all AI
 tasks** is a separate, explicitly confirmed live action. The screen never returns
 API keys, job payloads, prompts, borrower notes or inventory details. A catalog

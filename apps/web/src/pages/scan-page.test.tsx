@@ -502,7 +502,7 @@ describe("ScanPage", () => {
           },
         ],
         warnings: [
-          "No vision task is configured. Choose a vision-capable provider and model under Settings → AI providers → Task defaults.",
+          "No vision task is configured. Choose a vision-capable provider and model under Settings → AI providers → Vision & voice.",
         ],
       },
     };

@@ -426,7 +426,7 @@ container and label views. Real Safari/iPhone hardware was unavailable.
   Escape closes the provider dialog deliberately.
 - **A photo scan returns OCR-only text or says vision is unavailable:** the
   vision task is not explicitly configured, consent is missing, or the request
-  failed. Open **Settings → AI providers → Task defaults**, assign **Image
+  failed. Open **Settings → AI providers → Vision & voice**, assign **Image
   recognition** to a vision-capable model, and retry. Configuring the assistant
   model alone is not enough; Housetory will not silently use it for photos.
 - **A window, radiator or other fixture appears in a scan:** fixed architectural

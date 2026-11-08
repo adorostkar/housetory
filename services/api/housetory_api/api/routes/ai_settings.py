@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...schemas.ai_settings import (
     AiCredentialRotationOut,
+    AiDefaultTextUpdate,
     AiProviderCreate,
     AiProviderModels,
     AiProviderOut,
@@ -32,6 +33,24 @@ def read_ai_settings(
     db: Session = Depends(get_db),
 ) -> AiSettingsOut:
     return settings_service.ai_settings(db, auth.household.id)
+
+
+@router.put("/default-text", response_model=AiSettingsOut)
+def update_default_text(
+    payload: AiDefaultTextUpdate,
+    auth: AuthContext = Depends(require_owner),
+    db: Session = Depends(get_db),
+) -> AiSettingsOut:
+    try:
+        return settings_service.update_default_text(
+            db,
+            auth.household.id,
+            provider_id=payload.provider_id,
+            model=payload.model,
+        )
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post("/providers", response_model=AiProviderOut, status_code=201)

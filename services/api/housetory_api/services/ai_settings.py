@@ -12,6 +12,7 @@ from ..config import get_settings
 from ..domain import ACTIVE_AI_TASKS, RETIRED_AI_TASKS, AiProviderType, AiTask
 from ..models import AiProvider, AiTaskSetting, HouseholdOnlineSearchSettings
 from ..schemas.ai_settings import (
+    AiDefaultTextOut,
     AiModelOut,
     AiProviderCreate,
     AiProviderModels,
@@ -61,6 +62,13 @@ TASK_LABELS = {
     AiTask.VISION.value: "Image recognition",
     AiTask.TRANSCRIPTION.value: "Voice transcription",
 }
+
+TEXT_TASKS = (
+    AiTask.ASSISTANT.value,
+    AiTask.DOCUMENTS.value,
+    AiTask.IMPORTS.value,
+    AiTask.SEARCH.value,
+)
 
 MODEL_CACHE_TTL_SECONDS = 300
 _MODEL_CACHE: dict[tuple[uuid.UUID, uuid.UUID, str, int], tuple[float, list[AiModelOut]]] = {}
@@ -211,6 +219,104 @@ def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSet
     )
 
 
+def derive_default_text(
+    db: Session,
+    household_id: uuid.UUID,
+    tasks: list[AiTaskSettingOut] | None = None,
+) -> AiDefaultTextOut:
+    """Derive one effective text default without adding a settings table.
+
+    Existing per-task assignments remain the source of truth. The most common
+    text pair wins when unambiguous; otherwise the assistant pair is the primary
+    default. Tasks sharing the chosen pair are labelled inherited, while
+    different configured pairs remain explicit overrides.
+    """
+    task_list = tasks or [
+        serialize_task(db, household_id, task) for task in TEXT_TASKS
+    ]
+    by_name = {task.task: task for task in task_list if task.task in TEXT_TASKS}
+    pairs: dict[tuple[uuid.UUID, str], list[AiTaskSettingOut]] = {}
+    for task_name in TEXT_TASKS:
+        task = by_name.get(task_name)
+        if task and task.provider_id and task.model:
+            pairs.setdefault((task.provider_id, task.model), []).append(task)
+    if not pairs:
+        return AiDefaultTextOut(derived_from="none")
+    ordered_pairs = sorted(
+        pairs.items(),
+        key=lambda entry: (
+            -len(entry[1]),
+            TEXT_TASKS.index(entry[1][0].task),
+        ),
+    )
+    chosen_pair, chosen_tasks = ordered_pairs[0]
+    assistant_pair = None
+    assistant = by_name.get(AiTask.ASSISTANT.value)
+    if assistant and assistant.provider_id and assistant.model:
+        assistant_pair = (assistant.provider_id, assistant.model)
+    if len(chosen_tasks) >= 2:
+        derived_from = "common"
+    elif assistant_pair == chosen_pair:
+        derived_from = "assistant"
+    else:
+        derived_from = "single"
+        if assistant_pair:
+            chosen_pair = assistant_pair
+            chosen_tasks = pairs.get(assistant_pair, chosen_tasks)
+            derived_from = "assistant"
+    provider = db.get(AiProvider, chosen_pair[0])
+    inherited = [
+        task_name
+        for task_name in TEXT_TASKS
+        if (
+            (task := by_name.get(task_name))
+            and task.provider_id == chosen_pair[0]
+            and task.model == chosen_pair[1]
+        )
+    ]
+    overrides = [
+        task_name
+        for task_name in TEXT_TASKS
+        if (
+            (task := by_name.get(task_name))
+            and task.provider_id
+            and task.model
+            and (task.provider_id, task.model) != chosen_pair
+        )
+    ]
+    representative = next(
+        (task for task in chosen_tasks if task.task in inherited),
+        chosen_tasks[0],
+    )
+    compatibility = representative.compatibility or "not_configured"
+    runtime_configured = False
+    if provider is not None:
+        runtime_configured = config_for_provider(
+            provider,
+            AiTask.ASSISTANT.value,
+            model=chosen_pair[1],
+        ).configured
+    configured = bool(
+        provider
+        and provider.enabled
+        and runtime_configured
+        and compatibility
+        not in {"incompatible", "adapter_unavailable", "not_configured"}
+    )
+    return AiDefaultTextOut(
+        provider_id=chosen_pair[0],
+        provider_label=representative.provider_label,
+        model=chosen_pair[1],
+        model_label=representative.model_label,
+        model_listed=representative.model_listed,
+        compatibility=compatibility,
+        configured=configured,
+        inherited_tasks=inherited,
+        override_tasks=overrides,
+        derived_from=derived_from,
+    )
+
+
 def ai_settings(db: Session, household_id: uuid.UUID) -> AiSettingsOut:
     providers = list(
         db.scalars(
@@ -225,9 +331,11 @@ def ai_settings(db: Session, household_id: uuid.UUID) -> AiSettingsOut:
             "AI_CREDENTIAL_KEY is not configured. Saving cloud API keys is disabled "
             "until the deployment key is set; existing credentials fail closed."
         )
+    task_outputs = [serialize_task(db, household_id, task) for task in TASK_LABELS]
     return AiSettingsOut(
         providers=[serialize_provider(provider) for provider in providers],
-        tasks=[serialize_task(db, household_id, task) for task in TASK_LABELS],
+        tasks=task_outputs,
+        default_text=derive_default_text(db, household_id, task_outputs),
         credential_key_configured=key_configured(),
         environment_provider=get_settings().ai_provider,
         warning=warning,
@@ -425,6 +533,81 @@ def update_task(
     db.commit()
     db.refresh(setting)
     return serialize_task(db, household_id, task)
+
+
+def update_default_text(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    provider_id: uuid.UUID,
+    model: str | None,
+) -> AiSettingsOut:
+    provider = _provider_or_404(db, household_id, provider_id)
+    if not provider.enabled:
+        raise ApiError(
+            422,
+            "provider_disabled",
+            "Enable this provider before making it the text default.",
+        )
+    selected_model = (model or provider.default_model or "").strip()
+    if not selected_model:
+        raise ApiError(422, "model_required", "Choose a default text model.")
+    cached = _cached_model(provider, selected_model)
+    for task in TEXT_TASKS:
+        state = (
+            model_task_state(provider.provider, task, cached)
+            if cached is not None
+            else (
+                "unverified"
+                if provider_adapter_supported(provider.provider, task)
+                else "adapter_unavailable"
+            )
+        )
+        if state == "adapter_unavailable":
+            raise ApiError(422, "task_adapter_unavailable", adapter_gap_message(task))
+        if state == "incompatible":
+            raise ApiError(
+                422,
+                "model_capability_mismatch",
+                "The selected model is confirmed incompatible with the text tasks' "
+                "implemented API/input/output requirements. Choose a compatible model "
+                "or refresh discovery.",
+            )
+    before_tasks = [serialize_task(db, household_id, task) for task in TEXT_TASKS]
+    old_default = derive_default_text(db, household_id, before_tasks)
+    old_pair = (
+        (old_default.provider_id, old_default.model)
+        if old_default.provider_id and old_default.model
+        else None
+    )
+    for task in TEXT_TASKS:
+        setting = db.scalar(
+            select(AiTaskSetting).where(
+                AiTaskSetting.household_id == household_id,
+                AiTaskSetting.task == task,
+            )
+        )
+        if setting is not None:
+            pair = (setting.provider_id, setting.model)
+            inherited = setting.provider_id is None or (old_pair and pair == old_pair)
+        else:
+            inherited = True
+        if not inherited:
+            continue
+        if setting is None:
+            setting = AiTaskSetting(
+                household_id=household_id,
+                task=task,
+                provider_id=provider.id,
+                model=selected_model,
+                enabled=True,
+            )
+            db.add(setting)
+        else:
+            setting.provider_id = provider.id
+            setting.model = selected_model
+    db.commit()
+    return ai_settings(db, household_id)
 
 
 def provider_models(

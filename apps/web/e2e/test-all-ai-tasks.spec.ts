@@ -164,10 +164,10 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
   );
   await systemStatus.scrollIntoViewIfNeeded();
   await expect(
-    systemStatus.getByRole("button", { name: "Refresh status" }),
+    systemStatus.getByRole("button", { name: "Reload status snapshot" }),
   ).toBeVisible();
   await expect(
-    systemStatus.getByRole("button", { name: "Test all AI tasks" }),
+    systemStatus.getByRole("button", { name: "Test all enabled AI tasks" }),
   ).toBeEnabled();
   expect(taskCalls).toEqual([]);
   await page.screenshot({
@@ -175,7 +175,7 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
     fullPage: false,
   });
 
-  await systemStatus.getByRole("button", { name: "Test all AI tasks" }).click();
+  await systemStatus.getByRole("button", { name: "Test all enabled AI tasks" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/3 sequential, minimal synthetic probes/)).toBeVisible();
@@ -211,7 +211,7 @@ test("system status separates passive refresh from confirmed bulk AI task tests"
   ).toBeVisible();
   expect(taskCalls).toEqual(["assistant", "transcription", "vision"]);
   await expect(
-    systemStatus.getByRole("button", { name: "Test all AI tasks" }),
+    systemStatus.getByRole("button", { name: "Test all enabled AI tasks" }),
   ).toBeEnabled();
   await page.screenshot({
     path: "../../docs/walkthrough/test-all-ai-tasks/04-mixed-results.png",

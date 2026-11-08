@@ -1096,3 +1096,129 @@ def test_retired_ai_tasks_return_clear_unsupported_without_live_calls(owner_clie
         "vision",
         "transcription",
     }
+
+
+def test_default_text_route_derives_common_pair_and_preserves_existing_overrides(owner_client):
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    default = settings["default_text"]
+    assert default["provider_id"] == provider["id"]
+    assert default["model"] == "gpt-4o"
+    assert set(default["inherited_tasks"]) == {
+        "assistant",
+        "documents",
+        "imports",
+        "search",
+    }
+    assert default["override_tasks"] == []
+    assert default["derived_from"] == "common"
+    assert default["configured"] is True
+
+    override = owner_client.put(
+        "/api/v1/ai/tasks/documents",
+        json={
+            "provider_id": provider["id"],
+            "model": "o3-mini",
+            "enabled": True,
+        },
+    )
+    assert override.status_code == 200, override.text
+    disabled_search = owner_client.put(
+        "/api/v1/ai/tasks/search",
+        json={
+            "provider_id": provider["id"],
+            "model": "gpt-4o",
+            "enabled": False,
+        },
+    )
+    assert disabled_search.status_code == 200, disabled_search.text
+    settings = owner_client.get("/api/v1/ai/settings").json()
+    default = settings["default_text"]
+    assert set(default["inherited_tasks"]) == {"assistant", "imports", "search"}
+    assert default["override_tasks"] == ["documents"]
+
+    changed = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
+    )
+    assert changed.status_code == 200, changed.text
+    changed_body = changed.json()
+    tasks = {entry["task"]: entry for entry in changed_body["tasks"]}
+    assert tasks["assistant"]["model"] == "gpt-4o-mini"
+    assert tasks["imports"]["model"] == "gpt-4o-mini"
+    assert tasks["search"]["model"] == "gpt-4o-mini"
+    assert tasks["search"]["enabled"] is False
+    assert tasks["documents"]["model"] == "o3-mini"
+    assert tasks["vision"]["model"] == "gpt-4o"
+    assert tasks["transcription"]["provider_id"] is None
+    assert changed_body["default_text"]["model"] == "gpt-4o-mini"
+    assert changed_body["default_text"]["override_tasks"] == ["documents"]
+
+    providers = owner_client.get("/api/v1/ai/settings").json()["providers"]
+    assert providers[0]["default_model"] == "gpt-4o"
+    assert providers[0]["cloud_consent"] is True
+    assert providers[0]["has_api_key"] is True
+
+
+def test_default_text_rejects_missing_disabled_and_incompatible_routes(
+    owner_client, monkeypatch
+):
+    no_provider = owner_client.get("/api/v1/ai/settings").json()
+    assert no_provider["default_text"]["derived_from"] == "none"
+    missing = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": "00000000-0000-4000-8000-000000000000", "model": "gpt-4o"},
+    )
+    assert missing.status_code == 404
+
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    assert owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}", json={"enabled": False}
+    ).status_code == 200
+    disabled = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "gpt-4o"},
+    )
+    assert disabled.status_code == 422
+    assert disabled.json()["detail"]["code"] == "provider_disabled"
+
+    monkeypatch.setattr(
+        ai,
+        "discover_models",
+        lambda config: [
+            DiscoveredModel(
+                id="text-embedding-3-small",
+                display_name="Embedding",
+                kind="embedding",
+                capabilities=(),
+                capability_source="provider_metadata",
+                input_modalities=("text",),
+                output_modalities=("embeddings",),
+            )
+        ],
+    )
+    assert owner_client.patch(
+        f"/api/v1/ai/providers/{provider['id']}", json={"enabled": True}
+    ).status_code == 200
+    assert owner_client.get(
+        f"/api/v1/ai/providers/{provider['id']}/models"
+    ).status_code == 200
+    incompatible = owner_client.put(
+        "/api/v1/ai/default-text",
+        json={"provider_id": provider["id"], "model": "text-embedding-3-small"},
+    )
+    assert incompatible.status_code == 422
+    assert incompatible.json()["detail"]["code"] == "model_capability_mismatch"
+
+
+def test_default_text_endpoint_is_owner_only(owner_client):
+    from tests.test_single_home_polish import _viewer_headers
+
+    provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
+    viewer = _viewer_headers(owner_client)
+    response = owner_client.put(
+        "/api/v1/ai/default-text",
+        headers=viewer,
+        json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
+    )
+    assert response.status_code == 403

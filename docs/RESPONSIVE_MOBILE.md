@@ -66,12 +66,15 @@ The previous eight-tab bar was reduced to five healthy targets:
 
 - Home
 - Items
-- Review
+- Rooms
 - Loans
 - More
 
-**More** opens an accessible menu containing Rooms, Documents, Purchases,
-Warranties, Containers, Assistant, Search and Settings. Each target is at least
+**More** opens an accessible menu containing Review, Documents, Purchases,
+Warranties, Containers, Assistant, Search and Settings. The desktop sidebar keeps
+Overview/Items/Rooms/Loans as core links, Documents/Containers under **Library**,
+and Review/Purchases/Warranties/Assistant in a calm **More** disclosure. Search
+remains the top-centred global entry; no route or origin behavior changed. Each target is at least
 44px high; the primary tabs are 56px high and their label size was increased.
 The active destination is marked normally, and More is marked active when one of
 its destinations is open.
@@ -133,7 +136,7 @@ Results:
 
 - Chromium mobile/tablet matrix: pass
 - WebKit 27.2 mobile/tablet matrix with touch and DPR 3: pass
-- Full checked-in Playwright suite: **91 workflows, 90 passed, 1 fixture-dependent skip**
+- Full checked-in Playwright suite: **95 workflows, 94 passed, 1 fixture-dependent skip**
 - Desktop 1440 regression: compact controls and no mobile bar
 
 ## Screenshots

@@ -642,7 +642,7 @@ test.describe("mobile responsive", () => {
       });
       if (width === 768) {
         await page
-          .getByRole("heading", { name: "Task defaults", level: 2 })
+          .getByRole("heading", { name: "Default text model", level: 2 })
           .scrollIntoViewIfNeeded();
         await page.waitForTimeout(200);
         await page.screenshot({

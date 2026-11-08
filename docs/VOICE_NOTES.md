@@ -58,14 +58,15 @@ manual IDs are validated when saved. See
 4. Enable the provider's remote-processing consent if the endpoint is not on the
    Housetory host. Consent is required before any audio or transcript leaves the
    server.
-5. Under **Task defaults → Voice transcription**, choose the provider and a
+5. Under **Vision & voice → Voice transcription**, choose the provider and a
    transcription model. For OpenAI use `whisper-1`; for Gemini use a model that
    accepts audio input. For OpenRouter, discover models and choose one whose
    catalog metadata advertises STT output or audio input (for example an
    `openai/whisper-*` slug or an audio-input chat model). The picker excludes
    image/text-only models; a manual ID is validated on save.
-6. Under **Task defaults → Smart imports**, choose the chat model that should
-   interpret the edited transcript.
+6. In **Advanced task overrides → Smart imports**, choose the chat model that
+   should interpret the edited transcript, or let it inherit the default text
+   model.
 7. Open **Add items → Record a voice note**.
 
 No provider credentials are required for automated tests. The automated suite

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
+  ChevronDown,
   ClipboardCheck,
   Eye,
   Filter,
@@ -898,11 +899,34 @@ export function ReviewPage() {
         </section>
       )}
 
-      <ReviewSchedulePanel
-        isOwner={isOwner}
-        schedule={summaryQuery.data?.schedule}
-        onChanged={refreshReview}
-      />
+      {summaryQuery.isPending || summaryQuery.data?.schedule?.configured ? (
+        <ReviewSchedulePanel
+          isOwner={isOwner}
+          schedule={summaryQuery.data?.schedule}
+          onChanged={refreshReview}
+        />
+      ) : (
+        <details
+          className="group surface mb-5 p-4 sm:p-5"
+          data-testid="review-schedule-advanced"
+        >
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground">
+            <span className="flex items-center gap-2">
+              Advanced · Scheduled review
+              <Badge variant="outline">Off by default</Badge>
+            </span>
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-3">
+            <ReviewSchedulePanel
+              isOwner={isOwner}
+              schedule={summaryQuery.data?.schedule}
+              onChanged={refreshReview}
+              embedded
+            />
+          </div>
+        </details>
+      )}
 
       <section className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-end gap-3">
