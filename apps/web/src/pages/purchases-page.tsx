@@ -519,7 +519,7 @@ function PurchaseDialog({
                 onChange={(event) => setPurchaseDate(event.target.value)}
               />
             </Field>
-            <Field label="Price" htmlFor="purchase-price" optional>
+            <Field label="Purchase total" htmlFor="purchase-price" optional>
               <Input
                 id="purchase-price"
                 type="number"
@@ -568,6 +568,12 @@ function PurchaseDialog({
               </Select>
             </Field>
           </div>
+
+          <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+            Enter the total paid for all selected items. If one item is a multi-unit
+            pack, its item page shows the effective per-unit cost derived from this
+            package total and its quantity.
+          </p>
 
           <ItemMultiSelect
             selected={itemIds}

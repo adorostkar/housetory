@@ -96,6 +96,10 @@ actual reasons rather than a user-upload format message.
 - brand and type can come from structured item fields or, when the structured
   brand is blank, from a bounded local lexicon plus the item name/description;
   this inference is query-only and is never written back to the item;
+- an item with a structured brand and an exact model is searchable even when its
+  product type is not in the bounded type lexicon; the exact model must appear in
+  the candidate title, and conflicting similar models remain labelled as not
+  exact;
 - screen size, display family (OLED vs LCD/LED/QLED), explicit variants and
   structured model identifiers are compared as product evidence;
 - mutually contradictory known attributes are rejected; unknown candidate
@@ -133,9 +137,13 @@ actual reasons rather than a user-upload format message.
 
 The automatic flow is still a single selection, not a mandatory candidate chooser
 or per-domain approval step. Exact make/model is not required for a representative
-reference image; a name such as “LG TV” plus “OLED 77 inch” is sufficient. Manual
-and model-specific manual discovery keep the full confirmed manufacturer/model
-gate.
+reference image; a name such as “LG TV” plus “OLED 77 inch” is sufficient. A
+structured brand plus an exact model is also sufficient when the product type is
+unknown. Manual and model-specific manual discovery keep the full confirmed
+manufacturer/model gate. Toolboxes/tool chests are recognized product types, and
+Stanley is included in the local brand and manufacturer-domain registry; the
+query-only spelling alias `Stanely` normalizes to Stanley without rewriting the
+stored item.
 
 The user specifically approved relaxing the full-model gate for images. A name
 such as “LG TV” plus a description such as “OLED77inch” is enough to build a

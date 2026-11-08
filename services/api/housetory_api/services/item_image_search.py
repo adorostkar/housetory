@@ -173,6 +173,7 @@ DEFAULT_KNOWN_BRANDS: tuple[str, ...] = (
     "nespresso",
     "keurig",
     "dewalt",
+    "stanley",
     "makita",
     "milwaukee",
     "ryobi",
@@ -220,6 +221,11 @@ CONTEXT_BRAND_TYPES = {"tv", "laptop", "camera"}
 PRODUCT_BRAND_ALIASES: dict[str, tuple[str, ...]] = {
     "sony": ("ps5", "playstation 5", "playstation5"),
 }
+# Narrow, explicit spelling normalization for structured brand values. These
+# are query-time only and never rewrite the stored inventory record.
+BRAND_SPELLING_ALIASES: dict[str, str] = {
+    "stanely": "stanley",
+}
 
 DEFAULT_MANUFACTURER_DOMAINS: dict[str, tuple[str, ...]] = {
     "lg": ("lg.com",),
@@ -251,6 +257,7 @@ DEFAULT_MANUFACTURER_DOMAINS: dict[str, tuple[str, ...]] = {
     "nespresso": ("nespresso.com",),
     "keurig": ("keurig.com",),
     "dewalt": ("dewalt.com",),
+    "stanley": ("stanleytools.com", "stanleyblackanddecker.com"),
     "makita": ("makita.com",),
     "milwaukee": ("milwaukeetool.com",),
     "ryobi": ("ryobitools.com",),
@@ -328,6 +335,7 @@ _TYPE_CONFLICTS = {
     "camera": ("webcam cover", "doorbell", "security camera mount"),
     "kettle": ("coffee machine", "toaster", "saucepan"),
     "bicycle": ("motorcycle", "tricycle", "car"),
+    "toolbox": ("bag", "backpack", "handbag"),
 }
 
 _TYPE_TERMS: dict[str, tuple[str, ...]] = {
@@ -336,6 +344,7 @@ _TYPE_TERMS: dict[str, tuple[str, ...]] = {
     "drill": ("drill", "impact driver"),
     "suitcase": ("suitcase", "luggage", "travel case"),
     "box": ("box", "storage bin", "crate"),
+    "toolbox": ("toolbox", "tool box", "tool chest", "tool case"),
     "chair": ("chair", "stool", "armchair"),
     "sofa": ("sofa", "couch", "settee"),
     "camera": ("camera", "dslr", "mirrorless", "eos"),
@@ -351,6 +360,7 @@ _TYPE_QUERY_WORDS = {
     "drill": "drill",
     "suitcase": "suitcase",
     "box": "storage box",
+    "toolbox": "toolbox",
     "chair": "chair",
     "sofa": "sofa",
     "camera": "camera",
@@ -787,6 +797,8 @@ def build_product_profile(item: Item) -> ProductProfile:
             brand, brand_ambiguous = _infer_brand(name, description, item_type)
             if brand is not None:
                 brand_source = "inferred"
+    if brand is not None:
+        brand = BRAND_SPELLING_ALIASES.get(_compact(brand), brand)
     brand_terms = {_normalized(brand)} if brand else set()
     if brand:
         for canonical, aliases in PRODUCT_BRAND_ALIASES.items():
@@ -809,7 +821,11 @@ def build_product_profile(item: Item) -> ProductProfile:
 
 def reference_search_ready(item: Item) -> bool:
     profile = build_product_profile(item)
-    return bool(profile.brand and profile.item_type and not profile.brand_ambiguous)
+    return bool(
+        profile.brand
+        and (profile.item_type or profile.model)
+        and not profile.brand_ambiguous
+    )
 
 
 def _query(item: Item, profile: ProductProfile) -> str:
@@ -946,7 +962,11 @@ def parse_brave_image_results(payload: dict[str, Any]) -> list[ImageCandidate]:
 
 def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[RankedImage]:
     profile = build_product_profile(item)
-    if profile.brand_ambiguous or not profile.brand or not profile.item_type:
+    if (
+        profile.brand_ambiguous
+        or not profile.brand
+        or (not profile.item_type and not profile.model)
+    ):
         return []
     ranked: list[RankedImage] = []
     for candidate in candidates:
@@ -974,17 +994,21 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
                 image_host,
             ]
         )
+        tokens = _word_tokens(text)
+        model_present = bool(profile.model and _model_present(profile.model, tokens))
+        model_conflict = _model_conflict(profile.model, tokens)
+        if model_conflict:
+            continue
         brand_in_title = any(
             _phrase_present(_word_tokens(candidate.title), _word_tokens(term))
             for term in profile.brand_terms
         )
         manufacturer_verified = _manufacturer_verified(profile.brand, page_host)
-        if not brand_in_title and not manufacturer_verified:
+        if not brand_in_title and not manufacturer_verified and not model_present:
             continue
         if _type_conflict(profile.item_type, text):
             continue
 
-        tokens = _word_tokens(text)
         candidate_sizes = _sizes(text)
         candidate_technologies = _tech_families(text)
         candidate_variants = _variants(text)
@@ -1002,10 +1026,6 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
             profile.variants and candidate_variants and not (profile.variants & candidate_variants)
         )
         if size_conflict or tech_conflict or variant_conflict:
-            continue
-        model_present = bool(profile.model and _model_present(profile.model, tokens))
-        model_conflict = _model_conflict(profile.model, tokens)
-        if model_conflict:
             continue
         size_match = bool(profile.size_constraint and profile.size_constraint in candidate_sizes)
         tech_match = bool(
@@ -1510,12 +1530,17 @@ def find_and_select_reference(
             503, "image_search_unconfigured", provider.reason or "Image search is not configured."
         )
     profile = build_product_profile(item)
-    if profile.brand_ambiguous or not profile.brand or not profile.item_type:
+    if (
+        profile.brand_ambiguous
+        or not profile.brand
+        or (not profile.item_type and not profile.model)
+    ):
         raise ApiError(
             422,
             "image_description_required",
-            "This item does not have enough recognizable brand/product-type context for "
-            "an automatic public image search. Add a brand or a clearer product name. "
+            "This item does not have enough recognizable brand plus product-type or "
+            "exact-model context for an automatic public image search. Add a brand and "
+            "either a product type (for example toolbox or drill) or the exact model. "
             "For packaging or an empty box, keep the word “box” so a product image is "
             "not mistaken for the actual item. The category icon fallback remains "
             "available.",

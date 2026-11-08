@@ -223,7 +223,7 @@ test("editing only the name preserves collapsed shared purchase, warranty, value
   await shot(page, "03-collapsed-summaries");
 
   await page.getByRole("button", { name: /Purchase/ }).click();
-  await expect(page.getByLabel(/Purchase total/)).toHaveValue("100.00");
+  await expect(page.getByLabel(/purchase total/i)).toHaveValue("100.00");
   await expect(page.getByLabel(/Receipt document/)).toHaveValue(fixture.documentId);
   await page.getByRole("button", { name: /Purchase/ }).click();
 
@@ -324,6 +324,49 @@ test("documents, manuals and image-source details stay coherent and honest", asy
   await shot(page, "04-documents-manuals");
 });
 
+test("pack purchase can be entered per unit and shows the package total on detail", async ({
+  page,
+  request,
+}) => {
+  const id = suffix();
+  const roomId = await createRoom(request, `Pack room ${id}`);
+  const itemId = await createItem(request, `Headlamp pack ${id}`, roomId, {
+    quantity: 2,
+    purchase: {
+      vendor: "Build Supply",
+      purchase_date: "2026-02-01",
+      price_cents: 10000,
+      currency: "USD",
+    },
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`/items/${itemId}/edit`);
+  await page.getByRole("button", { name: /^Purchase/ }).click();
+  await expect(page.getByRole("group", { name: "Purchase price basis" })).toBeVisible();
+  await expect(page.getByLabel(/purchase total/i)).toHaveValue("100.00");
+  const preview = page.getByTestId("purchase-price-preview");
+  await expect(preview).toContainText("$100 package total");
+  await expect(preview).toContainText("$50 per unit");
+
+  await page.getByRole("button", { name: "Price per unit" }).click();
+  const unitPrice = page.getByLabel(/price per unit/i);
+  await unitPrice.fill("60");
+  await expect(preview).toContainText("$120 package total");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Item updated")).toBeVisible();
+
+  const auth = await headers(request);
+  const detail = (await (
+    await request.get(`/api/v1/items/${itemId}`, { headers: auth })
+  ).json()) as { item: { purchase: { price_cents: number | null } | null } };
+  expect(detail.item.purchase?.price_cents).toBe(12000);
+
+  await page.goto(`/items/${itemId}`);
+  await expect(page.getByText("Package total")).toBeVisible();
+  await expect(page.getByText("$120")).toBeVisible();
+  await expect(page.getByText(/\$60 effective per unit/)).toBeVisible();
+});
+
 test("item form and detail stay usable at phone, tablet and desktop widths", async ({
   page,
   request,
@@ -339,6 +382,25 @@ test("item form and detail stay usable at phone, tablet and desktop widths", asy
     await expect(page.getByLabel("Item name")).toBeVisible();
     await expect(page.getByLabel("Room")).toBeVisible();
     await expect(page.getByLabel("Storage location")).toBeVisible();
+    const optionalSections = page.getByTestId("optional-form-sections");
+    await expect(optionalSections.getByRole("button")).toHaveCount(4);
+    await expect(
+      optionalSections.getByRole("button").evaluateAll((buttons) =>
+        buttons.every((button) => button.getAttribute("aria-expanded") === "false"),
+      ),
+    ).resolves.toBe(true);
+    if (width === 1440) {
+      const boxes = await optionalSections.locator(":scope > section").evaluateAll(
+        (sections) =>
+          sections.map((section) => {
+            const rect = section.getBoundingClientRect();
+            return { x: Math.round(rect.x), width: Math.round(rect.width) };
+          }),
+      );
+      expect(new Set(boxes.map((box) => box.x)).size).toBe(1);
+      expect(new Set(boxes.map((box) => box.width)).size).toBe(1);
+      expect(boxes[0]?.width).toBeGreaterThan(700);
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth + 1,

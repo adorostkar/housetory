@@ -129,6 +129,19 @@ export function ItemDetailPage() {
   const roomTrail = item.room
     ? roomPath(roomsQuery.data?.items ?? [], item.room.id)
     : [];
+  const purchaseAllocations =
+    item.purchase?.allocations.filter((allocation) => allocation.item_id === item.id) ?? [];
+  const purchaseUnitCents =
+    item.purchase?.price_cents != null &&
+    !item.purchase.is_shared &&
+    purchaseAllocations.length === 0 &&
+    item.quantity > 1
+      ? Math.round(item.purchase.price_cents / item.quantity)
+      : null;
+  const purchaseUnitIsRounded =
+    purchaseUnitCents != null &&
+    item.purchase?.price_cents != null &&
+    item.purchase.price_cents % item.quantity !== 0;
 
   return (
     <div className="animate-fade-up">
@@ -648,7 +661,11 @@ export function ItemDetailPage() {
                 {item.purchase.price_cents != null && (
                   <>
                     <p className="text-[0.62rem] uppercase tracking-[0.1em] text-muted-foreground">
-                      Purchase total
+                      {item.purchase.is_shared
+                        ? "Shared purchase total"
+                        : item.quantity > 1
+                          ? "Package total"
+                          : "Purchase total"}
                     </p>
                     <p className="mt-1 font-display text-[2rem] leading-none tracking-[-0.03em] tabular-nums">
                       {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
@@ -656,6 +673,13 @@ export function ItemDetailPage() {
                     <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
                       Original transaction total, not a per-unit price.
                     </p>
+                    {purchaseUnitCents != null && (
+                      <p className="mt-1.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+                        {purchaseUnitIsRounded ? "≈ " : ""}
+                        {formatCurrency(purchaseUnitCents, item.purchase.currency)} effective
+                        per unit across {item.quantity} owned units.
+                      </p>
+                    )}
                   </>
                 )}
                 {item.purchase.is_shared && (

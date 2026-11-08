@@ -92,10 +92,11 @@ def provider(
     from housetory_api.services import item_image_generation
 
     monkeypatch.setattr(item_image_generation, "resolve_image_search_provider", fake_provider)
-    search_calls = {"count": 0}
+    search_calls = {"count": 0, "queries": []}
 
     def fake_results(_provider, _query):
         search_calls["count"] += 1
+        search_calls["queries"].append(_query)
         return list(candidates or [])
 
     monkeypatch.setattr(item_image_search, "_brave_image_results", fake_results)
@@ -131,6 +132,18 @@ def lg_candidate(title="LG OLED TV 77 inch product photo", source="lg.com", exac
         thumbnail_url="https://imgs.search.brave.com/oled77.jpg",
         width=1600,
         height=900,
+    )
+
+
+def stanley_candidate(title="Stanley FatMax FMST1 Toolbox product photo"):
+    return ImageCandidate(
+        title=title,
+        page_url="https://www.stanleytools.com/products/fatmax-fmst1",
+        source_domain="stanleytools.com",
+        image_url="https://media.stanleytools.com/fatmax-fmst1.png",
+        thumbnail_url="https://imgs.search.brave.com/fatmax-fmst1.jpg",
+        width=1600,
+        height=1200,
     )
 
 
@@ -720,6 +733,124 @@ def test_conflicting_size_technology_and_variant_evidence_is_rejected(owner_clie
         assert rank_candidates(
             pro_item, [lg_candidate(title="LG OLED TV 77 inch Pro product photo")]
         )
+
+
+def test_stanley_toolbox_uses_type_and_exact_model_evidence(owner_client, monkeypatch):
+    room = create_room(owner_client, "Toolbox image room")
+    item = create_item(
+        owner_client,
+        "Toolbox",
+        room["id"],
+        brand="Stanley",
+        model="FatMax FMST1",
+        description="Metal tool chest with two trays",
+    )
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        profile = build_product_profile(stored_item)
+        assert profile.brand.lower() == "stanley"
+        assert profile.item_type == "toolbox"
+        assert profile.model == "FatMax FMST1"
+        assert reference_search_ready(stored_item) is True
+        assert rank_candidates(stored_item, [stanley_candidate()])
+
+    calls = provider(
+        monkeypatch,
+        candidates=[stanley_candidate()],
+        permitted_domains="stanleytools.com",
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_type"] == "reference"
+    assert selected["exact_model_confirmed"] is True
+    assert calls["queries"]
+    query = calls["queries"][0].lower()
+    assert "stanley" in query
+    assert "fmst1" in query
+    assert "toolbox" in query
+    assert "borrower" not in query
+    assert "household" not in query
+
+    wrong_model = rank_candidates(
+        stored_item,
+        [stanley_candidate(title="Stanley FatMax FMST2 Toolbox product photo")],
+    )
+    assert wrong_model
+    assert wrong_model[0].exact_model_confirmed is False
+
+
+def test_model_only_unknown_type_is_searchable_but_stays_exact(owner_client, monkeypatch):
+    room = create_room(owner_client, "Model-only image room")
+    item = create_item(
+        owner_client,
+        "Widget",
+        room["id"],
+        brand="Acme",
+        model="ZX-9",
+    )
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        profile = build_product_profile(stored_item)
+        assert profile.item_type is None
+        assert profile.model == "ZX-9"
+        assert reference_search_ready(stored_item) is True
+        assert rank_candidates(
+            stored_item,
+            [replace(stanley_candidate(title="Acme ZX-9 Widget product photo"),
+                     page_url="https://www.retailer.example/widget",
+                     source_domain="retailer.example",
+                     image_url="https://media.retailer.example/widget.png")],
+        )
+
+    calls = provider(
+        monkeypatch,
+        candidates=[
+            replace(
+                stanley_candidate(title="Acme ZX-9 Widget product photo"),
+                page_url="https://www.retailer.example/widget",
+                source_domain="retailer.example",
+                image_url="https://media.retailer.example/widget.png",
+            )
+        ],
+        permitted_domains="retailer.example",
+    )
+    response = owner_client.post(f"/api/v1/items/{item['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["exact_model_confirmed"] is True
+    assert calls["queries"]
+    query = calls["queries"][0].lower()
+    assert "acme" in query
+    assert "zx-9" in query
+
+    wrong_model = rank_candidates(
+        stored_item,
+        [replace(stanley_candidate(title="Acme ZX-10 Widget product photo"),
+                 page_url="https://www.retailer.example/widget",
+                 source_domain="retailer.example",
+                 image_url="https://media.retailer.example/widget.png")],
+    )
+    assert wrong_model == []
+
+
+def test_stanley_spelling_alias_is_query_only(owner_client):
+    room = create_room(owner_client, "Stanley spelling room")
+    item = create_item(
+        owner_client,
+        "Toolbox",
+        room["id"],
+        brand="Stanely",
+        model="FatMax FMST1",
+    )
+    with SessionLocal() as db:
+        stored_item = db.get(Item, uuid.UUID(item["id"]))
+        assert stored_item is not None
+        profile = build_product_profile(stored_item)
+        assert profile.brand == "stanley"
+        assert reference_search_ready(stored_item) is True
+        assert rank_candidates(stored_item, [stanley_candidate()])
 
 
 def test_vague_or_brandless_items_fall_back_without_forcing_a_match(owner_client):

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -163,16 +163,31 @@ const item: ItemDetail = {
   storage: null,
 };
 
-function renderForm() {
+function renderForm(formItem: ItemDetail = item) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ItemForm item={item} returnTo="/items/item-1" />
+      <ItemForm item={formItem} returnTo="/items/item-1" />
     </QueryClientProvider>,
   );
 }
+
+const packItem: ItemDetail = {
+  ...item,
+  quantity: 2,
+  purchase: item.purchase
+    ? {
+        ...item.purchase,
+        items: [{ id: "item-1", name: "Toolbox" }],
+        item_count: 1,
+        is_shared: false,
+        allocated_total_cents: 0,
+        unallocated_cents: item.purchase.price_cents,
+      }
+    : null,
+};
 
 beforeEach(() => {
   navigate.mockReset();
@@ -241,7 +256,7 @@ describe("ItemForm optional sections", () => {
   it("expands purchase, value and warranty sections for review", async () => {
     renderForm();
     await userEvent.click(screen.getByRole("button", { name: /Purchase/ }));
-    expect(screen.getByLabelText(/Purchase total/)).toHaveValue(100);
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
     expect(screen.getByLabelText(/Receipt document/)).toHaveValue("receipt-1");
 
     await userEvent.click(screen.getByRole("button", { name: /Current value/ }));
@@ -252,6 +267,66 @@ describe("ItemForm optional sections", () => {
     await userEvent.click(screen.getByRole("button", { name: /Warranty/ }));
     expect(screen.getByLabelText(/Provider/)).toHaveValue("Stanley");
     expect(screen.getByLabelText(/Warranty document/)).toHaveValue("warranty-doc-1");
+  });
+
+  it("stacks collapsed optional sections and offers package/per-unit pricing for a pack", async () => {
+    renderForm(packItem);
+    const sections = screen.getByTestId("optional-form-sections");
+    const sectionButtons = within(sections).getAllByRole("button");
+    expect(sectionButtons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining("Identity & organisation"),
+      expect.stringContaining("Purchase"),
+      expect.stringContaining("Current value"),
+      expect.stringContaining("Warranty"),
+    ]);
+    for (const button of sectionButtons) {
+      expect(button).toHaveAttribute("aria-expanded", "false");
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    expect(screen.getByRole("group", { name: "Purchase price basis" })).toBeVisible();
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "$100 package total",
+    );
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "$50 per unit",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+    const unitPrice = screen.getByLabelText(/price per unit/i);
+    expect(unitPrice).toHaveValue(50);
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "2 units × $50 = $100",
+    );
+
+    await userEvent.clear(unitPrice);
+    await userEvent.type(unitPrice, "60");
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "$120 package total",
+    );
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "$60 per unit",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      quantity: 2,
+      purchase: {
+        price_cents: 12000,
+      },
+    });
+  });
+
+  it("keeps shared purchases total-only", async () => {
+    renderForm();
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    expect(
+      screen.queryByRole("group", { name: "Purchase price basis" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/shared purchase total/i)).toHaveValue(100);
   });
 
   it("expands identity fields and keeps focus/keyboard operation", async () => {

@@ -33,6 +33,7 @@ _ITEM_TYPE_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("bicycle", ("bicycle", "bike", "cycle")),
     ("sofa", ("sofa", "couch", "settee")),
     ("chair", ("chair", "stool", "armchair")),
+    ("toolbox", ("toolbox", "tool box", "tool chest", "tool case")),
     ("box", ("empty box", "storage box", "cardboard box", "plastic box", "storage bin", "crate")),
     ("book", ("book", "novel", "hardcover", "paperback")),
 )

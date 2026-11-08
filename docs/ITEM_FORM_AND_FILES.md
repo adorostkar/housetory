@@ -15,8 +15,9 @@ The first card contains only what is needed to add an item:
 
 Brand, model, serial number, description, category and tags are grouped in one
 optional **Identity & organisation** section. Purchase, Current value and Warranty
-are separate optional cards on the right (stacked on narrow screens). All optional
-cards start collapsed.
+are separate optional cards stacked below it at every viewport width. All optional
+cards start collapsed and expand in place, so purchase details get the full form
+width instead of a narrow desktop side column.
 
 ![Edit form, collapsed optional sections](walkthrough/simplification2/07-after-item-form.png)
 
@@ -35,7 +36,11 @@ React state and are still submitted, so changing only the name does not clear:
 ![Collapsed summaries with preserved purchase, value and warranty](walkthrough/simplification2/03-collapsed-summaries.png)
 
 Expanding a section exposes the same existing fields and validation. There is no
-new wizard and no confirmation step.
+new wizard and no confirmation step. For a non-shared item with quantity greater
+than one, Purchase offers **Total paid for package** or **Price per unit**; the
+form calculates the other value and always stores the package total. Shared
+purchases and reviewed allocation lines stay total-only. The item page shows the
+package total plus an effective per-unit amount derived from the item quantity.
 
 ### Contextual Add items
 

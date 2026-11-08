@@ -90,11 +90,12 @@ test("item and evidence report show $40 per unit, owned quantity 2 and $80 total
   await page.goto(`/items/${item.item.id}`);
   await expect(page.getByRole("heading", { name: itemName, level: 1 })).toBeVisible();
   await expect(page.getByText(/40.*per unit/)).toBeVisible();
-  await expect(page.getByText(/2 owned units/)).toBeVisible();
+  await expect(page.getByText(/2 owned units × \$40 = \$80/)).toBeVisible();
   await expect(page.getByText(/80.*total/)).toBeVisible();
   await expect(page.getByText(/includes 1 on loan/)).toBeVisible();
-  await expect(page.getByText("Purchase total", { exact: true })).toBeVisible();
+  await expect(page.getByText("Package total", { exact: true })).toBeVisible();
   await expect(page.getByText("Original transaction total, not a per-unit price.")).toBeVisible();
+  await expect(page.getByText(/\$50 effective per unit/)).toBeVisible();
   await page.screenshot({
     path: "../../docs/walkthrough/current-value/01-item-unit-value-desktop.png",
     fullPage: false,

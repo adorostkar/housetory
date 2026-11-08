@@ -197,6 +197,7 @@ export function ItemForm({
     item?.purchase?.price_cents != null ? (item.purchase.price_cents / 100).toFixed(2) : "",
   );
   const [currency, setCurrency] = React.useState(item?.purchase?.currency ?? "USD");
+  const [priceBasis, setPriceBasis] = React.useState<"total" | "unit">("total");
   const [orderNumber, setOrderNumber] = React.useState(item?.purchase?.order_number ?? "");
   const [purchaseNotes, setPurchaseNotes] = React.useState(item?.purchase?.notes ?? "");
   const [receiptDocumentId, setReceiptDocumentId] = React.useState(
@@ -260,10 +261,47 @@ export function ItemForm({
     locationsQuery.data?.items ?? [],
     locationId,
   );
-  const localPriceCents = price.trim() ? Math.round(Number(price) * 100) : null;
+  const parsedQuantity = /^\d+$/.test(quantity) ? Number(quantity) : 0;
+  const hasReviewedAllocation = Boolean(
+    item?.purchase?.allocations.some((allocation) => allocation.item_id === item?.id),
+  );
+  const canUseUnitPrice =
+    parsedQuantity > 1 &&
+    !item?.purchase?.is_shared &&
+    !hasReviewedAllocation;
+  const priceBasisActive = canUseUnitPrice ? priceBasis : "total";
+  const enteredPriceCents = price.trim() ? Math.round(Number(price) * 100) : null;
   const priceInvalid =
     price.trim().length > 0 &&
-    (localPriceCents === null || !Number.isFinite(localPriceCents) || localPriceCents < 0);
+    (enteredPriceCents === null ||
+      !Number.isFinite(enteredPriceCents) ||
+      enteredPriceCents < 0);
+  const packagePriceCents =
+    enteredPriceCents == null
+      ? null
+      : priceBasisActive === "unit" && parsedQuantity > 0
+        ? enteredPriceCents * parsedQuantity
+        : enteredPriceCents;
+  const effectiveUnitPriceCents =
+    packagePriceCents == null || parsedQuantity <= 0
+      ? null
+      : Math.round(packagePriceCents / parsedQuantity);
+  const effectiveUnitIsRounded =
+    packagePriceCents != null &&
+    parsedQuantity > 0 &&
+    packagePriceCents % parsedQuantity !== 0;
+  const changePriceBasis = (next: "total" | "unit") => {
+    if (next === priceBasisActive) return;
+    if (next === "unit" && parsedQuantity > 0 && packagePriceCents != null) {
+      setPrice((packagePriceCents / parsedQuantity / 100).toFixed(2));
+    } else if (next === "total" && enteredPriceCents != null && parsedQuantity > 0) {
+      setPrice((enteredPriceCents * parsedQuantity / 100).toFixed(2));
+    }
+    setPriceBasis(next);
+  };
+  React.useEffect(() => {
+    if (!canUseUnitPrice) setPriceBasis("total");
+  }, [canUseUnitPrice]);
   const localCurrentValueCents = currentValue.trim()
     ? Math.round(Number(currentValue) * 100)
     : null;
@@ -272,7 +310,6 @@ export function ItemForm({
     (localCurrentValueCents === null ||
       !Number.isFinite(localCurrentValueCents) ||
       localCurrentValueCents < 0);
-  const parsedQuantity = /^\d+$/.test(quantity) ? Number(quantity) : 0;
   const currentValueTotalCents =
     localCurrentValueCents == null
       ? null
@@ -390,8 +427,14 @@ export function ItemForm({
         : "";
   const purchaseParts = [
     item?.purchase?.is_shared ? "Shared purchase" : "",
-    localPriceCents != null && Number.isFinite(localPriceCents)
-      ? formatCurrency(localPriceCents, currency)
+    packagePriceCents != null && Number.isFinite(packagePriceCents)
+      ? `${formatCurrency(packagePriceCents, currency)} package total`
+      : "",
+    canUseUnitPrice && effectiveUnitPriceCents != null
+      ? `${effectiveUnitIsRounded ? "≈ " : ""}${formatCurrency(
+          effectiveUnitPriceCents,
+          currency,
+        )} per unit`
       : "",
     vendor.trim(),
     purchaseStatusLabel,
@@ -469,7 +512,7 @@ export function ItemForm({
         ? {
             merchant: vendor.trim() || null,
             purchase_date: purchaseDate || null,
-            price_cents: localPriceCents,
+            price_cents: packagePriceCents,
             currency,
             order_number: orderNumber.trim() || null,
             notes: purchaseNotes.trim() || null,
@@ -661,8 +704,7 @@ export function ItemForm({
               </div>
             </FormSection>
 
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-6">
+        <div className="space-y-6" data-testid="optional-form-sections">
             <OptionalFormSection
               id="optional-identity"
               title="Identity & organisation"
@@ -810,9 +852,7 @@ export function ItemForm({
                 {tagError && <p className="text-[0.74rem] text-destructive">{tagError}</p>}
               </div>
             </OptionalFormSection>
-          </div>
 
-          <div className="space-y-6 xl:sticky xl:top-8">
             <OptionalFormSection
               id="optional-purchase"
               title="Purchase"
@@ -821,8 +861,8 @@ export function ItemForm({
               onToggle={() => setPurchaseOpen((current) => !current)}
             >
               <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
-                The original transaction total and receipt trail. This is not a
-                per-unit price.
+                The original transaction or package total and receipt trail. Current
+                value is recorded separately per owned unit.
               </p>
               {item?.purchase?.is_shared && (
                 <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
@@ -830,6 +870,39 @@ export function ItemForm({
                   amount is the purchase transaction total, not a per-unit price, and
                   is not multiplied by quantity. Editing it updates the single shared
                   record; reviewed item allocations remain separate.
+                </div>
+              )}
+              {canUseUnitPrice && (
+                <div className="space-y-2">
+                  <p className="text-[0.8rem] font-medium">Amount entered</p>
+                  <div
+                    className="flex flex-wrap gap-2"
+                    role="group"
+                    aria-label="Purchase price basis"
+                  >
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={priceBasisActive === "total" ? "default" : "outline"}
+                      aria-pressed={priceBasisActive === "total"}
+                      onClick={() => changePriceBasis("total")}
+                    >
+                      Total paid for package
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={priceBasisActive === "unit" ? "default" : "outline"}
+                      aria-pressed={priceBasisActive === "unit"}
+                      onClick={() => changePriceBasis("unit")}
+                    >
+                      Price per unit
+                    </Button>
+                  </div>
+                  <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+                    This item has quantity {parsedQuantity}. Enter the package total or
+                    the price for one unit; the other value is calculated.
+                  </p>
                 </div>
               )}
               <Field
@@ -880,10 +953,15 @@ export function ItemForm({
               </div>
               <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
                 <Field
-                  label="Purchase total"
+                  label={
+                    priceBasisActive === "unit"
+                      ? "Price per unit"
+                      : item?.purchase?.is_shared
+                        ? "Shared purchase total"
+                        : "Purchase total"
+                  }
                   htmlFor="purchase-price"
                   optional
-                  hint="Transaction total, including all linked units/items when shared."
                 >
                   <Input
                     id="purchase-price"
@@ -910,6 +988,39 @@ export function ItemForm({
                   </Select>
                 </Field>
               </div>
+              <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+                {priceBasisActive === "unit"
+                  ? "Enter the price for one unit. The package total is calculated from the item quantity shown above."
+                  : item?.purchase?.is_shared
+                    ? "Total paid for all items linked to this shared purchase."
+                    : "Total paid for the whole purchase or pack. A per-unit estimate is calculated when quantity is greater than one."}
+              </p>
+              {packagePriceCents != null && Number.isFinite(packagePriceCents) && (
+                <div
+                  data-testid="purchase-price-preview"
+                  className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
+                >
+                  <p className="font-medium">
+                    {formatCurrency(packagePriceCents, currency)} package total
+                  </p>
+                  {canUseUnitPrice && effectiveUnitPriceCents != null && (
+                    <p className="mt-1 text-muted-foreground">
+                      {effectiveUnitIsRounded ? "≈ " : ""}
+                      {formatCurrency(effectiveUnitPriceCents, currency)} per unit for{" "}
+                      {parsedQuantity} units.
+                    </p>
+                  )}
+                  {priceBasisActive === "unit" &&
+                    enteredPriceCents != null &&
+                    parsedQuantity > 0 && (
+                      <p className="mt-1 text-muted-foreground">
+                        {parsedQuantity} units ×{" "}
+                        {formatCurrency(enteredPriceCents, currency)} ={" "}
+                        {formatCurrency(packagePriceCents, currency)}.
+                      </p>
+                    )}
+                </div>
+              )}
               <div className="grid gap-5 sm:grid-cols-2">
                 <Field label="Order number" htmlFor="purchase-order" optional>
                   <Input
@@ -1160,7 +1271,6 @@ export function ItemForm({
                 />
               </Field>
             </OptionalFormSection>
-          </div>
         </div>
 
         <div className="flex flex-col-reverse items-stretch gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-end">
