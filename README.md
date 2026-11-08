@@ -246,7 +246,9 @@ Tailscale is optional.
   filters, with distinct Record return and Return to owner actions. Owner display
   names use the same household-scoped suggestions; the simple person filter shows
   what a person currently has from you and what you have borrowed from them,
-  including returned history. Partial
+  including returned history. Status, direction, past-due and text filters stay
+  in the URL, and both detail back links and browser Back restore the composed
+  view. Partial
   returns, corrections, cancellation, request-id/payload binding, concurrency
   guards and append-only history are supported. Borrowed quantities never enter
   owned counts, values, evidence, search-as-owned results or stocktake. Search and
@@ -435,8 +437,8 @@ stack, not just unit mocks:
   inheritance/override preservation, household-scoped borrower/lender name
   suggestions and normalized person filters, calmer desktop/mobile navigation and
   optional scheduled-review disclosure.
-- 234 Vitest tests pass; strict TypeScript typecheck and production build pass.
-- 96 checked-in Playwright workflows run on disposable Compose stacks, covering
+- 236 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 97 checked-in Playwright workflows run on disposable Compose stacks, covering
   the Phase 5 container/label/QR flows, provider configuration against a mocked
   local Ollama service, camera upload, multi-object review/split/merge and
   approved creation, voice-note review/split/confirm with grouped quantities,

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
@@ -212,7 +212,17 @@ const emptyBorrowedList: BorrowedList = {
   physically_held_quantity: 0,
 };
 
-function renderPage(initialEntries: string[] = ["/"]) {
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="location">
+      {location.pathname}
+      {location.search}
+    </output>
+  );
+}
+
+function renderPage(initialEntries: string[] = ["/loans"]) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
@@ -220,6 +230,7 @@ function renderPage(initialEntries: string[] = ["/"]) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={initialEntries}>
         <LoansPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -279,6 +290,104 @@ describe("LoansPage", () => {
     expect(state.borrowedFilters?.person).toBeUndefined();
     await waitFor(() =>
       expect(screen.queryByLabelText("Clear person filter")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("restores composed filters from the URL and keeps person on tab changes", async () => {
+    renderPage([
+      "/loans?person=Jack&status=returned&direction=borrowed&overdue=1&q=drill",
+    ]);
+    expect(state.loanFilters).toMatchObject({
+      status: "returned",
+      person: "Jack",
+      overdue: true,
+      q: "drill",
+    });
+    expect(state.borrowedFilters).toMatchObject({
+      status: "returned",
+      person: "Jack",
+      overdue: true,
+      q: "drill",
+    });
+    expect(
+      screen.getByRole("tab", { name: "Returned" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.getByRole("tab", { name: "Borrowed" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Past due only")).toBeChecked();
+    expect(screen.getByLabelText("Search loans")).toHaveValue("drill");
+    expect(screen.getByLabelText("Filter loans by person")).toHaveValue(
+      "Jack",
+    );
+
+    await userEvent.click(
+      within(
+        screen.getByRole("tablist", { name: "Loan filters" }),
+      ).getByRole("tab", { name: "All" }),
+    );
+    await waitFor(() => expect(state.loanFilters?.status).toBe("all"));
+    let location = screen.getByTestId("location").textContent ?? "";
+    let params = new URLSearchParams(location.split("?")[1] ?? "");
+    expect(params.get("status")).toBe("all");
+    expect(params.get("person")).toBe("Jack");
+    expect(params.get("direction")).toBe("borrowed");
+    expect(params.get("overdue")).toBe("1");
+    expect(params.get("q")).toBe("drill");
+
+    await userEvent.click(
+      within(
+        screen.getByRole("tablist", { name: "Loan direction" }),
+      ).getByRole("tab", { name: "All" }),
+    );
+    await waitFor(() => expect(state.loanFilters?.person).toBe("Jack"));
+    location = screen.getByTestId("location").textContent ?? "";
+    params = new URLSearchParams(location.split("?")[1] ?? "");
+    expect(params.has("direction")).toBe(false);
+    expect(params.get("person")).toBe("Jack");
+    expect(params.get("overdue")).toBe("1");
+    expect(params.get("q")).toBe("drill");
+    expect(screen.getByLabelText("Filter loans by person")).toHaveValue(
+      "Jack",
+    );
+  });
+
+  it("keeps default /loans clean while preserving person across status tabs", async () => {
+    renderPage();
+    expect(screen.getByTestId("location").textContent).toBe("/loans");
+    expect(
+      screen.getByRole("tab", { name: "Outstanding" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(
+        screen.getByRole("tablist", { name: "Loan direction" }),
+      ).getByRole("tab", { name: "All" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Past due only")).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Returned" }));
+    await waitFor(() => expect(state.loanFilters?.status).toBe("returned"));
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/loans?status=returned",
+    );
+
+    await userEvent.type(screen.getByLabelText("Filter loans by person"), "Jack");
+    await waitFor(() =>
+      expect(state.loanFilters?.person).toBe("Jack"),
+    );
+    let location = screen.getByTestId("location").textContent ?? "";
+    let params = new URLSearchParams(location.split("?")[1] ?? "");
+    expect(params.get("person")).toBe("Jack");
+    expect(params.get("status")).toBe("returned");
+
+    await userEvent.click(screen.getByRole("tab", { name: "Outstanding" }));
+    await waitFor(() => expect(state.loanFilters?.status).toBe("open"));
+    location = screen.getByTestId("location").textContent ?? "";
+    params = new URLSearchParams(location.split("?")[1] ?? "");
+    expect(params.get("person")).toBe("Jack");
+    expect(params.has("status")).toBe(false);
+    expect(screen.getByLabelText("Filter loans by person")).toHaveValue(
+      "Jack",
     );
   });
 

@@ -57,6 +57,16 @@ directory page. Selecting or typing a person:
 - stays in the URL as `?person=…`, so reload and the existing detail back link
   return to the filtered view.
 
+Status (`status=outstanding|returned|all`), direction
+(`direction=lent_out|borrowed`), past-due (`overdue=1`), text search (`q`) and
+item scope (`item_id`) use the same URL state. Defaults stay out of the URL, so
+plain `/loans` and existing item deep links keep their established behaviour.
+Changing one tab or checkbox preserves every other parameter. Both lent-out and
+borrowed **View details** links carry the exact composed origin; the **All loans**
+back link and browser Back restore the same status, direction, person, text,
+past-due and item-scope view. Editing or returning on the detail page does not
+reset that origin.
+
 An exact normalised name wins over a longer prefix (`Jack` does not absorb
 `Jackie`). Without an exact match, prefix matches are shown. Returned history is
 available through the existing Returned/All filters, with partial quantities,
@@ -68,12 +78,13 @@ availability, due dates and returns unchanged.
   new-name save, cancellation without a phantom, exact/prefix filters, Unicode
   variants, per-record corrections, returned/partial history, household/role
   scoping and unchanged audit actors.
-- 234 Vitest tests pass; strict TypeScript typecheck and production build pass.
+- 236 Vitest tests pass; strict TypeScript typecheck and production build pass.
 - Focused disposable-stack Playwright workflows pass: the existing borrowed-item
-  and lending suites plus the new name/filter workflow. The browser run covers
+  and lending suites plus the new name/filter workflows. The browser run covers
   J→Jack selection, direct typing, cancel-without-create, both directions,
   returned/past-due composition, per-contract rename, keyboard selection, 390px
-  layout and URL/back preservation.
+  layout, URL/back preservation, the returned-person detail round trip and
+  borrowed/past-due/text composition.
 - No paid inference calls, real credentials or real inventory records were used.
 
 ## Screenshots
@@ -87,6 +98,10 @@ availability, due dates and returns unchanged.
 ![Per-contract correction suggestions](walkthrough/simple-loan-names/04-loan-name-correction.png)
 
 ![Mobile person filter](walkthrough/simple-loan-names/05-loans-mobile-person.png)
+
+![Returned person view restored after detail navigation](walkthrough/simple-loan-names/06-loans-returned-origin.png)
+
+![Composed person, overdue, text and direction filters](walkthrough/simple-loan-names/07-loans-composed-filters.png)
 
 ## Limits
 

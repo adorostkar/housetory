@@ -207,10 +207,12 @@ test("loan name suggestions, person filters and individual corrections", async (
   await expect(page.getByText("Borrowed ladder")).toBeVisible();
 
   await page.getByRole("tab", { name: "Outstanding" }).click();
-  await page.getByLabel("Past due only").check();
+  await page.getByLabel("Past due only").click();
+  await expect(page.getByLabel("Past due only")).toBeChecked();
   await expect(page.getByText("Open drill")).toBeVisible();
   await expect(page.getByText("Borrowed tile cutter")).toBeVisible();
-  await page.getByLabel("Past due only").uncheck();
+  await page.getByLabel("Past due only").click();
+  await expect(page.getByLabel("Past due only")).not.toBeChecked();
 
   // Detail back links retain the person query filter.
   await page
@@ -362,4 +364,170 @@ test("loan name suggestions, person filters and individual corrections", async (
   expect(((await returnedAgain.json()) as BorrowedRecord).status).toBe(
     "returned",
   );
+});
+
+test("returned person filters survive detail links, browser Back and composed tabs", async ({
+  page,
+  request,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("housetory-theme", "light");
+  });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+
+  const room = await createRoom(request, "Filter origin E2E");
+  const heavyDrill = await createItem(request, "Heavy drill", room.id);
+  const sander = await createItem(request, "Cordless sander", room.id);
+  const returnedLoan = await createLoan(
+    request,
+    heavyDrill.item.id,
+    "Mohsen",
+  );
+  await returnLoan(request, returnedLoan.id);
+  await createLoan(request, sander.item.id, "Mohsen");
+  await createBorrowed(request, "Borrowed sander", "Mohsen");
+  const returnedBorrowed = await createBorrowed(
+    request,
+    "Returned hose",
+    "Mohsen",
+  );
+  await returnBorrowed(request, returnedBorrowed.id);
+
+  await page.goto("/loans?person=Mohsen&status=returned");
+  await expect(page).toHaveURL(/person=Mohsen/);
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  const filterTabs = page.getByRole("tablist", { name: "Loan filters" });
+  await expect(
+    filterTabs.getByRole("tab", { name: "Returned" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    filterTabs.getByRole("tab", { name: "Outstanding" }),
+  ).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByLabel("Filter loans by person")).toHaveValue(
+    "Mohsen",
+  );
+  await expect(page.getByText("Heavy drill")).toBeVisible();
+  await expect(page.getByText("Returned hose")).toBeVisible();
+
+  // Browser Back from a lent-out detail restores the returned person view.
+  await page
+    .getByTestId("loan-row")
+    .filter({ hasText: "Heavy drill" })
+    .getByRole("link", { name: "View details" })
+    .click();
+  await expect(page.getByRole("heading", { name: "Mohsen" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/person=Mohsen/);
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(
+    filterTabs.getByRole("tab", { name: "Returned" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Heavy drill")).toBeVisible();
+  await shot(page, "06-loans-returned-origin");
+
+  // The explicit All loans back link preserves the same composed origin.
+  await page
+    .getByTestId("loan-row")
+    .filter({ hasText: "Heavy drill" })
+    .getByRole("link", { name: "View details" })
+    .click();
+  await page.getByRole("link", { name: "All loans" }).click();
+  await expect(page).toHaveURL(/person=Mohsen/);
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(
+    filterTabs.getByRole("tab", { name: "Returned" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Heavy drill")).toBeVisible();
+
+  // Borrowed direction and its detail link keep person + returned status.
+  await page
+    .getByRole("tablist", { name: "Loan direction" })
+    .getByRole("tab", { name: "Borrowed" })
+    .click();
+  await expect(page).toHaveURL(/direction=borrowed/);
+  expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(page.getByText("Returned hose")).toBeVisible();
+  await page
+    .getByTestId("borrowed-row")
+    .filter({ hasText: "Returned hose" })
+    .getByRole("link", { name: "View details" })
+    .click();
+  await page.goBack();
+  await expect(page).toHaveURL(/direction=borrowed/);
+  expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(page.getByText("Returned hose")).toBeVisible();
+
+  await page
+    .getByTestId("borrowed-row")
+    .filter({ hasText: "Returned hose" })
+    .getByRole("link", { name: "View details" })
+    .click();
+  await page.getByRole("link", { name: "All loans" }).click();
+  await expect(page).toHaveURL(/direction=borrowed/);
+  expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(page.getByText("Returned hose")).toBeVisible();
+
+  // All-direction tab keeps the person and status; text, overdue and direction
+  // filters compose together without clearing each other.
+  await page
+    .getByRole("tablist", { name: "Loan direction" })
+    .getByRole("tab", { name: "All" })
+    .click();
+  expect(new URL(page.url()).searchParams.has("direction")).toBe(false);
+  expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+
+  await page.goto(
+    "/loans?person=Mohsen&status=open&overdue=1&direction=all&q=sander",
+  );
+  await expect(
+    filterTabs.getByRole("tab", { name: "Outstanding" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Past due only")).toBeChecked();
+  await expect(page.getByLabel("Search loans")).toHaveValue("sander");
+  await expect(page.getByLabel("Filter loans by person")).toHaveValue(
+    "Mohsen",
+  );
+  await expect(page.getByText("Cordless sander")).toBeVisible();
+  await expect(page.getByText("Borrowed sander")).toBeVisible();
+
+  await page
+    .getByRole("tablist", { name: "Loan direction" })
+    .getByRole("tab", { name: "Lent out" })
+    .click();
+  expect(new URL(page.url()).searchParams.get("direction")).toBe("lent_out");
+  expect(new URL(page.url()).searchParams.get("person")).toBe("Mohsen");
+  expect(new URL(page.url()).searchParams.get("status")).toBe("open");
+  expect(new URL(page.url()).searchParams.get("overdue")).toBe("1");
+  expect(new URL(page.url()).searchParams.get("q")).toBe("sander");
+  await expect(page.getByText("Cordless sander")).toBeVisible();
+  await expect(page.getByText("Borrowed sander")).not.toBeVisible();
+  await shot(page, "07-loans-composed-filters");
+
+  await page
+    .getByRole("tablist", { name: "Loan direction" })
+    .getByRole("tab", { name: "Borrowed" })
+    .click();
+  expect(new URL(page.url()).searchParams.get("direction")).toBe("borrowed");
+  await expect(page.getByText("Borrowed sander")).toBeVisible();
+  await expect(page.getByText("Cordless sander")).not.toBeVisible();
+
+  // Default entry stays clean; item scope still works as a deep link.
+  await page.goto("/loans");
+  expect(new URL(page.url()).search).toBe("");
+  await expect(
+    filterTabs.getByRole("tab", { name: "Outstanding" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await page.goto(`/loans?item_id=${heavyDrill.item.id}&status=returned`);
+  expect(new URL(page.url()).searchParams.get("item_id")).toBe(
+    heavyDrill.item.id,
+  );
+  expect(new URL(page.url()).searchParams.get("status")).toBe("returned");
+  await expect(
+    page.getByText(/Showing loans for one owned item/),
+  ).toBeVisible();
+  await expect(page.getByText("Heavy drill")).toBeVisible();
 });

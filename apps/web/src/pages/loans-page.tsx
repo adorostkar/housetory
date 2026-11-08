@@ -51,17 +51,41 @@ const DIRECTIONS: Array<{ value: Direction; label: string }> = [
   { value: "borrowed", label: "Borrowed" },
 ];
 
+const LOAN_STATUS_VALUES = new Set<string>([
+  "all",
+  "open",
+  "outstanding",
+  "partially_returned",
+  "returned",
+  "cancelled",
+]);
+
+function parseStatus(value: string | null): LoanFilterStatus {
+  return value && LOAN_STATUS_VALUES.has(value)
+    ? (value as LoanFilterStatus)
+    : "open";
+}
+
+function parseDirection(value: string | null): Direction {
+  return value === "lent_out" || value === "borrowed" ? value : "all";
+}
+
+function parseOverdue(value: string | null): boolean {
+  return value === "1" || value === "true";
+}
+
 export function LoansPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const itemId = searchParams.get("item_id") ?? undefined;
+  const status = parseStatus(searchParams.get("status"));
+  const direction: Direction = itemId
+    ? "lent_out"
+    : parseDirection(searchParams.get("direction"));
+  const overdue = parseOverdue(searchParams.get("overdue"));
+  const qParam = searchParams.get("q") ?? "";
   const personParam = searchParams.get("person") ?? "";
   const canWrite = useCanWrite();
-  const [direction, setDirection] = React.useState<Direction>(
-    itemId ? "lent_out" : "all",
-  );
-  const [status, setStatus] = React.useState<LoanFilterStatus>("open");
-  const [overdue, setOverdue] = React.useState(false);
-  const [search, setSearch] = React.useState("");
+  const [search, setSearch] = React.useState(qParam);
   const [person, setPerson] = React.useState(personParam);
   const [choiceOpen, setChoiceOpen] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
@@ -72,36 +96,53 @@ export function LoansPage() {
     null,
   );
   const newLoanButtonRef = React.useRef<HTMLButtonElement>(null);
-  const deferredSearch = React.useDeferredValue(search);
+  const debouncedSearch = useDebouncedValue(search, 300);
   const debouncedPerson = useDebouncedValue(person, 250);
-  const personFilter = debouncedPerson.trim();
+
+  const updateFilters = React.useCallback(
+    (updates: Record<string, string | null>) => {
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          for (const [key, value] of Object.entries(updates)) {
+            if (value) next.set(key, value);
+            else next.delete(key);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   React.useEffect(() => {
-    if (personFilter === personParam) return;
-    setSearchParams(
-      (previous) => {
-        const next = new URLSearchParams(previous);
-        if (personFilter) next.set("person", personFilter);
-        else next.delete("person");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [personFilter, personParam, setSearchParams]);
+    const trimmed = debouncedSearch.trim();
+    if (trimmed === qParam) return;
+    updateFilters({ q: trimmed || null });
+  }, [debouncedSearch, qParam, updateFilters]);
+
+  React.useEffect(() => {
+    const trimmed = debouncedPerson.trim();
+    if (trimmed === personParam) return;
+    updateFilters({ person: trimmed || null });
+  }, [debouncedPerson, personParam, updateFilters]);
+
+  const clearPerson = () => setPerson("");
 
   const loansQuery = useLoans({
     status,
     item_id: itemId,
-    person: personFilter || undefined,
+    person: personParam.trim() || undefined,
     overdue,
-    q: deferredSearch.trim() || undefined,
+    q: qParam.trim() || undefined,
   });
   const borrowedQuery = useBorrowedList(
     {
       status,
-      person: personFilter || undefined,
+      person: personParam.trim() || undefined,
       overdue,
-      q: deferredSearch.trim() || undefined,
+      q: qParam.trim() || undefined,
     },
     50,
     !itemId,
@@ -127,8 +168,8 @@ export function LoansPage() {
   const loans = loanData?.items ?? [];
   const borrowed = borrowedData?.items ?? [];
   const hasFilters =
-    Boolean(deferredSearch.trim()) ||
-    Boolean(personFilter) ||
+    Boolean(qParam.trim()) ||
+    Boolean(personParam.trim()) ||
     Boolean(itemId) ||
     overdue ||
     status !== "open";
@@ -262,7 +303,11 @@ export function LoansPage() {
                     type="button"
                     role="tab"
                     aria-selected={direction === entry.value}
-                    onClick={() => setDirection(entry.value)}
+                    onClick={() =>
+                      updateFilters({
+                        direction: entry.value === "all" ? null : entry.value,
+                      })
+                    }
                     className={cn(
                       "rounded-full border px-3 py-1.5 text-[0.72rem] font-medium transition-colors",
                       direction === entry.value
@@ -286,7 +331,11 @@ export function LoansPage() {
                   type="button"
                   role="tab"
                   aria-selected={status === filter.value}
-                  onClick={() => setStatus(filter.value)}
+                  onClick={() =>
+                    updateFilters({
+                      status: filter.value === "open" ? null : filter.value,
+                    })
+                  }
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-[0.72rem] font-medium transition-colors",
                     status === filter.value
@@ -304,7 +353,11 @@ export function LoansPage() {
                   type="checkbox"
                   className="size-3.5 accent-primary"
                   checked={overdue}
-                  onChange={(event) => setOverdue(event.target.checked)}
+                  onChange={(event) =>
+                    updateFilters({
+                      overdue: event.target.checked ? "1" : null,
+                    })
+                  }
                 />
                 Past due only
               </label>
@@ -325,7 +378,7 @@ export function LoansPage() {
                     type="button"
                     aria-label="Clear person filter"
                     className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
-                    onClick={() => setPerson("")}
+                    onClick={clearPerson}
                   >
                     <X className="size-3.5" />
                   </button>
@@ -343,7 +396,7 @@ export function LoansPage() {
               </div>
             </div>
           </div>
-          {personFilter && (
+          {personParam.trim() && (
             <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
               Showing{" "}
               {direction === "all"
@@ -352,8 +405,10 @@ export function LoansPage() {
                   ? "lent-out records"
                   : "borrowed records"}{" "}
               for{" "}
-              <span className="font-medium text-foreground">{personFilter}</span>.
-              Outstanding, returned, all and past-due filters still apply.
+              <span className="font-medium text-foreground">
+                {personParam.trim()}
+              </span>
+              . Outstanding, returned, all and past-due filters still apply.
             </p>
           )}
         </div>
@@ -476,8 +531,7 @@ export function LoansPage() {
           if (!open) restoreNewLoanFocus();
         }}
         onCreated={() => {
-          setDirection("all");
-          setStatus("open");
+          updateFilters({ direction: null, status: null });
           refetchBoth();
           restoreNewLoanFocus();
         }}
@@ -496,7 +550,7 @@ export function LoansPage() {
             selectedItem.quantity - (selectedItem.on_loan_quantity ?? 0),
           )}
           onCreated={() => {
-            setStatus("open");
+            updateFilters({ status: null });
             setSelectedItem(null);
             refetchBoth();
             restoreNewLoanFocus();
