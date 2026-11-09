@@ -145,6 +145,7 @@ All application endpoints are versioned under `/api/v1`.
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items and reviewed per-item allocations |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
+| Insurance | `POST /insurance-valuations/scope-preview`, `POST/GET /insurance-valuations/batches/{request_id}`, cancel, `POST/GET /insurance-lists/{job_id}`, PDF/CSV downloads |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/natural` is the explicit answer/filter flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
@@ -281,7 +282,8 @@ Key decisions:
   container is explicit and preserves its UUID, children, items, documents and
   import provenance.
 - **Owned storage items** link one owned item to one storage location through
-  `storage_locations.owner_item_id` (nullable unique). The item remains outside
+  `storage_locations.owner_item_id` (nullable unique). The same model works for a
+  toolbox, TV stand or car; a car's Boot and Glovebox can be nested places. The item remains outside
   its own backing place and keeps its purchase, warranty, value, photos,
   documents, tags and history. Contents use the ordinary item storage-location
   relation. Moving the item moves the backing location subtree; moving the
@@ -372,13 +374,23 @@ Key decisions:
   as integer minor units plus an ISO-4217 currency. Multiple currencies are never
   silently summed. Reviewed extraction lines add `purchase_allocations` rows linked
   to the purchase/item/document/source line, without multiplying the shared purchase
-  total in ownership totals.
+  total in ownership totals. Households carry a default currency used only for new
+  entries when no explicit/document currency exists; existing records are not
+  rewritten and no exchange-rate conversion occurs.
 - **Warranties** remain one-to-one with an item. They store provider, start date,
   optional duration in calendar months, resolved end date, optional per-warranty
   reminder override, coverage notes and an optional certificate document.
   Households carry the default reminder window.
-- **Current values** are optional item estimates stored separately from purchase
-  values, with their own currency.
+- **Current values** are optional legacy item estimates stored separately from
+  purchase values, with their own currency. The ordinary UI preserves them as
+  read-only Earlier estimates and omits current-value keys on save; fresh
+  replacement estimates are generated only for dated Insurance PDF/CSV snapshots,
+  never applied back to items by that workflow.
+- **Disposition** is nullable outcome metadata on archived items: sold, given
+  away, donated, discarded, lost, consumed or other, with an optional date/note.
+  Active items cannot carry it; restoring clears it. It excludes records through
+  the same archived filters used by stocktake, lending, search and reports, and
+  changes are recorded as item history rather than deleting evidence.
 - **Photos** are item-owned files with dimensions, byte size, sort order and a
   derived WebP thumbnail. Up to 20 per item. Room and storage-location photos use
   the same validated storage pipeline and authenticated file routes.

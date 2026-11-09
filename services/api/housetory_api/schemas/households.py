@@ -12,6 +12,7 @@ class HouseholdBrief(ORMModel):
 
 class HouseholdMembershipOut(HouseholdBrief):
     role: str
+    default_currency: str = "USD"
     warranty_reminder_days: int = 30
     property_count: int = 0
     is_current: bool = False

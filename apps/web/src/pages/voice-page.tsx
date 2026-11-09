@@ -759,7 +759,7 @@ function VoiceSetup({
   );
 }
 
-function Recorder({
+export function Recorder({
   config,
   transcriptionReady,
   transcriptionStatus,

@@ -149,6 +149,7 @@ READ_ONLY_POST_SUFFIXES = (
 )
 READ_ONLY_POST_PATTERNS = (
     re.compile(r"/evidence-exports/preview$"),
+    re.compile(r"/insurance-valuations/scope-preview$"),
     re.compile(r"/evidence-exports$"),
     re.compile(r"/evidence-exports/[0-9a-f-]+/(cancel|retry)$"),
 )

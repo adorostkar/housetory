@@ -1,5 +1,6 @@
 import type {
   DocumentType,
+  ItemDisposition,
   LoanStatus,
   OcrStatus,
   WarrantyStatus,
@@ -21,6 +22,16 @@ export const CURRENCIES = [
   "DKK",
   "PLN",
 ] as const;
+
+export const ITEM_DISPOSITION_LABELS: Record<ItemDisposition, string> = {
+  sold: "Sold",
+  given_away: "Given away",
+  donated: "Donated",
+  discarded: "Discarded",
+  lost: "Lost",
+  consumed: "Consumed",
+  other: "No longer owned",
+};
 
 export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   receipt: "Receipt",

@@ -1,10 +1,12 @@
 # Owned items that provide storage
 
-A toolbox, TV stand or chest is an owned item **and** a place that can hold other
-items. Housetory keeps one owned item record for its purchase, warranty, current
-value, photographs, documents, tags and history, and one linked `StorageLocation`
-for the contents, identifier and QR code. The item itself is always recorded
-outside that storage place.
+A toolbox, TV stand, car or chest is an owned item **and** a place that can hold
+other items. Housetory keeps one owned item record for its purchase, warranty,
+current value, photographs, documents, tags and history, and one linked
+`StorageLocation` for the contents, identifier and QR code. The item itself is
+always recorded outside that storage place. For a car, use nested places such as
+Boot and Glovebox; the car retains its own purchase/warranty/documents and usual
+home while its contents stay independently searchable and movable.
 
 ![Item page with contents](walkthrough/item-storage/01-item-contents.png)
 

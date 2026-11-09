@@ -187,7 +187,7 @@ test("contextual Add items keeps place and returns a useful origin", async ({
   ).toHaveAttribute("aria-expanded", "false");
   await expect(
     page.getByRole("button", { name: /Current value/ }),
-  ).toHaveAttribute("aria-expanded", "false");
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: /Warranty/ }),
   ).toHaveAttribute("aria-expanded", "false");
@@ -227,9 +227,10 @@ test("editing only the name preserves collapsed shared purchase, warranty, value
   await expect(page.getByLabel(/Receipt document/)).toHaveValue(fixture.documentId);
   await page.getByRole("button", { name: /Purchase/ }).click();
 
-  await page.getByRole("button", { name: /Current value/ }).click();
-  await expect(page.getByLabel(/Estimated current value per unit/)).toHaveValue("50.00");
-  await page.getByRole("button", { name: /Current value/ }).click();
+  await page.getByRole("button", { name: /Earlier estimate/ }).click();
+  await expect(page.getByText(/Earlier estimate · per unit · \$50/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Convert to per-unit" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Earlier estimate/ }).click();
 
   await page.getByRole("button", { name: /Warranty/ }).click();
   await expect(page.getByLabel(/Provider/)).toHaveValue("Stanley");

@@ -70,8 +70,8 @@ test("container contents summary is live after quantity and move changes", async
 
   await page.goto(`/containers/${boxId}`);
   await expect(page.getByRole("heading", { name: /Inside/ })).toBeVisible();
-  const summary = page.getByText(/nested units/).locator("..");
-  await expect(summary).toContainText(`2 items · 5 nested units`);
+  const summary = page.getByText(/units total/).locator("..");
+  await expect(summary).toContainText(`2 items · 5 units total`);
   await expect(summary).toContainText(`1 item · 3 directly here`);
   await expect(summary).toContainText(`Tools ${id} · 1`);
   await expect(summary).toContainText(`Gear ${id} · 1`);
@@ -89,8 +89,8 @@ test("container contents summary is live after quantity and move changes", async
   });
   expect(quantity.ok()).toBeTruthy();
   await page.reload();
-  await expect(page.getByText(/nested units/).locator("..")).toContainText(
-    `2 items · 7 nested units`,
+  await expect(page.getByText(/units total/).locator("..")).toContainText(
+    `2 items · 7 units total`,
   );
 
   const moved = await request.patch(`/api/v1/items/${firstId}`, {
@@ -99,8 +99,8 @@ test("container contents summary is live after quantity and move changes", async
   });
   expect(moved.ok()).toBeTruthy();
   await page.reload();
-  const movedSummary = page.getByText(/nested units/).locator("..");
-  await expect(movedSummary).toContainText(`1 item · 2 nested units`);
+  const movedSummary = page.getByText(/units total/).locator("..");
+  await expect(movedSummary).toContainText(`1 item · 2 units total`);
   await expect(movedSummary).toContainText(`0 items · 0 directly here`);
   await expect(movedSummary).not.toContainText(`Tools ${id} · 1`);
   await expect(page.getByRole("button", { name: "Regenerate" })).toHaveCount(0);

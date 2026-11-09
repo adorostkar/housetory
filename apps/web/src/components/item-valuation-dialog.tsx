@@ -24,7 +24,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { CURRENCIES } from "@/lib/labels";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useInvalidateInventory } from "@/lib/queries";
+import { useDefaultCurrency, useInvalidateInventory } from "@/lib/queries";
 import type {
   ItemDetail,
   ItemDetailResponse,
@@ -66,6 +66,13 @@ function isCurrency(value: string): boolean {
   return /^[A-Z]{3}$/.test(value);
 }
 
+function initialCurrency(item: ItemDetail, defaultCurrency: string) {
+  if (item.current_value_cents != null && item.current_value_currency) {
+    return item.current_value_currency;
+  }
+  return item.purchase?.currency || defaultCurrency;
+}
+
 export function ItemValuationDialog({
   open,
   onOpenChange,
@@ -78,9 +85,10 @@ export function ItemValuationDialog({
   onApplied?: (item: ItemDetail) => void;
 }) {
   const invalidateInventory = useInvalidateInventory();
+  const defaultCurrency = useDefaultCurrency();
   const [purpose, setPurpose] = React.useState<ValuationPurpose>("resale");
   const [currency, setCurrency] = React.useState(
-    item.current_value_currency || item.purchase?.currency || "USD",
+    initialCurrency(item, defaultCurrency),
   );
   const [includeWeb, setIncludeWeb] = React.useState(false);
   const [amount, setAmount] = React.useState("");
@@ -91,13 +99,20 @@ export function ItemValuationDialog({
   React.useEffect(() => {
     if (!open) return;
     setPurpose("resale");
-    setCurrency(item.current_value_currency || item.purchase?.currency || "USD");
+    setCurrency(initialCurrency(item, defaultCurrency));
     setIncludeWeb(false);
     setAmount("");
     setPreview(null);
     setEstimateError(null);
     setApplyError(null);
-  }, [open, item.id, item.current_value_currency, item.purchase?.currency]);
+  }, [
+    open,
+    item.id,
+    item.current_value_cents,
+    item.current_value_currency,
+    item.purchase?.currency,
+    defaultCurrency,
+  ]);
 
   const amountCents = amount.trim() ? Math.round(Number(amount) * 100) : null;
   const amountInvalid =

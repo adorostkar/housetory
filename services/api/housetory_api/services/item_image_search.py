@@ -819,13 +819,20 @@ def build_product_profile(item: Item) -> ProductProfile:
     )
 
 
-def reference_search_ready(item: Item) -> bool:
-    profile = build_product_profile(item)
+def _searchable_model(model: str | None) -> bool:
+    return len(_compact(model)) >= 2
+
+
+def _profile_search_ready(profile: ProductProfile) -> bool:
     return bool(
         profile.brand
-        and (profile.item_type or profile.model)
+        and (profile.item_type or _searchable_model(profile.model))
         and not profile.brand_ambiguous
     )
+
+
+def reference_search_ready(item: Item) -> bool:
+    return _profile_search_ready(build_product_profile(item))
 
 
 def _query(item: Item, profile: ProductProfile) -> str:
@@ -906,7 +913,7 @@ def _model_windows(tokens: list[str]) -> set[str]:
 
 def _model_present(model: str, tokens: list[str]) -> bool:
     target = _compact(model)
-    return len(target) >= 2 and target in _model_windows(tokens)
+    return _searchable_model(model) and target in _model_windows(tokens)
 
 
 def _model_conflict(model: str | None, tokens: list[str]) -> bool:
@@ -962,11 +969,7 @@ def parse_brave_image_results(payload: dict[str, Any]) -> list[ImageCandidate]:
 
 def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[RankedImage]:
     profile = build_product_profile(item)
-    if (
-        profile.brand_ambiguous
-        or not profile.brand
-        or (not profile.item_type and not profile.model)
-    ):
+    if not _profile_search_ready(profile):
         return []
     ranked: list[RankedImage] = []
     for candidate in candidates:
@@ -995,16 +998,18 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
             ]
         )
         tokens = _word_tokens(text)
-        model_present = bool(profile.model and _model_present(profile.model, tokens))
+        title_tokens = _word_tokens(candidate.title)
+        # Model evidence is title-only: provenance hosts cannot confirm an exact
+        # model or substitute for unknown product-type evidence.
+        model_present = bool(profile.model and _model_present(profile.model, title_tokens))
         model_conflict = _model_conflict(profile.model, tokens)
         if model_conflict:
             continue
         brand_in_title = any(
-            _phrase_present(_word_tokens(candidate.title), _word_tokens(term))
-            for term in profile.brand_terms
+            _phrase_present(title_tokens, _word_tokens(term)) for term in profile.brand_terms
         )
         manufacturer_verified = _manufacturer_verified(profile.brand, page_host)
-        if not brand_in_title and not manufacturer_verified and not model_present:
+        if not brand_in_title and not manufacturer_verified:
             continue
         if _type_conflict(profile.item_type, text):
             continue
@@ -1096,8 +1101,7 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
         )
         item_tokens = _word_tokens(item_text)
         diagram_item = any(
-            _phrase_present(item_tokens, _word_tokens(term))
-            for term in DIAGRAM_ITEM_TERMS
+            _phrase_present(item_tokens, _word_tokens(term)) for term in DIAGRAM_ITEM_TERMS
         )
         if not diagram_item:
             image_text = " ".join(
@@ -1115,9 +1119,7 @@ def rank_candidates(item: Item, candidates: list[ImageCandidate]) -> list[Ranked
                     term for term in INFOGRAPHIC_TERMS if term not in PACKAGING_TERMS
                 )
             info_hits = sum(
-                1
-                for term in info_terms
-                if _phrase_present(image_tokens, _word_tokens(term))
+                1 for term in info_terms if _phrase_present(image_tokens, _word_tokens(term))
             )
             clean_hits = sum(
                 1
@@ -1530,11 +1532,7 @@ def find_and_select_reference(
             503, "image_search_unconfigured", provider.reason or "Image search is not configured."
         )
     profile = build_product_profile(item)
-    if (
-        profile.brand_ambiguous
-        or not profile.brand
-        or (not profile.item_type and not profile.model)
-    ):
+    if not _profile_search_ready(profile):
         raise ApiError(
             422,
             "image_description_required",

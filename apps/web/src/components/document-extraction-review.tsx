@@ -25,6 +25,7 @@ import { CURRENCIES } from "@/lib/labels";
 import {
   queryKeys,
   useCanWrite,
+  useDefaultCurrency,
   useInvalidateInventory,
   useItems,
   useLocations,
@@ -253,6 +254,7 @@ function ItemSearchPicker({
 
 export function DocumentExtractionReview({ document }: { document: DocumentRecord }) {
   const canWrite = useCanWrite();
+  const defaultCurrency = useDefaultCurrency();
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const extractionQuery = useQuery({
@@ -270,7 +272,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   const [merchant, setMerchant] = React.useState("");
   const [purchaseDate, setPurchaseDate] = React.useState("");
   const [documentDate, setDocumentDate] = React.useState("");
-  const [currency, setCurrency] = React.useState("USD");
+  const [currency, setCurrency] = React.useState(defaultCurrency);
   const [total, setTotal] = React.useState("");
   const [orderNumber, setOrderNumber] = React.useState("");
   const [purchaseAction, setPurchaseAction] = React.useState<"none" | "create" | "existing">(
@@ -316,7 +318,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     setMerchant(fieldValue(fields.merchant ?? document.merchant));
     setPurchaseDate(fieldValue(fields.purchase_date));
     setDocumentDate(fieldValue(fields.document_date ?? document.document_date));
-    setCurrency(fields.currency ?? "USD");
+    setCurrency(fields.currency ?? defaultCurrency);
     setTotal(centsInput(fields.total_cents));
     setOrderNumber(fieldValue(fields.order_number));
     setPurchaseAction(purchaseEligible && fields.total_cents != null ? "create" : "none");

@@ -34,9 +34,11 @@ Tailscale is optional.
 - Explicit conversion of existing storage places into containers; fixed shelves,
   cabinets and drawers can also receive optional identifiers such as
   `SHELF-001`.
-- Owned items can provide storage: a toolbox, TV stand or other physical object
-  keeps its purchase, warranty, value, photos, documents, tags and history while
-  its item page contains the other items stored inside. Existing containers can
+- Owned items can provide storage: a toolbox, TV stand, car or other physical
+  object keeps its purchase, warranty, value, photos, documents, tags and history
+  while its item page contains the other items stored inside. A car can therefore
+  have nested Boot and Glovebox places without becoming a fake room or property.
+  Existing containers can
   deliberately create or link one owned item, preserving the container/QR identity.
   Items that provide storage stay at quantity 1; separate physical units are
   separate items rather than invented instances. See
@@ -138,7 +140,10 @@ Tailscale is optional.
   Suggestions persist, deduplicate unchanged findings, support applied category/name
   changes with stale checks and real undo, and keep duplicates/missing details
   advisory. Optional owner-triggered AI review reuses the existing consented
-  Assistant task with a bounded one-request data disclosure. An optional
+  Assistant task with a bounded one-request data disclosure. Combined
+  **Organisation** suggestions cover existing/new categories and up to three
+  practical tags per item, with atomic apply and exact category/tag undo. Latest
+  review shows provider, model, items sent and completed/skipped/failed AI. An optional
   owner-managed weekly/monthly schedule is off by default, runs through durable
   worker jobs with hard item/daily caps, and never auto-applies changes. Scheduled
   AI requires its own consent tied to the current Assistant route; provider/model
@@ -178,23 +183,20 @@ Tailscale is optional.
   duplicating the amount, receipt or merchant.
 - Warranties with provider, start date, duration, calculated expiration,
   certificate document, coverage notes, status and configurable reminders.
-- Ownership overview with purchase transaction value, per-unit current-value
-  estimates extended by owned quantity, category and room breakdowns, most
-  valuable items and items missing purchase information.
-- Per-unit current values with explicit `unit × owned quantity = record total`,
-  separate original purchase totals, audited legacy record-total conversion,
-  missing values kept unknown, and matching item/PDF/CSV/ZIP/JSON semantics.
-- **On-demand item valuation** for one item at a time: choose used-market
-  **Resale** or today's **Replacement** purpose, optionally use the existing
-  consented Assistant/text provider and configured Brave search, review the
-  per-unit range and owned total, and apply or cancel explicitly. Manual entry
-  works without AI. Preview metadata, real asking/listed source links, purpose,
-  date and uncertainty are stored with the value and shown in the evidence PDF;
-  shared purchase totals, legacy totals, owned storage contents and borrowed
-  records are not double-counted. No automatic, bulk or periodic valuation. See
-  [`docs/ITEM_VALUATION.md`](docs/ITEM_VALUATION.md).
-- Multi-currency reporting that never adds currencies together; there is no
-  implicit exchange rate.
+- Ownership overview with historical purchase transaction value, category and
+  room breakdowns, and items missing purchase information. Current-value cards
+  and rankings are intentionally not maintained in the ordinary UI.
+- **Insurance replacement lists**: select inventory, request bounded background
+  AI replacement estimates or enter values manually, edit/exclude rows in one
+  review table, and generate dated PDF/CSV snapshots. Existing consented AI and
+  optional Brave comparisons preserve real source links and uncertainty. Values
+  are export-only; no item `current_value_*` field or purchase record is changed.
+  Existing values remain visible read-only as Earlier estimates and legacy APIs
+  remain compatible. See [`docs/ITEM_VALUATION.md`](docs/ITEM_VALUATION.md).
+- A household **Default currency** for new purchase and current-value entries,
+  applied consistently by item forms, imports and API fallbacks. Existing records
+  and document-extracted currencies stay explicit. Multi-currency reporting never
+  adds currencies together; there is no implicit exchange rate.
 - CSV exports for documents, purchases, warranties and inventory.
 - AI-assisted bulk inventory import from pasted text, TXT, Markdown, CSV, XLSX,
   DOCX, PDF, OCR images and complete Obsidian ZIP vaults through the ordinary
@@ -209,19 +211,28 @@ Tailscale is optional.
   lookup first, configured consented AI only when interpretation is needed, and
   honest direct-only results when no provider is available. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
-- One clear **Add items** chooser for manual entry, **Scan a photo** and
-  importing a list or file. This replaces separate primary Import/AI Scan
-  navigation while keeping every focused workflow and import history.
+- One clear **Add items** chooser for **Manual add** and **Describe or show**.
+  Text, an image with optional context, editable microphone transcription and a
+  single product URL all converge on the same import review/apply workflow.
+  Recognition adaptation is idempotent, product pages use bounded SSRF-safe
+  retrieval, and no transcript writes inventory before review. See
+  [`docs/ASSISTED_ADD_ITEMS.md`](docs/ASSISTED_ADD_ITEMS.md).
 - The item form leads with name, quantity and place. Optional identity,
   description, category, tags, purchase, current value and warranty stay in
   collapsed summaries; editing a visible field never clears hidden recorded
   values or shared-purchase relationships. Contextual Add items preserves the
-  source place and a useful return origin. See
+  source place and a useful return origin. Rooms/sub-rooms can be created without
+  losing the draft. **Duplicate item** copies identity and organisation with
+  quantity 1, not unit-specific financial or photographic evidence. **Mark as no
+  longer owned** preserves the record with an outcome/date/note and restore;
+  deletion remains separate. See
   [`docs/ITEM_FORM_AND_FILES.md`](docs/ITEM_FORM_AND_FILES.md).
 - One prominent global search box in the desktop top bar and near the top of
   every mobile inventory page, with grouped local suggestions while typing and
-  the same submit-time result flow everywhere. There is no competing sidebar
-  search box or separate keyword/Ask mode on the results page.
+  the same submit-time result flow everywhere. On Items, this same input updates
+  the list's `q` filter, so there is no duplicate Items search or Advanced search
+  mode. There is no competing sidebar search box or separate keyword/Ask mode on
+  the results page.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
   quantities, duplicate review, room-only or room-plus-container destinations,
   per-suggestion overrides and approved bulk creation. Fixed fixtures are flagged

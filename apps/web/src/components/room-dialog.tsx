@@ -35,6 +35,7 @@ export function RoomDialog({
   room,
   defaultParentId,
   defaultPropertyId,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -42,6 +43,7 @@ export function RoomDialog({
   room?: Room;
   defaultParentId?: string;
   defaultPropertyId?: string;
+  onCreated?: (room: Room) => void;
 }) {
   const queryClient = useQueryClient();
   const propertiesQuery = useProperties();
@@ -50,6 +52,10 @@ export function RoomDialog({
   const [description, setDescription] = useState("");
   const [propertyId, setPropertyId] = useState("");
   const [parentId, setParentId] = useState("");
+  const roomsKey = rooms
+    .map((entry) => `${entry.id}:${entry.property_id}:${entry.parent_id}:${entry.name}`)
+    .join("|");
+  const propertiesKey = properties.map((entry) => entry.id).join("|");
 
   useEffect(() => {
     if (!open) return;
@@ -65,17 +71,18 @@ export function RoomDialog({
         (properties.length === 1 ? properties[0]!.id : ""),
     );
     setParentId(room?.parent_id ?? defaultParentId ?? "");
-  }, [open, room, rooms, defaultParentId, defaultPropertyId, properties]);
+  }, [open, room, roomsKey, defaultParentId, defaultPropertyId, propertiesKey]);
 
   const save = useMutation({
     mutationFn: (payload: RoomPayload) =>
       room
         ? api.patch<Room>(`/rooms/${room.id}`, payload)
         : api.post<Room>("/rooms", payload),
-    onSuccess: () => {
+    onSuccess: (createdRoom) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
       toast.success(room ? "Room updated" : "Room added");
+      if (!room) onCreated?.(createdRoom);
       onOpenChange(false);
     },
   });

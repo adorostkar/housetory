@@ -198,6 +198,7 @@ const sessionState = {
   household: {
     id: "house-1",
     name: "Home",
+    default_currency: "USD",
     warranty_reminder_days: 30,
   },
   role: "owner",

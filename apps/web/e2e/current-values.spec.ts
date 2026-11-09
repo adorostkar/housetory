@@ -151,7 +151,7 @@ test("item and evidence report show $40 per unit, owned quantity 2 and $80 total
   });
 });
 
-test("legacy record total is reviewed and explicitly converted in the item form", async ({
+test("legacy record total stays read-only and unchanged when editing the item", async ({
   page,
   request,
 }) => {
@@ -166,7 +166,7 @@ test("legacy record total is reviewed and explicitly converted in the item form"
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByText(/Legacy record total/)).toBeVisible();
+  await expect(page.getByText(/Earlier record total/)).toBeVisible();
   await expect(page.getByText(/not multiplied by quantity/)).toBeVisible();
   await expect(page.getByText(/\$80/)).toBeVisible();
   await page.screenshot({
@@ -175,26 +175,15 @@ test("legacy record total is reviewed and explicitly converted in the item form"
   });
 
   await page.getByRole("link", { name: "Edit" }).first().click();
-  await page.getByRole("button", { name: /Current value/ }).click();
-  await expect(page.getByText("Legacy recorded total", { exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Convert to per-unit" }).click();
-  const preview = page.getByTestId("current-value-preview");
-  await expect(preview).toContainText("2 owned units");
-  await expect(preview).toContainText("$40");
-  await expect(preview).toContainText("$80");
-  const currentValueSection = page
-    .locator("section")
-    .filter({ has: page.getByTestId("current-value-preview") });
-  await currentValueSection.scrollIntoViewIfNeeded();
-  await currentValueSection.screenshot({
-    path: "../../docs/walkthrough/current-value/04-legacy-conversion-review.png",
-  });
+  await page.getByRole("button", { name: /Earlier estimate/ }).click();
+  await expect(page.getByText(/read-only/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Convert to per-unit" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Create insurance list" })).toBeVisible();
 
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("heading", { name: itemName, level: 1 })).toBeVisible();
-  await expect(page.getByText(/40.*per unit/)).toBeVisible();
-  await expect(page.getByText(/80.*total/)).toBeVisible();
-  await expect(page.getByText(/Legacy record total/)).toHaveCount(0);
+  await expect(page.getByText(/Earlier record total/)).toBeVisible();
+  await expect(page.getByText(/\$80/)).toBeVisible();
 
   await expect
     .poll(async () => {
@@ -205,7 +194,7 @@ test("legacy record total is reviewed and explicitly converted in the item form"
       };
       return body.item.current_value_basis;
     })
-    .toBe("per_unit");
+    .toBe("legacy_record_total");
   const detail = await request.get(`/api/v1/items/${item.item.id}`);
   const body = (await detail.json()) as {
     item: {
@@ -214,6 +203,6 @@ test("legacy record total is reviewed and explicitly converted in the item form"
       current_value_total_cents: number;
     };
   };
-  expect(body.item.current_value_cents).toBe(4000);
+  expect(body.item.current_value_cents).toBe(8000);
   expect(body.item.current_value_total_cents).toBe(8000);
 });

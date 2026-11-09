@@ -36,7 +36,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { useCanWrite } from "@/lib/queries";
+import { useCanWrite, useDefaultCurrency } from "@/lib/queries";
 import { CURRENCIES, DOCUMENT_TYPE_LABELS } from "@/lib/labels";
 import {
   useDocuments,
@@ -425,11 +425,13 @@ function PurchaseDialog({
   purchase: Purchase | null;
 }) {
   const invalidate = useInvalidateInventory();
+  const defaultCurrency = useDefaultCurrency();
   const documentsQuery = useDocuments({}, 100);
   const [merchant, setMerchant] = React.useState("");
   const [purchaseDate, setPurchaseDate] = React.useState("");
   const [price, setPrice] = React.useState("");
-  const [currency, setCurrency] = React.useState("USD");
+  const [currency, setCurrency] = React.useState(defaultCurrency);
+  const [currencyTouched, setCurrencyTouched] = React.useState(false);
   const [orderNumber, setOrderNumber] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [receiptDocumentId, setReceiptDocumentId] = React.useState("");
@@ -442,12 +444,17 @@ function PurchaseDialog({
     setPrice(
       purchase?.price_cents != null ? (purchase.price_cents / 100).toFixed(2) : "",
     );
-    setCurrency(purchase?.currency ?? "USD");
+    setCurrency(purchase?.currency ?? defaultCurrency);
+    setCurrencyTouched(false);
     setOrderNumber(purchase?.order_number ?? "");
     setNotes(purchase?.notes ?? "");
     setReceiptDocumentId(purchase?.receipt_document_id ?? "");
     setItemIds(purchase?.items.map((item) => item.id) ?? []);
   }, [open, purchase]);
+
+  React.useEffect(() => {
+    if (open && !purchase && !currencyTouched) setCurrency(defaultCurrency);
+  }, [currencyTouched, defaultCurrency, open, purchase]);
 
   const localPriceCents = price.trim() ? Math.round(Number(price) * 100) : null;
   const priceInvalid =
@@ -535,7 +542,10 @@ function PurchaseDialog({
               <Select
                 id="purchase-currency"
                 value={currency}
-                onChange={(event) => setCurrency(event.target.value)}
+                onChange={(event) => {
+                  setCurrency(event.target.value);
+                  setCurrencyTouched(true);
+                }}
               >
                 {CURRENCIES.map((code) => (
                   <option key={code} value={code}>

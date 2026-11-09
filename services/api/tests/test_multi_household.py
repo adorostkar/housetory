@@ -153,6 +153,7 @@ def test_household_listing_creation_switching_and_explicit_mutation_context(owne
 
     created = create_household(owner_client, "Summer house", "Cabin")
     assert created["household"]["name"] == "Summer house"
+    assert created["household"]["default_currency"] == "USD"
     assert created["role"] == "owner"
     assert {entry["name"] for entry in created["households"]} == {
         "Ada's Home",

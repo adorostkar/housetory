@@ -144,6 +144,10 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
   const item = await createItem(request, `Brave drill ${id}`);
   await page.setViewportSize({ width: 390, height: 844 });
 
+  const configure = await request.put("/api/v1/settings/online-search", {
+    data: { manual_enabled: true, api_key: BRAVE_FIXTURE_KEY },
+  });
+  expect(configure.ok()).toBeTruthy();
   const initial = await request.get(`/api/v1/items/${item.item.id}/manuals`);
   const status = (await initial.json()) as {
     search: { provider: string | null; provider_label: string | null };

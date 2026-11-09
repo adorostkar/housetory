@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...domain import RETIRED_AI_TASKS, RecognitionStatus
-from ...models import AiRecognition
+from ...models import AiRecognition, Room
 from ...schemas.ai import (
     AiRecognitionApplyRequest,
     AiRecognitionApplyResult,
@@ -25,6 +25,7 @@ from ...schemas.ai import (
 from ...schemas.items import ItemSummary
 from ...services import ai as ai_service
 from ...services import global_assistant, global_search, storage, unified_search
+from ...services import properties as property_service
 from ...services.ai_tools import document_relations
 from ...services.assistant import answer_question, natural_search
 from ...services.documents import get_document
@@ -54,6 +55,15 @@ def _get_recognition(
     if recognition is None:
         raise ApiError(404, "recognition_not_found", "Recognition not found.")
     return recognition
+
+
+def _reject_linked_recognition(recognition: AiRecognition) -> None:
+    if (recognition.result or {}).get("_add_items", {}).get("import_batch_id"):
+        raise ApiError(
+            409,
+            "recognition_already_in_import",
+            "This recognition already has an import review. Continue from that review instead.",
+        )
 
 
 @router.get("/ai/status", response_model=AiStatus)
@@ -224,11 +234,32 @@ def create_recognition(
     file: Annotated[UploadFile, File()],
     location_id: Annotated[uuid.UUID | None, Form()] = None,
     room_id: Annotated[uuid.UUID | None, Form()] = None,
+    property_id: Annotated[uuid.UUID | None, Form()] = None,
+    text: Annotated[str | None, Form(max_length=10_000)] = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
     room_id, location_record = resolve_location(db, auth.household.id, room_id, location_id)
     location_id = location_record.id if location_record is not None else None
+    property_record = (
+        property_service.get_property(db, auth.household.id, property_id)
+        if property_id is not None
+        else None
+    )
+    if room_id is not None and property_record is not None:
+        room = db.get(Room, room_id)
+        if room is not None and room.property_id != property_record.id:
+            raise ApiError(
+                422,
+                "context_mismatch",
+                "The selected room belongs to a different property.",
+            )
+    context_text = (text or "").strip()
+    add_items = (
+        {"text": context_text, "property_id": str(property_record.id) if property_record else None}
+        if context_text or property_record is not None
+        else None
+    )
     stored = storage.store_ai_image(auth.household.id, file)
     recognition = AiRecognition(
         household_id=auth.household.id,
@@ -244,7 +275,7 @@ def create_recognition(
         room_id=room_id,
         location_id=location_id,
         status=RecognitionStatus.QUEUED.value,
-        result={},
+        result={"_add_items": add_items} if add_items is not None else {},
         field_sources={},
     )
     db.add(recognition)
@@ -342,6 +373,7 @@ def apply_recognition_route(
     db: Session = Depends(get_db),
 ) -> AiRecognitionApplyResult:
     recognition = _get_recognition(db, auth.household.id, recognition_id)
+    _reject_linked_recognition(recognition)
     try:
         return apply_recognition(db, auth.household.id, recognition, payload)
     except ValueError as exc:
@@ -356,6 +388,7 @@ def retry_recognition(
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
     recognition = _get_recognition(db, auth.household.id, recognition_id)
+    _reject_linked_recognition(recognition)
     if recognition.status == RecognitionStatus.QUEUED.value:
         raise ApiError(409, "recognition_in_progress", "This photo is already queued.")
     enqueue_recognition(db, recognition)

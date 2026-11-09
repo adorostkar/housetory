@@ -105,6 +105,32 @@ async function focusQuickSearch(page: Page) {
   return input;
 }
 
+test("the global input filters Items in place without a second search field", async ({
+  page,
+  request,
+}) => {
+  const suffix = Date.now().toString().slice(-6);
+  const room = await createRoom(request, `Items filter room ${suffix}`);
+  await createItem(request, {
+    name: `Items filter camera ${suffix}`,
+    room_id: room.id,
+  });
+
+  await page.goto("/items?sort=name_asc");
+  const input = page.getByRole("combobox", {
+    name: "Search or ask about your inventory",
+  });
+  await expect(input).toBeVisible();
+  await input.fill(`Items filter camera ${suffix}`);
+  await expect(page).toHaveURL(/\/items\?q=.*sort=name_asc|\/items\?sort=name_asc&q=/);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator("main").getByRole("link", { name: new RegExp(`Items filter camera ${suffix}`) }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Search items")).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("sort")).toBe("name_asc");
+});
+
 test("desktop global and mobile quick search find and open records", async ({
   page,
   browser,

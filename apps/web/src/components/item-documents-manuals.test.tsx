@@ -132,7 +132,7 @@ function session(role: SessionState["role"] = "owner"): SessionState {
     authenticated: true,
     setup_required: false,
     user: { id: "user-1", name: "Ada", email: "ada@example.com", created_at: "2026-01-01" },
-    household: { id: "household-1", name: "Ada's Home", warranty_reminder_days: 30 },
+    household: { id: "household-1", name: "Ada's Home", default_currency: "USD", warranty_reminder_days: 30 },
     role,
   };
 }
@@ -498,6 +498,15 @@ describe("ItemDocumentsAndManuals", () => {
     expect(
       screen.queryByRole("heading", { name: "Manuals & help" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens the simplified item-context manual upload", async () => {
+    renderDocumentsAndManuals(manualsData({ manuals: [] }));
+    await userEvent.click(screen.getByRole("button", { name: "Add manual" }));
+
+    expect(screen.getByRole("heading", { name: "Add a manual" })).toBeVisible();
+    expect(screen.getByText(/attached to this item automatically/)).toBeVisible();
+    expect(screen.queryByText("Compatible items")).not.toBeInTheDocument();
   });
 
   it("lists a manual once even when it is also in the item document list", () => {

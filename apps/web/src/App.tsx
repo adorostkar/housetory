@@ -46,8 +46,18 @@ const RoomDetailPage = React.lazy(() =>
 const ItemsPage = React.lazy(() =>
   import("@/pages/items-page").then((module) => ({ default: module.ItemsPage })),
 );
+const DescribeItemsPage = React.lazy(() =>
+  import("@/pages/describe-items-page").then((module) => ({
+    default: module.DescribeItemsPage,
+  })),
+);
 const LoansPage = React.lazy(() =>
   import("@/pages/loans-page").then((module) => ({ default: module.LoansPage })),
+);
+const InsurancePage = React.lazy(() =>
+  import("@/pages/insurance-page").then((module) => ({
+    default: module.InsurancePage,
+  })),
 );
 const LoanDetailPage = React.lazy(() =>
   import("@/pages/loan-detail-page").then((module) => ({
@@ -296,9 +306,11 @@ export default function App() {
             <Route element={<RequireWriter />}>
               <Route path="items/new" element={<ItemNewPage />} />
               <Route path="items/:itemId/edit" element={<ItemEditPage />} />
+              <Route path="add-items" element={<DescribeItemsPage />} />
             </Route>
             <Route path="items/:itemId" element={<ItemDetailPage />} />
             <Route path="review" element={<ReviewPage />} />
+            <Route path="insurance" element={<InsurancePage />} />
             <Route path="loans" element={<LoansPage />} />
             <Route path="loans/:loanId" element={<LoanDetailPage />} />
             <Route path="borrowed/:borrowedId" element={<BorrowedDetailPage />} />

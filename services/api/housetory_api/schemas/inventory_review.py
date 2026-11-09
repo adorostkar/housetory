@@ -11,12 +11,13 @@ ReviewScopeType = Literal["items", "room", "container", "property", "household"]
 ReviewSuggestionType = Literal[
     "category",
     "name",
+    "organisation",
     "possible_duplicate",
     "missing_detail",
     "location_conflict",
 ]
 ReviewSuggestionStatus = Literal["pending", "accepted", "dismissed", "stale", "reverted"]
-ReviewActionKind = Literal["apply_category", "apply_name", "advisory"]
+ReviewActionKind = Literal["apply_category", "apply_name", "apply_organisation", "advisory"]
 ReviewRunTrigger = Literal["manual", "scheduled"]
 ReviewScheduleScopeType = Literal["household", "property", "room", "container"]
 ReviewScheduleFrequency = Literal["weekly", "monthly"]
@@ -84,6 +85,7 @@ class ReviewRunOut(BaseModel):
     stale_suggestion_count: int
     suppressed_suggestion_count: int
     ai_used: bool
+    ai_item_count: int = 0
     ai_provider_label: str | None = None
     ai_model: str | None = None
     ai_error: str | None = None

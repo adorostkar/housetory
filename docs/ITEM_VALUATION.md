@@ -1,100 +1,90 @@
-# On-demand item valuation
+# Insurance replacement lists
 
-This batch adds one explicit action on an individual item: **Estimate value**. It
-is not an automatic, periodic, whole-household or bulk valuation feature, and it
-does not add a review dashboard.
+Valuation is an **export-time activity**, not a value the user maintains on every
+item. Purchase prices remain historical evidence and are never mixed with
+replacement estimates.
 
-## Purposes and unit rules
+## One simple workflow
 
-The owner/member chooses either:
+Open **Insurance** from Overview, an item, or the mobile More menu. Choose whole
+household, property, room, container or explicitly selected items, then review
+one table:
 
-- **Resale value** — a realistic used-market amount, using asking/listed
-  comparisons only as unconfirmed evidence; or
-- **Replacement value** — what a comparable replacement could cost today.
+- include or exclude each item;
+- enter a per-unit replacement amount manually, or request AI estimates;
+- edit any suggestion and inspect its range, confidence, assumptions and real
+  source links;
+- leave the amount blank when value is unknown. Blank is not zero; an explicit
+  zero is still valid.
 
-The two purposes are never mixed silently. Changing purpose after a preview
-clears that preview and requires a new AI estimate or a manually entered value.
+The default currency comes from the household Settings. Choose the review date,
+then generate a dated PDF and CSV. Large inventories can be estimated in batches
+of up to 10 eligible items. Items with insufficient identity information remain
+available for manual review instead of being silently excluded.
 
-Values are always **per owned unit**. The preview shows the range, the suggested
-amount and the owned total using `unit × owned quantity`. Loaned owned units
-remain included; borrowed-from-others records are never owned inventory. A
-storage-bearing item's value includes only that item, not its contents, and shared
-purchase transaction totals are never treated as per-unit prices.
+## AI and web comparisons
 
-Legacy `legacy_record_total` values remain reported once and are not multiplied.
-Applying a new per-unit value converts a legacy total only after explicit review,
-and the prior value/provenance is retained in item history.
+AI estimation uses the existing consented Assistant/text provider and the
+existing replacement-valuation service. Each item runs as a separate bounded
+background job, so one slow provider or failure does not abort the rest of the
+batch. There is no automatic paid retry. Batch reads and cancellation are
+household-scoped. Public comparison search is optional and uses the existing
+Brave integration; without it, estimates are clearly rough AI estimates.
 
-## Optional AI and web comparisons
+Only product-identifying context is used: name, description, brand/model,
+condition and purchase context. Serials, room/location, borrowers, receipts and
+account data are not sent to the model. Brave receives only the generic product
+query. AI-produced URLs are never trusted; source links come only from actual
+retrieved results.
 
-The existing Assistant/text default provider and consent are reused. There is no
-new mandatory valuation model setting or subscription. The optional online
-comparison checkbox sends only a generic item name, brand/model and condition
-query to the configured Brave integration. It never sends location, borrower,
-serial, receipt, account or document contents. No result page is fetched; only
-Brave snippets and their links are used.
+AI is used only when the user explicitly starts a batch. Nothing is scheduled or
+periodically re-valued.
 
-AI output is validated for currency, integer minor-unit bounds and ordered
-low/suggested/high ranges. Item text is treated as data, never instructions, and
-AI-generated links are omitted. Web sources are real retrieved result links;
-snippet prices are labelled asking/listed prices, never confirmed sold prices.
-Currency inferred from a symbol is marked as inferred. If web search is not
-available, the preview clearly states it is a rough estimate without verified
-current comparisons. If AI is unavailable, manual entry remains fully usable.
+## Export-only values and immutability
 
-## Preview, apply and stale safety
+The existing `apply_valuation` path is **not** called by Insurance. Item
+`current_value_*` fields and purchase records are unchanged.
 
-A preview is stored for at most 24 hours and never changes the item value. The
-review dialog lets the user edit the per-unit amount and currency or cancel.
-Applying:
+Every included row stores either no reviewed value or:
 
-1. checks the item's valuation fingerprint (quantity, relevant item facts,
-   purchase/allocation facts and existing value metadata) for changes;
-2. checks the preview still exists, has not expired, and still matches purpose and
-   currency;
-3. validates the reviewed amount and safe extended total;
-4. saves the per-unit value, purpose, range, as-of date, confidence, assumptions
-   and real source links;
-5. records an `item.value_updated` history event with from/to value and estimate
-   provenance.
+- reviewed per-unit amount and owned total;
+- current item fingerprint;
+- optional estimate ID, with household/item/purpose/currency/expiry/fingerprint
+  validation;
+- estimate date, confidence, reasoning, assumptions and real source metadata.
 
-If the item changed after preview, apply returns a stale error and writes nothing.
-Manual edits through the ordinary item form continue to work and clear old
-estimate provenance rather than mislabelling the new value.
+Changing an item after review invalidates its expected fingerprint. A generated
+job result freezes the reviewed values and metadata, so later item edits or
+preview expiry do not alter the PDF/CSV already generated. These job snapshots
+use the existing durable queue lifecycle and are not presented as permanent named
+insurance-list records.
 
-## Evidence and reports
+PDF output states that values are export-only, unknown is not zero, purchase
+prices are separate, and estimates are not professional appraisals or insurer
+payout guarantees. CSV uses explicit replacement columns and UTF-8 BOM for
+spreadsheet compatibility.
 
-The evidence/insurance PDF shows per-unit value, owned-quantity total, purpose,
-as-of date, confidence, range, real source links (marked asking/listed, retrieved
-date) and a clear estimate-only disclaimer. Unknown values remain unknown, not
-zero. Existing CSV columns and existing stored values are unchanged unless the
-user applies a new value.
+## Existing values and compatibility
 
-![Estimate value purpose and preview](walkthrough/item-valuation/01-valuation-purpose.png)
+Existing `current_value_*` columns, financial endpoints, valuation endpoints and
+generic evidence exports remain compatible for imports, older clients and older
+evidence snapshots. In the ordinary UI they are read-only **Earlier estimates**:
 
-![AI/web preview with range and asking sources](walkthrough/item-valuation/02-valuation-preview-web.png)
+- item create/edit does not offer current-value controls and omits all
+  current-value keys on save;
+- item detail shows older values without an Apply/Estimate action;
+- Overview reports purchase facts only, without current-value cards/rankings.
 
-![Applied per-unit value and provenance](walkthrough/item-valuation/03-item-applied-value.png)
-
-![Mobile valuation dialog](walkthrough/item-valuation/04-valuation-mobile.png)
+The new Insurance workflow is the only primary place for creating fresh
+replacement estimates. Generic receipt/photo evidence export remains a separate
+action.
 
 ## Verification
 
-- Backend tests cover per-unit quantity totals, legacy totals, shared purchase
-  allocations, owned storage hosts, borrowed exclusion, rough AI vs web sources,
-  currency/condition/missing input/provider failure, invalid AI output, purpose
-  switching, stale fingerprints, manual fallback, permissions/cross-household
-  isolation, privacy prompts, evidence PDF metadata and migration preservation.
-- Frontend tests cover purpose selection, preview, edited amount, manual save,
-  purpose-change preview clearing, AI failure fallback, cancel-without-write and
-  accessible source links.
-- Disposable Playwright coverage runs at desktop, 768, 390 and 320 widths with a
-  mock AI/Brave endpoint. No paid calls or real credentials are used.
-
-## Limits
-
-- No automatic, scheduled, bulk or whole-household valuation.
-- No professional appraisal, guaranteed resale price or guaranteed insurer payout.
-- No listing-page scraping or confirmed sold-price claim. Brave is the supported
-  optional web provider for this flow.
-- No AI warranty feature, investment advice or financial decision guidance.
+- Backend tests cover scope/eligibility, AI batches, edited reviewed amounts,
+  unknown and explicit-zero values, stale fingerprints, no item-value writes,
+  immutable output, PDF text and CSV replacement columns.
+- Frontend tests cover AI estimate editing, explicit zero versus unknown,
+  downloads and the absence of `/valuation/apply` calls.
+- Browser coverage uses mocked AI/Brave providers, edits a generated estimate,
+  downloads PDF/CSV and checks responsive overflow.

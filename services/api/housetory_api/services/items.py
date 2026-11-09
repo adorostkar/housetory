@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
-from ..models import Category, Item, Purchase, Room, StorageLocation, Tag, Warranty
+from ..domain import ActivityAction
+from ..models import Category, Household, Item, Purchase, Room, StorageLocation, Tag, Warranty
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import current_value as current_value_service
 from . import history, lending, storage_items
@@ -97,7 +98,11 @@ def resolve_location(
 
 def apply_purchase(db: Session, item: Item, payload: PurchaseIn, *, replace: bool) -> None:
     if replace or item.purchase is None:
-        item.purchase = Purchase(household_id=item.household_id, currency="USD")
+        household = db.get(Household, item.household_id)
+        item.purchase = Purchase(
+            household_id=item.household_id,
+            currency=household.default_currency if household is not None else "USD",
+        )
     purchase = cast(Purchase, item.purchase)
     fields = payload.model_fields_set
     if "merchant" in fields or "vendor" in fields:
@@ -261,6 +266,70 @@ def _apply_current_value_update(
     }
 
 
+def _disposition_snapshot(item: Item) -> dict[str, Any]:
+    return {
+        "is_archived": item.is_archived,
+        "disposition": item.disposition,
+        "disposed_on": item.disposed_on.isoformat() if item.disposed_on else None,
+        "disposition_note": item.disposition_note,
+    }
+
+
+def _apply_disposition_update(
+    item: Item, payload: ItemUpdate, fields: set[str]
+) -> dict[str, Any] | None:
+    if not fields & {"is_archived", "disposition", "disposed_on", "disposition_note"}:
+        return None
+
+    before = _disposition_snapshot(item)
+    restoring = (
+        "is_archived" in fields and payload.is_archived is False and item.is_archived
+    )
+    if restoring:
+        item.is_archived = False
+        item.disposition = None
+        item.disposed_on = None
+        item.disposition_note = None
+    else:
+        new_archived = payload.is_archived if payload.is_archived is not None else item.is_archived
+        new_disposition = (
+            (payload.disposition.value if payload.disposition is not None else None)
+            if "disposition" in fields
+            else item.disposition
+        )
+        new_disposed_on = (
+            payload.disposed_on if "disposed_on" in fields else item.disposed_on
+        )
+        new_note = (
+            payload.disposition_note
+            if "disposition_note" in fields
+            else item.disposition_note
+        )
+        if not new_archived and any(
+            value is not None for value in (new_disposition, new_disposed_on, new_note)
+        ):
+            raise ApiError(
+                422,
+                "disposition_requires_archive",
+                "Disposition metadata can only be set on an archived item.",
+            )
+        if new_disposition is None and (new_disposed_on is not None or new_note is not None):
+            raise ApiError(
+                422,
+                "disposition_reason_required",
+                "A disposition reason is required when setting a disposed date or note.",
+            )
+        item.is_archived = new_archived
+        item.disposition = new_disposition
+        item.disposed_on = new_disposed_on
+        item.disposition_note = new_note
+
+    after = _disposition_snapshot(item)
+    if before == after:
+        return None
+    return {"from": before, "to": after}
+
+
 def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate) -> Item:
     room_id, location_record = resolve_location(
         db, household_id, payload.room_id, payload.storage_location_id
@@ -269,6 +338,8 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         category(db, household_id, payload.category_id) if payload.category_id else None
     )
     tag_records = tags(db, household_id, payload.tag_ids)
+    household = db.get(Household, household_id)
+    default_currency = household.default_currency if household is not None else "USD"
     current_value_service.validate_current_value(
         payload.current_value_cents,
         payload.quantity,
@@ -288,7 +359,11 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         storage_location_id=location_record.id if location_record else None,
         category_id=category_record.id if category_record else None,
         current_value_cents=payload.current_value_cents,
-        current_value_currency=payload.current_value_currency,
+        current_value_currency=(
+            payload.current_value_currency
+            if "current_value_currency" in payload.model_fields_set
+            else default_currency
+        ),
         current_value_basis=(
             current_value_service.PER_UNIT if payload.current_value_cents is not None else None
         ),
@@ -434,8 +509,7 @@ def update_item_record(
         item.quantity = payload.quantity
     if payload.condition is not None:
         item.condition = payload.condition.value
-    if payload.is_archived is not None:
-        item.is_archived = payload.is_archived
+    disposition_change = _apply_disposition_update(item, payload, fields)
 
     value_change: dict[str, Any] | None = None
     if fields & {"current_value_cents", "current_value_currency", "current_value_basis"}:
@@ -495,6 +569,33 @@ def update_item_record(
                 else "Current value updated"
             ),
             details=value_change,
+        )
+
+    if record_history and disposition_change is not None:
+        from_state = disposition_change["from"]
+        to_state = disposition_change["to"]
+        if to_state["is_archived"] and not from_state["is_archived"]:
+            reason = (
+                f" as {to_state['disposition'].replace('_', ' ')}"
+                if to_state["disposition"]
+                else ""
+            )
+            summary = f"Archived {item.name}{reason}"
+        elif from_state["is_archived"] and not to_state["is_archived"]:
+            summary = f"Restored {item.name}"
+        else:
+            summary = f"Updated disposition for {item.name}"
+        history.record_event(
+            db,
+            household_id,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
+            action=ActivityAction.ITEM_DISPOSITION_CHANGED.value,
+            entity_type="item",
+            entity_id=item.id,
+            item_id=item.id,
+            summary=summary,
+            details=disposition_change,
         )
 
     db.flush()

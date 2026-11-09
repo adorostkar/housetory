@@ -112,7 +112,7 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   await expect(page.getByRole("heading", { name: "Review", level: 1 })).toBeVisible();
   await expect(
     page.getByRole("checkbox", {
-      name: /Include optional AI-assisted category suggestions/,
+      name: /Include optional AI-assisted organisation suggestions/,
     }),
   ).not.toBeChecked();
   await clickFindSuggestions(page);
@@ -417,7 +417,7 @@ test("Review schedule is off by default, saves offline-only and disables cleanly
   await timezone.fill("UTC");
   await page.getByLabel("Schedule scope type").selectOption("household");
   await expect(
-    page.getByLabel("Include scheduled AI-assisted categories"),
+    page.getByLabel("Include scheduled AI-assisted organisation"),
   ).not.toBeChecked();
 
   const saved = page.waitForResponse(

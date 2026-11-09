@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..api.errors import ApiError
-from ..models import Document, Item, Purchase, PurchaseAllocation
+from ..models import Document, Household, Item, Purchase, PurchaseAllocation
 from ..schemas.purchases import PurchaseCreate, PurchaseIn, PurchaseUpdate
 
 
@@ -86,7 +86,11 @@ def create_purchase(
     if not items:
         raise ApiError(422, "item_required", "A purchase must be linked to at least one item.")
     receipt = validate_receipt(db, household_id, payload.receipt_document_id)
-    purchase = Purchase(household_id=household_id, currency="USD")
+    household = db.get(Household, household_id)
+    purchase = Purchase(
+        household_id=household_id,
+        currency=household.default_currency if household is not None else "USD",
+    )
     apply_purchase_fields(purchase, payload, fields=payload.model_fields_set)
     if receipt is not None:
         purchase.receipt_document = receipt

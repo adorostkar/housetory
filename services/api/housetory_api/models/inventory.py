@@ -336,6 +336,20 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "purchase_info_status IS NULL OR purchase_info_status IN ('unknown', 'not_applicable')",
             name="valid_purchase_info_status",
         ),
+        CheckConstraint(
+            "disposition IS NULL OR disposition IN "
+            "('sold', 'given_away', 'donated', 'discarded', 'lost', 'consumed', 'other')",
+            name="valid_disposition",
+        ),
+        CheckConstraint(
+            "is_archived OR (disposition IS NULL AND disposed_on IS NULL "
+            "AND disposition_note IS NULL)",
+            name="disposition_requires_archive",
+        ),
+        CheckConstraint(
+            "disposition IS NOT NULL OR (disposed_on IS NULL AND disposition_note IS NULL)",
+            name="disposition_reason_required",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -360,6 +374,9 @@ class Item(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(16), nullable=False, server_default=ItemCondition.GOOD.value
     )
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    disposition: Mapped[str | None] = mapped_column(String(32))
+    disposed_on: Mapped[date | None] = mapped_column(Date)
+    disposition_note: Mapped[str | None] = mapped_column(Text)
     purchase_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("purchases.id", ondelete="SET NULL")
     )

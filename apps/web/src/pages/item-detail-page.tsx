@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   FileText,
   HandCoins,
   Hash,
@@ -24,10 +25,10 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
+import { ItemDispositionDialog } from "@/components/item-disposition-dialog";
 import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { ItemLoanStatus } from "@/components/item-loan-status";
 import { ItemStorageSection } from "@/components/item-storage-section";
-import { ItemValuationDialog } from "@/components/item-valuation-dialog";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageHeader } from "@/components/page-header";
 import { ItemImageControls } from "@/components/item-image-controls";
@@ -54,6 +55,7 @@ import {
 } from "@/lib/queries";
 import type { ItemDetail, Loan } from "@/lib/types";
 import {
+  ITEM_DISPOSITION_LABELS,
   WARRANTY_STATUS_LABELS,
   WARRANTY_STATUS_TONE,
   warrantyRemainingLabel,
@@ -84,8 +86,8 @@ export function ItemDetailPage() {
   const loansQuery = useItemLoans(itemId);
   const historyQuery = useItemHistory(itemId);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [dispositionOpen, setDispositionOpen] = useState(false);
   const [lendOpen, setLendOpen] = useState(false);
-  const [valuationOpen, setValuationOpen] = useState(false);
   const [returnLoan, setReturnLoan] = useState<Loan | null>(null);
 
   const archive = useMutation({
@@ -169,7 +171,16 @@ export function ItemDetailPage() {
         }
         actions={
           <>
-            {item.is_archived && <Badge variant="secondary">Archived</Badge>}
+            {item.is_archived && (
+              <Badge
+                variant="secondary"
+                title={item.disposed_on ? `Recorded ${item.disposed_on}` : undefined}
+              >
+                {item.disposition
+                  ? ITEM_DISPOSITION_LABELS[item.disposition]
+                  : "Archived"}
+              </Badge>
+            )}
             {canWrite && (
               <>
                 {!item.is_archived && (
@@ -188,6 +199,12 @@ export function ItemDetailPage() {
                   </Button>
                 )}
                 <Button variant="outline" asChild>
+                  <Link to={`/insurance?item_ids=${item.id}`}>
+                    <ShieldCheck />
+                    Insurance
+                  </Link>
+                </Button>
+                <Button variant="outline" asChild>
                   <Link to={appendOrigin(`/items/${item.id}/edit`, origin)}>
                     <Pencil />
                     Edit
@@ -200,12 +217,23 @@ export function ItemDetailPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {!item.is_archived && (
+                      <DropdownMenuItem asChild>
+                        <Link to={appendOrigin(`/items/new?duplicate_of=${item.id}`, origin)}>
+                          <Copy />
+                          Duplicate item
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       disabled={archive.isPending || onLoan > 0 || Boolean(item.storage?.active)}
-                      onSelect={() => archive.mutate(item)}
+                      onSelect={() => {
+                        if (item.is_archived) archive.mutate(item);
+                        else setDispositionOpen(true);
+                      }}
                     >
                       {item.is_archived ? <ArchiveRestore /> : <Archive />}
-                      {item.is_archived ? "Restore item" : "Archive item"}
+                      {item.is_archived ? "Restore item" : "Mark as no longer owned"}
                     </DropdownMenuItem>
                     {item.storage?.active && (
                       <p className="px-2 py-1 text-[0.63rem] leading-relaxed text-muted-foreground">
@@ -428,7 +456,8 @@ export function ItemDetailPage() {
                 </InfoRow>
               )}
 
-              <InfoRow icon={Wallet} label="Current value">
+              {item.current_value_cents != null && (
+              <InfoRow icon={Wallet} label="Earlier estimate">
                 {item.current_value_cents == null ? (
                   <span className="text-muted-foreground">
                     Not estimated
@@ -439,7 +468,7 @@ export function ItemDetailPage() {
                 ) : item.current_value_basis === "legacy_record_total" ? (
                   <span className="block">
                     <span className="block">
-                      Legacy record total{" "}
+                      Earlier record total{" "}
                       {formatCurrency(
                         item.current_value_cents,
                         item.current_value_currency,
@@ -542,18 +571,8 @@ export function ItemDetailPage() {
                     )}
                   </span>
                 )}
-                {canWrite && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="mt-2"
-                    onClick={() => setValuationOpen(true)}
-                  >
-                    <Wallet />
-                    Estimate value
-                  </Button>
-                )}
               </InfoRow>
+              )}
 
               {item.serial_number && (
                 <InfoRow icon={Hash} label="Serial">
@@ -946,16 +965,6 @@ export function ItemDetailPage() {
         }}
       />
 
-      <ItemValuationDialog
-        open={valuationOpen}
-        onOpenChange={setValuationOpen}
-        item={item}
-        onApplied={() => {
-          void itemQuery.refetch();
-          void historyQuery.refetch();
-        }}
-      />
-
       {returnLoan && (
         <ReturnLoanDialog
           open={Boolean(returnLoan)}
@@ -970,6 +979,12 @@ export function ItemDetailPage() {
           }}
         />
       )}
+
+      <ItemDispositionDialog
+        open={dispositionOpen}
+        onOpenChange={setDispositionOpen}
+        item={item}
+      />
 
       <ConfirmDialog
         open={deleteOpen}

@@ -12,6 +12,10 @@ a cheap, local direct lookup; pressing Enter submits the same request everywhere
   search icon and the separate sidebar quick-search box were removed.
 - `/search` does not render a second input or keyword/Ask mode switch. Its
   results are driven by the same global box and the same endpoint.
+- `/items` also uses that same global input: its debounced text updates the
+  page's URL `q` while preserving room, category, tag and other filters. There is
+  no second Items-specific search box. Enter filters the list in place;
+  Shift+Enter still opens the shared assistant flow.
 - `⌘K` / `Ctrl+K` focuses the box. Escape closes the suggestion panel.
 - The input uses `dir="auto"` so Persian/Arabic queries render correctly.
 - Local list filters remain separate and clearly scoped.

@@ -133,7 +133,7 @@ describe("PhotoGallery", () => {
     const image = screen.getByRole("img", { name: /Reference image/i });
     expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
-    expect(image.parentElement).toHaveClass("bg-secondary/30", "p-3", "sm:p-4");
+    expect(image.parentElement).toHaveClass("bg-white", "p-3", "sm:p-4");
     expect(screen.queryByText("No photograph yet")).not.toBeInTheDocument();
   });
 

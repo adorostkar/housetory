@@ -132,25 +132,41 @@ async function createItem(
 }
 
 async function configureProviders(request: APIRequestContext) {
-  const provider = await request.post("/api/v1/ai/providers", {
+  const existingResponse = await request.get("/api/v1/ai/settings", {
     headers: await headers(request),
-    data: {
-      provider: "openai",
-      display_name: "Valuation E2E mock",
-      base_url: `http://host.docker.internal:${MOCK_PORT}/v1`,
-      default_model: "valuation-mock",
-      api_key: "sk-valuation-e2e-not-real",
-      enabled: true,
-      cloud_consent: true,
-    },
   });
+  expect(existingResponse.ok()).toBeTruthy();
+  const existing = (await existingResponse.json()) as {
+    providers: Array<{ id: string; display_name: string }>;
+  };
+  const previous = existing.providers.find(
+    (entry) => entry.display_name === "Valuation E2E mock",
+  );
+  const payload = {
+    provider: "openai",
+    display_name: "Valuation E2E mock",
+    base_url: `http://host.docker.internal:${MOCK_PORT}/v1`,
+    default_model: "valuation-mock",
+    api_key: "sk-valuation-e2e-not-real",
+    enabled: true,
+    cloud_consent: true,
+  };
+  const provider = previous
+    ? await request.patch(`/api/v1/ai/providers/${previous.id}`, {
+        headers: await headers(request),
+        data: payload,
+      })
+    : await request.post("/api/v1/ai/providers", {
+        headers: await headers(request),
+        data: payload,
+      });
   expect(provider.ok()).toBeTruthy();
   const providerBody = (await provider.json()) as { id: string };
   const online = await request.put("/api/v1/settings/online-search", {
     headers: await headers(request),
     data: {
       manual_enabled: true,
-      api_key: "brave-valuation-e2e-not-real",
+      api_key: "e2e-fixture-key",
     },
   });
   expect(online.ok()).toBeTruthy();
@@ -188,7 +204,7 @@ async function shot(page: Page, name: string) {
   });
 }
 
-test("on-demand item valuation previews, purpose separation, manual entry and responsive layout", async ({
+test("insurance list uses AI replacement estimates without changing item values", async ({
   page,
   request,
 }) => {
@@ -197,102 +213,47 @@ test("on-demand item valuation previews, purpose separation, manual entry and re
   });
   await page.setViewportSize({ width: 1440, height: 1100 });
   const valuationProviderId = await configureProviders(request);
-  const room = await createRoom(request, "Valuation E2E room");
+  const room = await createRoom(request, `Valuation E2E room ${Date.now()}`);
   const item = await createItem(request, "Mirrorless camera", room.id, 2);
-  const manualItem = await createItem(request, "Manual value tripod", room.id, 1);
 
-  await page.goto(`/items/${item.item.id}`);
-  await page.getByRole("button", { name: "Estimate value" }).click();
-  await expect(
-    page.getByRole("radio", { name: /Resale value/ }),
-  ).toBeChecked();
-  await expect(
-    page.getByRole("radio", { name: /Replacement value/ }),
-  ).not.toBeChecked();
-  await shot(page, "01-valuation-purpose");
+  await page.goto(`/insurance?item_ids=${item.item.id}`);
+  await page.getByRole("button", { name: "Estimate 1 with AI" }).click();
+  const amount = page.getByLabel("Replacement value for Mirrorless camera");
+  await expect(amount).toHaveValue("80.00");
+  await amount.fill("85");
+  await expect(page.getByText("$170", { exact: true })).toBeVisible();
+  await shot(page, "01-insurance-review");
 
-  await page.getByRole("checkbox", { name: /Try online comparisons/ }).check();
-  await page.getByRole("button", { name: "Get AI estimate" }).click();
-  const preview = page.getByTestId("valuation-preview");
-  await expect(preview).toBeVisible();
-  await expect(preview).toContainText("Range $35 – $50 per unit");
-  await expect(preview).toContainText("2 owned units");
-  await expect(preview).toContainText("$80 owned total");
-  await expect(preview).toContainText("Used market camera listing");
-  await expect(preview).toContainText("asking/listed price");
-  await expect(preview).toContainText("not a professional appraisal");
-  await shot(page, "02-valuation-preview-web");
+  await page.getByRole("button", { name: "Generate insurance list" }).click();
+  const pdfLink = page.getByRole("link", { name: "Download PDF" });
+  await expect(pdfLink).toBeVisible();
+  const csvLink = page.getByRole("link", { name: "Download CSV" });
+  await expect(csvLink).toBeVisible();
+  expect(aiCalls).toBeGreaterThan(0);
 
-  await page.getByLabel("Per-unit value").fill("42");
-  await expect(page.getByTestId("valuation-save-total")).toContainText(
-    "$84 owned total",
-  );
-  await page.getByRole("button", { name: "Apply value" }).click();
-  await expect(page.getByRole("dialog", { name: "Estimate value" })).toBeHidden();
-  await expect(page.getByText(/Resale estimate/)).toBeVisible();
-  await expect(page.getByText(/\$42 per unit/)).toBeVisible();
-  await expect(page.getByText(/\$84 total/)).toBeVisible();
+  const pdf = await request.get((await pdfLink.getAttribute("href"))!);
+  expect(pdf.ok()).toBeTruthy();
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+  const csv = await request.get((await csvLink.getAttribute("href"))!);
+  expect(csv.ok()).toBeTruthy();
+  expect(await csv.text()).toContain("replacement_value_total_cents");
+  expect(await csv.text()).toContain("17000");
+
   const saved = await itemDetail(request, item.item.id);
-  expect(saved.current_value_cents).toBe(4200);
-  expect(saved.current_value_total_cents).toBe(8400);
-  expect(saved.current_value_basis).toBe("per_unit");
-  expect(saved.current_value_estimate).toMatchObject({
-    purpose: "resale",
-    source: "ai_web",
-    confidence: "medium",
-  });
-  expect(saved.current_value_estimate?.sources[0]).toMatchObject({
-    url: "https://example.com/used-camera",
-    price_kind: "asking",
-  });
-  await shot(page, "03-item-applied-value");
-
-  const savedValue = saved.current_value_cents;
-  await page.getByRole("button", { name: "Estimate value" }).click();
-  await page.getByText("Replacement value", { exact: true }).click();
-  await expect(page.getByTestId("valuation-preview")).toBeHidden();
-  await page.getByRole("button", { name: "Get AI estimate" }).click();
-  await expect(page.getByTestId("valuation-preview")).toContainText(
-    "Range $70 – $90 per unit",
-  );
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  expect((await itemDetail(request, item.item.id)).current_value_cents).toBe(
-    savedValue,
-  );
-
-  const callsBeforeManual = aiCalls;
-  await page.goto(`/items/${manualItem.item.id}`);
-  await page.getByRole("button", { name: "Estimate value" }).click();
-  await page.getByLabel("Per-unit value").fill("25");
-  await page.getByRole("button", { name: "Apply value" }).click();
-  await expect(page.getByRole("dialog", { name: "Estimate value" })).toBeHidden();
-  expect(aiCalls).toBe(callsBeforeManual);
-  const manual = await itemDetail(request, manualItem.item.id);
-  expect(manual.current_value_cents).toBe(2500);
-  expect(manual.current_value_estimate).toMatchObject({
-    purpose: "resale",
-    source: "manual",
-    confidence: null,
-  });
+  expect(saved.current_value_cents).toBeNull();
+  expect(saved.current_value_basis).toBeNull();
+  expect(saved.current_value_estimate).toBeNull();
 
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto(`/items/${item.item.id}`);
-    await page.getByRole("button", { name: "Estimate value" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Estimate value" }),
-    ).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth + 1,
       ),
     ).toBe(true);
-    if (width === 390) await shot(page, "04-valuation-mobile");
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
   }
+  await shot(page, "02-insurance-mobile");
 
-  // Leave the shared disposable stack's online-search fixture unconfigured so
-  // later specs that intentionally skip without Brave stay deterministic.
   await request.put("/api/v1/settings/online-search", {
     headers: await headers(request),
     data: { manual_enabled: false, reference_enabled: false, clear_api_key: true },

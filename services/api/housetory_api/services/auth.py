@@ -157,6 +157,7 @@ def build_session_state(
             HouseholdOut(
                 id=chosen[0].id,
                 name=chosen[0].name,
+                default_currency=chosen[0].default_currency,
                 warranty_reminder_days=chosen[0].warranty_reminder_days,
                 item_image_auto_reference=chosen[0].item_image_auto_reference,
             )
@@ -169,6 +170,7 @@ def build_session_state(
                 id=household.id,
                 name=household.name,
                 role=membership.role,
+                default_currency=household.default_currency,
                 warranty_reminder_days=household.warranty_reminder_days,
                 property_count=property_count,
                 is_current=chosen is not None and household.id == chosen[0].id,

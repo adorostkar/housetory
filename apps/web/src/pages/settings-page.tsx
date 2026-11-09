@@ -24,9 +24,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FormError } from "@/components/form-field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { CURRENCIES } from "@/lib/labels";
 import {
   queryKeys,
   useAiStatus,
@@ -97,6 +99,9 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const { theme, setTheme } = useTheme();
   const [householdName, setHouseholdName] = React.useState(session.data?.household?.name ?? "");
+  const [defaultCurrency, setDefaultCurrency] = React.useState(
+    session.data?.household?.default_currency ?? "USD",
+  );
   const [reminderDays, setReminderDays] = React.useState(
     String(session.data?.household?.warranty_reminder_days ?? 30),
   );
@@ -107,6 +112,7 @@ export function SettingsPage() {
   React.useEffect(() => {
     if (session.data?.household) {
       setHouseholdName(session.data.household.name);
+      setDefaultCurrency(session.data.household.default_currency ?? "USD");
       setReminderDays(String(session.data.household.warranty_reminder_days));
       setAutoReference(session.data.household.item_image_auto_reference ?? false);
     }
@@ -121,12 +127,21 @@ export function SettingsPage() {
     mutationFn: () =>
       api.patch<Household>("/household", {
         name: householdName.trim(),
+        default_currency: defaultCurrency,
         warranty_reminder_days: Number(reminderDays),
         item_image_auto_reference: autoReference,
       }),
     onSuccess: (household) => {
       queryClient.setQueryData<SessionState>(queryKeys.session, (current) =>
-        current ? { ...current, household } : current,
+        current
+          ? {
+              ...current,
+              household,
+              households: current.households?.map((entry) =>
+                entry.id === household.id ? { ...entry, ...household } : entry,
+              ),
+            }
+          : current,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.session });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
@@ -175,7 +190,7 @@ export function SettingsPage() {
             assistant default to all your current places.
           </p>
           <form
-            className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end"
+            className="mt-5 grid max-w-2xl gap-4 sm:grid-cols-[minmax(0,1fr)_180px] sm:items-end"
             onSubmit={(event) => {
               event.preventDefault();
               if (householdName.trim() && !reminderInvalid) {
@@ -214,6 +229,25 @@ export function SettingsPage() {
                 onChange={(event) => setReminderDays(event.target.value)}
               />
             </Field>
+            <Field
+              label="Default currency"
+              htmlFor="default-currency"
+              hint="Starting choice for new entries"
+              error={fieldErrors?.default_currency}
+            >
+              <Select
+                id="default-currency"
+                value={defaultCurrency}
+                disabled={!isOwner || saveHousehold.isPending}
+                onChange={(event) => setDefaultCurrency(event.target.value)}
+              >
+                {CURRENCIES.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Button
               type="submit"
               variant="outline"
@@ -223,6 +257,7 @@ export function SettingsPage() {
                 !householdName.trim() ||
                 reminderInvalid ||
                 (householdName.trim() === household?.name &&
+                  defaultCurrency === (household?.default_currency ?? "USD") &&
                   Number(reminderDays) === household?.warranty_reminder_days &&
                   autoReference === (household?.item_image_auto_reference ?? false))
               }

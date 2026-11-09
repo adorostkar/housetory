@@ -40,13 +40,13 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderSearch() {
+function renderSearch(initialEntry = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <QuickSearch />
         <LocationProbe />
       </MemoryRouter>
@@ -288,5 +288,24 @@ describe("QuickSearch", () => {
     await waitFor(() => expect(resolveCamera).toBeDefined());
     resolveCamera?.(response("Camera", [result({ title: "Fresh camera" })]));
     expect(await screen.findByRole("option", { name: /Fresh camera/ })).toBeVisible();
+  });
+
+  it("uses the global input as the Items filter while preserving other filters", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), []),
+    );
+    renderSearch("/items?q=Old&sort=name_asc");
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    expect(input).toHaveValue("Old");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Camera");
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/items?q=Camera&sort=name_asc",
+      ),
+    );
+    expect(screen.getByTestId("location")).not.toHaveTextContent("/search");
   });
 });

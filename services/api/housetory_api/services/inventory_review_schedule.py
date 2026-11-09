@@ -515,8 +515,19 @@ def _run_detail(
         f"{run.stale_suggestion_count} stale, "
         f"{run.suppressed_suggestion_count} previously resolved."
     )
-    if run.ai_used:
-        detail += f" AI used {run.ai_provider_label or 'Assistant'}."
+    model = f" ({run.ai_model})" if run.ai_model else ""
+    route = f" via {run.ai_provider_label or 'Assistant'}{model}"
+    if run.ai_error and run.ai_used:
+        detail += f" AI failed{route}; {run.ai_item_count} items were sent."
+    elif run.ai_error:
+        detail += f" AI was skipped{route}; no items were sent."
+    elif run.ai_used:
+        detail += (
+            f" AI completed{route}; {run.ai_item_count} items were sent. "
+            "Review suggestions remain explicit."
+        )
+    elif run.include_ai:
+        detail += " AI skipped because no eligible items needed organisation; 0 items were sent."
     if ai_skip_note:
         detail += f" {ai_skip_note}"
     if run.partial_reason:
@@ -677,6 +688,7 @@ def execute_scheduled_review(db: Session, payload: dict) -> dict:
         "created": run.created_suggestion_count,
         "existing": run.existing_suggestion_count,
         "ai_used": run.ai_used,
+        "ai_item_count": run.ai_item_count,
         "ai_skipped_reason": ai_skip_note,
     }
 

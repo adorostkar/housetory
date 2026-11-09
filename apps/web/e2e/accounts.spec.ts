@@ -72,6 +72,7 @@ test("renders the new-account invitation form for a valid token", async ({ page 
         household: {
           id: "demo-household",
           name: "Mock Household",
+          default_currency: "USD",
           warranty_reminder_days: 30,
         },
         role: "member",

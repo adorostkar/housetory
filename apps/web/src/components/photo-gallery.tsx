@@ -165,7 +165,14 @@ export function PhotoGallery({
         ) : representative ? (
           <>
             {representative.url ? (
-              <div className="flex size-full items-center justify-center bg-secondary/30 p-3 sm:p-4">
+              <div
+                className={cn(
+                  "flex size-full items-center justify-center p-3 sm:p-4",
+                  representative.source_type === "reference"
+                    ? "bg-white"
+                    : "bg-secondary/30",
+                )}
+              >
                 <img
                   src={representative.thumbnail_url ?? representative.url}
                   alt={`${item.name} ${representative.label.toLowerCase()}`}

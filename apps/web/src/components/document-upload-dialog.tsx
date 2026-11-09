@@ -47,6 +47,7 @@ export function DocumentUploadDialog({
   const [notes, setNotes] = React.useState("");
   const [itemIds, setItemIds] = React.useState<string[]>(defaultItemIds);
   const defaultItemKey = defaultItemIds.join(",");
+  const fixedItemManual = manualMode && defaultItemIds.length > 0;
 
   React.useEffect(() => {
     if (open) {
@@ -68,7 +69,8 @@ export function DocumentUploadDialog({
       if (merchant.trim()) formData.append("merchant", merchant.trim());
       if (documentDate) formData.append("document_date", documentDate);
       if (notes.trim()) formData.append("notes", notes.trim());
-      itemIds.forEach((itemId) => formData.append("item_ids", itemId));
+      const uploadItemIds = fixedItemManual ? defaultItemIds : itemIds;
+      uploadItemIds.forEach((itemId) => formData.append("item_ids", itemId));
       return api.postForm<DocumentRecord>("/documents", formData);
     },
     onSuccess: (document) => {
@@ -118,7 +120,9 @@ export function DocumentUploadDialog({
           <DialogTitle>{manualMode ? "Add a manual" : "Add a document"}</DialogTitle>
           <DialogDescription>
             {manualMode
-              ? "Upload a manual or a clear photo/scan of one. No make or model is required, and the exact original is preserved in the Manual library."
+              ? fixedItemManual
+                ? "Upload a manual or a clear photo/scan of one. It will be attached to this item automatically; no make or model is required."
+                : "Upload a manual or a clear photo/scan of one. No make or model is required, and the exact original is preserved in the Manual library."
               : "Receipts, invoices, warranty certificates, manuals and specifications. The original upload is preserved alongside a safe download copy."}
           </DialogDescription>
         </DialogHeader>
@@ -226,17 +230,19 @@ export function DocumentUploadDialog({
             )}
           </div>
 
-          <ItemMultiSelect
-            selected={itemIds}
-            onChange={setItemIds}
-            label={manualMode ? "Compatible items" : "Linked items"}
-            hint={
-              manualMode
-                ? "A manual can cover one item, several compatible items, or stay in the library. Only link items this manual actually covers."
-                : "A document can belong to one item, several items, or the household library."
-            }
-            disabled={upload.isPending}
-          />
+          {!fixedItemManual && (
+            <ItemMultiSelect
+              selected={itemIds}
+              onChange={setItemIds}
+              label={manualMode ? "Compatible items" : "Linked items"}
+              hint={
+                manualMode
+                  ? "A manual can cover one item, several compatible items, or stay in the library. Only link items this manual actually covers."
+                  : "A document can belong to one item, several items, or the household library."
+              }
+              disabled={upload.isPending}
+            />
+          )}
 
           <Field label="Notes" htmlFor="document-notes" optional>
             <Textarea

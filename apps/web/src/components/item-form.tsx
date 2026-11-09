@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Plus } from "lucide-react";
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { CategoryDialog } from "@/components/category-dialog";
+import { RoomDialog } from "@/components/room-dialog";
 import { Field, FormError } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import {
   queryKeys,
   useCategories,
   useDocuments,
+  useDefaultCurrency,
   useInvalidateInventory,
   useLocations,
   useProperties,
@@ -30,6 +32,7 @@ import type {
   ItemDetailResponse,
   ItemInput,
   LocationKind,
+  Room,
   Tag,
 } from "@/lib/types";
 import {
@@ -128,6 +131,7 @@ function OptionalFormSection({
 
 export function ItemForm({
   item,
+  duplicateOf,
   defaultPropertyId,
   defaultRoomId,
   defaultLocationId,
@@ -137,6 +141,7 @@ export function ItemForm({
   origin,
 }: {
   item?: ItemDetail;
+  duplicateOf?: ItemDetail;
   defaultPropertyId?: string;
   defaultRoomId?: string;
   defaultLocationId?: string;
@@ -146,57 +151,68 @@ export function ItemForm({
   origin?: ItemOrigin | null;
 }) {
   const navigate = useNavigate();
+  const template = item ?? duplicateOf;
   const queryClient = useQueryClient();
   const invalidate = useInvalidateInventory();
+  const defaultCurrency = useDefaultCurrency();
   const propertiesQuery = useProperties();
   const properties = propertiesQuery.data?.items ?? [];
   const [propertyId, setPropertyId] = React.useState(
-    item?.property?.id ?? defaultPropertyId ?? "",
+    template?.property?.id ?? defaultPropertyId ?? "",
   );
   const roomsQuery = useRooms(propertyId || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
   const documentsQuery = useDocuments({}, 100);
 
-  const [name, setName] = React.useState(item?.name ?? defaultName ?? "");
-  const [description, setDescription] = React.useState(item?.description ?? "");
-  const [brand, setBrand] = React.useState(item?.brand ?? "");
-  const [model, setModel] = React.useState(item?.model ?? "");
+  const [name, setName] = React.useState(template?.name ?? defaultName ?? "");
+  const [description, setDescription] = React.useState(template?.description ?? "");
+  const [brand, setBrand] = React.useState(template?.brand ?? "");
+  const [model, setModel] = React.useState(template?.model ?? "");
   const [serialNumber, setSerialNumber] = React.useState(item?.serial_number ?? "");
   const [quantity, setQuantity] = React.useState(String(item?.quantity ?? 1));
   const storageLocked = Boolean(item?.storage?.active);
-  const [condition, setCondition] = React.useState<ItemCondition>(item?.condition ?? "good");
-  const [roomId, setRoomId] = React.useState(item?.room?.id ?? defaultRoomId ?? "");
+  const [condition, setCondition] = React.useState<ItemCondition>(
+    template?.condition ?? "good",
+  );
+  const [roomId, setRoomId] = React.useState(template?.room?.id ?? defaultRoomId ?? "");
   const [locationId, setLocationId] = React.useState(
-    item?.location?.id ?? defaultLocationId ?? "",
+    template?.location?.id ?? defaultLocationId ?? "",
   );
   React.useEffect(() => {
     if (propertyId) return;
     const selectedRoom = roomsQuery.data?.items.find((room) => room.id === roomId);
-    if (item?.property?.id) setPropertyId(item.property.id);
+    if (template?.property?.id) setPropertyId(template.property.id);
     else if (defaultPropertyId) setPropertyId(defaultPropertyId);
     else if (selectedRoom?.property_id) setPropertyId(selectedRoom.property_id);
     else if (properties.length === 1) setPropertyId(properties[0]!.id);
   }, [
     propertyId,
-    item?.property?.id,
+    template?.property?.id,
     defaultPropertyId,
     properties,
     roomId,
     roomsQuery.data?.items,
   ]);
-  const [categoryId, setCategoryId] = React.useState(item?.category?.id ?? "");
-  const [tagIds, setTagIds] = React.useState<string[]>(item?.tags.map((tag) => tag.id) ?? []);
+  const [categoryId, setCategoryId] = React.useState(template?.category?.id ?? "");
+  const [tagIds, setTagIds] = React.useState<string[]>(
+    template?.tags.map((tag) => tag.id) ?? [],
+  );
   const [newTag, setNewTag] = React.useState("");
   const [tagError, setTagError] = React.useState<string | null>(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = React.useState(false);
+  const [roomDialogOpen, setRoomDialogOpen] = React.useState(false);
 
   const [vendor, setVendor] = React.useState(item?.purchase?.vendor ?? "");
   const [purchaseDate, setPurchaseDate] = React.useState(item?.purchase?.purchase_date ?? "");
-  const [price, setPrice] = React.useState(
+  const [totalPrice, setTotalPrice] = React.useState(
     item?.purchase?.price_cents != null ? (item.purchase.price_cents / 100).toFixed(2) : "",
   );
-  const [currency, setCurrency] = React.useState(item?.purchase?.currency ?? "USD");
+  const [editedUnitPrice, setEditedUnitPrice] = React.useState<string | null>(null);
+  const [currency, setCurrency] = React.useState(
+    item?.purchase?.currency ?? defaultCurrency,
+  );
+  const [currencyTouched, setCurrencyTouched] = React.useState(false);
   const [priceBasis, setPriceBasis] = React.useState<"total" | "unit">("total");
   const [orderNumber, setOrderNumber] = React.useState(item?.purchase?.order_number ?? "");
   const [purchaseNotes, setPurchaseNotes] = React.useState(item?.purchase?.notes ?? "");
@@ -212,21 +228,6 @@ export function ItemForm({
   const [purchaseInfoStatus, setPurchaseInfoStatus] = React.useState<
     "auto" | "unknown" | "not_applicable"
   >(initialPurchaseInfoStatus);
-  const [currentValue, setCurrentValue] = React.useState(
-    item?.current_value_cents != null
-      ? (item.current_value_cents / 100).toFixed(2)
-      : "",
-  );
-  const [currentValueCurrency, setCurrentValueCurrency] = React.useState(
-    item?.current_value_currency ?? "USD",
-  );
-  const [currentValueBasis, setCurrentValueBasis] = React.useState<
-    "per_unit" | "legacy_record_total"
-  >(
-    item?.current_value_basis ??
-      (item?.current_value_cents != null ? "legacy_record_total" : "per_unit"),
-  );
-
   const [warrantyProvider, setWarrantyProvider] = React.useState(item?.warranty?.provider ?? "");
   const [warrantyStart, setWarrantyStart] = React.useState(item?.warranty?.start_date ?? "");
   const [warrantyDuration, setWarrantyDuration] = React.useState(
@@ -240,9 +241,12 @@ export function ItemForm({
     item?.warranty?.document_id ?? "",
   );
   const [warrantyNotes, setWarrantyNotes] = React.useState(item?.warranty?.notes ?? "");
+  React.useEffect(() => {
+    if (!item?.purchase?.currency && !currencyTouched) setCurrency(defaultCurrency);
+  }, [currencyTouched, defaultCurrency, item?.purchase?.currency]);
   const [identityOpen, setIdentityOpen] = React.useState(false);
   const [purchaseOpen, setPurchaseOpen] = React.useState(false);
-  const [currentValueOpen, setCurrentValueOpen] = React.useState(false);
+  const [legacyEstimateOpen, setLegacyEstimateOpen] = React.useState(false);
   const [warrantyOpen, setWarrantyOpen] = React.useState(false);
 
   const locationsQuery = useLocations(roomId || undefined);
@@ -270,18 +274,42 @@ export function ItemForm({
     !item?.purchase?.is_shared &&
     !hasReviewedAllocation;
   const priceBasisActive = canUseUnitPrice ? priceBasis : "total";
+  const totalPriceCents = totalPrice.trim() ? Math.round(Number(totalPrice) * 100) : null;
+  const derivedUnitPrice =
+    totalPriceCents != null && Number.isFinite(totalPriceCents) && parsedQuantity > 0
+      ? (totalPriceCents / parsedQuantity / 100).toFixed(2)
+      : "";
+  const price =
+    priceBasisActive === "unit" ? (editedUnitPrice ?? derivedUnitPrice) : totalPrice;
   const enteredPriceCents = price.trim() ? Math.round(Number(price) * 100) : null;
+  const validationPrice =
+    priceBasisActive === "unit" && editedUnitPrice === null ? totalPrice : price;
+  const validationPriceCents =
+    priceBasisActive === "unit" && editedUnitPrice === null
+      ? totalPriceCents
+      : enteredPriceCents;
   const priceInvalid =
-    price.trim().length > 0 &&
-    (enteredPriceCents === null ||
-      !Number.isFinite(enteredPriceCents) ||
-      enteredPriceCents < 0);
+    validationPrice.trim().length > 0 &&
+    (validationPriceCents === null ||
+      !Number.isFinite(validationPriceCents) ||
+      validationPriceCents < 0);
+  const editedUnitPriceCents = editedUnitPrice?.trim()
+    ? Math.round(Number(editedUnitPrice) * 100)
+    : null;
+  const editedUnitTotalCents =
+    editedUnitPriceCents == null || parsedQuantity <= 0
+      ? editedUnitPriceCents
+      : editedUnitPriceCents * parsedQuantity;
   const packagePriceCents =
-    enteredPriceCents == null
-      ? null
-      : priceBasisActive === "unit" && parsedQuantity > 0
-        ? enteredPriceCents * parsedQuantity
-        : enteredPriceCents;
+    priceBasis === "unit" && editedUnitPrice !== null
+      ? editedUnitTotalCents
+      : totalPriceCents;
+  const calculatedTotalPrice =
+    packagePriceCents == null
+      ? ""
+      : Number.isFinite(packagePriceCents)
+        ? (packagePriceCents / 100).toFixed(2)
+        : (editedUnitPrice ?? totalPrice);
   const effectiveUnitPriceCents =
     packagePriceCents == null || parsedQuantity <= 0
       ? null
@@ -292,39 +320,18 @@ export function ItemForm({
     packagePriceCents % parsedQuantity !== 0;
   const changePriceBasis = (next: "total" | "unit") => {
     if (next === priceBasisActive) return;
-    if (next === "unit" && parsedQuantity > 0 && packagePriceCents != null) {
-      setPrice((packagePriceCents / parsedQuantity / 100).toFixed(2));
-    } else if (next === "total" && enteredPriceCents != null && parsedQuantity > 0) {
-      setPrice((enteredPriceCents * parsedQuantity / 100).toFixed(2));
+    if (next === "total" && editedUnitPrice !== null) {
+      setTotalPrice(calculatedTotalPrice);
     }
+    setEditedUnitPrice(null);
     setPriceBasis(next);
   };
   React.useEffect(() => {
-    if (!canUseUnitPrice) setPriceBasis("total");
-  }, [canUseUnitPrice]);
-  const localCurrentValueCents = currentValue.trim()
-    ? Math.round(Number(currentValue) * 100)
-    : null;
-  const currentValueInvalid =
-    currentValue.trim().length > 0 &&
-    (localCurrentValueCents === null ||
-      !Number.isFinite(localCurrentValueCents) ||
-      localCurrentValueCents < 0);
-  const currentValueTotalCents =
-    localCurrentValueCents == null
-      ? null
-      : currentValueBasis === "per_unit"
-        ? localCurrentValueCents * parsedQuantity
-        : localCurrentValueCents;
-  const convertLegacyToPerUnit = () => {
-    if (localCurrentValueCents == null || parsedQuantity <= 0) {
-      setCurrentValueBasis("per_unit");
-      return;
-    }
-    const unitCents = Math.round(localCurrentValueCents / parsedQuantity);
-    setCurrentValue((unitCents / 100).toFixed(2));
-    setCurrentValueBasis("per_unit");
-  };
+    if (canUseUnitPrice || priceBasis !== "unit") return;
+    if (editedUnitPrice !== null) setTotalPrice(calculatedTotalPrice);
+    setEditedUnitPrice(null);
+    setPriceBasis("total");
+  }, [canUseUnitPrice, priceBasis, editedUnitPrice, calculatedTotalPrice]);
   const durationNumber = warrantyDuration.trim() ? Number(warrantyDuration) : null;
   const durationInvalid =
     warrantyDuration.trim().length > 0 &&
@@ -425,10 +432,11 @@ export function ItemForm({
       : purchaseInfoStatus === "not_applicable"
         ? "Purchase information not applicable"
         : "";
+  const purchaseTotalLabel = item?.purchase?.is_shared ? "transaction total" : "package total";
   const purchaseParts = [
     item?.purchase?.is_shared ? "Shared purchase" : "",
     packagePriceCents != null && Number.isFinite(packagePriceCents)
-      ? `${formatCurrency(packagePriceCents, currency)} package total`
+      ? `${formatCurrency(packagePriceCents, currency)} ${purchaseTotalLabel}`
       : "",
     canUseUnitPrice && effectiveUnitPriceCents != null
       ? `${effectiveUnitIsRounded ? "≈ " : ""}${formatCurrency(
@@ -447,28 +455,14 @@ export function ItemForm({
       ? purchaseParts.join(" · ")
       : "No purchase information recorded.";
 
-  const currentValueSummary = currentValueInvalid
-    ? "Check the current value before saving."
-    : localCurrentValueCents == null || !Number.isFinite(localCurrentValueCents)
-      ? "Not estimated. Missing is not zero."
-      : currentValueBasis === "legacy_record_total"
-        ? `Legacy record total ${formatCurrency(
-            localCurrentValueCents,
-            currentValueCurrency,
-          )} · review before converting`
-        : `${formatCurrency(
-            localCurrentValueCents,
-            currentValueCurrency,
-          )} per unit${
-            parsedQuantity > 0
-              ? ` · ${formatCurrency(
-                  currentValueTotalCents ?? 0,
-                  currentValueCurrency,
-                )} for ${parsedQuantity} ${
-                  parsedQuantity === 1 ? "unit" : "units"
-                }`
-              : ""
-          }`;
+  const legacyEstimateSummary =
+    item?.current_value_cents != null
+      ? `${
+          item.current_value_basis === "legacy_record_total"
+            ? "Earlier record total"
+            : "Earlier estimate · per unit ·"
+        } ${formatCurrency(item.current_value_cents, item.current_value_currency)}`
+      : "";
 
   const warrantyParts = [
     warrantyProvider.trim(),
@@ -490,7 +484,6 @@ export function ItemForm({
       !name.trim() ||
       quantityInvalid ||
       priceInvalid ||
-      currentValueInvalid ||
       durationInvalid ||
       warrantyDatesInvalid
     ) {
@@ -533,9 +526,6 @@ export function ItemForm({
             notes: warrantyNotes.trim() || null,
           }
         : null,
-      current_value_cents: localCurrentValueCents,
-      current_value_currency: currentValueCurrency,
-      current_value_basis: currentValueBasis,
     };
     save.mutate(payload);
   };
@@ -649,6 +639,10 @@ export function ItemForm({
                         id="item-room"
                         value={roomId}
                         onChange={(event) => {
+                          if (event.target.value === "__new_room__") {
+                            setRoomDialogOpen(true);
+                            return;
+                          }
                           setRoomId(event.target.value);
                           setLocationId("");
                         }}
@@ -666,6 +660,7 @@ export function ItemForm({
                               .join(" / ")}
                           </option>
                         ))}
+                        <option value="__new_room__">＋ New room or sub-room…</option>
                       </Select>
                     </Field>
 
@@ -970,7 +965,13 @@ export function ItemForm({
                     min={0}
                     step="0.01"
                     value={price}
-                    onChange={(event) => setPrice(event.target.value)}
+                    onChange={(event) => {
+                      if (priceBasisActive === "unit") {
+                        setEditedUnitPrice(event.target.value);
+                      } else {
+                        setTotalPrice(event.target.value);
+                      }
+                    }}
                     placeholder="0.00"
                   />
                 </Field>
@@ -978,7 +979,10 @@ export function ItemForm({
                   <Select
                     id="purchase-currency"
                     value={currency}
-                    onChange={(event) => setCurrency(event.target.value)}
+                    onChange={(event) => {
+                      setCurrency(event.target.value);
+                      setCurrencyTouched(true);
+                    }}
                   >
                     {CURRENCIES.map((code) => (
                       <option key={code} value={code}>
@@ -1001,7 +1005,7 @@ export function ItemForm({
                   className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
                 >
                   <p className="font-medium">
-                    {formatCurrency(packagePriceCents, currency)} package total
+                    {formatCurrency(packagePriceCents, currency)} {purchaseTotalLabel}
                   </p>
                   {canUseUnitPrice && effectiveUnitPriceCents != null && (
                     <p className="mt-1 text-muted-foreground">
@@ -1012,7 +1016,9 @@ export function ItemForm({
                   )}
                   {priceBasisActive === "unit" &&
                     enteredPriceCents != null &&
-                    parsedQuantity > 0 && (
+                    Number.isFinite(enteredPriceCents) &&
+                    parsedQuantity > 0 &&
+                    enteredPriceCents * parsedQuantity === packagePriceCents && (
                       <p className="mt-1 text-muted-foreground">
                         {parsedQuantity} units ×{" "}
                         {formatCurrency(enteredPriceCents, currency)} ={" "}
@@ -1057,111 +1063,23 @@ export function ItemForm({
               </Field>
             </OptionalFormSection>
 
-            <OptionalFormSection
-              id="optional-current-value"
-              title="Current value"
-              summary={currentValueSummary}
-              open={currentValueOpen}
-              onToggle={() => setCurrentValueOpen((current) => !current)}
-            >
-              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
-                An optional estimate of what one owned unit is worth today. It is kept
-                separate from the original purchase transaction total.
-              </p>
-              {currentValueInvalid && (
-                <FormError message="Enter a valid current value, such as 129.00." />
-              )}
-              {currentValueBasis === "legacy_record_total" && (
-                <div className="rounded-xl border border-brass/25 bg-brass-soft/45 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
-                  <p className="font-medium text-foreground/85">Legacy recorded total</p>
-                  <p className="mt-1">
-                    This older value was saved as one amount for the whole item record,
-                    not as a per-unit estimate. It is reported once and is not
-                    multiplied by quantity. Review it and convert to a per-unit
-                    estimate when you are ready.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-2.5"
-                    onClick={convertLegacyToPerUnit}
-                  >
-                    Convert to per-unit
-                  </Button>
-                </div>
-              )}
-              <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
-                <Field
-                  label={
-                    currentValueBasis === "legacy_record_total"
-                      ? "Legacy recorded total"
-                      : "Estimated current value per unit"
-                  }
-                  htmlFor="current-value"
-                  optional
-                >
-                  <Input
-                    id="current-value"
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="0.01"
-                    value={currentValue}
-                    onChange={(event) => setCurrentValue(event.target.value)}
-                    placeholder="0.00"
-                  />
-                </Field>
-                <Field label="Currency" htmlFor="current-value-currency">
-                  <Select
-                    id="current-value-currency"
-                    value={currentValueCurrency}
-                    onChange={(event) => setCurrentValueCurrency(event.target.value)}
-                  >
-                    {CURRENCIES.map((code) => (
-                      <option key={code} value={code}>
-                        {code}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-              {localCurrentValueCents != null && (
-                <div
-                  data-testid="current-value-preview"
-                  className="rounded-lg border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
-                >
-                  {currentValueBasis === "per_unit" ? (
-                    <>
-                      {quantityInvalid ? (
-                        <p className="text-muted-foreground">
-                          Enter a valid owned quantity to compute the extended total.
-                        </p>
-                      ) : (
-                        <p className="font-medium">
-                          {parsedQuantity} owned{" "}
-                          {parsedQuantity === 1 ? "unit" : "units"} ×{" "}
-                          {formatCurrency(localCurrentValueCents, currentValueCurrency)} ={" "}
-                          {formatCurrency(currentValueTotalCents ?? 0, currentValueCurrency)}
-                        </p>
-                      )}
-                      <p className="mt-1 text-muted-foreground">
-                        Loaned owned units remain included. Borrowed items are not owned
-                        and never enter this total. Leave blank if the value is unknown;
-                        missing is not zero.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground">
-                      Reported as one legacy record total of{" "}
-                      {formatCurrency(localCurrentValueCents, currentValueCurrency)}. It
-                      does not change when quantity changes. Convert above to review a
-                      per-unit estimate.
-                    </p>
-                  )}
-                </div>
-              )}
-            </OptionalFormSection>
+            {item?.current_value_cents != null && (
+              <OptionalFormSection
+                id="optional-earlier-estimate"
+                title="Earlier estimate"
+                summary={legacyEstimateSummary}
+                open={legacyEstimateOpen}
+                onToggle={() => setLegacyEstimateOpen((current) => !current)}
+              >
+                <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+                  This older value is read-only and is preserved when you edit the item.
+                  Create a fresh replacement estimate only when you need an insurance list.
+                </p>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={`/insurance?item_ids=${item.id}`}>Create insurance list</Link>
+                </Button>
+              </OptionalFormSection>
+            )}
 
             <OptionalFormSection
               id="optional-warranty"
@@ -1295,7 +1213,6 @@ export function ItemForm({
               !name.trim() ||
               quantityInvalid ||
               priceInvalid ||
-              currentValueInvalid ||
               durationInvalid ||
               warrantyDatesInvalid
             }
@@ -1310,6 +1227,18 @@ export function ItemForm({
         open={categoryDialogOpen}
         onOpenChange={setCategoryDialogOpen}
         onCreated={(category: Category) => setCategoryId(category.id)}
+      />
+      <RoomDialog
+        open={roomDialogOpen}
+        onOpenChange={setRoomDialogOpen}
+        rooms={roomsQuery.data?.items ?? []}
+        defaultParentId={roomId || undefined}
+        defaultPropertyId={propertyId || undefined}
+        onCreated={(room: Room) => {
+          setPropertyId(room.property_id ?? "");
+          setRoomId(room.id);
+          setLocationId("");
+        }}
       />
     </>
   );

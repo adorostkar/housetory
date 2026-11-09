@@ -558,7 +558,7 @@ function ScheduleDialog({
                 <p className="font-medium">Optional scheduled AI</p>
                 <p className="mt-0.5 text-[0.68rem] leading-relaxed text-muted-foreground">
                   Offline rules are always the base of a scheduled run. This separate
-                  option adds one bounded category pass using the existing household
+                  option adds one bounded organisation pass using the existing household
                   Assistant task.
                 </p>
                 <p className="mt-1 break-words text-[0.68rem] text-muted-foreground">
@@ -582,10 +582,10 @@ function ScheduleDialog({
                     aiConsent: event.target.checked ? current.aiConsent : false,
                   }))
                 }
-                aria-label="Include scheduled AI-assisted categories"
+                aria-label="Include scheduled AI-assisted organisation"
               />
               <span>
-                Include AI-assisted category suggestions in scheduled runs
+                Include AI-assisted category and tag suggestions in scheduled runs
                 <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
                   {aiReady
                     ? "Requires the separate consent below. If the provider, endpoint or model changes, AI is skipped until consent is reconfirmed."
@@ -611,14 +611,15 @@ function ScheduleDialog({
                   <span className="min-w-0 break-words">
                     I consent to scheduled AI using this provider
                     <span className="mt-1 block text-[0.68rem] leading-relaxed text-muted-foreground">
-                      One bounded request per scheduled run sends at most 40
-                      uncategorised item names, descriptions, brand/model and existing
-                      category names from the selected scope to{" "}
+                      One bounded request per scheduled run sends at most 40 items that
+                      need a category or tags. Only item names, descriptions, brand/model,
+                      current category/tag names and existing household category/tag names
+                      from the selected scope are sent to{" "}
                       <strong className="font-medium text-foreground/80">{aiLabel}</strong>
-                      {aiModel ? ` (${aiModel})` : ""}. No photos, receipts, loans,
-                      prices, borrower data or other households are sent. The provider
-                      may charge usage or cost; Housetory does not estimate it. Consent
-                      is tied to this provider, endpoint and model.
+                      {aiModel ? ` (${aiModel})` : ""}. No photos, locations, receipts,
+                      prices, loans, private notes, borrower data or other households are
+                      sent. The provider may charge usage or cost; Housetory does not
+                      estimate it. Consent is tied to this provider, endpoint and model.
                     </span>
                   </span>
                 </label>

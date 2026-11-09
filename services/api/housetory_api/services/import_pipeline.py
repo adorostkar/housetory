@@ -18,6 +18,7 @@ from ..domain import AiTask, ImportEntityType, ImportEntryStatus, ImportStatus
 from ..jobs import enqueue
 from ..models import (
     Category,
+    Household,
     ImportBatch,
     ImportEntry,
     ImportSourceFile,
@@ -39,6 +40,7 @@ from ..schemas.imports import (
     ImportSourceFileOut,
     LocationProposal,
     ProposedItem,
+    ProposedPurchase,
 )
 from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import ai, storage
@@ -811,6 +813,10 @@ def process_import_batch(
         }
         db.commit()
         try:
+            if (batch.metadata_json or {}).get("product_url"):
+                from .product_import import refresh_product_source
+
+                refresh_product_source(db, batch)
             if not batch.storage_key:
                 raise ValueError("This import has no source file.")
             path = storage.resolve_import_key(batch.storage_key)
@@ -823,6 +829,17 @@ def process_import_batch(
             }
             db.commit()
             parsed = parse_documents(bundle)
+            if (batch.metadata_json or {}).get("product_url") and not parsed.drafts:
+                parsed.drafts = [
+                    ProposalDraft(
+                        name=batch.title,
+                        source_path=batch.original_filename,
+                        source_excerpt=(
+                            f"Product page: {(batch.metadata_json or {}).get('product_url')}"
+                        ),
+                        field_sources={"name": "explicit"},
+                    )
+                ]
             file_mapping = _store_vault_files(db, batch, bundle)
             property_record = _context_property(db, batch)
             index = build_index(db, batch.household_id, property_record.id)
@@ -868,6 +885,16 @@ def process_import_batch(
                 for position, draft in enumerate(drafts):
                     proposed = to_proposed_item(draft, index)
                     proposed = _apply_context_destination(db, batch, proposed)
+                    explicit_purchase_date = (batch.metadata_json or {}).get("purchase_date")
+                    if explicit_purchase_date:
+                        purchase = proposed.purchase or ProposedPurchase()
+                        if purchase.purchase_date is None:
+                            purchase.purchase_date = date.fromisoformat(explicit_purchase_date)
+                        proposed.purchase = purchase
+                        proposed.field_sources = {
+                            **proposed.field_sources,
+                            "purchase_date": "explicit",
+                        }
                     duplicates = find_duplicates(db, batch.household_id, proposed)
                     source_file = file_mapping.get(draft.source_file_path or "")
                     entry = ImportEntry(
@@ -988,6 +1015,11 @@ def _resolve_or_create_tags(
     return list(dict.fromkeys(ids))
 
 
+def _default_currency(db: Session, household_id: uuid.UUID) -> str:
+    household = db.get(Household, household_id)
+    return household.default_currency if household is not None else "USD"
+
+
 def _item_create_from_proposal(
     db: Session, household_id: uuid.UUID, proposed: ProposedItem
 ) -> ItemCreate:
@@ -1001,13 +1033,11 @@ def _item_create_from_proposal(
             proposed.purchase.order_number,
         )
     ):
-        if proposed.purchase.price_cents is not None and not proposed.purchase.currency:
-            raise ValueError("Choose a currency before importing the purchase price.")
         purchase = PurchaseIn(
             merchant=proposed.purchase.merchant,
             purchase_date=proposed.purchase.purchase_date,
             price_cents=proposed.purchase.price_cents,
-            currency=proposed.purchase.currency or "USD",
+            currency=proposed.purchase.currency or _default_currency(db, household_id),
             order_number=proposed.purchase.order_number,
             notes=proposed.purchase.notes,
         )
@@ -1104,13 +1134,11 @@ def _merge_from_proposal(
             else None
         )
     if "purchase" in fields and proposed.purchase:
-        if proposed.purchase.price_cents is not None and not proposed.purchase.currency:
-            raise ValueError("Choose a currency before merging the purchase price.")
         payload["purchase"] = PurchaseIn(
             merchant=proposed.purchase.merchant,
             purchase_date=proposed.purchase.purchase_date,
             price_cents=proposed.purchase.price_cents,
-            currency=proposed.purchase.currency or "USD",
+            currency=proposed.purchase.currency or _default_currency(db, household_id),
             order_number=proposed.purchase.order_number,
             notes=proposed.purchase.notes,
         )

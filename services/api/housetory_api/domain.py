@@ -83,6 +83,16 @@ class ItemCondition(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ItemDisposition(StrEnum):
+    SOLD = "sold"
+    GIVEN_AWAY = "given_away"
+    DONATED = "donated"
+    DISCARDED = "discarded"
+    LOST = "lost"
+    CONSUMED = "consumed"
+    OTHER = "other"
+
+
 class CustomFieldType(StrEnum):
     TEXT = "text"
     NUMBER = "number"
@@ -231,6 +241,7 @@ class LoanStatus(StrEnum):
 class ActivityAction(StrEnum):
     ITEM_MOVED = "item.moved"
     ITEM_VALUE_UPDATED = "item.value_updated"
+    ITEM_DISPOSITION_CHANGED = "item.disposition_changed"
     ITEM_STORAGE_ENABLED = "item.storage_enabled"
     ITEM_STORAGE_DISABLED = "item.storage_disabled"
     ITEMS_BULK_MOVED = "items.bulk_moved"
@@ -263,9 +274,11 @@ class ActivityAction(StrEnum):
     INVENTORY_REVIEW_COMPLETED = "inventory_review.completed"
     INVENTORY_REVIEW_CATEGORY_APPLIED = "inventory_review.category_applied"
     INVENTORY_REVIEW_NAME_APPLIED = "inventory_review.name_applied"
+    INVENTORY_REVIEW_ORGANISATION_APPLIED = "inventory_review.organisation_applied"
     INVENTORY_REVIEW_DISMISSED = "inventory_review.dismissed"
     INVENTORY_REVIEW_CATEGORY_REVERTED = "inventory_review.category_reverted"
     INVENTORY_REVIEW_NAME_REVERTED = "inventory_review.name_reverted"
+    INVENTORY_REVIEW_ORGANISATION_REVERTED = "inventory_review.organisation_reverted"
 
 
 class ImportEntityType(StrEnum):

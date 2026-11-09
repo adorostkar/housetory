@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..domain import ItemCondition
+from ..domain import ItemCondition, ItemDisposition
 from ..schemas.common import Description, ORMModel, trimmed
 from ..schemas.documents import DocumentList, DocumentOut
 from ..schemas.households import HouseholdBrief
@@ -133,6 +133,9 @@ class ItemUpdate(BaseModel):
     current_value_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     current_value_basis: Literal["per_unit", "legacy_record_total"] | None = None
     is_archived: bool | None = None
+    disposition: ItemDisposition | None = None
+    disposed_on: date | None = None
+    disposition_note: trimmed(1, 2000) | None = None
 
     @model_validator(mode="after")
     def _one_purchase_source(self) -> "ItemUpdate":
@@ -165,6 +168,9 @@ class ItemSummary(ORMModel):
     on_loan_quantity: int = 0
     condition: str
     is_archived: bool
+    disposition: ItemDisposition | None = None
+    disposed_on: date | None = None
+    disposition_note: str | None = None
     room: RoomBrief | None
     household: HouseholdBrief | None = None
     property: PropertyBrief | None = None

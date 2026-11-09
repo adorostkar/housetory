@@ -15,7 +15,7 @@ A review can cover:
 - up to 100 explicitly selected items, including a **Review** action in the
   existing Items/place bulk bar.
 
-All scope IDs, item IDs and applied category IDs are validated inside the current
+All scope IDs, item IDs and applied category/tag IDs are validated inside the current
 household. Cross-household references are rejected.
 
 ## Offline rule-based suggestions
@@ -55,21 +55,27 @@ stale.
 
 ## Applying changes
 
-Only category and naming suggestions are actionable. The server:
+Category, naming and combined AI organisation suggestions are actionable. The server:
 
 - locks and rechecks the item against the exact analysis version;
 - marks the suggestion stale instead of overwriting a changed item;
-- validates category ownership and display-name bounds;
+- validates category/tag ownership and display-name bounds;
+- atomically creates any approved new category/tags, applies one proposed category and
+  adds up to three proposed tags without removing existing tags;
 - records an activity event for the applied change.
 
-Accepted category/name changes can be undone while the item has not changed since
-apply. The original category must still exist for category undo. Undo records a
-separate history event. Stale or unsafe undos are refused honestly.
+Accepted category/name/organisation changes can be undone while the item has not
+changed since apply. Organisation undo compares the exact current category and tag IDs
+with the applied snapshot, then restores the exact prior category and tag IDs. Original
+taxonomy records must still exist; newly created taxonomy records may remain. Undo
+records a separate history event. Stale or unsafe undos are refused honestly.
 
 Dismissal records a history event. Possible duplicates, missing details and
 location wording are advisory and cannot be accepted as automatic mutations.
-Bulk accept applies only compatible pending category/name suggestions and reports
-applied/skipped/stale/unsupported outcomes.
+Bulk accept applies only compatible pending category/name/organisation suggestions and
+reports applied/skipped/stale/unsupported outcomes. The `organisation` queue type and
+`apply_organisation` action are additive; existing category/name rows and actions remain
+supported.
 
 ## Optional AI-assisted review
 
@@ -77,16 +83,27 @@ applied/skipped/stale/unsupported outcomes.
 - AI review is an explicit owner action and is off by default.
 - It uses the existing household **Assistant** task/provider; no new provider or
   subscription is required.
+- AI evaluates up to 40 items missing a category **or** tags. Items with both are
+  skipped, as are items already covered by an offline category rule where sending them
+  would duplicate that category suggestion.
 - The confirmation dialog shows the reviewed scope and explains that one bounded
-  request sends at most 40 uncategorised item names, descriptions, brand/model and
-  existing category names. It does not send photos, receipts, loans, prices,
-  borrower data or other households.
+  request sends only item names, descriptions, brand/model, current category/tag names
+  and existing household category/tag vocabularies. It does not send photos, locations,
+  receipts, loans, prices, private notes, borrower data or other households.
 - Opening Review never calls AI. The provider may charge usage/cost.
-- Model output is schema-validated. It may only choose an existing household
-  category; invalid JSON, unknown categories, duplicate indexes or provider errors
-  mark the run partial and keep the offline suggestions.
-- Related-items, moves, merges, quantities and purchase values are never AI
-  actions.
+- Model output is schema-validated, with at most one category and three practical
+  use/activity tags per item. Existing taxonomy is selected by household-owned ID; a
+  category or tag may instead carry one bounded new name. Output never changes inventory
+  during analysis and cannot invent specifications.
+- Each returned item index produces at most one combined `organisation` suggestion,
+  which may be category-only or tags-only. Duplicate indexes are ignored. Invalid JSON,
+  unknown existing IDs, over-bound names/counts or provider errors mark the run partial
+  and keep offline suggestions without creating taxonomy.
+- Runs persist `ai_item_count`, the number of items actually sent (zero for a skip or a
+  pre-request failure). Latest review distinguishes completed, skipped and failed AI,
+  its provider/model and sent-item count, alongside suggestion counts. No delay is
+  simulated.
+- Related-items, moves, merges, quantities and purchase values are never AI actions.
 
 ## Scheduled review
 
@@ -121,11 +138,12 @@ read or change the schedule:
 
 Scheduled AI has its own opt-in. Provider-level cloud consent or a previous
 on-demand AI review do **not** enable it. The consent text states that one
-bounded request per run sends at most 40 uncategorised item names, descriptions,
-brand/model and existing category names from the selected scope to the current
-Assistant provider, with no photos, receipts, loans, prices, borrower data or
-other households. It also states that the provider may charge usage or cost;
-Housetory does not invent a cost estimate.
+bounded request per run sends at most 40 items needing a category or tags from the
+selected scope to the current Assistant provider. Only names, descriptions, brand/model,
+current category/tag names and existing household category/tag vocabularies are
+included; photos, locations, receipts, loans, prices, private notes, borrower data and
+other households are excluded. It also states that the provider may charge usage or
+cost; Housetory does not invent a cost estimate.
 
 The consent is fingerprinted against the current Assistant route: provider,
 endpoint/base URL, model, mode, source and cloud-consent state. If any of those
@@ -157,7 +175,7 @@ clear disabled, not-configured, consent-needed and attention states.
 
 - Rule scans are bounded to 500 scoped items per run; scheduled scans also
   respect the owner's smaller item cap. Larger scopes are marked partial. AI
-  receives at most 40 uncategorised items.
+  receives at most 40 items missing a category or tags.
 - On-demand runs are synchronous. Scheduled runs use the durable worker queue and
   report queued/running/completed/partial/failed/skipped states.
 - Viewers can read suggestions but cannot run, apply, dismiss or undo.

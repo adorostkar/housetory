@@ -46,12 +46,14 @@ class UserOut(ORMModel):
 class HouseholdOut(ORMModel):
     id: uuid.UUID
     name: str
+    default_currency: str = "USD"
     warranty_reminder_days: int = 30
     item_image_auto_reference: bool = False
 
 
 class HouseholdUpdate(BaseModel):
     name: Name | None = None
+    default_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     warranty_reminder_days: int | None = Field(default=None, ge=1, le=3650)
     item_image_auto_reference: bool | None = None
 

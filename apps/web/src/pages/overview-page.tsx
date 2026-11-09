@@ -7,7 +7,6 @@ import {
   Plus,
   ReceiptText,
   ShieldCheck,
-  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -81,12 +80,8 @@ export function OverviewPage() {
   }).format(new Date());
 
   const purchaseValue = data.value_by_currency[0];
-  const currentValue = data.current_value_by_currency[0];
   const purchaseLabel = purchaseValue
     ? formatCurrency(purchaseValue.total_cents, purchaseValue.currency, { compact: true })
-    : "—";
-  const currentLabel = currentValue
-    ? formatCurrency(currentValue.total_cents, currentValue.currency, { compact: true })
     : "—";
   const warrantyCounts = data.warranties;
   const hasWarranties =
@@ -96,9 +91,7 @@ export function OverviewPage() {
       warrantyCounts.unknown_count >
     0;
   const hasPurchaseValues = data.value_by_currency.length > 0;
-  const hasCurrentValues = data.current_value_by_currency.length > 0;
-  const statCount =
-    2 + (hasPurchaseValues ? 1 : 0) + (hasCurrentValues ? 1 : 0) + (hasWarranties ? 1 : 0);
+  const statCount = 2 + (hasPurchaseValues ? 1 : 0) + (hasWarranties ? 1 : 0);
   const statGridClass =
     statCount >= 5
       ? "xl:grid-cols-5"
@@ -116,16 +109,24 @@ export function OverviewPage() {
           </h1>
           <p className="mt-3 max-w-2xl text-pretty text-[0.94rem] leading-relaxed text-muted-foreground">
             {data.item_count === 0
-              ? "A calm record of everything you own — where it lives, what it cost, what it is worth, and the paperwork that proves it."
+              ? "A calm record of everything you own — where it lives, what it cost, and the paperwork that proves it."
               : `${pluralize(data.item_count, "item")} across ${pluralize(data.room_count, "room")}, with ${pluralize(data.document_count, "document")} in the library. Everything has a place.`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           {data.item_count > 0 && (
-            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
-              <Download />
-              Export evidence
-            </Button>
+            <>
+              <Button variant="outline" asChild>
+                <Link to="/insurance">
+                  <ShieldCheck />
+                  Create insurance list
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
+                <Download />
+                Export evidence
+              </Button>
+            </>
           )}
           <Button variant="outline" onClick={() => setRoomDialogOpen(true)}>
             <DoorOpen />
@@ -177,26 +178,6 @@ export function OverviewPage() {
             }
             icon={Wallet}
             to="/purchases"
-          />
-        )}
-        {hasCurrentValues && (
-          <StatCard
-            label="Current value"
-            value={
-              <span>
-                {currentLabel}
-                {data.current_value_by_currency.length > 1 && (
-                  <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
-                    +{data.current_value_by_currency.length - 1}
-                  </span>
-                )}
-              </span>
-            }
-            detail={
-              currentValue ? "Your estimates, kept separate" : "No current values yet"
-            }
-            icon={TrendingUp}
-            to="/items"
           />
         )}
         {hasWarranties && (
@@ -414,8 +395,8 @@ function OwnershipSection({
   return (
     <section className="mt-10">
       <SectionHeading
-        title="Purchase & value"
-        description="Purchase transaction totals and current estimate totals are reported side by side, never added across currencies."
+        title="Purchases"
+        description="Historical purchase transaction totals, kept separate by currency."
         actionLabel="Purchases"
         actionTo="/purchases"
       />
@@ -424,11 +405,11 @@ function OwnershipSection({
       ) : !hasValues ? (
         <div className="surface flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-[0.8rem] leading-relaxed text-muted-foreground">
-            <p className="font-medium text-foreground/85">No purchase or current values yet.</p>
+            <p className="font-medium text-foreground/85">No purchase values yet.</p>
             <p className="mt-1">
               {financial.items_missing_purchase_count > 0
                 ? `${financial.items_missing_purchase_count} items have missing or unresolved purchase information. Items marked not applicable are excluded.`
-                : "Purchase details and current estimates appear here when recorded."}
+                : "Purchase details appear here when recorded."}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -455,33 +436,19 @@ function OwnershipSection({
                     {pluralize(entry.purchase_item_count, "priced item")}
                   </Badge>
                 </div>
-                <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                      Purchase
-                    </p>
-                    <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                      {formatCurrency(entry.purchase_total_cents, entry.currency, {
-                        compact: true,
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                      Current estimate total
-                    </p>
-                    <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                      {formatCurrency(entry.current_value_total_cents, entry.currency, {
-                        compact: true,
-                      })}
-                    </p>
-                  </div>
+                <div className="mt-5">
+                  <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+                    Purchase
+                  </p>
+                  <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
+                    {formatCurrency(entry.purchase_total_cents, entry.currency, {
+                      compact: true,
+                    })}
+                  </p>
                 </div>
                 <p className="mt-4 text-[0.68rem] leading-relaxed text-muted-foreground">
-                  {entry.purchase_item_count} items with purchase data ·{" "}
-                  {entry.current_value_item_count} items with current estimates.
-                  Estimates are per owned unit × owned quantity; legacy record totals
-                  count once. Values are not converted between currencies.
+                  {entry.purchase_item_count} items with purchase data. Values are not
+                  converted between currencies.
                 </p>
               </div>
             ))}
@@ -516,66 +483,14 @@ function OwnershipSection({
             financial.value_by_room.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2">
               {financial.value_by_category.length > 0 && (
-                <BreakdownTable title="Value by category" rows={financial.value_by_category} />
+                <BreakdownTable title="Purchases by category" rows={financial.value_by_category} />
               )}
               {financial.value_by_room.length > 0 && (
-                <BreakdownTable title="Value by room" rows={financial.value_by_room} />
+                <BreakdownTable title="Purchases by room" rows={financial.value_by_room} />
               )}
             </div>
           )}
 
-          {financial.most_valuable_items.length > 0 && (
-            <div className="surface p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-display text-[1.2rem] tracking-[-0.02em]">
-                    Most valuable items
-                  </h3>
-                  <p className="mt-1 text-[0.72rem] text-muted-foreground">
-                    Current estimate where recorded, otherwise the allocated purchase
-                    value.
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" asChild>
-                  <Link to="/items">All items</Link>
-                </Button>
-              </div>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                {financial.most_valuable_items.slice(0, 6).map((entry) => (
-                  <Link
-                    key={entry.item.id}
-                    to={`/items/${entry.item.id}`}
-                    className="flex items-center gap-3 rounded-xl border border-border/60 px-3 py-2.5 transition-colors hover:bg-secondary/40"
-                  >
-                    {entry.item.primary_photo ? (
-                      <img
-                        src={entry.item.primary_photo.thumbnail_url}
-                        alt=""
-                        loading="lazy"
-                        className="size-10 shrink-0 rounded-lg object-cover"
-                      />
-                    ) : (
-                      <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground/60">
-                        <Package className="size-4" />
-                      </span>
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[0.8rem] font-medium">
-                        {entry.item.name}
-                      </span>
-                      <span className="block truncate text-[0.68rem] text-muted-foreground">
-                        {entry.item.room?.name ?? "No room"} ·{" "}
-                        {entry.value_kind === "current" ? "current estimate" : "purchase share"}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-[0.8rem] font-medium tabular-nums">
-                      {formatCurrency(entry.value_cents, entry.currency, { compact: true })}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </section>
@@ -606,8 +521,7 @@ function BreakdownTable({
               <tr className="border-b border-border/60 text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
                 <th className="px-5 py-2.5 font-medium">Name</th>
                 <th className="px-3 py-2.5 font-medium">Currency</th>
-                <th className="px-3 py-2.5 text-right font-medium">Purchase</th>
-                <th className="px-5 py-2.5 text-right font-medium">Current total</th>
+                <th className="px-5 py-2.5 text-right font-medium">Purchase</th>
               </tr>
             </thead>
             <tbody>
@@ -620,11 +534,8 @@ function BreakdownTable({
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">{row.currency}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
-                  </td>
                   <td className="px-5 py-2.5 text-right tabular-nums">
-                    {formatCurrency(row.current_value_total_cents, row.currency, { compact: true })}
+                    {formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
                   </td>
                 </tr>
               ))}

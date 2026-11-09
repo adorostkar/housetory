@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ChevronDown,
   Download,
   FileText,
   Images,
@@ -57,7 +58,11 @@ import { useQueryClient } from "@tanstack/react-query";
 export function DocumentDetailPage() {
   const { documentId = "" } = useParams();
   const documentQuery = useDocument(documentId);
-  const relationsQuery = useDocumentRelations(documentId);
+  const isManual = documentQuery.data?.document_type === "manual";
+  const [manualExtractionOpen, setManualExtractionOpen] = React.useState(false);
+  const relationsQuery = useDocumentRelations(
+    documentQuery.data && (!isManual || manualExtractionOpen) ? documentId : undefined,
+  );
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -268,20 +273,55 @@ export function DocumentDetailPage() {
             </section>
           )}
 
-          <section className="surface p-5 sm:p-6">
-            <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
-              <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-                Review extracted items
-              </h2>
-            </div>
-            <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
-              {document.pages.length > 0
-                ? "OCR reads the cleaned PDF; original page files remain available above. Review document fields, line items and household matches before anything changes."
-                : "Review document fields, line items and household matches before anything changes."}
-            </p>
-            <DocumentExtractionReview document={document} />
-          </section>
+          {isManual ? (
+            <details
+              className="group surface p-5 sm:p-6"
+              data-testid="manual-extraction-review"
+              onToggle={(event) => setManualExtractionOpen(event.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-[0.78rem] font-medium">
+                <span className="flex flex-wrap items-center gap-2">
+                  Advanced · Extraction review
+                  <Badge variant="outline">Optional</Badge>
+                </span>
+                <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+                Purchase and line-item tools are available when needed. Stored manual text
+                remains available below.
+              </p>
+              {manualExtractionOpen && (
+                <div className="mt-5 border-t border-border/60 pt-5">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
+                    <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                      Review extracted items
+                    </h2>
+                  </div>
+                  <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+                    Review document fields, line items and household matches before anything
+                    changes.
+                  </p>
+                  <DocumentExtractionReview document={document} />
+                </div>
+              )}
+            </details>
+          ) : (
+            <section className="surface p-5 sm:p-6">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
+                <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                  Review extracted items
+                </h2>
+              </div>
+              <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+                {document.pages.length > 0
+                  ? "OCR reads the cleaned PDF; original page files remain available above. Review document fields, line items and household matches before anything changes."
+                  : "Review document fields, line items and household matches before anything changes."}
+              </p>
+              <DocumentExtractionReview document={document} />
+            </section>
+          )}
 
           {document.extracted_text && (
             <details className="surface p-5 sm:p-6">

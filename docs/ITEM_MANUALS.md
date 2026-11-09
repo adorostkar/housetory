@@ -12,9 +12,13 @@ multi-household work.
 ## Attaching manuals
 
 - **Add manual** on an item opens the ordinary document upload in manual mode.
-  A PDF, image or text manual can be uploaded without any make/model fields.
-  The exact original is preserved and the normal document limits, duplicate
-  warning, OCR, scan and authenticated download behavior still apply.
+  The current item ID is submitted automatically, so the dialog does not ask the
+  user to choose compatible items again. A PDF, image or text manual can be
+  uploaded with a title and notes but without any make/model fields. The exact
+  original is preserved and the normal document limits, duplicate warning, OCR,
+  scan and authenticated download behavior still apply. To cover additional
+  items later, use **Link existing** from those items rather than repeating the
+  upload.
 - **Link existing** in the combined **Documents & manuals** surface lists every
   household document not yet linked to the item, including manuals, receipts and
   warranty certificates. One manual can be linked to several compatible items
@@ -351,6 +355,12 @@ search results or require a paid provider.
 
 ## OCR and citation limitations
 
+- A manual's document detail page keeps OCR status, extracted text, downloads and
+  grounded Ask/citation behavior. Purchase-style field and product-line review is
+  behind the collapsed **Advanced · Extraction review** disclosure instead of
+  dominating the page. Its extraction and related-item lookups are deferred until
+  that disclosure is opened; receipts, invoices and other document types retain
+  the existing open review. No extraction endpoint or stored result is removed.
 - New or newly reprocessed documents store up to 40 pages, 20,000 characters per
   page and 180,000 characters total under `extracted_metadata["ocr_pages"]`;
   `extracted_text` remains capped at 200,000 characters.

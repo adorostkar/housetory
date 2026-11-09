@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api";
 import type {
   ItemSummary,
+  ReviewRun,
   ReviewSuggestion,
   ReviewSummary,
 } from "@/lib/types";
@@ -76,6 +77,29 @@ const categorySuggestion: ReviewSuggestion = {
   secondary_item: null,
 };
 
+const organisationSuggestion: ReviewSuggestion = {
+  ...categorySuggestion,
+  id: "suggestion-organisation",
+  type: "organisation",
+  action_kind: "apply_organisation",
+  source: "ai",
+  title: "Organise as “Camping equipment” with 3 tags",
+  explanation: "AI-assisted organisation suggestion for camping and cooking.",
+  category_id: null,
+  before: { category_id: null, category_name: null, tag_ids: [] },
+  after: {
+    category_id: null,
+    category_name: "Camping equipment",
+    category_is_new: true,
+    tags: [
+      { id: "tag-outdoors", name: "outdoors", is_new: false },
+      { id: null, name: "camping", is_new: true },
+      { id: null, name: "cooking", is_new: true },
+    ],
+  },
+  fingerprint: "fingerprint-organisation",
+};
+
 const duplicateSuggestion: ReviewSuggestion = {
   ...categorySuggestion,
   id: "suggestion-duplicate",
@@ -101,6 +125,35 @@ const summary: ReviewSummary = {
   last_run: null,
   schedule: null,
 };
+
+function reviewRun(overrides: Partial<ReviewRun> = {}): ReviewRun {
+  return {
+    id: "run-latest",
+    request_id: "request-latest",
+    trigger_type: "manual",
+    schedule_id: null,
+    scope_type: "household",
+    scope_id: null,
+    scope_label: "Whole household",
+    include_ai: true,
+    status: "completed",
+    total_item_count: 12,
+    item_count_scanned: 12,
+    created_suggestion_count: 3,
+    existing_suggestion_count: 2,
+    stale_suggestion_count: 1,
+    suppressed_suggestion_count: 0,
+    ai_used: true,
+    ai_item_count: 8,
+    ai_provider_label: "OpenAI household",
+    ai_model: "gpt-test",
+    ai_error: null,
+    partial_reason: null,
+    created_at: "2026-11-06T12:00:00Z",
+    completed_at: "2026-11-06T12:00:01Z",
+    ...overrides,
+  };
+}
 
 let canWrite = true;
 let owner = true;
@@ -261,6 +314,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
             stale_suggestion_count: 0,
             suppressed_suggestion_count: 0,
             ai_used: true,
+            ai_item_count: 2,
             ai_provider_label: "OpenAI household",
             ai_model: "gpt-test",
             ai_error: null,
@@ -304,6 +358,7 @@ beforeEach(() => {
   canWrite = true;
   owner = true;
   suggestions = [categorySuggestion, duplicateSuggestion];
+  summary.last_run = null;
   vi.mocked(api.post).mockClear();
 });
 
@@ -355,13 +410,13 @@ describe("ReviewPage", () => {
     renderPage();
     await userEvent.click(
       screen.getByRole("checkbox", {
-        name: /Include optional AI-assisted category suggestions/,
+        name: /Include optional AI-assisted organisation suggestions/,
       }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Review with AI" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(/may charge usage/i)).toBeVisible();
-    expect(within(dialog).getByText(/never sends photos, receipts, loans, prices/i)).toBeVisible();
+    expect(within(dialog).getByText(/never sends photos, locations, receipts, prices, loans/i)).toBeVisible();
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Run review with AI" }),
     );
@@ -376,6 +431,9 @@ describe("ReviewPage", () => {
         }),
       ),
     );
+    expect(
+      await screen.findByText(/AI completed via OpenAI household · gpt-test · 2 items sent/),
+    ).toBeVisible();
   });
 
   it("round-trips URL-backed pending status, type and search through item origins", async () => {
@@ -486,8 +544,63 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: "Find suggestions" })).toBeDisabled();
     expect(
       screen.getByRole("checkbox", {
-        name: /Include optional AI-assisted category suggestions/,
+        name: /Include optional AI-assisted organisation suggestions/,
       }),
     ).toBeDisabled();
+  });
+
+  it("labels organisation category and tags and accepts the combined suggestion", async () => {
+    suggestions = [organisationSuggestion];
+    renderPage("/review?suggestion_type=organisation");
+    expect(screen.getByLabelText("Filter suggestions by type")).toHaveValue(
+      "organisation",
+    );
+    const card = screen
+      .getByText("Organise as “Camping equipment” with 3 tags")
+      .closest("li");
+    expect(card).not.toBeNull();
+    expect(within(card!).getByText("Organisation")).toBeVisible();
+    expect(within(card!).getByText("Category: Camping equipment (new)")).toBeVisible();
+    expect(within(card!).getByText("Tags: outdoors, camping, cooking")).toBeVisible();
+    await userEvent.click(
+      within(card!).getByRole("button", { name: "Accept organisation" }),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-organisation/accept",
+        {},
+      ),
+    );
+  });
+
+  it("shows failed AI provider, model, sent item count and retained suggestions", () => {
+    summary.last_run = reviewRun({
+      status: "partial",
+      ai_item_count: 5,
+      ai_error: "AI organisation review failed: provider timed out. Offline suggestions were kept.",
+      partial_reason: "AI provider access failed.",
+    });
+    renderPage();
+    expect(
+      screen.getByText(
+        /AI failed via OpenAI household · gpt-test · 5 items sent · offline suggestions kept/,
+      ),
+    ).toBeVisible();
+    expect(screen.getByText(/Suggestions: 3 new · 2 already queued/)).toBeVisible();
+    expect(screen.getByText(/AI review: .*provider timed out/)).toBeVisible();
+  });
+
+  it("distinguishes an AI skip with no eligible items from a completed request", () => {
+    summary.last_run = reviewRun({
+      ai_used: false,
+      ai_item_count: 0,
+      ai_provider_label: null,
+      ai_model: null,
+    });
+    renderPage();
+    expect(
+      screen.getByText(/AI skipped · no eligible items need organisation · 0 items sent/),
+    ).toBeVisible();
+    expect(screen.queryByText(/AI completed via/)).toBeNull();
   });
 });

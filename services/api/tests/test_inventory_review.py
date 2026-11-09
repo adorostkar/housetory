@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from sqlalchemy import select
@@ -5,8 +6,11 @@ from sqlalchemy import select
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import (
+    ActivityEvent,
+    Category,
     HouseholdMember,
     InventoryReviewSuggestion,
+    Tag,
     User,
 )
 from housetory_api.security import hash_password
@@ -99,6 +103,41 @@ def add_member(client, role="member", email=None):
         )
         db.commit()
     return {"Cookie": f"housetory_session={token}"}
+
+
+def create_tag(client, name):
+    response = client.post("/api/v1/tags", json={"name": name})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def configure_review_assistant(client):
+    provider = client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "openai",
+            "display_name": "Organisation fixture AI",
+            "base_url": "https://api.openai.com/v1",
+            "default_model": "gpt-organisation-test",
+            "api_key": "sk-organisation-fixture",
+            "enabled": True,
+            "cloud_consent": True,
+        },
+    )
+    assert provider.status_code == 201, provider.text
+    task = client.put(
+        "/api/v1/ai/tasks/assistant",
+        json={
+            "provider_id": provider.json()["id"],
+            "model": "gpt-organisation-test",
+            "enabled": True,
+        },
+    )
+    assert task.status_code == 200, task.text
+
+
+def organisation_suggestions(client):
+    return [entry for entry in suggestions(client)["items"] if entry["type"] == "organisation"]
 
 
 def test_offline_review_persists_scoped_suggestions_without_mutating_items(owner_client):
@@ -451,7 +490,9 @@ def test_review_permissions_cross_household_and_idempotency(owner_client):
     assert cross_items.status_code == 404
 
 
-def test_ai_category_output_is_validated_and_offline_runs_never_call_ai(owner_client, monkeypatch):
+def test_ai_organisation_output_is_validated_and_offline_runs_never_call_ai(
+    owner_client, monkeypatch
+):
     client = owner_client
     room = create_room(client)
     category = create_category(client, "Garden")
@@ -496,7 +537,8 @@ def test_ai_category_output_is_validated_and_offline_runs_never_call_ai(owner_cl
             "suggestions": [
                 {
                     "index": 0,
-                    "category_id": str(category["id"]),
+                    "category": {"id": str(category["id"])},
+                    "tags": [],
                     "confidence": "high",
                     "reason": "Explicit garden tool description.",
                 }
@@ -509,7 +551,9 @@ def test_ai_category_output_is_validated_and_offline_runs_never_call_ai(owner_cl
     assert valid.json()["ai_error"] is None
     ai_suggestions = [entry for entry in suggestions(client)["items"] if entry["source"] == "ai"]
     assert ai_suggestions
+    assert ai_suggestions[0]["type"] == "organisation"
     assert ai_suggestions[0]["category_id"] == category["id"]
+    assert valid.json()["ai_item_count"] == 2
 
     monkeypatch.setattr(
         inventory_review.ai,
@@ -518,7 +562,8 @@ def test_ai_category_output_is_validated_and_offline_runs_never_call_ai(owner_cl
             "suggestions": [
                 {
                     "index": 0,
-                    "category_id": "not-a-category",
+                    "category": {"id": "not-a-category"},
+                    "tags": [],
                     "confidence": "high",
                     "reason": "bad",
                 }
@@ -636,3 +681,483 @@ def test_room_container_property_and_item_scopes_stay_inside_scope(owner_client)
     property_ids = run_and_ids(scope_type="property", scope_id=room_a["property_id"])
     assert uuid.UUID(other_uncategorised["id"]) in property_ids
     assert uuid.UUID(other_category["id"]) not in property_ids
+
+
+def test_ai_camping_organisation_creates_taxonomy_on_accept_and_undo_restores_exactly(
+    owner_client, monkeypatch
+):
+    client = owner_client
+    room = create_room(client, "Private gear locker")
+    cooking = create_category(client, "Cooking")
+    outdoors = create_tag(client, "outdoors")
+    stove = create_item(
+        client,
+        "Camp stove",
+        room["id"],
+        category_id=cooking["id"],
+        description="Compact stove for weekend camping and outdoor cooking.",
+        serial_number="PRIVATE-SERIAL-NOT-FOR-AI",
+    )
+    organised = create_item(
+        client,
+        "Already organised lantern",
+        room["id"],
+        category_id=cooking["id"],
+        tag_ids=[outdoors["id"]],
+    )
+    configure_review_assistant(client)
+    prompts = []
+
+    def fake_complete_json(_system, prompt, *, config):
+        prompts.append(prompt)
+        return {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "category": {"name": "Camping equipment"},
+                    "tags": [
+                        {"id": outdoors["id"]},
+                        {"name": "camping"},
+                        {"name": "cooking"},
+                    ],
+                    "confidence": "high",
+                    "reason": "The description explicitly supports camping and outdoor cooking.",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(inventory_review.ai, "complete_json", fake_complete_json)
+    before = item_state(client, stove["id"])
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run["status"] == "completed"
+    assert run["ai_used"] is True
+    assert run["ai_item_count"] == 1
+    assert len(prompts) == 1
+    assert "Camp stove" in prompts[0]
+    assert "Already organised lantern" not in prompts[0]
+    assert "Private gear locker" not in prompts[0]
+    assert "PRIVATE-SERIAL-NOT-FOR-AI" not in prompts[0]
+    assert "current_tags" in prompts[0]
+    assert item_state(client, stove["id"])["updated_at"] == before["updated_at"]
+    assert item_state(client, organised["id"])["tags"][0]["name"] == "outdoors"
+
+    entries = organisation_suggestions(client)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["action_kind"] == "apply_organisation"
+    assert entry["before"]["category_id"] == cooking["id"]
+    assert entry["before"]["tag_ids"] == []
+    assert entry["after"]["category_name"] == "Camping equipment"
+    assert entry["after"]["category_is_new"] is True
+    assert {tag["name"] for tag in entry["after"]["tags"]} == {
+        "outdoors",
+        "camping",
+        "cooking",
+    }
+    with SessionLocal() as db:
+        assert db.scalar(select(Category).where(Category.name == "Camping equipment")) is None
+        assert db.scalar(select(Tag).where(Tag.name == "camping")) is None
+        assert db.scalar(select(Tag).where(Tag.name == "cooking")) is None
+
+    accepted = client.post(f"/api/v1/inventory-review/suggestions/{entry['id']}/accept", json={})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "applied"
+    assert accepted.json()["suggestion"]["can_undo"] is True
+    applied = item_state(client, stove["id"])
+    assert applied["category"]["name"] == "Camping equipment"
+    assert {tag["name"] for tag in applied["tags"]} == {"outdoors", "camping", "cooking"}
+    with SessionLocal() as db:
+        assert db.scalar(select(Tag).where(Tag.name == "camping")) is not None
+        assert db.scalar(select(Tag).where(Tag.name == "cooking")) is not None
+        assert db.scalar(select(Category).where(Category.name == "Camping equipment")) is not None
+        event = db.scalar(
+            select(ActivityEvent).where(
+                ActivityEvent.item_id == uuid.UUID(stove["id"]),
+                ActivityEvent.action == "inventory_review.organisation_applied",
+            )
+        )
+        assert event is not None
+
+    undone = client.post(f"/api/v1/inventory-review/suggestions/{entry['id']}/undo")
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["status"] == "applied"
+    restored = item_state(client, stove["id"])
+    assert restored["category"]["id"] == cooking["id"]
+    assert restored["tags"] == []
+    with SessionLocal() as db:
+        # Undo restores item links, not approved taxonomy vocabulary records.
+        assert db.scalar(select(Category).where(Category.name == "Camping equipment")) is not None
+        assert db.scalar(select(Tag).where(Tag.name == "camping")) is not None
+        assert db.scalar(select(Tag).where(Tag.name == "cooking")) is not None
+
+
+def test_organisation_bulk_accept_and_duplicate_ai_indexes(owner_client, monkeypatch):
+    client = owner_client
+    room = create_room(client)
+    outdoors = create_tag(client, "outdoors")
+    family = create_tag(client, "family")
+    tent = create_item(client, "Family tent", room["id"], tag_ids=[family["id"]])
+    kettle = create_item(client, "Camp kettle", room["id"])
+    configure_review_assistant(client)
+
+    def fake_complete_json(_system, prompt, *, config):
+        prompt_items = json.loads(
+            next(
+                line.removeprefix("Items: ")
+                for line in prompt.splitlines()
+                if line.startswith("Items: ")
+            )
+        )
+        entries = []
+        for prompt_item in prompt_items:
+            entries.append(
+                {
+                    "index": prompt_item["index"],
+                    "tags": [{"id": outdoors["id"]}, {"name": "camping"}],
+                    "confidence": "high",
+                    "reason": "Camping activity is explicit in the item name.",
+                }
+            )
+        # A repeated index is ignored rather than creating a second suggestion.
+        entries.append(dict(entries[0], category={"name": "Ignored duplicate"}))
+        return {"suggestions": entries}
+
+    monkeypatch.setattr(inventory_review.ai, "complete_json", fake_complete_json)
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    assert response.json()["ai_item_count"] == 2
+    entries = organisation_suggestions(client)
+    assert len(entries) == 2
+    assert all(entry["after"]["category_name"] is None for entry in entries)
+    bulk = client.post(
+        "/api/v1/inventory-review/suggestions/bulk-accept",
+        json={"suggestion_ids": [entry["id"] for entry in entries]},
+    )
+    assert bulk.status_code == 200, bulk.text
+    assert bulk.json()["applied_count"] == 2
+    assert {tag["name"] for tag in item_state(client, tent["id"])["tags"]} == {
+        "family",
+        "outdoors",
+        "camping",
+    }
+    assert {tag["name"] for tag in item_state(client, kettle["id"])["tags"]} == {
+        "outdoors",
+        "camping",
+    }
+    tent_entry = next(entry for entry in entries if entry["item_id"] == tent["id"])
+    undone = client.post(f"/api/v1/inventory-review/suggestions/{tent_entry['id']}/undo")
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["status"] == "applied"
+    assert {tag["name"] for tag in item_state(client, tent["id"])["tags"]} == {"family"}
+
+
+def test_ai_organisation_skips_when_no_eligible_items(owner_client, monkeypatch):
+    client = owner_client
+    room = create_room(client)
+    category = create_category(client, "Tools")
+    tag = create_tag(client, "repair")
+    create_item(
+        client,
+        "Workshop hammer",
+        room["id"],
+        category_id=category["id"],
+        tag_ids=[tag["id"]],
+    )
+    target = create_item(client, "Workshop hammer", room["id"])
+    create_item(
+        client,
+        "Organised screwdriver",
+        room["id"],
+        category_id=category["id"],
+        tag_ids=[tag["id"]],
+    )
+    configure_review_assistant(client)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("AI must not run without eligible organisation items.")
+
+    monkeypatch.setattr(inventory_review.ai, "complete_json", forbidden)
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run["status"] == "completed"
+    assert run["ai_used"] is False
+    assert run["ai_item_count"] == 0
+    assert run["ai_error"] is None
+    offline = [
+        entry
+        for entry in suggestions(client)["items"]
+        if entry["type"] == "category" and entry["item_id"] == target["id"]
+    ]
+    assert len(offline) == 1
+    assert organisation_suggestions(client) == []
+
+
+def test_ai_organisation_validation_rejects_bad_taxonomy_and_keeps_offline(
+    owner_client, monkeypatch
+):
+    client = owner_client
+    room = create_room(client)
+    category = create_category(client, "Tools")
+    tag = create_tag(client, "repair")
+    create_item(
+        client,
+        "Validation hammer",
+        room["id"],
+        category_id=category["id"],
+        tag_ids=[tag["id"]],
+    )
+    target = create_item(client, "Validation hammer", room["id"])
+    create_item(client, "Validation camp chair", room["id"], category_id=category["id"])
+    configure_review_assistant(client)
+    invalid_outputs = [
+        {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "category": {"id": str(uuid.uuid4())},
+                    "confidence": "high",
+                    "reason": "Unknown category id.",
+                }
+            ]
+        },
+        {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"id": str(uuid.uuid4())}],
+                    "confidence": "high",
+                    "reason": "Unknown tag id.",
+                }
+            ]
+        },
+        {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": str(index)} for index in range(4)],
+                    "confidence": "high",
+                    "reason": "Too many tags.",
+                }
+            ]
+        },
+        {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "category": {"name": "x" * 81},
+                    "confidence": "high",
+                    "reason": "Category name is too long.",
+                }
+            ]
+        },
+        {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": "camping", "invented": "specification"}],
+                    "confidence": "high",
+                    "reason": "Extra fields are forbidden.",
+                }
+            ]
+        },
+    ]
+    for output in invalid_outputs:
+        monkeypatch.setattr(
+            inventory_review.ai, "complete_json", lambda *_args, _output=output, **_kwargs: _output
+        )
+        response = run_review(client, include_ai=True)
+        assert response.status_code == 200, response.text
+        run = response.json()
+        assert run["status"] == "partial"
+        assert run["ai_used"] is True
+        assert run["ai_item_count"] == 1
+        assert run["ai_error"]
+        assert organisation_suggestions(client) == []
+        offline = [
+            entry
+            for entry in suggestions(client)["items"]
+            if entry["type"] == "category" and entry["item_id"] == target["id"]
+        ]
+        assert len(offline) == 1
+
+
+def test_ai_provider_failure_is_honest_and_preserves_offline_suggestions(owner_client, monkeypatch):
+    client = owner_client
+    room = create_room(client)
+    category = create_category(client, "Tools")
+    tag = create_tag(client, "repair")
+    create_item(
+        client,
+        "Provider hammer",
+        room["id"],
+        category_id=category["id"],
+        tag_ids=[tag["id"]],
+    )
+    target = create_item(client, "Provider hammer", room["id"])
+    create_item(client, "Provider camp chair", room["id"], category_id=category["id"])
+    configure_review_assistant(client)
+
+    def provider_failure(*_args, **_kwargs):
+        raise inventory_review.ai.AiError("provider unavailable for fixture")
+
+    monkeypatch.setattr(inventory_review.ai, "complete_json", provider_failure)
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    run = response.json()
+    assert run["status"] == "partial"
+    assert run["ai_used"] is True
+    assert run["ai_item_count"] == 1
+    assert run["ai_provider_label"] == "Organisation fixture AI"
+    assert run["ai_model"] == "gpt-organisation-test"
+    assert "provider unavailable for fixture" in run["ai_error"]
+    assert organisation_suggestions(client) == []
+    assert any(
+        entry["type"] == "category" and entry["item_id"] == target["id"]
+        for entry in suggestions(client)["items"]
+    )
+
+
+def test_organisation_undo_detects_tag_changes_even_without_item_timestamp_change(
+    owner_client, monkeypatch
+):
+    client = owner_client
+    room = create_room(client)
+    camping = create_tag(client, "camping")
+    extra = create_tag(client, "weekend")
+    item = create_item(client, "Camping wash kit", room["id"])
+    configure_review_assistant(client)
+    monkeypatch.setattr(
+        inventory_review.ai,
+        "complete_json",
+        lambda *_args, **_kwargs: {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"id": camping["id"]}],
+                    "confidence": "high",
+                    "reason": "The item name explicitly describes camping use.",
+                }
+            ]
+        },
+    )
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    entry = organisation_suggestions(client)[0]
+    accepted = client.post(f"/api/v1/inventory-review/suggestions/{entry['id']}/accept", json={})
+    assert accepted.status_code == 200, accepted.text
+    applied_updated_at = item_state(client, item["id"])["updated_at"]
+    changed = client.post(
+        "/api/v1/items/bulk/tags",
+        json={
+            "item_ids": [item["id"]],
+            "tag_ids": [extra["id"]],
+            "mode": "add",
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    # The association-only bulk operation need not touch items.updated_at; the exact
+    # tag snapshot still prevents an unsafe undo.
+    assert item_state(client, item["id"])["updated_at"] == applied_updated_at
+    undone = client.post(f"/api/v1/inventory-review/suggestions/{entry['id']}/undo")
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["status"] == "skipped"
+    assert "tags changed" in undone.json()["message"]
+    assert {tag["name"] for tag in item_state(client, item["id"])["tags"]} == {
+        "camping",
+        "weekend",
+    }
+
+
+def test_organisation_accept_enforces_permissions_and_household_taxonomy(owner_client, monkeypatch):
+    client = owner_client
+    room = create_room(client)
+    category = create_category(client, "Household")
+    proposed_category = create_category(client, "Cooking equipment")
+    tag = create_tag(client, "cooking")
+    item = create_item(client, "organisation safety stove", room["id"], category_id=category["id"])
+    configure_review_assistant(client)
+    monkeypatch.setattr(
+        inventory_review.ai,
+        "complete_json",
+        lambda *_args, **_kwargs: {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "category": {"id": proposed_category["id"]},
+                    "tags": [{"id": tag["id"]}],
+                    "confidence": "high",
+                    "reason": "The item name supports cooking organisation.",
+                }
+            ]
+        },
+    )
+    response = run_review(client, include_ai=True)
+    assert response.status_code == 200, response.text
+    entry = organisation_suggestions(client)[0]
+    viewer = add_member(client, "viewer", email="organisation-viewer@example.com")
+    denied = client.post(
+        f"/api/v1/inventory-review/suggestions/{entry['id']}/accept",
+        headers=viewer,
+        json={},
+    )
+    assert denied.status_code == 403
+
+    first_household = uuid.UUID(client.get("/api/v1/auth/session").json()["household"]["id"])
+    second = client.post(
+        "/api/v1/households",
+        json={"name": "Organisation other household", "property_name": "Other"},
+    )
+    assert second.status_code == 201, second.text
+    second_household = uuid.UUID(second.json()["household"]["id"])
+    second_headers = {"X-Household-Id": str(second_household)}
+    other_category = client.post(
+        "/api/v1/categories", headers=second_headers, json={"name": "Other category"}
+    ).json()
+    other_tag = client.post(
+        "/api/v1/tags", headers=second_headers, json={"name": "other-tag"}
+    ).json()
+    selected = client.post(f"/api/v1/households/{first_household}/select")
+    assert selected.status_code == 200
+
+    with SessionLocal() as db:
+        row = db.get(InventoryReviewSuggestion, uuid.UUID(entry["id"]))
+        assert row is not None
+        after = dict(row.after_json)
+        after["category_id"] = other_category["id"]
+        after["tags"] = [{**after["tags"][0], "id": other_tag["id"]}]
+        row.after_json = after
+        db.commit()
+    first_headers = {"X-Household-Id": str(first_household)}
+    cross_category = client.post(
+        f"/api/v1/inventory-review/suggestions/{entry['id']}/accept",
+        headers=first_headers,
+        json={},
+    )
+    assert cross_category.status_code == 200, cross_category.text
+    assert cross_category.json()["status"] == "unsupported"
+    assert "category" in cross_category.json()["message"]
+
+    with SessionLocal() as db:
+        row = db.get(InventoryReviewSuggestion, uuid.UUID(entry["id"]))
+        assert row is not None
+        after = dict(row.after_json)
+        after["category_id"] = proposed_category["id"]
+        row.after_json = after
+        db.commit()
+    cross_tag = client.post(
+        f"/api/v1/inventory-review/suggestions/{entry['id']}/accept",
+        headers=first_headers,
+        json={},
+    )
+    assert cross_tag.status_code == 200, cross_tag.text
+    assert cross_tag.json()["status"] == "unsupported"
+    assert "tag" in cross_tag.json()["message"]
+    item_response = client.get(f"/api/v1/items/{item['id']}", headers=first_headers)
+    assert item_response.status_code == 200, item_response.text
+    state = item_response.json()["item"]
+    assert state["category"]["id"] == category["id"]
+    assert state["tags"] == []

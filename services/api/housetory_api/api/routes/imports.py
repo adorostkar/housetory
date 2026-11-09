@@ -1,7 +1,9 @@
 import re
 import uuid
+from datetime import date
 from pathlib import PurePosixPath
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -27,6 +29,7 @@ from ...services.import_pipeline import (
     serialize_batch,
 )
 from ...services.import_readers import SUPPORTED_EXTENSIONS
+from ...services.recognition_import import create_batch_from_recognition
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -106,6 +109,8 @@ def create_import(
     file: Annotated[UploadFile | None, File()] = None,
     text: Annotated[str | None, Form()] = None,
     title: Annotated[str | None, Form(max_length=200)] = None,
+    product_url: Annotated[str | None, Form(max_length=2000)] = None,
+    purchase_date: Annotated[date | None, Form()] = None,
     property_id: Annotated[uuid.UUID | None, Form()] = None,
     room_id: Annotated[uuid.UUID | None, Form()] = None,
     location_id: Annotated[uuid.UUID | None, Form()] = None,
@@ -114,12 +119,32 @@ def create_import(
 ) -> ImportBatchDetail:
     has_file = file is not None and bool(file.filename)
     has_text = bool(text and text.strip())
-    if has_file == has_text:
+    has_product_url = bool(product_url and product_url.strip())
+    if sum((has_file, has_text, has_product_url)) != 1:
         raise ApiError(
             422,
             "import_source_required",
-            "Choose exactly one source: a file, a ZIP vault, or pasted text.",
+            "Choose exactly one source: a file, a ZIP vault, pasted text, or one product URL.",
         )
+    if purchase_date is not None and not has_product_url:
+        raise ApiError(
+            422,
+            "purchase_date_requires_product_url",
+            "A purchase date can only be supplied with a product URL.",
+        )
+    if has_product_url:
+        parsed_url = urlparse(product_url.strip())
+        if (
+            parsed_url.scheme not in {"http", "https"}
+            or not parsed_url.hostname
+            or parsed_url.username
+            or parsed_url.password
+        ):
+            raise ApiError(
+                422,
+                "invalid_product_url",
+                "Enter a valid public HTTP or HTTPS product URL without credentials.",
+            )
     if has_text and len(text) > 2_000_000:
         raise ApiError(413, "text_too_large", "Pasted imports are limited to 2 MB of text.")
 
@@ -201,6 +226,8 @@ def create_import(
         clean_title = "Pasted notes"
     if has_file and not clean_title:
         clean_title = (filename or "Import").rsplit(".", 1)[0][:200] or "Import"
+    if has_product_url and not clean_title:
+        clean_title = "Product link"
 
     batch = ImportBatch(
         household_id=auth.household.id,
@@ -210,26 +237,55 @@ def create_import(
         original_filename=filename,
         content_type=content_type,
         warnings=[],
-        metadata_json={"context": context} if context else {},
+        metadata_json={
+            **({"context": context} if context else {}),
+            **(
+                {
+                    "product_url": product_url.strip(),
+                    "purchase_date": purchase_date.isoformat() if purchase_date else None,
+                }
+                if has_product_url
+                else {}
+            ),
+        },
     )
     db.add(batch)
     try:
         db.flush()
         if has_text:
             stored = storage.store_import_text(auth.household.id, batch.id, text or "")
+        elif has_product_url:
+            source_text = f"Product URL: {product_url.strip()}\n"
+            if purchase_date:
+                source_text += f"Purchase date (explicit user fact): {purchase_date.isoformat()}\n"
+            stored = storage.store_import_text(auth.household.id, batch.id, source_text)
         else:
             if file is None:
                 raise ApiError(422, "import_source_required", "Choose a file to import.")
             stored = storage.store_import_source(auth.household.id, batch.id, file)
         batch.storage_key = stored.storage_key
         batch.byte_size = stored.byte_size
-        if has_text:
-            batch.original_filename = "pasted-notes.txt"
+        if has_text or has_product_url:
+            batch.original_filename = "product-url.txt" if has_product_url else "pasted-notes.txt"
             batch.content_type = "text/plain"
         enqueue_import(db, batch)
     except Exception:
         db.rollback()
         raise
+    return serialize_batch(db, batch)
+
+
+@router.post(
+    "/from-recognition/{recognition_id}",
+    response_model=ImportBatchDetail,
+    status_code=201,
+)
+def create_import_from_recognition_route(
+    recognition_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    batch = create_batch_from_recognition(db, auth.household.id, recognition_id)
     return serialize_batch(db, batch)
 
 

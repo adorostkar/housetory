@@ -487,7 +487,7 @@ def test_web_comparables_persist_and_appear_in_evidence_pdf(owner_client, monkey
     )
     assert "Resale estimate" in text
     assert "AI with public web search snippets" in text
-    assert "as of 2026-11-08" in text
+    assert f"as of {body['as_of']}" in text
     assert "Medium confidence" in text
     assert "Estimated per-unit range" in text
     assert "90.00 USD total" in text

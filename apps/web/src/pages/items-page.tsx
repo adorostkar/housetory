@@ -8,7 +8,6 @@ import {
 import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePropertyFilter } from "@/hooks/use-property-filter";
 
 import { AddItemsButton, useAddItems } from "@/components/add-items";
@@ -24,7 +23,6 @@ import { ItemCard, ItemRow } from "@/components/item-card";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -76,8 +74,6 @@ export function ItemsPage() {
   const sortParam = searchParams.get("sort");
   const sort: SortKey = isSortKey(sortParam) ? sortParam : "created_desc";
 
-  const [search, setSearch] = useState(qParam);
-  const debouncedSearch = useDebouncedValue(search, 300);
   const [view, setView] = useState<"grid" | "list">(() => {
     try {
       return localStorage.getItem("housetory.items.view") === "list" ? "list" : "grid";
@@ -97,20 +93,6 @@ export function ItemsPage() {
       // Browsing-private storage failures should not break the list.
     }
   }, [view]);
-
-  useEffect(() => {
-    const trimmed = debouncedSearch.trim();
-    if (trimmed === qParam) return;
-    setSearchParams(
-      (previous) => {
-        const next = new URLSearchParams(previous);
-        if (trimmed) next.set("q", trimmed);
-        else next.delete("q");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [debouncedSearch, qParam, setSearchParams]);
 
   const filters = {
     q: qParam || undefined,
@@ -186,10 +168,7 @@ export function ItemsPage() {
       ? {
           key: "q",
           label: `Search: ${qParam}`,
-          remove: () => {
-            setSearch("");
-            updateParam("q", "");
-          },
+          remove: () => updateParam("q", ""),
         }
       : null,
     roomFilter
@@ -303,7 +282,6 @@ export function ItemsPage() {
   };
 
   const clearFilters = () => {
-    setSearch("");
     selection.clearSelection("Selection cleared because the view changed.");
     setPropertyId("");
     setSearchParams({}, { replace: true });
@@ -327,34 +305,9 @@ export function ItemsPage() {
       />
 
       <div className="surface mb-8 p-3.5 sm:p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                selection.clearSelection("Selection cleared because the search changed.");
-              }}
-              placeholder="Search items"
-              aria-label="Search items"
-              className="pl-10"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-          <div className="hidden items-center gap-2 text-[0.75rem] text-muted-foreground sm:flex">
-            <SlidersHorizontal className="size-3.5" />
-            <span>Filters</span>
-          </div>
+        <div className="flex items-center gap-2 text-[0.75rem] text-muted-foreground">
+          <SlidersHorizontal className="size-3.5" />
+          <span>Filters</span>
         </div>
 
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-7">

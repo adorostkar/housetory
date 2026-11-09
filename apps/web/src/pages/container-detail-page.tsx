@@ -79,7 +79,6 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { Container, ContainerType } from "@/lib/types";
 import {
   CONTAINER_TYPE_LABELS,
-  formatCurrency,
   formatDate,
   formatRelativeDate,
   itemContainer,
@@ -328,7 +327,6 @@ export function ContainerDetailPage() {
                 Delete
               </Button>
             )}
-            <AddItemsButton context={addItemsContext} />
           </>
         }
       />
@@ -338,91 +336,8 @@ export function ContainerDetailPage() {
       <BorrowedKeptHere locationId={detail.id} />
 
       <section className="surface mb-4 p-4 sm:p-5">
-        <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />
-      </section>
-
-      <section className="surface mb-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                <PackageOpen className="size-4" />
-                Ownership details
-              </h2>
-              {detail.owner_item ? (
-                <Badge variant="sage">Owned item</Badge>
-              ) : (
-                <Badge variant="outline">Storage only</Badge>
-              )}
-            </div>
-            {detail.owner_item ? (
-              <>
-                <Link
-                  to={`/items/${detail.owner_item.id}`}
-                  className="mt-2 block font-display text-[1.25rem] tracking-[-0.02em] underline-offset-4 hover:underline"
-                >
-                  {detail.owner_item.name}
-                </Link>
-                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
-                  Purchase, warranty, photos, documents, value, tags and history are kept on
-                  this owned item. The container keeps its identifier, QR code and contents.
-                </p>
-                {detail.owner_item_detail && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {detail.owner_item_detail.current_value_total_cents != null && (
-                      <Badge variant="outline">
-                        Value{" "}
-                        {formatCurrency(
-                          detail.owner_item_detail.current_value_total_cents,
-                          detail.owner_item_detail.current_value_currency,
-                        )}
-                      </Badge>
-                    )}
-                    {detail.owner_item_detail.purchase && (
-                      <Badge variant="outline">Purchase recorded</Badge>
-                    )}
-                    {detail.owner_item_detail.warranty && (
-                      <Badge
-                        variant={
-                          WARRANTY_STATUS_TONE[detail.owner_item_detail.warranty.status]
-                        }
-                      >
-                        {WARRANTY_STATUS_LABELS[detail.owner_item_detail.warranty.status]}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="mt-2 max-w-2xl text-[0.78rem] leading-relaxed text-muted-foreground">
-                This container is a storage place without an owned item. Add purchase,
-                warranty, photos, documents and value by linking an existing item or creating
-                one owned record. No duplicate inventory record is created automatically.
-              </p>
-            )}
-          </div>
-          {canWrite && detail.owner_item && (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/items/${detail.owner_item.id}`}>Open owned item</Link>
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setUnlinkOpen(true)}>
-                Unlink
-              </Button>
-            </div>
-          )}
-          {canWrite && !detail.owner_item && (
-            <Button variant="outline" size="sm" onClick={() => setOwnershipOpen(true)}>
-              <PackageOpen />
-              Add ownership details
-            </Button>
-          )}
-        </div>
-      </section>
-
-      <section className="surface p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={detail.is_container ? "sage" : "outline"}>
                 {detail.is_container
@@ -434,7 +349,7 @@ export function ContainerDetailPage() {
                 {pluralize(detail.child_count, "nested place")}
               </span>
             </div>
-            <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[0.82rem] text-muted-foreground">
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.82rem] text-muted-foreground">
               <MapPin className="size-3.5" />
               {detail.property && (
                 <>
@@ -465,10 +380,82 @@ export function ContainerDetailPage() {
           )}
         </div>
         {detail.description && (
-          <p className="mt-4 max-w-3xl whitespace-pre-line text-[0.82rem] leading-relaxed text-foreground/75">
+          <p className="mt-3 max-w-3xl whitespace-pre-line text-[0.82rem] leading-relaxed text-foreground/75">
             {detail.description}
           </p>
         )}
+      </section>
+
+      <section className="surface mb-4 p-4 sm:p-5">
+        <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />
+      </section>
+
+      <section className="surface mb-4 p-3.5 sm:p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                <PackageOpen className="size-4" />
+                Ownership details
+              </h2>
+              {detail.owner_item ? (
+                <Badge variant="sage">Owned item</Badge>
+              ) : (
+                <Badge variant="outline">Storage only</Badge>
+              )}
+            </div>
+            {detail.owner_item ? (
+              <>
+                <Link
+                  to={`/items/${detail.owner_item.id}`}
+                  className="mt-2 block font-display text-[1.25rem] tracking-[-0.02em] underline-offset-4 hover:underline"
+                >
+                  {detail.owner_item.name}
+                </Link>
+                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                  Purchase, warranty, photos, documents, value, tags and history are kept on
+                  this owned item. The container keeps its identifier, QR code and contents.
+                </p>
+                {detail.owner_item_detail && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {detail.owner_item_detail.purchase && (
+                      <Badge variant="outline">Purchase recorded</Badge>
+                    )}
+                    {detail.owner_item_detail.warranty && (
+                      <Badge
+                        variant={
+                          WARRANTY_STATUS_TONE[detail.owner_item_detail.warranty.status]
+                        }
+                      >
+                        {WARRANTY_STATUS_LABELS[detail.owner_item_detail.warranty.status]}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 max-w-2xl text-[0.75rem] leading-relaxed text-muted-foreground">
+                Link an owned item to add purchase, warranty, photos, documents and value.
+              </p>
+            )}
+          </div>
+          {canWrite && detail.owner_item && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/items/${detail.owner_item.id}`}>Open owned item</Link>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setUnlinkOpen(true)}>
+                Unlink
+              </Button>
+            </div>
+          )}
+          {canWrite && !detail.owner_item && (
+            <Button variant="outline" size="sm" onClick={() => setOwnershipOpen(true)}>
+              <PackageOpen />
+              Add ownership details
+            </Button>
+          )}
+        </div>
       </section>
 
       <section className="mt-8">
@@ -485,7 +472,7 @@ export function ContainerDetailPage() {
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-muted-foreground">
               <span>
                 {pluralize(detail.summary.item_count, "item")} ·{" "}
-                {detail.summary.total_quantity} nested units
+                {detail.summary.total_quantity} units total
               </span>
               <span>·</span>
               <span>

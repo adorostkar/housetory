@@ -72,10 +72,13 @@ export function QuickSearch({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
-  const [query, setQuery] = React.useState("");
+  const [query, setQuery] = React.useState(() =>
+    ["/search", "/items"].includes(location.pathname) ? (searchParams.get("q") ?? "") : "",
+  );
   const [focused, setFocused] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
+  const isItemsPage = location.pathname === "/items";
   const debounced = useDebouncedValue(query, 220);
   const term = query.trim();
   const debouncedTerm = debounced.trim();
@@ -108,12 +111,27 @@ export function QuickSearch({
     setFocused(false);
   }, [location.pathname]);
 
-  const urlQuery =
-    location.pathname === "/search" ? (searchParams.get("q") ?? "") : null;
+  const urlQuery = ["/search", "/items"].includes(location.pathname)
+    ? (searchParams.get("q") ?? "")
+    : null;
   React.useEffect(() => {
     if (urlQuery === null) return;
     setQuery((current) => (current === urlQuery ? current : urlQuery));
   }, [urlQuery]);
+
+  React.useEffect(() => {
+    if (!isItemsPage || query !== debounced) return;
+    const trimmed = debounced.trim();
+    const current = searchParams.get("q") ?? "";
+    if (trimmed === current) return;
+    const next = new URLSearchParams(searchParams);
+    if (trimmed) next.set("q", trimmed);
+    else next.delete("q");
+    navigate(
+      { pathname: "/items", search: next.size > 0 ? `?${next.toString()}` : "" },
+      { replace: true },
+    );
+  }, [debounced, isItemsPage, navigate, query, searchParams]);
 
   React.useEffect(() => {
     if (!focused) setActiveIndex(-1);
@@ -184,6 +202,12 @@ export function QuickSearch({
   const submitToResults = (explicitAsk: boolean) => {
     if (!term) return;
     setFocused(false);
+    if (isItemsPage && !explicitAsk) {
+      const next = new URLSearchParams(searchParams);
+      next.set("q", term);
+      navigate(`/items?${next.toString()}`, { replace: true });
+      return;
+    }
     const params = new URLSearchParams({
       q: term,
       r: Date.now().toString(),
@@ -370,7 +394,7 @@ export function QuickSearch({
                       className="h-7 px-2 text-[0.68rem]"
                       onClick={() => submitToResults(false)}
                     >
-                      View all results
+                      {isItemsPage ? "Filter items" : "View all results"}
                       <ArrowRight className="size-3" />
                     </Button>
                   </div>

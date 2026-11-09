@@ -68,6 +68,7 @@ class InventoryReviewRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Integer, nullable=False, server_default="0"
     )
     ai_used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    ai_item_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     ai_provider_label: Mapped[str | None] = mapped_column(String(160))
     ai_model: Mapped[str | None] = mapped_column(String(160))
     ai_error: Mapped[str | None] = mapped_column(Text)
@@ -82,12 +83,12 @@ class InventoryReviewSuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "inventory_review_suggestions"
     __table_args__ = (
         CheckConstraint(
-            "type in ('category', 'name', 'possible_duplicate', 'missing_detail', "
-            "'location_conflict')",
+            "type in ('category', 'name', 'organisation', 'possible_duplicate', "
+            "'missing_detail', 'location_conflict')",
             name="valid_type",
         ),
         CheckConstraint(
-            "action_kind in ('apply_category', 'apply_name', 'advisory')",
+            "action_kind in ('apply_category', 'apply_name', 'apply_organisation', 'advisory')",
             name="valid_action_kind",
         ),
         CheckConstraint(

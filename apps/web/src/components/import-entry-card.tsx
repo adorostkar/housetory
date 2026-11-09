@@ -30,6 +30,7 @@ import type {
   StorageLocation,
 } from "@/lib/types";
 import { CURRENCIES } from "@/lib/labels";
+import { useDefaultCurrency } from "@/lib/queries";
 import {
   cn,
   formatCurrency,
@@ -96,7 +97,8 @@ export function ImportEntryCard({
   ) => Promise<StorageLocation | null>;
   disabled: boolean;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const defaultCurrency = useDefaultCurrency();
+  const [open, setOpen] = React.useState(() => !proposed.room?.matched_id);
   const [creatingRoom, setCreatingRoom] = React.useState(false);
   const [creatingLocation, setCreatingLocation] = React.useState(false);
   const final = ["imported", "merged", "skipped", "rejected"].includes(entry.status);
@@ -268,7 +270,7 @@ export function ImportEntryCard({
               <span>
                 {formatCurrency(
                   proposed.purchase.price_cents,
-                  proposed.purchase.currency ?? "USD",
+                  proposed.purchase.currency ?? defaultCurrency,
                 )}
               </span>
             )}
@@ -571,7 +573,7 @@ export function ImportEntryCard({
                       purchase: {
                         purchase_date: proposed.purchase?.purchase_date ?? null,
                         price_cents: proposed.purchase?.price_cents ?? null,
-                        currency: proposed.purchase?.currency ?? null,
+                        currency: proposed.purchase?.currency ?? defaultCurrency,
                         order_number: proposed.purchase?.order_number ?? null,
                         notes: proposed.purchase?.notes ?? null,
                         merchant: event.target.value || null,
@@ -592,7 +594,7 @@ export function ImportEntryCard({
                         merchant: proposed.purchase?.merchant ?? null,
                         purchase_date: event.target.value || null,
                         price_cents: proposed.purchase?.price_cents ?? null,
-                        currency: proposed.purchase?.currency ?? null,
+                        currency: proposed.purchase?.currency ?? defaultCurrency,
                         order_number: proposed.purchase?.order_number ?? null,
                         notes: proposed.purchase?.notes ?? null,
                       },
@@ -620,7 +622,7 @@ export function ImportEntryCard({
                         price_cents: event.target.value
                           ? Math.round(Number(event.target.value) * 100)
                           : null,
-                        currency: proposed.purchase?.currency ?? null,
+                        currency: proposed.purchase?.currency ?? defaultCurrency,
                         order_number: proposed.purchase?.order_number ?? null,
                         notes: proposed.purchase?.notes ?? null,
                       },
@@ -631,7 +633,7 @@ export function ImportEntryCard({
               <Field label="Currency" htmlFor={`currency-${entry.id}`}>
                 <Select
                   id={`currency-${entry.id}`}
-                  value={proposed.purchase?.currency ?? ""}
+                  value={proposed.purchase?.currency ?? defaultCurrency}
                   disabled={disabled || final}
                   onChange={(event) =>
                     update({
@@ -646,7 +648,6 @@ export function ImportEntryCard({
                     })
                   }
                 >
-                  <option value="">Not sure</option>
                   {CURRENCIES.map((code) => (
                     <option key={code} value={code}>
                       {code}
@@ -666,7 +667,7 @@ export function ImportEntryCard({
                         merchant: proposed.purchase?.merchant ?? null,
                         purchase_date: proposed.purchase?.purchase_date ?? null,
                         price_cents: proposed.purchase?.price_cents ?? null,
-                        currency: proposed.purchase?.currency ?? null,
+                        currency: proposed.purchase?.currency ?? defaultCurrency,
                         order_number: event.target.value || null,
                         notes: proposed.purchase?.notes ?? null,
                       },

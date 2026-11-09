@@ -147,6 +147,7 @@ describe("ItemCard image sources", () => {
     expect(image).toHaveAttribute("src", "/api/v1/item-images/image-ref/thumbnail");
     expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
+    expect(image.parentElement).toHaveClass("bg-white");
     expect(screen.getByText("Reference")).toBeVisible();
   });
 
@@ -192,7 +193,7 @@ describe("ItemCard image sources", () => {
       </MemoryRouter>,
     );
     const image = screen.getByRole("link").querySelector("img");
-    expect(image).toHaveClass("object-contain");
+    expect(image).toHaveClass("object-contain", "bg-white");
     expect(image).not.toHaveClass("object-cover");
   });
 

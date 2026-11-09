@@ -86,6 +86,7 @@ const SCOPES: Array<{ value: ReviewScopeType; label: string }> = [
 const TYPE_LABELS: Record<ReviewSuggestionType, string> = {
   category: "Category",
   name: "Naming",
+  organisation: "Organisation",
   possible_duplicate: "Possible duplicate",
   missing_detail: "Missing detail",
   location_conflict: "Location wording",
@@ -125,6 +126,18 @@ function stringList(value: unknown): string[] {
     : [];
 }
 
+function organisationTagNames(after: Record<string, unknown>): string[] {
+  if (!Array.isArray(after.tags)) return stringList(after.tag_names);
+  return after.tags.flatMap((entry) => {
+    if (typeof entry === "string") return [entry];
+    if (entry && typeof entry === "object" && "name" in entry) {
+      const name = (entry as { name?: unknown }).name;
+      return typeof name === "string" && name.trim() ? [name] : [];
+    }
+    return [];
+  });
+}
+
 function timestamp(value: string | null | undefined) {
   if (!value) return "never";
   const date = new Date(value);
@@ -133,6 +146,20 @@ function timestamp(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function aiRunSummary(run: ReviewRun) {
+  if (!run.include_ai) return "AI not requested · offline rules only";
+  const route = run.ai_provider_label
+    ? ` via ${run.ai_provider_label}${run.ai_model ? ` · ${run.ai_model}` : ""}`
+    : "";
+  if (run.ai_error && run.ai_used) {
+    return `AI failed${route} · ${run.ai_item_count} items sent · offline suggestions kept`;
+  }
+  if (run.ai_error) return `AI skipped${route} · 0 items sent`;
+  if (!run.ai_used) return "AI skipped · no eligible items need organisation · 0 items sent";
+  const provider = run.ai_provider_label ?? "Assistant";
+  return `AI completed via ${provider}${run.ai_model ? ` · ${run.ai_model}` : ""} · ${run.ai_item_count} items sent`;
 }
 
 function reviewScopeLabel({
@@ -819,16 +846,18 @@ export function ReviewPage() {
               onChange={(event) => setIncludeAi(event.target.checked)}
             />
             <span className="min-w-0 break-words">
-              Include optional AI-assisted category suggestions
+              Include optional AI-assisted organisation suggestions
               <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
                 Owner only. Uses the existing household Assistant task via{" "}
                 <strong className="break-all font-medium text-foreground/80">
                   {aiProvider}
                 </strong>.
-                Sends at most {40} uncategorised item names, descriptions, brand/model
-                and existing category names. No photos, receipts, loans, prices,
-                borrower data or other households are sent. One bounded provider
-                request may incur usage or cost. Opening Review never calls AI.
+                Sends at most {40} items missing a category or tags. Only names,
+                descriptions, brand/model, current category/tag names and existing
+                household category/tag names are included. No photos, locations,
+                receipts, prices, loans, private notes, borrower data or other households
+                are sent. One bounded provider request may incur usage or cost. Opening
+                Review never calls AI.
               </span>
             </span>
           </label>
@@ -880,11 +909,14 @@ export function ReviewPage() {
             </Badge>
           </div>
           <p className="mt-2 text-[0.72rem] text-muted-foreground">
-            Scanned {displayedRun.item_count_scanned} of {displayedRun.total_item_count} items ·
-            {" "}{displayedRun.created_suggestion_count} new ·{" "}
+            Scanned {displayedRun.item_count_scanned} of {displayedRun.total_item_count} items ·{" "}
+            {aiRunSummary(displayedRun)}.
+          </p>
+          <p className="mt-1 text-[0.72rem] text-muted-foreground">
+            Suggestions: {displayedRun.created_suggestion_count} new ·{" "}
             {displayedRun.existing_suggestion_count} already queued ·{" "}
-            {displayedRun.suppressed_suggestion_count} previously resolved
-            {displayedRun.ai_used ? ` · AI via ${displayedRun.ai_provider_label ?? "Assistant"}` : " · offline rules only"}.
+            {displayedRun.suppressed_suggestion_count} previously resolved ·{" "}
+            {displayedRun.stale_suggestion_count} marked stale.
           </p>
           {displayedRun.partial_reason && (
             <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
@@ -1075,6 +1107,10 @@ export function ReviewPage() {
                   stringField(suggestion.after, "category_name") ??
                   stringField(suggestion.after, "name");
                 const beforeName = stringField(suggestion.before, "name");
+                const proposedTags =
+                  suggestion.type === "organisation"
+                    ? organisationTagNames(suggestion.after)
+                    : [];
                 const evidence = suggestion.evidence ?? {};
                 const missingFields = stringList(evidence.missing_fields);
                 const mentionedRoom = stringField(evidence, "mentioned_room");
@@ -1127,8 +1163,13 @@ export function ReviewPage() {
                       )}
                       {categoryName && (
                         <Badge variant="outline">
-                          Proposed: {categoryName}
+                          {suggestion.type === "organisation"
+                            ? `Category: ${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`
+                            : `Proposed: ${categoryName}`}
                         </Badge>
+                      )}
+                      {proposedTags.length > 0 && (
+                        <Badge variant="outline">Tags: {proposedTags.join(", ")}</Badge>
                       )}
                       {suggestion.type === "name" && beforeName && (
                         <Badge variant="secondary">
@@ -1194,6 +1235,16 @@ export function ReviewPage() {
                               Edit & accept
                             </Button>
                           </>
+                        )}
+                      {suggestion.status === "pending" &&
+                        suggestion.action_kind === "apply_organisation" && (
+                          <Button
+                            size="sm"
+                            disabled={!canWrite || applyMutation.isPending}
+                            onClick={() => applyMutation.mutate({ suggestion })}
+                          >
+                            Accept organisation
+                          </Button>
                         )}
                       {suggestion.status === "pending" &&
                         suggestion.action_kind === "advisory" &&
@@ -1272,7 +1323,7 @@ export function ReviewPage() {
         open={aiConfirmOpen}
         onOpenChange={setAiConfirmOpen}
         title="Run the optional AI review pass?"
-        description={`This runs one bounded Assistant request for ${scopeLabel} via ${aiProvider}. It sends at most 40 uncategorised item names, descriptions, brand/model and existing category names. It never sends photos, receipts, loans, prices, borrower data or other households. The provider may charge usage, and its output is validated as suggestions only; no inventory changes happen during analysis.`}
+        description={`This runs one bounded Assistant request for ${scopeLabel} via ${aiProvider}. It sends at most 40 items missing a category or tags, and only their names, descriptions, brand/model, current category/tag names plus existing household category/tag vocabularies. It never sends photos, locations, receipts, prices, loans, private notes, borrower data or other households. The provider may charge usage, and its output is validated as suggestions only; no inventory changes happen during analysis.`}
         confirmLabel="Run review with AI"
         onConfirm={async () => {
           await runReview.mutateAsync();

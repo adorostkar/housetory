@@ -54,6 +54,7 @@ const sessionState: SessionState = {
   household: {
     id: "household-1",
     name: "Housetory Phase Five",
+    default_currency: "USD",
     warranty_reminder_days: 30,
   },
 };
@@ -200,7 +201,7 @@ describe("OverviewPage sparse and populated states", () => {
     renderPage();
     expect(screen.getByText("1 unit")).toBeVisible();
     expect(screen.getByText(/on loan across/)).toBeVisible();
-    expect(screen.getByText("No purchase or current values yet.")).toBeVisible();
+    expect(screen.getByText("No purchase values yet.")).toBeVisible();
     expect(screen.getByText(/No warranties recorded/)).toBeVisible();
     expect(screen.queryByText("Expiring soon")).not.toBeInTheDocument();
     expect(screen.queryByText("Purchase value")).not.toBeInTheDocument();
@@ -213,7 +214,8 @@ describe("OverviewPage sparse and populated states", () => {
     state.financial = populatedFinancial;
     renderPage();
     expect(screen.getByText("Purchase value")).toBeVisible();
-    expect(screen.getByText("Current value")).toBeVisible();
+    expect(screen.queryByText("Current value")).not.toBeInTheDocument();
+    expect(screen.getByText("Purchases by category")).toBeVisible();
     expect(screen.getByText("Expiring soon")).toBeVisible();
     expect(screen.getByText("Missing purchase info")).toBeVisible();
   });

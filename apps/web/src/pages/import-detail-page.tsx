@@ -104,8 +104,9 @@ export function ImportDetailPage() {
             mergeFields: [],
           };
         } else if (!(entry.id in next)) {
+          const needsReview = entry.proposed.relationships?.review === true;
           next[entry.id] = {
-            include: !highDuplicate,
+            include: !highDuplicate && !needsReview,
             action: highDuplicate ? "skip" : "import",
             mergeItemId: highDuplicate?.item_id ?? "",
             mergeFields: highDuplicate ? ["serial_number"] : [],

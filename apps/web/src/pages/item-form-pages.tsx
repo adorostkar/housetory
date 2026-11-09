@@ -13,22 +13,64 @@ export function ItemNewPage() {
   const propertyId = searchParams.get("property_id") ?? undefined;
   const locationId = searchParams.get("location_id") ?? undefined;
   const defaultName = searchParams.get("name") ?? undefined;
+  const duplicateOfId = searchParams.get("duplicate_of") ?? undefined;
+  const duplicateQuery = useItem(duplicateOfId);
   const origin = readOrigin(searchParams);
+
+  if (duplicateOfId && duplicateQuery.isPending) {
+    return (
+      <div>
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="mt-4 h-12 w-1/2 max-w-md" />
+        <Skeleton className="mt-10 h-96 rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (duplicateOfId && duplicateQuery.isError) {
+    return (
+      <ErrorState
+        title="The item to duplicate is out of reach"
+        message="It may have been deleted, or the link may be out of date."
+        onRetry={() => void duplicateQuery.refetch()}
+      />
+    );
+  }
+
+  const duplicateOf = duplicateOfId ? duplicateQuery.data?.item : undefined;
 
   return (
     <div className="animate-fade-up">
       <PageHeader
-        eyebrow="New item"
-        title="Add something to your home"
-        description="Start with the essentials. Photographs and documents can follow once the item is saved."
-        backTo={origin?.path ?? (roomId ? `/rooms/${roomId}` : "/items")}
-        backLabel={origin ? `Back to ${origin.label}` : roomId ? "Back to room" : "All items"}
+        eyebrow={duplicateOf ? "Duplicate item" : "New item"}
+        title={duplicateOf ? `Duplicate ${duplicateOf.name}` : "Add something to your home"}
+        description={
+          duplicateOf
+            ? "Identity, category, tags and place are copied. Quantity starts at 1; serial, photos, purchase, warranty and value start empty."
+            : "Start with the essentials. Photographs and documents can follow once the item is saved."
+        }
+        backTo={
+          duplicateOf
+            ? `/items/${duplicateOf.id}`
+            : (origin?.path ?? (roomId ? `/rooms/${roomId}` : "/items"))
+        }
+        backLabel={
+          duplicateOf
+            ? "Back to original item"
+            : origin
+              ? `Back to ${origin.label}`
+              : roomId
+                ? "Back to room"
+                : "All items"
+        }
       />
       <ItemForm
+        duplicateOf={duplicateOf}
         defaultPropertyId={propertyId}
         defaultRoomId={roomId}
         defaultLocationId={locationId}
         defaultName={defaultName}
+        cancelTo={duplicateOf ? `/items/${duplicateOf.id}` : undefined}
         origin={origin}
       />
     </div>

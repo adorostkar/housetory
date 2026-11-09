@@ -39,13 +39,10 @@ async function expectChooser(page: Page) {
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Add items" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Enter manually/ })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /Scan a photo/ })).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: /Record a voice note/ }),
-  ).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: /Import a list or file/ }),
-  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Describe or show/ })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Scan a photo/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Record a voice note/ })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Import a list or file/ })).toHaveCount(0);
   return dialog;
 }
 
@@ -86,25 +83,22 @@ test("unified Add items chooser consolidates workflows and preserves context", a
   dialog = await expectChooser(page);
   await expect(dialog.getByText(room.name)).toBeVisible();
   await expect(dialog.getByText(container.identifier)).toBeVisible();
-  await dialog.getByRole("button", { name: /Scan a photo/ }).click();
+  await dialog.getByRole("button", { name: /Describe or show/ }).click();
   await expect(page).toHaveURL(
-    new RegExp(`/scan\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
+    new RegExp(`/add-items\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
   );
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/containers/${container.id}`));
 
   await page.locator("main").getByRole("button", { name: "Add items" }).first().click();
   await (await expectChooser(page))
-    .getByRole("button", { name: /Import a list or file/ })
+    .getByRole("button", { name: /Describe or show/ })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/imports\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
+    new RegExp(`/add-items\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
   );
-  await expect(page.getByText(/New entries without their own location/)).toBeVisible();
-  await expect(page.getByText(container.identifier)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Import history" })).toBeVisible();
-  await page.getByLabel("Notes").fill(`- Context import item ${suffix}`);
-  await page.getByRole("button", { name: "Process import" }).click();
+  await page.getByLabel("What did you get?").fill(`- Context import item ${suffix}`);
+  await page.getByRole("button", { name: "Review items" }).click();
   await expect(page).toHaveURL(/\/imports\/[0-9a-f-]+$/);
   const contextBatchId = page.url().split("/").pop();
   await expect
@@ -150,7 +144,7 @@ test("unified Add items chooser consolidates workflows and preserves context", a
   await mobilePage.goto("/items");
   await mobilePage.getByRole("button", { name: "Add items" }).click();
   await expectChooser(mobilePage);
-  await mobilePage.getByRole("button", { name: /Scan a photo/ }).click();
-  await expect(mobilePage).toHaveURL(/\/scan$/);
+  await mobilePage.getByRole("button", { name: /Describe or show/ }).click();
+  await expect(mobilePage).toHaveURL(/\/add-items$/);
   await mobile.close();
 });

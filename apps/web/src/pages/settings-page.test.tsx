@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/components/theme-provider";
 import { api } from "@/lib/api";
-import type { AiStatus, Overview, SessionState } from "@/lib/types";
+import { queryKeys } from "@/lib/queries";
+import type { AiStatus, Household, Overview, SessionState } from "@/lib/types";
 import { SettingsPage } from "@/pages/settings-page";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -16,6 +17,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       get: vi.fn(),
+      patch: vi.fn(),
     },
   };
 });
@@ -32,9 +34,21 @@ const session: SessionState = {
   household: {
     id: "household-1",
     name: "Home",
+    default_currency: "USD",
     warranty_reminder_days: 30,
   },
   role: "owner",
+  households: [
+    {
+      id: "household-1",
+      name: "Home",
+      default_currency: "USD",
+      warranty_reminder_days: 30,
+      role: "owner",
+      property_count: 1,
+      is_current: true,
+    },
+  ],
 };
 
 const overview = {
@@ -78,10 +92,10 @@ function renderPage() {
   return client;
 }
 
-function mockApi(status: () => AiStatus) {
+function mockApi(status: () => AiStatus, getSession: () => SessionState = () => session) {
   const calls = { status: 0 };
   vi.mocked(api.get).mockImplementation(((path: string) => {
-    if (path === "/auth/session") return Promise.resolve(session);
+    if (path === "/auth/session") return Promise.resolve(getSession());
     if (path === "/overview") return Promise.resolve(overview);
     if (path === "/system/status/summary") {
       return Promise.resolve({
@@ -102,6 +116,64 @@ function mockApi(status: () => AiStatus) {
   }) as typeof api.get);
   return calls;
 }
+
+describe("SettingsPage household defaults", () => {
+  it("saves the default currency, updates cached memberships and follows household switches", async () => {
+    let currentSession = session;
+    mockApi(() => baseStatus, () => currentSession);
+    const updatedHousehold: Household = {
+      ...session.household!,
+      default_currency: "EUR",
+    };
+    vi.mocked(api.patch).mockImplementation((() => {
+      currentSession = {
+        ...currentSession,
+        household: updatedHousehold,
+        households: currentSession.households?.map((entry) =>
+          entry.id === updatedHousehold.id
+            ? { ...entry, ...updatedHousehold }
+            : entry,
+        ),
+      };
+      return Promise.resolve(updatedHousehold);
+    }) as typeof api.patch);
+    const client = renderPage();
+
+    const currency = await screen.findByLabelText("Default currency");
+    expect(currency).toHaveValue("USD");
+    expect(screen.getByRole("option", { name: "EUR" })).toBeInTheDocument();
+    await userEvent.selectOptions(currency, "EUR");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith("/household", {
+        name: "Home",
+        default_currency: "EUR",
+        warranty_reminder_days: 30,
+        item_image_auto_reference: false,
+      }),
+    );
+    await waitFor(() => {
+      const cached = client.getQueryData<SessionState>(queryKeys.session);
+      expect(cached?.household?.default_currency).toBe("EUR");
+      expect(cached?.households?.[0]?.default_currency).toBe("EUR");
+    });
+
+    const switched: SessionState = {
+      ...currentSession,
+      household: {
+        id: "household-2",
+        name: "Cabin",
+        default_currency: "GBP",
+        warranty_reminder_days: 14,
+      },
+      households: [],
+    };
+    currentSession = switched;
+    client.setQueryData(queryKeys.session, switched);
+    await waitFor(() => expect(currency).toHaveValue("GBP"));
+  });
+});
 
 describe("SettingsPage Intelligence summary", () => {
   it("shows a compact catalog count and never renders hundreds of model IDs", async () => {

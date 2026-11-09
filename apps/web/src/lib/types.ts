@@ -46,6 +46,7 @@ export interface User {
 export interface Household {
   id: UUID;
   name: string;
+  default_currency: string;
   warranty_reminder_days: number;
   item_image_auto_reference?: boolean;
 }
@@ -762,6 +763,15 @@ export interface Photo {
 
 
 
+export type ItemDisposition =
+  | "sold"
+  | "given_away"
+  | "donated"
+  | "discarded"
+  | "lost"
+  | "consumed"
+  | "other";
+
 export interface ItemSummary {
   id: UUID;
   name: string;
@@ -772,6 +782,9 @@ export interface ItemSummary {
   on_loan_quantity?: number;
   condition: ItemCondition;
   is_archived: boolean;
+  disposition?: ItemDisposition | null;
+  disposed_on?: string | null;
+  disposition_note?: string | null;
   room: RoomBrief | null;
   household?: { id: UUID; name: string } | null;
   property?: PropertyBrief | null;
@@ -853,6 +866,53 @@ export interface ItemList {
 
 export interface ItemDetailResponse {
   item: ItemDetail;
+}
+
+export interface InsuranceScopeItem {
+  item_id: UUID;
+  name: string;
+  description: string | null;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  quantity: number;
+  condition: ItemCondition;
+  is_archived: boolean;
+  valuation_fingerprint: string;
+  ai_eligible: boolean;
+  ai_ineligible_reason: string | null;
+}
+
+export interface InsuranceScopePreview {
+  items: InsuranceScopeItem[];
+  scope_label: string;
+  archived_excluded_count: number;
+  max_items: number;
+}
+
+export interface InsuranceBatchEntry {
+  item_id: UUID;
+  status: "queued" | "running" | "estimated" | "failed" | "cancelled";
+  estimate: ItemValuationPreview | null;
+  error: string | null;
+}
+
+export interface InsuranceBatch {
+  request_id: UUID;
+  status: "queued" | "running" | "completed" | "partial" | "cancelled";
+  total: number;
+  processed: number;
+  estimated: number;
+  failed: number;
+  items: InsuranceBatchEntry[];
+}
+
+export interface InsuranceJob {
+  id: UUID;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  error: string | null;
+  pdf_url: string | null;
+  csv_url: string | null;
 }
 
 export type ValuationPurpose = "resale" | "replacement";
@@ -2030,6 +2090,7 @@ export type ReviewScopeType =
 export type ReviewSuggestionType =
   | "category"
   | "name"
+  | "organisation"
   | "possible_duplicate"
   | "missing_detail"
   | "location_conflict";
@@ -2039,7 +2100,11 @@ export type ReviewSuggestionStatus =
   | "dismissed"
   | "stale"
   | "reverted";
-export type ReviewActionKind = "apply_category" | "apply_name" | "advisory";
+export type ReviewActionKind =
+  | "apply_category"
+  | "apply_name"
+  | "apply_organisation"
+  | "advisory";
 
 export type ReviewRunTrigger = "manual" | "scheduled";
 export type ReviewScheduleScope = "household" | "property" | "room" | "container";
@@ -2078,6 +2143,7 @@ export interface ReviewRun {
   stale_suggestion_count: number;
   suppressed_suggestion_count: number;
   ai_used: boolean;
+  ai_item_count: number;
   ai_provider_label: string | null;
   ai_model: string | null;
   ai_error: string | null;

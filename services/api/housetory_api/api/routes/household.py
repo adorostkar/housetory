@@ -13,6 +13,7 @@ def get_household(auth: AuthContext = Depends(require_auth)) -> HouseholdOut:
     return HouseholdOut(
         id=auth.household.id,
         name=auth.household.name,
+        default_currency=auth.household.default_currency,
         warranty_reminder_days=auth.household.warranty_reminder_days,
         item_image_auto_reference=auth.household.item_image_auto_reference,
     )
@@ -26,6 +27,8 @@ def update_household(
 ) -> HouseholdOut:
     if "name" in payload.model_fields_set and payload.name is not None:
         auth.household.name = payload.name
+    if "default_currency" in payload.model_fields_set and payload.default_currency is not None:
+        auth.household.default_currency = payload.default_currency
     if (
         "warranty_reminder_days" in payload.model_fields_set
         and payload.warranty_reminder_days is not None
@@ -40,6 +43,7 @@ def update_household(
     return HouseholdOut(
         id=auth.household.id,
         name=auth.household.name,
+        default_currency=auth.household.default_currency,
         warranty_reminder_days=auth.household.warranty_reminder_days,
         item_image_auto_reference=auth.household.item_image_auto_reference,
     )

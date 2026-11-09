@@ -50,6 +50,7 @@ const libraryNav = [
 
 const occasionalNav = [
   { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
+  { to: "/insurance", label: "Insurance", icon: ShieldCheck, end: false },
   { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
   { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
@@ -64,6 +65,7 @@ const mobileNav = [
 
 const mobileMoreNav = [
   { to: "/review", label: "Review", icon: ClipboardCheck },
+  { to: "/insurance", label: "Insurance", icon: ShieldCheck },
   { to: "/documents", label: "Documents", icon: FileText },
   { to: "/purchases", label: "Purchases", icon: ReceiptText },
   { to: "/warranties", label: "Warranties", icon: ShieldCheck },

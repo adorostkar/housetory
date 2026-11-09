@@ -378,6 +378,10 @@ export function useSession() {
   });
 }
 
+export function useDefaultCurrency() {
+  return useSession().data?.household?.default_currency ?? "USD";
+}
+
 export function useCreateHousehold() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -744,6 +748,7 @@ export function useInvalidateInventory() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
     void queryClient.invalidateQueries({ queryKey: ["containers"] });
     void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory-review"] });
   };
 }
 

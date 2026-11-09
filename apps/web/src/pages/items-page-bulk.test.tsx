@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
@@ -148,6 +148,15 @@ function LocationProbe() {
   );
 }
 
+function SearchChangeButton() {
+  const [, setSearchParams] = useSearchParams();
+  return (
+    <button type="button" onClick={() => setSearchParams({ q: "cam" }, { replace: true })}>
+      Change search query
+    </button>
+  );
+}
+
 function renderPage(initialEntry = "/items") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -157,6 +166,7 @@ function renderPage(initialEntry = "/items") {
       <MemoryRouter initialEntries={[initialEntry]}>
         <AddItemsProvider>
           <ItemsPage />
+          <SearchChangeButton />
           <LocationProbe />
         </AddItemsProvider>
       </MemoryRouter>
@@ -215,10 +225,11 @@ describe("ItemsPage bulk organisation", () => {
     expect(localStorage.getItem("housetory.items.view")).toBe("list");
     expect(screen.getByText(/1 on loan · 1 at home/)).toBeVisible();
 
-    await userEvent.type(screen.getByLabelText("Search items"), "cam");
+    await userEvent.click(screen.getByRole("button", { name: "Change search query" }));
     await waitFor(() =>
-      expect(screen.getByText(/Selection cleared because the search changed/i)).toBeVisible(),
+      expect(screen.getByText(/Selection cleared because the view changed/i)).toBeVisible(),
     );
+    expect(screen.getByTestId("location")).toHaveTextContent("/items?q=cam");
     expect(screen.queryByText(/selected ·/)).not.toBeInTheDocument();
   });
 

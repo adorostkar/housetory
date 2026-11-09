@@ -153,7 +153,7 @@ describe("ReviewSchedulePanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Set up schedule" }));
     expect(screen.getByLabelText("Enable scheduled review")).not.toBeChecked();
     expect(
-      screen.getByLabelText("Include scheduled AI-assisted categories"),
+      screen.getByLabelText("Include scheduled AI-assisted organisation"),
     ).not.toBeChecked();
 
     await userEvent.click(screen.getByLabelText("Enable scheduled review"));
@@ -195,7 +195,7 @@ describe("ReviewSchedulePanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Set up schedule" }));
     await userEvent.click(screen.getByLabelText("Enable scheduled review"));
     await userEvent.click(
-      screen.getByLabelText("Include scheduled AI-assisted categories"),
+      screen.getByLabelText("Include scheduled AI-assisted organisation"),
     );
     await userEvent.click(screen.getByRole("button", { name: "Save schedule" }));
 
@@ -205,6 +205,9 @@ describe("ReviewSchedulePanel", () => {
     expect(api.put).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByLabelText("Confirm scheduled AI consent"));
+    expect(screen.getByText(/current category\/tag names/)).toBeVisible();
+    expect(screen.getByText(/No photos, locations, receipts/)).toBeVisible();
+    expect(screen.getByText(/private notes/)).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Save schedule" }));
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
     expect(api.put).toHaveBeenCalledWith(

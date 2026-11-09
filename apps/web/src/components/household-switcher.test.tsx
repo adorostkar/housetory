@@ -16,13 +16,13 @@ const session = {
     email: "ada@example.com",
     created_at: "2026-01-01T00:00:00Z",
   },
-  household: { id: "home-1", name: "Ada's Home", warranty_reminder_days: 30 },
+  household: { id: "home-1", name: "Ada's Home", default_currency: "USD", warranty_reminder_days: 30 },
   role: "owner" as const,
   households: [
     {
       id: "home-1",
       name: "Ada's Home",
-      warranty_reminder_days: 30,
+      default_currency: "USD", warranty_reminder_days: 30,
       role: "owner" as const,
       property_count: 2,
       is_current: true,
@@ -30,7 +30,7 @@ const session = {
     {
       id: "home-2",
       name: "Cabin",
-      warranty_reminder_days: 30,
+      default_currency: "USD", warranty_reminder_days: 30,
       role: "viewer" as const,
       property_count: 1,
       is_current: false,

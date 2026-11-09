@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import { CategoryIcon } from "@/components/category-icon";
 import { Badge } from "@/components/ui/badge";
+import { ITEM_DISPOSITION_LABELS } from "@/lib/labels";
 import { itemHref, rememberListScroll, type ItemOrigin } from "@/lib/navigation";
 import type { ItemSummary } from "@/lib/types";
 import {
@@ -59,7 +60,12 @@ export function ItemCard({
             />
           </div>
         ) : representative?.thumbnail_url || representative?.url ? (
-          <div className="flex size-full items-center justify-center bg-secondary/30 p-4">
+          <div
+            className={cn(
+              "flex size-full items-center justify-center p-4",
+              representative.source_type === "reference" ? "bg-white" : "bg-secondary/30",
+            )}
+          >
             <img
               src={representative.thumbnail_url ?? representative.url ?? ""}
               alt={`${item.name} ${representative.label.toLowerCase()}`}
@@ -98,7 +104,9 @@ export function ItemCard({
           <div className="flex flex-wrap gap-1.5">
             {item.is_archived && (
               <Badge variant="secondary" className="bg-background/80 backdrop-blur-md">
-                Archived
+                {item.disposition
+                  ? ITEM_DISPOSITION_LABELS[item.disposition]
+                  : "Archived"}
               </Badge>
             )}
             {warrantyActive && (
@@ -301,7 +309,10 @@ export function ItemRow({
             src={representative.thumbnail_url ?? representative.url ?? ""}
             alt=""
             loading="lazy"
-            className="size-full bg-secondary/30 object-contain p-1.5"
+            className={cn(
+              "size-full object-contain p-1.5",
+              representative.source_type === "reference" ? "bg-white" : "bg-secondary/30",
+            )}
           />
         ) : (
           <div className="image-placeholder flex size-full items-center justify-center">
@@ -323,7 +334,13 @@ export function ItemRow({
               {onLoan} on loan · {Math.max(0, item.quantity - onLoan)} at home
             </Badge>
           )}
-          {item.is_archived && <Badge variant="secondary">Archived</Badge>}
+          {item.is_archived && (
+            <Badge variant="secondary">
+              {item.disposition
+                ? ITEM_DISPOSITION_LABELS[item.disposition]
+                : "Archived"}
+            </Badge>
+          )}
         </div>
         <p className="mt-0.5 truncate text-[0.72rem] text-muted-foreground">
           {path || "No location"}

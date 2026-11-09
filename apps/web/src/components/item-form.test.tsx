@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ItemForm } from "@/components/item-form";
@@ -8,6 +9,7 @@ import { api } from "@/lib/api";
 import type { ItemDetail } from "@/lib/types";
 
 const navigate = vi.hoisted(() => vi.fn());
+const queryMocks = vi.hoisted(() => ({ defaultCurrency: "USD" }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>();
@@ -47,6 +49,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
   return {
     ...actual,
     useInvalidateInventory: () => vi.fn(),
+    useDefaultCurrency: () => queryMocks.defaultCurrency,
     useProperties: () => ({ data: { items: [{ id: "property-1", name: "Home" }] } }),
     useRooms: () => ({
       data: { items: [{ id: "room-1", name: "Workshop", property_id: "property-1" }] },
@@ -163,13 +166,19 @@ const item: ItemDetail = {
   storage: null,
 };
 
-function renderForm(formItem: ItemDetail = item) {
+function renderForm(formItem: ItemDetail | null = item, duplicateOf?: ItemDetail) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ItemForm item={formItem} returnTo="/items/item-1" />
+      <MemoryRouter>
+        <ItemForm
+          item={formItem ?? undefined}
+          duplicateOf={duplicateOf}
+          returnTo="/items/item-1"
+        />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -189,7 +198,22 @@ const packItem: ItemDetail = {
     : null,
 };
 
+function makePackItem(quantity: number, priceCents: number): ItemDetail {
+  return {
+    ...packItem,
+    quantity,
+    purchase: packItem.purchase
+      ? {
+          ...packItem.purchase,
+          price_cents: priceCents,
+          unallocated_cents: priceCents,
+        }
+      : null,
+  };
+}
+
 beforeEach(() => {
+  queryMocks.defaultCurrency = "USD";
   navigate.mockReset();
   vi.mocked(api.patch).mockReset();
   vi.mocked(api.patch).mockResolvedValue({ item });
@@ -204,12 +228,109 @@ describe("ItemForm optional sections", () => {
     expect(screen.getByLabelText("Quantity")).toBeVisible();
     expect(screen.getByLabelText("Room")).toBeVisible();
     expect(screen.getByLabelText("Storage location")).toBeVisible();
-    expect(screen.getByText(/Shared purchase · \$100\b/)).toBeVisible();
+    expect(screen.getByText(/Shared purchase · \$100 transaction total/)).toBeVisible();
     expect(screen.getByText(/Stanley · Document: Toolbox warranty/)).toBeVisible();
-    expect(screen.getByText(/Legacy record total \$50\b/)).toBeVisible();
+    expect(screen.getByText(/Earlier record total \$50\b/)).toBeVisible();
     expect(screen.queryByLabelText(/Purchase total/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Estimated current value per unit")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Provider/)).not.toBeInTheDocument();
+  });
+
+  it("uses the household default currency for new purchase entries without adding current-value controls", async () => {
+    queryMocks.defaultCurrency = "EUR";
+    renderForm(null);
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    expect(document.getElementById("purchase-currency")).toHaveValue("EUR");
+    expect(screen.queryByRole("button", { name: /^Current value/ })).not.toBeInTheDocument();
+  });
+
+  it("does not rewrite existing records or expose their old estimate for editing", async () => {
+    queryMocks.defaultCurrency = "EUR";
+    renderForm();
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    expect(document.getElementById("purchase-currency")).toHaveValue("USD");
+    const earlierToggle = screen.getByRole("button", { name: /^Earlier estimate/ });
+    await userEvent.click(earlierToggle);
+    const earlier = earlierToggle.closest("section")!;
+    expect(within(earlier).queryByLabelText("Currency")).not.toBeInTheDocument();
+    expect(within(earlier).getByRole("link", { name: "Create insurance list" })).toHaveAttribute(
+      "href",
+      "/insurance?item_ids=item-1",
+    );
+  });
+
+  it("duplicates identity and organisation without copying unit-specific financial details", async () => {
+    vi.mocked(api.post).mockResolvedValue({ item });
+    renderForm(null, packItem);
+    expect(screen.getByLabelText("Item name")).toHaveValue("Toolbox");
+    expect(screen.getByLabelText("Quantity")).toHaveValue(1);
+    const identityToggle = screen.getByRole("button", {
+      name: /Identity & organisation/,
+    });
+    expect(identityToggle).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(identityToggle);
+    expect(identityToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText(/^Brand/)).toHaveValue("Stanley");
+    expect(screen.getByLabelText(/^Model/)).toHaveValue("Pro-Stack");
+    expect(screen.getByLabelText(/^Serial number/)).toHaveValue("");
+
+    await userEvent.click(screen.getByRole("button", { name: "Add to your home" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/items", expect.anything()));
+    const [, payload] = vi.mocked(api.post).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      name: "Toolbox",
+      quantity: 1,
+      brand: "Stanley",
+      model: "Pro-Stack",
+      serial_number: null,
+      category_id: "category-1",
+      tag_ids: ["tag-1"],
+      purchase: null,
+      warranty: null,
+    });
+    expect(payload).not.toHaveProperty("current_value_cents");
+    expect(payload).not.toHaveProperty("current_value_currency");
+    expect(payload).not.toHaveProperty("current_value_basis");
+  });
+
+  it("creates a sub-room without losing the item draft", async () => {
+    const newRoom = {
+      id: "room-new",
+      name: "Garden cupboard",
+      description: null,
+      property_id: "property-1",
+      parent_id: "room-1",
+      sort_order: 0,
+      item_count: 0,
+      location_count: 0,
+      total_item_count: 0,
+      total_location_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    vi.mocked(api.post).mockImplementation(async (path) => {
+      if (path === "/rooms") return newRoom;
+      if (path === "/items") return { item };
+      throw new Error(`Unexpected POST ${path}`);
+    });
+    renderForm(null);
+    await userEvent.type(screen.getByLabelText("Item name"), "Garden tools");
+    await userEvent.selectOptions(screen.getByLabelText("Room"), "room-1");
+    await userEvent.selectOptions(screen.getByLabelText("Room"), "__new_room__");
+    const dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("Room name"), "Garden cupboard");
+    expect(within(dialog).getByLabelText(/Nested inside/)).toHaveValue("room-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add room" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add to your home" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/items", expect.anything()));
+    const [, payload] = vi.mocked(api.post).mock.calls.find(
+      ([path]) => path === "/items",
+    )!;
+    expect(payload).toMatchObject({ name: "Garden tools", room_id: "room-new" });
   });
 
   it("edits only the name while preserving collapsed shared purchase, value, warranty and links", async () => {
@@ -239,9 +360,6 @@ describe("ItemForm optional sections", () => {
         notes: "Shared order",
         receipt_document_id: "receipt-1",
       },
-      current_value_cents: 5000,
-      current_value_currency: "USD",
-      current_value_basis: "legacy_record_total",
       warranty: {
         provider: "Stanley",
         start_date: "2026-02-01",
@@ -251,18 +369,20 @@ describe("ItemForm optional sections", () => {
         notes: "Lifetime shell warranty",
       },
     });
+    expect(payload).not.toHaveProperty("current_value_cents");
+    expect(payload).not.toHaveProperty("current_value_currency");
+    expect(payload).not.toHaveProperty("current_value_basis");
   });
 
-  it("expands purchase, value and warranty sections for review", async () => {
+  it("expands purchase, earlier estimate and warranty sections for review", async () => {
     renderForm();
     await userEvent.click(screen.getByRole("button", { name: /Purchase/ }));
     expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
     expect(screen.getByLabelText(/Receipt document/)).toHaveValue("receipt-1");
 
-    await userEvent.click(screen.getByRole("button", { name: /Current value/ }));
-    expect(screen.getByLabelText(/Legacy recorded total/)).toHaveValue(50);
-    expect(screen.getByText("Legacy recorded total", { selector: "p" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Convert to per-unit" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Earlier estimate/ }));
+    expect(screen.getByText(/Earlier record total/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Convert to per-unit" })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Warranty/ }));
     expect(screen.getByLabelText(/Provider/)).toHaveValue("Stanley");
@@ -276,7 +396,7 @@ describe("ItemForm optional sections", () => {
     expect(sectionButtons.map((button) => button.textContent)).toEqual([
       expect.stringContaining("Identity & organisation"),
       expect.stringContaining("Purchase"),
-      expect.stringContaining("Current value"),
+      expect.stringContaining("Earlier estimate"),
       expect.stringContaining("Warranty"),
     ]);
     for (const button of sectionButtons) {
@@ -320,6 +440,109 @@ describe("ItemForm optional sections", () => {
     });
   });
 
+  it("preserves a non-divisible package total while inspecting its derived unit price", async () => {
+    renderForm(makePackItem(3, 10000));
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+
+    expect(screen.getByLabelText(/price per unit/i)).toHaveValue(33.33);
+    const preview = screen.getByTestId("purchase-price-preview");
+    expect(preview).toHaveTextContent("$100 package total");
+    expect(preview).toHaveTextContent("≈ $33.33 per unit for 3 units.");
+    expect(preview).not.toHaveTextContent("3 units ×");
+
+    await userEvent.click(screen.getByRole("button", { name: "Total paid for package" }));
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+    expect(screen.getByLabelText(/price per unit/i)).toHaveValue(33.33);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      quantity: 3,
+      purchase: { price_cents: 10000 },
+    });
+  });
+
+  it("does not round a one-dollar total to zero across one thousand derived units", async () => {
+    renderForm(makePackItem(1000, 100));
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+
+    expect(screen.getByLabelText(/price per unit/i)).toHaveValue(0);
+    const preview = screen.getByTestId("purchase-price-preview");
+    expect(preview).toHaveTextContent("$1 package total");
+    expect(preview).toHaveTextContent("≈ $0 per unit for 1000 units.");
+    expect(preview).not.toHaveTextContent("1000 units ×");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      quantity: 1000,
+      purchase: { price_cents: 100 },
+    });
+  });
+
+  it("restores the canonical total after a derived-unit quantity goes two to one to two", async () => {
+    renderForm(packItem);
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+    expect(screen.getByLabelText(/price per unit/i)).toHaveValue(50);
+
+    const quantity = screen.getByLabelText("Quantity");
+    await userEvent.tripleClick(quantity);
+    await userEvent.keyboard("1");
+    expect(
+      screen.queryByRole("group", { name: "Purchase price basis" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
+
+    await userEvent.tripleClick(quantity);
+    await userEvent.keyboard("2");
+    expect(screen.getByRole("button", { name: "Total paid for package" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(100);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      quantity: 2,
+      purchase: { price_cents: 10000 },
+    });
+  });
+
+  it("uses an explicitly edited unit price and the current quantity for the total", async () => {
+    renderForm(packItem);
+    await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Price per unit" }));
+
+    const unitPrice = screen.getByLabelText(/price per unit/i);
+    await userEvent.clear(unitPrice);
+    await userEvent.type(unitPrice, "60");
+    const quantity = screen.getByLabelText("Quantity");
+    await userEvent.tripleClick(quantity);
+    await userEvent.keyboard("3");
+    expect(screen.getByTestId("purchase-price-preview")).toHaveTextContent(
+      "3 units × $60 = $180",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Total paid for package" }));
+    expect(screen.getByLabelText(/purchase total/i)).toHaveValue(180);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(payload).toMatchObject({
+      quantity: 3,
+      purchase: { price_cents: 18000 },
+    });
+  });
+
   it("keeps shared purchases total-only", async () => {
     renderForm();
     await userEvent.click(screen.getByRole("button", { name: /^Purchase/ }));
@@ -327,6 +550,9 @@ describe("ItemForm optional sections", () => {
       screen.queryByRole("group", { name: "Purchase price basis" }),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText(/shared purchase total/i)).toHaveValue(100);
+    const preview = screen.getByTestId("purchase-price-preview");
+    expect(preview).toHaveTextContent("$100 transaction total");
+    expect(preview).not.toHaveTextContent("package total");
   });
 
   it("expands identity fields and keeps focus/keyboard operation", async () => {

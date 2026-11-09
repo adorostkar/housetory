@@ -316,6 +316,7 @@ def apply_document_ocr(
     db: Session = Depends(get_db),
 ) -> OcrApplyResponse:
     document = get_document(db, auth.household.id, document_id)
+    currency = payload.currency or auth.household.default_currency
     selected_items = resolve_items(db, auth.household.id, payload.item_ids)
     update_items = resolve_items(
         db, auth.household.id, [entry.item_id for entry in payload.item_updates]
@@ -335,7 +336,7 @@ def apply_document_ocr(
             previous_purchase_ids = {
                 item.purchase_id for item in selected_items if item.purchase_id is not None
             }
-            purchase = Purchase(household_id=auth.household.id, currency="USD")
+            purchase = Purchase(household_id=auth.household.id, currency=currency)
             db.add(purchase)
             db.flush()
             for item in selected_items:
@@ -346,7 +347,7 @@ def apply_document_ocr(
         purchase.vendor = payload.merchant
         purchase.purchase_date = payload.purchase_date
         purchase.price_cents = payload.price_cents
-        purchase.currency = payload.currency
+        purchase.currency = currency
         purchase.order_number = payload.order_number
         purchase.notes = payload.notes
         if payload.attach_as_receipt:
@@ -370,7 +371,7 @@ def apply_document_ocr(
         "merchant": payload.merchant,
         "purchase_date": payload.purchase_date.isoformat() if payload.purchase_date else None,
         "price_cents": payload.price_cents,
-        "currency": payload.currency,
+        "currency": currency,
         "order_number": payload.order_number,
         "document_date": payload.document_date.isoformat() if payload.document_date else None,
     }

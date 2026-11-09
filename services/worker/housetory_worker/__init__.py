@@ -40,6 +40,18 @@ from housetory_api.services.import_pipeline import (
     IMPORT_TASK,
     run_import_job,
 )
+from housetory_api.services.insurance import (
+    ESTIMATE_TASK as INSURANCE_ESTIMATE_TASK,
+)
+from housetory_api.services.insurance import (
+    LIST_TASK as INSURANCE_LIST_TASK,
+)
+from housetory_api.services.insurance import (
+    process_estimate as run_insurance_estimate,
+)
+from housetory_api.services.insurance import (
+    process_list as run_insurance_list,
+)
 from housetory_api.services.inventory_review_schedule import (
     SCHEDULED_REVIEW_TASK,
     dispatch_due_reviews,
@@ -142,6 +154,8 @@ HANDLERS = {
     PRUNE_FINISHED_TASK: prune_finished_jobs,
     EVIDENCE_PRUNE_TASK: lambda payload: {"expired": prune_expired_exports()},
     EVIDENCE_EXPORT_TASK: run_evidence_export,
+    INSURANCE_ESTIMATE_TASK: run_insurance_estimate,
+    INSURANCE_LIST_TASK: run_insurance_list,
     "maintenance.ping": ping,
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,

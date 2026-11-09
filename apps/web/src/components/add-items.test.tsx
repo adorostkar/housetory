@@ -55,9 +55,7 @@ function renderChooser({
 describe("AddItems", () => {
   it.each([
     ["Enter manually", "/items/new"],
-    ["Scan a photo", "/scan"],
-    ["Record a voice note", "/voice"],
-    ["Import a list or file", "/imports"],
+    ["Describe or show", "/add-items"],
   ])("opens %s with the preserved room and place context", async (choice, path) => {
     renderChooser({
       context: {
@@ -101,13 +99,13 @@ describe("AddItems", () => {
   it("uses page-registered context for the global Add items button", async () => {
     renderChooser({ register: true });
     await userEvent.click(screen.getByRole("button", { name: "Add items" }));
-    await userEvent.click(screen.getByRole("button", { name: /Scan a photo/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Describe or show/ }));
     await waitFor(() => {
       const url = new URL(
         screen.getByTestId("location").textContent ?? "/",
         "http://housetory.invalid",
       );
-      expect(url.pathname).toBe("/scan");
+      expect(url.pathname).toBe("/add-items");
       expect(url.searchParams.get("room_id")).toBe("room-9");
       expect(url.searchParams.get("location_id")).toBe("box-9");
       expect(url.searchParams.get("from")).toBe("/");

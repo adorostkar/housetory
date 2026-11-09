@@ -13,20 +13,20 @@ const previous: SessionState = {
   authenticated: true,
   setup_required: false,
   user: null,
-  household: { id: "home-1", name: "Home", warranty_reminder_days: 30 },
+  household: { id: "home-1", name: "Home", default_currency: "USD", warranty_reminder_days: 30 },
   role: "owner",
   households: [],
 };
 
 const next: SessionState = {
   ...previous,
-  household: { id: "home-2", name: "Cabin", warranty_reminder_days: 30 },
+  household: { id: "home-2", name: "Cabin", default_currency: "USD", warranty_reminder_days: 30 },
   role: "viewer",
   households: [
     {
       id: "home-2",
       name: "Cabin",
-      warranty_reminder_days: 30,
+      default_currency: "USD", warranty_reminder_days: 30,
       role: "viewer",
       property_count: 1,
       is_current: true,

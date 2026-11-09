@@ -350,7 +350,8 @@ def test_scheduled_ai_needs_separate_consent_and_route_changes_skip_ai(owner_cli
             "suggestions": [
                 {
                     "index": 0,
-                    "category_id": str(category["id"]),
+                    "category": {"id": str(category["id"])},
+                    "tags": [],
                     "confidence": "high",
                     "reason": "Fixture garden evidence.",
                 }
@@ -444,7 +445,8 @@ def test_scheduled_ai_uses_one_bounded_provider_request(owner_client, monkeypatc
             "suggestions": [
                 {
                     "index": 0,
-                    "category_id": str(category["id"]),
+                    "category": {"id": str(category["id"])},
+                    "tags": [],
                     "confidence": "high",
                     "reason": "Bounded fixture.",
                 }
@@ -466,6 +468,7 @@ def test_scheduled_ai_uses_one_bounded_provider_request(owner_client, monkeypatc
         assert run.item_count_scanned == 45
         assert run.total_item_count == 45
         assert "first 40" in (run.partial_reason or "")
+        assert run.ai_item_count == 40
 
 
 def test_schedule_caps_rotation_and_cross_household_scope_are_enforced(owner_client):

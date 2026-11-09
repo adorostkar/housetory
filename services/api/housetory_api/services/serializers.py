@@ -344,6 +344,9 @@ def item_summary(
         on_loan_quantity=on_loan_quantity,
         condition=item.condition,
         is_archived=item.is_archived,
+        disposition=item.disposition,
+        disposed_on=item.disposed_on,
+        disposition_note=item.disposition_note,
         room=RoomBrief(id=item.room.id, name=item.room.name) if item.room else None,
         household=(
             HouseholdBrief(id=item.household.id, name=item.household.name)

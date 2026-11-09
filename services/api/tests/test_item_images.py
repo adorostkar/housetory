@@ -799,10 +799,14 @@ def test_model_only_unknown_type_is_searchable_but_stays_exact(owner_client, mon
         assert reference_search_ready(stored_item) is True
         assert rank_candidates(
             stored_item,
-            [replace(stanley_candidate(title="Acme ZX-9 Widget product photo"),
-                     page_url="https://www.retailer.example/widget",
-                     source_domain="retailer.example",
-                     image_url="https://media.retailer.example/widget.png")],
+            [
+                replace(
+                    stanley_candidate(title="Acme ZX-9 Widget product photo"),
+                    page_url="https://www.retailer.example/widget",
+                    source_domain="retailer.example",
+                    image_url="https://media.retailer.example/widget.png",
+                )
+            ],
         )
 
     calls = provider(
@@ -827,12 +831,107 @@ def test_model_only_unknown_type_is_searchable_but_stays_exact(owner_client, mon
 
     wrong_model = rank_candidates(
         stored_item,
-        [replace(stanley_candidate(title="Acme ZX-10 Widget product photo"),
-                 page_url="https://www.retailer.example/widget",
-                 source_domain="retailer.example",
-                 image_url="https://media.retailer.example/widget.png")],
+        [
+            replace(
+                stanley_candidate(title="Acme ZX-10 Widget product photo"),
+                page_url="https://www.retailer.example/widget",
+                source_domain="retailer.example",
+                image_url="https://media.retailer.example/widget.png",
+            )
+        ],
     )
     assert wrong_model == []
+
+    host_only_model = replace(
+        stanley_candidate(title="Acme Widget product photo"),
+        page_url="https://zx-9.retailer.example/widget",
+        source_domain="zx-9.retailer.example",
+        image_url="https://media.zx-9.retailer.example/widget.png",
+    )
+    assert rank_candidates(stored_item, [host_only_model]) == []
+
+
+def test_one_character_model_without_known_type_is_not_search_ready(owner_client, monkeypatch):
+    room = create_room(owner_client, "Short model image room")
+    calls = provider(monkeypatch, candidates=[], permitted_domains="")
+    for model in ("A", "-"):
+        created = create_item(
+            owner_client,
+            "Widget",
+            room["id"],
+            brand="Acme",
+            model=model,
+        )
+        with SessionLocal() as db:
+            item = db.get(Item, uuid.UUID(created["id"]))
+            assert item is not None
+            assert build_product_profile(item).item_type is None
+            assert reference_search_ready(item) is False
+            candidate = replace(
+                stanley_candidate(title=f"Acme {model} Widget product photo"),
+                page_url="https://www.retailer.example/widget",
+                source_domain="retailer.example",
+                image_url="https://media.retailer.example/widget.png",
+            )
+            assert rank_candidates(item, [candidate]) == []
+
+        response = owner_client.post(f"/api/v1/items/{created['id']}/image/find", json={})
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == "image_description_required"
+    assert calls["count"] == 0
+
+
+def test_structured_osprey_model_matches_clean_retailer_candidate(owner_client, monkeypatch):
+    room = create_room(owner_client, "Osprey backpack image room")
+    created = create_item(
+        owner_client,
+        "Osprey · Kids' Jet 18 Blue",
+        room["id"],
+        brand="Osprey",
+        model="Jet 18",
+    )
+    clean = ImageCandidate(
+        title="Osprey Jet 18 Kids' Backpack, Blue product photo",
+        page_url="https://www.outdoor-retailer.example/osprey-jet-18-blue",
+        source_domain="outdoor-retailer.example",
+        image_url="https://cdn.outdoor-retailer.example/osprey-jet-18-blue.png",
+        thumbnail_url=None,
+        width=1400,
+        height=1400,
+    )
+    wrong_brand = replace(
+        clean,
+        title="Deuter Jet 18 Kids' Backpack, Blue product photo",
+        page_url="https://www.other-retailer.example/deuter-jet-18-blue",
+        source_domain="other-retailer.example",
+        image_url="https://cdn.other-retailer.example/deuter-jet-18-blue.png",
+    )
+    host_only_model = replace(
+        clean,
+        title="Osprey Kids' Backpack, Blue product photo",
+        page_url="https://jet-18.outdoor-retailer.example/backpack",
+        source_domain="jet-18.outdoor-retailer.example",
+        image_url="https://cdn.jet-18.outdoor-retailer.example/backpack.png",
+    )
+    with SessionLocal() as db:
+        item = db.get(Item, uuid.UUID(created["id"]))
+        assert item is not None
+        profile = build_product_profile(item)
+        assert profile.brand_source == "structured"
+        assert profile.item_type is None
+        assert profile.model == "Jet 18"
+        assert reference_search_ready(item) is True
+        ranked = rank_candidates(item, [wrong_brand, host_only_model, clean])
+        assert [entry.candidate for entry in ranked] == [clean]
+        assert ranked[0].exact_model_confirmed is True
+
+    provider(monkeypatch, candidates=[wrong_brand, host_only_model, clean], permitted_domains="")
+    response = owner_client.post(f"/api/v1/items/{created['id']}/image/find", json={})
+    assert response.status_code == 200, response.text
+    selected = response.json()["selected"]
+    assert selected["source_page_url"] == clean.page_url
+    assert selected["exact_model_confirmed"] is True
+    assert selected["model_label"] == "Jet 18"
 
 
 def test_stanley_spelling_alias_is_query_only(owner_client):
@@ -922,6 +1021,24 @@ def test_unknown_attributes_are_representative_and_exact_model_has_token_boundar
         ranked = rank_candidates(item, [lg_candidate(title="LG A1 OLED TV 77 inch product photo")])
         assert ranked
         assert ranked[0].exact_model_confirmed is True
+
+        wrong_brand = replace(
+            lg_candidate(title="Canon A1 OLED TV 77 inch product photo"),
+            page_url="https://www.retailer.example/canon-a1",
+            source_domain="retailer.example",
+            image_url="https://media.retailer.example/canon-a1.png",
+        )
+        assert rank_candidates(item, [wrong_brand]) == []
+
+        host_only_model = replace(
+            lg_candidate(title="LG OLED TV 77 inch product photo"),
+            page_url="https://a1.retailer.example/lg-oled",
+            source_domain="a1.retailer.example",
+            image_url="https://media.a1.retailer.example/lg-oled.png",
+        )
+        host_only_ranked = rank_candidates(item, [host_only_model])
+        assert host_only_ranked
+        assert host_only_ranked[0].exact_model_confirmed is False
 
         # A10 and A1X are not the exact A1 model; A10 is a contradictory longer
         # model and A1X simply fails the token boundary.

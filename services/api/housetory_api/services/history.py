@@ -37,6 +37,7 @@ UNDOABLE_ACTIONS = {
 ACTION_LABELS = {
     ActivityAction.ITEM_MOVED.value: "Item moved",
     ActivityAction.ITEM_VALUE_UPDATED.value: "Current value updated",
+    ActivityAction.ITEM_DISPOSITION_CHANGED.value: "Item disposition changed",
     ActivityAction.ITEM_STORAGE_ENABLED.value: "Item storage enabled",
     ActivityAction.ITEM_STORAGE_DISABLED.value: "Item storage removed",
     ActivityAction.CONTAINER_OWNERSHIP_UNLINKED.value: "Container ownership unlinked",
@@ -68,9 +69,11 @@ ACTION_LABELS = {
     ActivityAction.INVENTORY_REVIEW_COMPLETED.value: "Inventory review completed",
     ActivityAction.INVENTORY_REVIEW_CATEGORY_APPLIED.value: "Review category applied",
     ActivityAction.INVENTORY_REVIEW_NAME_APPLIED.value: "Review name applied",
+    ActivityAction.INVENTORY_REVIEW_ORGANISATION_APPLIED.value: "Review organisation applied",
     ActivityAction.INVENTORY_REVIEW_DISMISSED.value: "Review suggestion dismissed",
     ActivityAction.INVENTORY_REVIEW_CATEGORY_REVERTED.value: "Review category reverted",
     ActivityAction.INVENTORY_REVIEW_NAME_REVERTED.value: "Review name reverted",
+    ActivityAction.INVENTORY_REVIEW_ORGANISATION_REVERTED.value: "Review organisation reverted",
 }
 
 

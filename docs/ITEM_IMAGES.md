@@ -19,6 +19,10 @@ follows the same priority. Both actual photos and representative reference/AI
 images use the same bounded responsive frame (240 px phone, 320 px tablet,
 340 px desktop) with `object-contain`; placeholders stay compact at 150 px.
 Reference/AI images cannot stretch the frame through intrinsic height or flex.
+Public reference images sit on a consistent white canvas in card, row and detail
+frames so white product backgrounds blend cleanly in either theme. Files are not
+background-removed, feathered or otherwise altered for presentation; actual
+photos retain their ordinary neutral gallery background and original evidence.
 
 Users can **Change image**, **Remove** a stored reference/AI image, or
 **Use icon** to clear a selected non-photo image and return to the simple
@@ -96,10 +100,13 @@ actual reasons rather than a user-upload format message.
 - brand and type can come from structured item fields or, when the structured
   brand is blank, from a bounded local lexicon plus the item name/description;
   this inference is query-only and is never written back to the item;
-- an item with a structured brand and an exact model is searchable even when its
-  product type is not in the bounded type lexicon; the exact model must appear in
-  the candidate title, and conflicting similar models remain labelled as not
-  exact;
+- an item with a structured brand and a model containing at least two
+  alphanumeric characters is searchable even when its product type is not in the
+  bounded type lexicon; the exact model must appear in the candidate title, not
+  merely in a source/page/image hostname, and conflicting similar models remain
+  labelled as not exact;
+- every candidate must name the item's brand in its title or have a verified
+  manufacturer page host; matching model text never bypasses that brand check;
 - screen size, display family (OLED vs LCD/LED/QLED), explicit variants and
   structured model identifiers are compared as product evidence;
 - mutually contradictory known attributes are rejected; unknown candidate

@@ -177,7 +177,7 @@ class OcrApplyRequest(BaseModel):
     merchant: trimmed(1, 160) | None = None
     purchase_date: date | None = None
     price_cents: int | None = Field(default=None, ge=0, le=10**12)
-    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     order_number: trimmed(1, 120) | None = None
     notes: Description | None = None
     document_date: date | None = None

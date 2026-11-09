@@ -55,9 +55,14 @@ class Household(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "item_image_daily_generation_cap between 1 and 100",
             name="item_image_generation_cap",
         ),
+        CheckConstraint(
+            "default_currency ~ '^[A-Z]{3}$'",
+            name="default_currency_format",
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="USD")
     warranty_reminder_days: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="30"
     )
