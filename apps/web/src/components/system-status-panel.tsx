@@ -168,7 +168,7 @@ function readinessBadge(status: "ok" | "degraded" | "unknown") {
 function JobCounts({ status }: { status: SystemStatus }) {
   const entries = Object.entries(status.jobs.counts).filter(([, count]) => count > 0);
   if (entries.length === 0) {
-    return <p className="text-[0.74rem] text-muted-foreground">No jobs recorded.</p>;
+    return <p className="text-2xs text-muted-foreground">No jobs recorded.</p>;
   }
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -185,7 +185,7 @@ function BulkTestStatus({ entry }: { entry: BulkTestProgress }) {
   const badge = bulkStateBadge(entry.state);
   const Icon = badge.icon;
   return (
-    <div className="mt-1 flex flex-wrap items-start gap-1.5 text-[0.64rem] leading-relaxed">
+    <div className="mt-1 flex flex-wrap items-start gap-1.5 text-2xs leading-relaxed">
       <Badge variant={badge.variant} className="shrink-0">
         <Icon className="size-3" />
         {badge.label}
@@ -352,7 +352,7 @@ export function SystemStatusPanel({
             <Activity className="size-4 text-muted-foreground" strokeWidth={1.7} />
             {title}
           </h2>
-          <p className="mt-1 max-w-2xl text-[0.76rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
             Release identity, local readiness, worker jobs and task readiness.{" "}
             <span className="text-foreground/80">Reload status snapshot</span> only
             reads stored and runtime evidence and never calls a provider.{" "}
@@ -376,7 +376,7 @@ export function SystemStatusPanel({
       </div>
 
       {!isOwner ? (
-        <p className="mt-4 rounded-xl border border-border/60 bg-background/35 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+        <p className="mt-4 rounded-xl border border-border/60 bg-background/35 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
           Owner access is required for release identity, readiness, job errors and
           task-level status. Inventory, search and ordinary settings remain available
           to members and viewers.
@@ -387,21 +387,21 @@ export function SystemStatusPanel({
           <Skeleton className="h-24 rounded-xl" />
         </div>
       ) : statusQuery.isError || !statusQuery.data ? (
-        <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-3 text-[0.74rem] leading-relaxed text-destructive">
+        <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-3 text-2xs leading-relaxed text-destructive">
           {getApiErrorMessage(statusQuery.error)}
         </p>
       ) : (
         <div className="mt-5 space-y-5">
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
             <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-              <p className="flex items-center gap-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 <Server className="size-3.5" /> Release
               </p>
-              <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[0.72rem]">
+              <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-2xs">
                 <dt className="text-muted-foreground">Version</dt>
                 <dd className="truncate">{statusQuery.data.release.version}</dd>
                 <dt className="text-muted-foreground">Commit</dt>
-                <dd className="truncate font-mono text-[0.68rem]">
+                <dd className="truncate font-mono text-2xs">
                   {statusQuery.data.release.commit}
                 </dd>
                 <dt className="text-muted-foreground">Built</dt>
@@ -416,7 +416,7 @@ export function SystemStatusPanel({
             </div>
 
             <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-              <p className="flex items-center gap-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 <Database className="size-3.5" /> Readiness
               </p>
               <ul className="mt-2 space-y-2">
@@ -425,12 +425,12 @@ export function SystemStatusPanel({
                   return (
                     <li
                       key={component.name}
-                      className="flex items-start justify-between gap-2 text-[0.72rem]"
+                      className="flex items-start justify-between gap-2 text-2xs"
                     >
                       <span className="min-w-0">
                         <span className="font-medium">{component.name}</span>
                         {component.detail ? (
-                          <span className="mt-0.5 block break-words text-[0.66rem] text-muted-foreground">
+                          <span className="mt-0.5 block break-words text-2xs text-muted-foreground">
                             {component.detail}
                           </span>
                         ) : null}
@@ -447,7 +447,7 @@ export function SystemStatusPanel({
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 <CalendarClock className="size-3.5" /> Scheduled review
               </p>
               <Badge
@@ -466,10 +466,10 @@ export function SystemStatusPanel({
                 {statusQuery.data.scheduled_review.state.replaceAll("_", " ")}
               </Badge>
             </div>
-            <p className="mt-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
               {statusQuery.data.scheduled_review.state_detail}
             </p>
-            <p className="mt-1 text-[0.68rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               {statusQuery.data.scheduled_review.scope_label} ·{" "}
               {statusQuery.data.scheduled_review.frequency} ·{" "}
               {statusQuery.data.scheduled_review.timezone}
@@ -481,7 +481,7 @@ export function SystemStatusPanel({
                   }`
                 : " · offline rules only"}
             </p>
-            <p className="mt-1 text-[0.68rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Last run:{" "}
               {statusQuery.data.scheduled_review.last_run_status === "never"
                 ? "never"
@@ -492,18 +492,18 @@ export function SystemStatusPanel({
               {formatTimestamp(statusQuery.data.scheduled_review.next_due_at)}
             </p>
             {statusQuery.data.scheduled_review.last_run_detail ? (
-              <p className="mt-1 break-words text-[0.68rem] text-muted-foreground">
+              <p className="mt-1 break-words text-2xs text-muted-foreground">
                 {statusQuery.data.scheduled_review.last_run_detail}
               </p>
             ) : null}
-            <p className="mt-1 text-[0.64rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Hard caps: {statusQuery.data.scheduled_review.max_items} items per run,{" "}
               {statusQuery.data.scheduled_review.provider_request_cap} AI provider
               request per run.
             </p>
             <Link
               to="/review"
-              className="mt-1 inline-block text-[0.66rem] text-brass underline-offset-2 hover:underline"
+              className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline"
             >
               Open Review schedule
             </Link>
@@ -511,13 +511,13 @@ export function SystemStatusPanel({
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Worker jobs
               </p>
               <JobCounts status={statusQuery.data} />
             </div>
             {statusQuery.data.jobs.recent_failed.length === 0 ? (
-              <p className="mt-2 text-[0.72rem] text-muted-foreground">
+              <p className="mt-2 text-2xs text-muted-foreground">
                 No failed jobs recorded.
               </p>
             ) : (
@@ -525,15 +525,15 @@ export function SystemStatusPanel({
                 {statusQuery.data.jobs.recent_failed.map((job) => (
                   <li
                     key={job.id}
-                    className="flex flex-wrap items-start justify-between gap-2 py-2 text-[0.72rem]"
+                    className="flex flex-wrap items-start justify-between gap-2 py-2 text-2xs"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="font-medium">{job.task}</span>
-                      <span className="ml-2 text-[0.66rem] text-muted-foreground">
+                      <span className="ml-2 text-2xs text-muted-foreground">
                         {formatTimestamp(job.finished_at ?? job.created_at)}
                       </span>
                       {job.error ? (
-                        <span className="mt-0.5 block break-words text-[0.66rem] text-muted-foreground">
+                        <span className="mt-0.5 block break-words text-2xs text-muted-foreground">
                           {job.error}
                         </span>
                       ) : null}
@@ -555,13 +555,13 @@ export function SystemStatusPanel({
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 <ShieldCheck className="size-3.5" /> AI tasks
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 {bulkRunning || bulkEntries.length > 0 ? (
                   <span
-                    className="text-[0.64rem] tabular-nums text-muted-foreground"
+                    className="text-2xs tabular-nums text-muted-foreground"
                     role="status"
                     aria-live="polite"
                   >
@@ -592,7 +592,7 @@ export function SystemStatusPanel({
                 const compatibility = compatibilityBadge(task.compatibility);
                 const bulkEntry = bulkResults[task.task];
                 return (
-                  <li key={task.task} className="py-2.5 text-[0.72rem]">
+                  <li key={task.task} className="py-2.5 text-2xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-medium">{task.label}</span>
                       <div className="flex flex-wrap gap-1">
@@ -611,7 +611,7 @@ export function SystemStatusPanel({
                         </Badge>
                       </div>
                     </div>
-                    <p className="mt-1 min-w-0 break-words text-[0.66rem] text-muted-foreground">
+                    <p className="mt-1 min-w-0 break-words text-2xs text-muted-foreground">
                       {task.provider_label ?? "No provider"}
                       {task.model
                         ? ` · ${task.model_label ?? task.model}`
@@ -621,7 +621,7 @@ export function SystemStatusPanel({
                         : ""}
                     </p>
                     {task.error ? (
-                      <p className="mt-1 break-words text-[0.66rem] text-brass">
+                      <p className="mt-1 break-words text-2xs text-brass">
                         {task.error}
                       </p>
                     ) : null}
@@ -633,22 +633,22 @@ export function SystemStatusPanel({
           </div>
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-            <p className="text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
               Optional external services
             </p>
             <ul className="mt-2 space-y-2">
               {statusQuery.data.external_services.map((service) => (
                 <li
                   key={service.name}
-                  className="flex flex-wrap items-start justify-between gap-2 text-[0.72rem]"
+                  className="flex flex-wrap items-start justify-between gap-2 text-2xs"
                 >
                   <span className="min-w-0 flex-1 break-words">
                     <span className="font-medium">{service.name}</span>
-                    <span className="mt-0.5 block break-words text-[0.66rem] text-muted-foreground">
+                    <span className="mt-0.5 block break-words text-2xs text-muted-foreground">
                       {service.detail}
                     </span>
                     {service.source && service.source !== "unknown" ? (
-                      <span className="mt-1 block text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground">
+                      <span className="mt-1 block text-2xs uppercase tracking-[0.08em] text-muted-foreground">
                         Source:{" "}
                         {service.source === "household"
                           ? "Household settings"
@@ -660,7 +660,7 @@ export function SystemStatusPanel({
                     {service.settings_path ? (
                       <Link
                         to={service.settings_path}
-                        className="mt-1 inline-block text-[0.66rem] text-brass underline-offset-2 hover:underline"
+                        className="mt-1 inline-block text-2xs text-brass underline-offset-2 hover:underline"
                       >
                         Open settings
                       </Link>
@@ -683,7 +683,7 @@ export function SystemStatusPanel({
             </ul>
           </div>
 
-          <p className="text-[0.66rem] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Last generated {formatTimestamp(statusQuery.data.generated_at)}. Discovery
             and catalog checks are not live inference tests. Individual Test buttons and
             Test all enabled AI tasks runs bounded, explicitly confirmed live requests.

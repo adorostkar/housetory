@@ -79,11 +79,11 @@ export function LoanItemPickerDialog({
 
         <div className="max-h-[min(55vh,420px)] overflow-y-auto rounded-xl border border-border/70 bg-background/35 p-1.5">
           {itemsQuery.isPending ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-[0.78rem] text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
               <Spinner /> Loading inventory…
             </div>
           ) : itemsQuery.isError ? (
-            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center text-[0.78rem] text-muted-foreground">
+            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center text-xs text-muted-foreground">
               <p>Inventory could not be loaded.</p>
               <Button
                 type="button"
@@ -95,7 +95,7 @@ export function LoanItemPickerDialog({
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <p className="px-4 py-8 text-center text-[0.78rem] text-muted-foreground">
+            <p className="px-4 py-8 text-center text-xs text-muted-foreground">
               {debounced.trim()
                 ? "No active items match that search."
                 : "No inventory items are available to lend."}
@@ -115,15 +115,15 @@ export function LoanItemPickerDialog({
                     <Package className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.82rem] font-medium">
+                    <span className="block truncate text-xs font-medium">
                       {item.name}
                     </span>
                     {(item.brand || item.model) && (
-                      <span className="block truncate text-[0.68rem] text-muted-foreground">
+                      <span className="block truncate text-2xs text-muted-foreground">
                         {[item.brand, item.model].filter(Boolean).join(" · ")}
                       </span>
                     )}
-                    <span className="block truncate text-[0.66rem] text-muted-foreground/80">
+                    <span className="block truncate text-2xs text-muted-foreground">
                       {placeLabel(item)}
                     </span>
                   </span>
@@ -137,7 +137,7 @@ export function LoanItemPickerDialog({
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-7 px-2.5 text-[0.68rem]"
+                      className="h-7 px-2.5 text-2xs"
                       disabled={available <= 0}
                       onClick={() => onSelect(item)}
                       aria-label={`Choose ${item.name} for a new loan`}
@@ -150,7 +150,7 @@ export function LoanItemPickerDialog({
             })
           )}
         </div>
-        <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+        <p className="text-2xs leading-relaxed text-muted-foreground">
           {total > items.length
             ? `Showing ${items.length} of ${total} matching items. Refine the search to find the rest.`
             : "Available quantities are current household records. The server rechecks stock when the loan is saved."}

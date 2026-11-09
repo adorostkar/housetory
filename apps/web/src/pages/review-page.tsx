@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { FormError } from "@/components/form-field";
 import { PageHeader } from "@/components/page-header";
+import { SectionNav } from "@/components/section-nav";
 import { ReviewSchedulePanel } from "@/components/review-schedule-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -499,7 +500,7 @@ export function ReviewPage() {
           <Button type="button" variant="outline" onClick={() => setPickerOpen(true)}>
             Choose items
           </Button>
-          <span className="text-[0.72rem] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {selectedItemIds.length
               ? pluralize(selectedItemIds.length, "selected item")
               : "No items selected"}
@@ -524,13 +525,22 @@ export function ReviewPage() {
         }
       />
 
-      <section className="surface mb-5 p-5 sm:p-6">
+      <SectionNav
+        sections={[
+          { id: "review-scope", label: "Run a review" },
+          ...(displayedRun ? [{ id: "latest-review", label: "Latest review" }] : []),
+          { id: "review-schedule", label: "Schedule" },
+          { id: "review-suggestions", label: "Suggestions" },
+        ]}
+      />
+
+      <section id="review-scope" className="surface mb-5 scroll-mt-32 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
               Review scope
             </h2>
-            <p className="mt-1 text-[0.75rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               Analysis is read-only. Nothing is renamed, categorised, moved or merged
               until you explicitly apply a suggestion.
             </p>
@@ -540,7 +550,7 @@ export function ReviewPage() {
           </Badge>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-end">
-          <label className="space-y-1.5 text-[0.74rem]">
+          <label className="space-y-1.5 text-2xs">
             <span className="field-label">Scope</span>
             <Select
               aria-label="Review scope type"
@@ -557,7 +567,7 @@ export function ReviewPage() {
               ))}
             </Select>
           </label>
-          <div className="space-y-1.5 text-[0.74rem]">
+          <div className="space-y-1.5 text-2xs">
             <span className="field-label">Scope detail</span>
             {scopeOptions()}
           </div>
@@ -589,7 +599,7 @@ export function ReviewPage() {
         )}
 
         <div className="mt-4 rounded-xl border border-border/60 bg-background/35 p-3.5">
-          <label className="flex items-start gap-2.5 text-[0.76rem]">
+          <label className="flex items-start gap-2.5 text-xs">
             <input
               type="checkbox"
               className="mt-0.5 size-4 accent-primary"
@@ -599,7 +609,7 @@ export function ReviewPage() {
             />
             <span className="min-w-0 break-words">
               Include optional AI-assisted organisation suggestions
-              <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+              <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
                 Owner only. Uses the existing household Assistant task via{" "}
                 <strong className="break-all font-medium text-foreground/80">
                   {aiProvider}
@@ -614,7 +624,7 @@ export function ReviewPage() {
             </span>
           </label>
           {!aiReady && isOwner && (
-            <p className="mt-2 text-[0.68rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               The Assistant task is not configured for this household. Offline checks
               remain available.{" "}
               <Link to="/settings/ai" className="underline underline-offset-4">
@@ -623,14 +633,14 @@ export function ReviewPage() {
             </p>
           )}
           {!isOwner && (
-            <p className="mt-2 text-[0.68rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               Only the owner can enable the optional AI review pass. Offline review is
               still available to writers.
             </p>
           )}
         </div>
         {!canWrite && (
-          <p className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             Viewers can read suggestions but cannot run reviews, apply, dismiss or undo.
           </p>
         )}
@@ -638,13 +648,13 @@ export function ReviewPage() {
       </section>
 
       {displayedRun && (
-        <section className="surface mb-5 p-4 sm:p-5">
+        <section id="latest-review" className="surface mb-5 scroll-mt-32 p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Latest review
               </p>
-              <p className="mt-1 text-[0.8rem] font-medium">
+              <p className="mt-1 text-xs font-medium">
                 {displayedRun.scope_label} · {timestamp(displayedRun.completed_at ?? displayedRun.created_at)}
               </p>
             </div>
@@ -660,29 +670,30 @@ export function ReviewPage() {
               {displayedRun.status}
             </Badge>
           </div>
-          <p className="mt-2 text-[0.72rem] text-muted-foreground">
+          <p className="mt-2 text-2xs text-muted-foreground">
             Scanned {displayedRun.item_count_scanned} of {displayedRun.total_item_count} items ·{" "}
             {aiRunSummary(displayedRun)}.
           </p>
-          <p className="mt-1 text-[0.72rem] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             Suggestions: {displayedRun.created_suggestion_count} new ·{" "}
             {displayedRun.existing_suggestion_count} already queued ·{" "}
             {displayedRun.suppressed_suggestion_count} previously resolved ·{" "}
             {displayedRun.stale_suggestion_count} marked stale.
           </p>
           {displayedRun.partial_reason && (
-            <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
               Partial scan: {displayedRun.partial_reason}
             </p>
           )}
           {displayedRun.ai_error && (
-            <p className="mt-2 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-[0.7rem] leading-relaxed text-destructive">
+            <p className="mt-2 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-2xs leading-relaxed text-destructive">
               AI review: {displayedRun.ai_error}
             </p>
           )}
         </section>
       )}
 
+      <div id="review-schedule" className="scroll-mt-32">
       {summaryQuery.isPending || summaryQuery.data?.schedule?.configured ? (
         <ReviewSchedulePanel
           isOwner={isOwner}
@@ -694,7 +705,7 @@ export function ReviewPage() {
           className="group surface mb-5 p-4 sm:p-5"
           data-testid="review-schedule-advanced"
         >
-          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground">
             <span className="flex items-center gap-2">
               Advanced · Scheduled review
               <Badge variant="outline">Off by default</Badge>
@@ -711,10 +722,11 @@ export function ReviewPage() {
           </div>
         </details>
       )}
+      </div>
 
-      <section className="surface p-4 sm:p-5">
+      <section id="review-suggestions" className="surface scroll-mt-32 p-4 sm:p-5">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1.5 text-[0.72rem]">
+          <label className="space-y-1.5 text-2xs">
             <span className="field-label">Status</span>
             <Select
               aria-label="Filter suggestions by status"
@@ -730,7 +742,7 @@ export function ReviewPage() {
               <option value="reverted">Undone</option>
             </Select>
           </label>
-          <label className="space-y-1.5 text-[0.72rem]">
+          <label className="space-y-1.5 text-2xs">
             <span className="field-label">Type</span>
             <Select
               aria-label="Filter suggestions by type"
@@ -814,7 +826,7 @@ export function ReviewPage() {
         ) : (
           <>
             {actionableSuggestions.length > 0 && canWrite && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3.5 py-3 text-[0.72rem]">
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3.5 py-3 text-2xs">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -889,19 +901,19 @@ export function ReviewPage() {
                           )}
                           <SuggestionStatusBadge suggestion={suggestion} />
                         </div>
-                        <h3 className="mt-2 text-[0.9rem] font-medium">
+                        <h3 className="mt-2 text-sm font-medium">
                           {suggestion.title}
                         </h3>
-                        <p className="mt-1 max-w-3xl text-[0.74rem] leading-relaxed text-muted-foreground">
+                        <p className="mt-1 max-w-3xl text-2xs leading-relaxed text-muted-foreground">
                           {suggestion.explanation}
                         </p>
                       </div>
-                      <span className="text-[0.64rem] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         {timestamp(suggestion.created_at)}
                       </span>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.72rem]">
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs">
                       {suggestion.item && (
                         <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
                           <ItemReference item={suggestion.item} origin={origin} />
@@ -1055,7 +1067,7 @@ export function ReviewPage() {
                       {suggestion.status === "accepted" &&
                         !suggestion.can_undo &&
                         suggestion.undo_blocked_reason && (
-                          <span className="text-[0.68rem] text-muted-foreground">
+                          <span className="text-2xs text-muted-foreground">
                             {suggestion.undo_blocked_reason}
                           </span>
                         )}
@@ -1096,7 +1108,7 @@ export function ReviewPage() {
             </DialogDescription>
           </DialogHeader>
           {editTarget?.type === "category" ? (
-            <label className="space-y-1.5 text-[0.76rem]">
+            <label className="space-y-1.5 text-xs">
               <span className="field-label">Category</span>
               <Select
                 aria-label="Proposed category"
@@ -1112,7 +1124,7 @@ export function ReviewPage() {
               </Select>
             </label>
           ) : (
-            <label className="space-y-1.5 text-[0.76rem]">
+            <label className="space-y-1.5 text-xs">
               <span className="field-label">Proposed name</span>
               <Input
                 aria-label="Proposed name"
@@ -1166,7 +1178,7 @@ export function ReviewPage() {
             ).map((item) => (
               <div
                 key={item.id}
-                className="rounded-xl border border-border/60 bg-background/35 p-3.5 text-[0.72rem]"
+                className="rounded-xl border border-border/60 bg-background/35 p-3.5 text-2xs"
               >
                 <p className="font-medium">{item.name}</p>
                 <dl className="mt-2 space-y-1 text-muted-foreground">

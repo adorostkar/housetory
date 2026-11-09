@@ -26,7 +26,7 @@ import {
   PlaceTransferDialog,
   type PlaceTransferSource,
 } from "@/components/place-transfer-dialog";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -220,12 +220,12 @@ export function ContainersPage() {
   const selectedIds = containers.filter((entry) => selected.has(entry.id)).map((entry) => entry.id);
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Physical storage"
-        title="Containers"
-        description="Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels. Containers linked to owned items are managed from those item pages."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Physical storage",
+        title: "Containers",
+        description: "Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels. Containers linked to owned items are managed from those item pages.",
+        actions: (
           <>
             {canWrite && (
               <Button variant="outline" asChild>
@@ -242,11 +242,11 @@ export function ContainersPage() {
               </Button>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       {containersQuery.data?.qr_warning && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-brass" />
           <span>{containersQuery.data.qr_warning}</span>
         </div>
@@ -259,7 +259,7 @@ export function ContainersPage() {
               type="button"
               onClick={() => setView("containers")}
               className={cn(
-                "rounded-full px-3.5 py-1.5 text-[0.72rem] font-medium",
+                "rounded-full px-3.5 py-1.5 text-2xs font-medium",
                 view === "containers"
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground",
@@ -271,7 +271,7 @@ export function ContainersPage() {
               type="button"
               onClick={() => setView("fixed")}
               className={cn(
-                "rounded-full px-3.5 py-1.5 text-[0.72rem] font-medium",
+                "rounded-full px-3.5 py-1.5 text-2xs font-medium",
                 view === "fixed"
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground",
@@ -342,7 +342,7 @@ export function ContainersPage() {
             </Select>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-[0.72rem] text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -495,7 +495,7 @@ export function ContainersPage() {
         source={transferTarget?.source ?? null}
         mode={transferTarget?.mode ?? "move"}
       />
-    </div>
+    </PageLayout>
   );
 }
 
@@ -554,10 +554,10 @@ function ContainerCard({
                 : "Fixed place"}
             </Badge>
           </div>
-          <p className="mt-2 line-clamp-1 text-[0.84rem] text-foreground/75">
+          <p className="mt-2 line-clamp-1 text-sm text-foreground/75">
             {container.name !== identifier ? container.name : "Unnamed container"}
           </p>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] text-muted-foreground">
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <MapPin className="size-3" />
               {roomName}
@@ -575,7 +575,7 @@ function ContainerCard({
         </Link>
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-        <span className="text-[0.66rem] text-muted-foreground">
+        <span className="text-2xs text-muted-foreground">
           {container.label_generated_at
             ? `Label ${formatRelativeDate(container.label_generated_at)}`
             : container.is_container

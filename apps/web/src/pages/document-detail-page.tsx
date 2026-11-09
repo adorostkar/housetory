@@ -21,7 +21,7 @@ import { DocumentExtractionReview } from "@/components/document-extraction-revie
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
 import { ItemMultiSelect } from "@/components/item-multi-select";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +34,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
@@ -120,7 +119,7 @@ export function DocumentDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relationsQuery.dataUpdatedAt]);
 
-  if (documentQuery.isPending) return <DocumentDetailSkeleton />;
+  if (documentQuery.isPending) return <PageSkeleton variant="detail" />;
   if (documentQuery.isError) {
     return (
       <ErrorState
@@ -131,25 +130,25 @@ export function DocumentDetailPage() {
     );
   }
   const document = documentQuery.data;
-  if (!document) return <DocumentDetailSkeleton />;
+  if (!document) return <PageSkeleton variant="detail" />;
   const busy = retry.isPending || remove.isPending;
   const firstPage = document.pages[0];
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow={DOCUMENT_TYPE_LABELS[document.document_type]}
-        title={document.title}
-        description={[
+    <PageLayout
+      header={{
+        eyebrow: DOCUMENT_TYPE_LABELS[document.document_type],
+        title: document.title,
+        description: [
           document.merchant,
           document.document_date ? formatDate(document.document_date) : null,
           document.original_filename,
         ]
           .filter(Boolean)
-          .join(" · ")}
-        backTo="/documents"
-        backLabel="Documents"
-        actions={
+          .join(" · "),
+        backTo: "/documents",
+        backLabel: "Documents",
+        actions: (
           <>
             <Button variant="outline" asChild>
               <a href={document.url}>
@@ -180,9 +179,9 @@ export function DocumentDetailPage() {
               </>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
         <div className="space-y-6">
           <section className="surface overflow-hidden">
@@ -216,7 +215,7 @@ export function DocumentDetailPage() {
                 <p className="mt-4 font-display text-xl tracking-[-0.02em]">
                   {document.original_filename}
                 </p>
-                <p className="mt-1 text-[0.75rem] text-muted-foreground">
+                <p className="mt-1 text-2xs text-muted-foreground">
                   {formatFileSize(document.byte_size)} · {document.content_type}
                 </p>
                 <Button className="mt-5" asChild>
@@ -240,7 +239,7 @@ export function DocumentDetailPage() {
                 </div>
                 <Badge variant="outline">{document.page_count} pages</Badge>
               </div>
-              <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 The cleaned PDF is the default download. Exact original page files are
                 preserved separately and can be downloaded below.
               </p>
@@ -257,7 +256,7 @@ export function DocumentDetailPage() {
                         className="h-36 w-full object-contain p-2"
                       />
                     </a>
-                    <figcaption className="flex items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-[0.68rem] text-muted-foreground">
+                    <figcaption className="flex items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-2xs text-muted-foreground">
                       <span>Page {page.page_number}</span>
                       <a
                         href={page.original_url}
@@ -279,14 +278,14 @@ export function DocumentDetailPage() {
               data-testid="manual-extraction-review"
               onToggle={(event) => setManualExtractionOpen(event.currentTarget.open)}
             >
-              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-[0.78rem] font-medium">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-xs font-medium">
                 <span className="flex flex-wrap items-center gap-2">
                   Advanced · Extraction review
                   <Badge variant="outline">Optional</Badge>
                 </span>
                 <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
-              <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
                 Purchase and line-item tools are available when needed. Stored manual text
                 remains available below.
               </p>
@@ -298,7 +297,7 @@ export function DocumentDetailPage() {
                       Review extracted items
                     </h2>
                   </div>
-                  <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                     Review document fields, line items and household matches before anything
                     changes.
                   </p>
@@ -314,7 +313,7 @@ export function DocumentDetailPage() {
                   Review extracted items
                 </h2>
               </div>
-              <p className="mt-1.5 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 {document.pages.length > 0
                   ? "OCR reads the cleaned PDF; original page files remain available above. Review document fields, line items and household matches before anything changes."
                   : "Review document fields, line items and household matches before anything changes."}
@@ -325,13 +324,13 @@ export function DocumentDetailPage() {
 
           {document.extracted_text && (
             <details className="surface p-5 sm:p-6">
-              <summary className="cursor-pointer text-[0.8rem] font-medium">
+              <summary className="cursor-pointer text-xs font-medium">
                 Extracted text
-                <span className="ml-2 text-[0.7rem] font-normal text-muted-foreground">
+                <span className="ml-2 text-2xs font-normal text-muted-foreground">
                   {document.extracted_text.length.toLocaleString()} characters
                 </span>
               </summary>
-              <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-secondary/40 p-4 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-secondary/40 p-4 text-2xs leading-relaxed text-muted-foreground">
                 {document.extracted_text}
               </pre>
             </details>
@@ -340,10 +339,10 @@ export function DocumentDetailPage() {
 
         <aside className="space-y-4">
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Metadata
             </h2>
-            <dl className="mt-4 space-y-3 text-[0.8rem]">
+            <dl className="mt-4 space-y-3 text-xs">
               <MetadataRow label="Type" value={DOCUMENT_TYPE_LABELS[document.document_type]} />
               <MetadataRow label="Merchant" value={document.merchant ?? "—"} />
               <MetadataRow
@@ -363,17 +362,17 @@ export function DocumentDetailPage() {
               <MetadataRow label="Added" value={formatDate(document.created_at)} />
             </dl>
             {document.notes && (
-              <p className="mt-4 whitespace-pre-line border-t border-border/60 pt-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <p className="mt-4 whitespace-pre-line border-t border-border/60 pt-4 text-xs leading-relaxed text-muted-foreground">
                 {document.notes}
               </p>
             )}
             <div className="mt-4 border-t border-border/60 pt-4">
-              <div className="flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <div className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 <Link2 className="size-3.5" />
                 Linked items
               </div>
               {document.items.length === 0 ? (
-                <p className="mt-2 text-[0.78rem] text-muted-foreground">
+                <p className="mt-2 text-xs text-muted-foreground">
                   No items linked yet.
                 </p>
               ) : (
@@ -394,10 +393,10 @@ export function DocumentDetailPage() {
             <section className="surface p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                  <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                     Suggested items
                   </h2>
-                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     Matched from extracted text, serials and merchant information.
                   </p>
                 </div>
@@ -409,7 +408,7 @@ export function DocumentDetailPage() {
                   return (
                     <label
                       key={suggestion.item.id}
-                      className="flex items-start gap-2 rounded-lg border border-border/60 px-3 py-2 text-[0.75rem]"
+                      className="flex items-start gap-2 rounded-lg border border-border/60 px-3 py-2 text-2xs"
                     >
                       <input
                         type="checkbox"
@@ -431,7 +430,7 @@ export function DocumentDetailPage() {
                         >
                           {suggestion.item.name}
                         </Link>
-                        <span className="block text-[0.66rem] text-muted-foreground">
+                        <span className="block text-2xs text-muted-foreground">
                           {suggestion.reasons.join(" · ")} · {suggestion.score}% match
                         </span>
                       </span>
@@ -459,7 +458,7 @@ export function DocumentDetailPage() {
 
           <section className="surface p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 Local OCR
               </h2>
               <Badge
@@ -478,23 +477,23 @@ export function DocumentDetailPage() {
               </Badge>
             </div>
             {document.ocr_status === "queued" || document.ocr_status === "processing" ? (
-              <p className="mt-3 flex items-center gap-2 text-[0.78rem] text-muted-foreground">
+              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                 <Spinner className="size-3.5" />
                 The worker is reading this document on your server. This page updates
                 automatically.
               </p>
             ) : document.ocr_status === "failed" ? (
               <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3">
-                <p className="flex items-center gap-1.5 text-[0.75rem] font-medium text-destructive">
+                <p className="flex items-center gap-1.5 text-2xs font-medium text-destructive">
                   <AlertTriangle className="size-3.5" /> Extraction failed
                 </p>
-                <p className="mt-1 break-words text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 break-words text-2xs leading-relaxed text-muted-foreground">
                   {document.ocr_error ?? "The worker could not read this file."}
                 </p>
               </div>
             ) : document.ocr_status === "succeeded" ? (
               <>
-              <p className="mt-3 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                 {document.ocr_confidence != null
                   ? `${document.ocr_confidence}% mean confidence. `
                   : "Read from embedded PDF text. "}
@@ -508,7 +507,7 @@ export function DocumentDetailPage() {
               </p>
               {Array.isArray(document.extracted_metadata.ai_warnings) &&
               document.extracted_metadata.ai_warnings.length > 0 ? (
-                <div className="mt-2 rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+                <div className="mt-2 rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                   {document.extracted_metadata.ai_warnings
                     .slice(0, 5)
                     .map((warning) => String(warning))
@@ -517,7 +516,7 @@ export function DocumentDetailPage() {
               ) : null}
               </>
             ) : (
-              <p className="mt-3 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
                 No OCR run yet. Start one to propose fields from this document.
               </p>
             )}
@@ -540,10 +539,10 @@ export function DocumentDetailPage() {
           </section>
 
           <section className="surface p-5">
-            <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               <ShieldCheck className="size-3.5" /> File safety
             </h2>
-            <ul className="mt-3 space-y-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <ul className="mt-3 space-y-2 text-2xs leading-relaxed text-muted-foreground">
               <li>Downloads are authenticated and never cached by the browser.</li>
               <li>
                 {document.page_count > 0
@@ -577,7 +576,7 @@ export function DocumentDetailPage() {
           await remove.mutateAsync();
         }}
       />
-    </div>
+    </PageLayout>
   );
 }
 
@@ -732,24 +731,5 @@ function EditDocumentDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DocumentDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="mt-4 h-12 w-1/2 max-w-md" />
-      <div className="mt-10 grid gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
-        <div className="space-y-6">
-          <Skeleton className="aspect-[4/3] rounded-2xl" />
-          <Skeleton className="h-80 rounded-2xl" />
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-64 rounded-2xl" />
-          <Skeleton className="h-40 rounded-2xl" />
-        </div>
-      </div>
-    </div>
   );
 }

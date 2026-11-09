@@ -4,7 +4,7 @@ import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { FormError } from "@/components/form-field";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -249,12 +249,13 @@ export function InsurancePage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Insurance"
-        title="Create insurance list"
-        description="Review replacement values only for this dated export. Nothing is written back to your item records."
-      />
+    <PageLayout
+      header={{
+        eyebrow: "Insurance",
+        title: "Create insurance list",
+        description: "Review replacement values only for this dated export. Nothing is written back to your item records.",
+      }}
+    >
       <section className="surface mb-5 p-4 sm:p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Select aria-label="Insurance scope" value={scopeType} onChange={(event) => {
@@ -292,7 +293,7 @@ export function InsurancePage() {
           </Select>
           <Input aria-label="Reviewed on" type="date" value={reviewedOn} onChange={(event) => setReviewedOn(event.target.value)} />
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3 text-[0.75rem] text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-2xs text-muted-foreground">
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />
             Include archived
@@ -318,10 +319,10 @@ export function InsurancePage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 p-4 sm:p-5">
             <div>
               <h2 className="font-display text-xl">{preview.scope_label}</h2>
-              <p className="mt-1 text-[0.75rem] text-muted-foreground">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 {rows.length} items · values per owned unit · blank means unknown
               </p>
-              <p className="mt-1 text-[0.68rem] text-muted-foreground">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 AI estimates process up to 10 eligible items per batch.
               </p>
             </div>
@@ -360,17 +361,17 @@ export function InsurancePage() {
                     />
                     <div className="min-w-0">
                       <p className="font-medium">{item.name}</p>
-                      <p className="mt-0.5 text-[0.72rem] text-muted-foreground">
+                      <p className="mt-0.5 text-2xs text-muted-foreground">
                         {[item.brand, item.model].filter(Boolean).join(" · ") || "No brand/model"} · {item.quantity} owned
                       </p>
-                      {!item.ai_eligible && <p className="mt-1 text-[0.68rem] text-brass">{item.ai_ineligible_reason}</p>}
+                      {!item.ai_eligible && <p className="mt-1 text-2xs text-brass">{item.ai_ineligible_reason}</p>}
                       {batch?.items.find((entry) => entry.item_id === item.item_id)?.error && (
-                        <p className="mt-1 text-[0.68rem] text-destructive">
+                        <p className="mt-1 text-2xs text-destructive">
                           {batch.items.find((entry) => entry.item_id === item.item_id)?.error}
                         </p>
                       )}
                       {draft.estimate && (
-                        <details className="mt-2 text-[0.7rem] text-muted-foreground">
+                        <details className="mt-2 text-2xs text-muted-foreground">
                           <summary className="cursor-pointer">Estimate evidence</summary>
                           <div className="mt-2 space-y-1">
                             <p>{draft.estimate.reasoning}</p>
@@ -383,7 +384,7 @@ export function InsurancePage() {
                       )}
                     </div>
                   </div>
-                  <label className="space-y-1 text-[0.7rem] text-muted-foreground">
+                  <label className="space-y-1 text-2xs text-muted-foreground">
                     Replacement / unit
                     <Input
                       aria-label={`Replacement value for ${item.name}`}
@@ -396,7 +397,7 @@ export function InsurancePage() {
                       placeholder="Unknown"
                     />
                   </label>
-                  <div className="text-[0.75rem]">
+                  <div className="text-2xs">
                     <p className="text-muted-foreground">Owned total</p>
                     <p className="mt-1 font-medium">
                       {cents == null || !Number.isFinite(cents) ? "Unknown" : formatCurrency(cents * item.quantity, currency)}
@@ -408,7 +409,7 @@ export function InsurancePage() {
             })}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 p-4 sm:p-5">
-            <p className="text-[0.72rem] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               <ShieldCheck className="mr-1 inline size-3.5" /> Export only. No item value or purchase history is changed.
             </p>
             {canWrite && (
@@ -429,9 +430,9 @@ export function InsurancePage() {
         </section>
       )}
       {list?.status === "failed" && <div className="mt-5"><FormError message={list.error || "Insurance list generation failed."} /></div>}
-      <p className="mt-5 text-[0.72rem] text-muted-foreground">
+      <p className="mt-5 text-2xs text-muted-foreground">
         Need receipts and photographs instead? Use the ordinary <Link className="underline" to="/">evidence export</Link>.
       </p>
-    </div>
+    </PageLayout>
   );
 }

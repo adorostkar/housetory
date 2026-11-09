@@ -87,7 +87,7 @@ export function ItemCard({
         {!photo && representative && (
           <Badge
             variant="secondary"
-            className="absolute bottom-3 left-3 z-10 gap-1 bg-background/85 text-[0.58rem] backdrop-blur-md"
+            className="absolute bottom-3 left-3 z-10 gap-1 bg-background/85 text-2xs backdrop-blur-md"
           >
             {representative.source_type === "reference"
               ? "Reference"
@@ -130,7 +130,7 @@ export function ItemCard({
             )}
           </div>
           {item.quantity > 1 && (
-            <span className="rounded-full bg-background/80 px-2 py-0.5 text-[0.68rem] font-semibold text-foreground/80 backdrop-blur-md">
+            <span className="rounded-full bg-background/80 px-2 py-0.5 text-2xs font-semibold text-foreground/80 backdrop-blur-md">
               ×{item.quantity}
             </span>
           )}
@@ -144,19 +144,19 @@ export function ItemCard({
               {item.name}
             </h3>
             {(item.brand || item.model) && (
-              <p className="mt-0.5 line-clamp-1 text-[0.75rem] text-muted-foreground">
+              <p className="mt-0.5 line-clamp-1 text-2xs text-muted-foreground">
                 {[item.brand, item.model].filter(Boolean).join(" · ")}
               </p>
             )}
           </div>
           {typeof price === "number" && (
             <p
-              className="shrink-0 text-right text-[0.8rem] font-medium tabular-nums text-foreground/75"
+              className="shrink-0 text-right text-xs font-medium tabular-nums text-foreground/75"
               title={item.purchase?.is_shared ? "Shared purchase transaction total" : "Purchase transaction total"}
             >
               {formatCurrency(price, item.purchase?.currency)}
               {item.purchase?.is_shared && (
-                <span className="block text-[0.6rem] font-normal text-muted-foreground">
+                <span className="block text-2xs font-normal text-muted-foreground">
                   shared
                 </span>
               )}
@@ -168,7 +168,7 @@ export function ItemCard({
           {item.last_verified && (
             <p
               className={cn(
-                "mb-1.5 inline-flex items-center gap-1 text-[0.66rem]",
+                "mb-1.5 inline-flex items-center gap-1 text-2xs",
                 item.last_verified.stale ? "text-brass" : "text-muted-foreground",
               )}
               title={item.last_verified.stale_reason ?? "Last stocktake check"}
@@ -181,7 +181,7 @@ export function ItemCard({
               {item.last_verified.stale ? " · changed" : ""}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.72rem] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
             {item.household && <span className="truncate">{item.household.name}</span>}
             {item.household && (item.property || item.room || container || item.location) && (
               <span className="text-border">/</span>
@@ -225,7 +225,7 @@ export function ItemCard({
                 </Badge>
               ))}
               {item.tags.length > 2 && (
-                <span className="text-[0.68rem] text-muted-foreground">
+                <span className="text-2xs text-muted-foreground">
                   +{item.tags.length - 2}
                 </span>
               )}
@@ -325,7 +325,7 @@ export function ItemRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <p className="truncate text-[0.88rem] font-medium">{item.name}</p>
+          <p className="truncate text-sm font-medium">{item.name}</p>
           <Badge variant="outline" className="shrink-0 tabular-nums">
             ×{item.quantity}
           </Badge>
@@ -342,11 +342,11 @@ export function ItemRow({
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 truncate text-[0.72rem] text-muted-foreground">
+        <p className="mt-0.5 truncate text-2xs text-muted-foreground">
           {path || "No location"}
           {item.category ? ` · ${item.category.name}` : ""}{" "}
           {item.purchase?.price_cents != null && (
-            <span className="text-muted-foreground/70">
+            <span className="text-muted-foreground">
               · {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
               {item.purchase.is_shared ? " shared" : ""}
             </span>
@@ -354,7 +354,7 @@ export function ItemRow({
         </p>
       </div>
       {item.warranty?.end_date && (
-        <span className="hidden text-[0.68rem] text-muted-foreground sm:block">
+        <span className="hidden text-2xs text-muted-foreground sm:block">
           Until {formatDate(item.warranty.end_date)}
         </span>
       )}

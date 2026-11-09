@@ -35,7 +35,7 @@ import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import {
   PlaceTransferDialog,
   type PlaceTransferSource,
@@ -258,7 +258,7 @@ export function RoomDetailPage() {
     },
   });
 
-  if (roomsQuery.isPending) return <RoomDetailSkeleton />;
+  if (roomsQuery.isPending) return <PageSkeleton variant="detail" />;
   if (roomsQuery.isError) {
     return (
       <ErrorState
@@ -332,23 +332,21 @@ export function RoomDetailPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow={
-          [
-            room.property?.name,
-            ...(path.length > 1
-              ? path.slice(0, -1).map((entry) => entry.name)
-              : ["Your rooms"]),
-          ]
-            .filter(Boolean)
-            .join(" / ")
-        }
-        title={room.name}
-        description={room.description ?? undefined}
-        backTo={parent ? `/rooms/${parent.id}` : "/rooms"}
-        backLabel={parent ? parent.name : "All rooms"}
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: [
+          room.property?.name,
+          ...(path.length > 1
+            ? path.slice(0, -1).map((entry) => entry.name)
+            : ["Your rooms"]),
+        ]
+          .filter(Boolean)
+          .join(" / "),
+        title: room.name,
+        description: room.description ?? undefined,
+        backTo: parent ? `/rooms/${parent.id}` : "/rooms",
+        backLabel: parent ? parent.name : "All rooms",
+        actions: (
           <>
             <Button variant="outline" asChild>
               <Link to={`/containers?room_id=${room.id}`}>
@@ -412,9 +410,9 @@ export function RoomDetailPage() {
               </DropdownMenuContent>
             </DropdownMenu>}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <StocktakeEntry roomId={room.id} />
 
       <BorrowedKeptHere roomId={room.id} />
@@ -427,7 +425,7 @@ export function RoomDetailPage() {
         <aside className="space-y-5">
           <section className="surface p-4">
             <div className="flex items-center justify-between px-1 pb-3">
-              <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 Places in this room
               </h2>
               {canWrite && (
@@ -450,18 +448,18 @@ export function RoomDetailPage() {
               type="button"
               onClick={() => selectLocation(null)}
               className={cn(
-                "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[0.8rem] transition-colors",
+                "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors",
                 selectedLocationId === null
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
               )}
             >
               <span>Everything in {room.name}</span>
-              <span className="text-[0.68rem] tabular-nums">{room.total_item_count}</span>
+              <span className="text-2xs tabular-nums">{room.total_item_count}</span>
             </button>
 
             {flatLocations.length === 0 ? (
-              <p className="px-2.5 pb-2 pt-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+              <p className="px-2.5 pb-2 pt-3 text-2xs leading-relaxed text-muted-foreground">
                 No storage places yet. Add a shelf, cabinet or drawer to be more exact.
               </p>
             ) : (
@@ -487,12 +485,12 @@ export function RoomDetailPage() {
                           kind={location.kind}
                           className={cn(
                             "size-3.5 shrink-0",
-                            active ? "text-foreground" : "text-muted-foreground/70",
+                            active ? "text-foreground" : "text-muted-foreground",
                           )}
                         />
                         <span
                           className={cn(
-                            "min-w-0 flex-1 truncate text-[0.79rem]",
+                            "min-w-0 flex-1 truncate text-xs",
                             active ? "font-medium text-foreground" : "text-muted-foreground",
                           )}
                         >
@@ -500,7 +498,7 @@ export function RoomDetailPage() {
                             ? `${location.identifier} · ${location.name}`
                             : location.name}
                         </span>
-                        <span className="shrink-0 text-[0.65rem] tabular-nums text-muted-foreground/80">
+                        <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
                           {location.total_item_count}
                         </span>
                       </button>
@@ -568,7 +566,7 @@ export function RoomDetailPage() {
           {childRooms.length > 0 && (
             <section className="surface p-4">
               <div className="flex items-center justify-between px-1 pb-3">
-                <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                   Inside this room
                 </h2>
                 {canWrite && (
@@ -589,7 +587,7 @@ export function RoomDetailPage() {
                     <Link
                       key={child.id}
                       to={`/rooms/${child.id}`}
-                      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[0.8rem] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+                      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
                       style={{
                         marginLeft: `${depth * 18}px`,
                         paddingLeft: "10px",
@@ -620,14 +618,14 @@ export function RoomDetailPage() {
                 <button
                   type="button"
                   onClick={() => selectLocation(null)}
-                  className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[0.68rem] text-muted-foreground transition-colors hover:text-foreground"
+                  className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-2xs text-muted-foreground transition-colors hover:text-foreground"
                 >
                   Clear
                   <X className="size-3" />
                 </button>
               )}
             </div>
-            <p className="text-[0.75rem] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               {itemsQuery.data ? pluralize(totalItems, "item") : ""}
             </p>
           </div>
@@ -664,8 +662,8 @@ export function RoomDetailPage() {
                     }
                     className={
                       scope === value
-                        ? "rounded-full bg-primary px-3 py-1.5 text-[0.7rem] font-medium text-primary-foreground"
-                        : "rounded-full px-3 py-1.5 text-[0.7rem] font-medium text-muted-foreground"
+                        ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
+                        : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
                     }
                   >
                     {value === "nested" ? "Include nested" : "Direct only"}
@@ -681,7 +679,7 @@ export function RoomDetailPage() {
                     event.target.value === "created_desc" ? "" : event.target.value,
                   )
                 }
-                className="h-9 rounded-lg text-[0.8rem] lg:max-w-44"
+                className="h-9 rounded-lg text-xs lg:max-w-44"
               >
                 {Object.entries(ROOM_ITEM_SORTS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -867,23 +865,6 @@ export function RoomDetailPage() {
           }
         }}
       />
-    </div>
-  );
-}
-
-function RoomDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="mt-4 h-12 w-56" />
-      <div className="mt-10 grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <Skeleton className="h-72 rounded-2xl" />
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-60 rounded-2xl" />
-          ))}
-        </div>
-      </div>
-    </div>
+    </PageLayout>
   );
 }

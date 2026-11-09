@@ -468,7 +468,7 @@ export function SmartAddInput({
           aria-label={`Place: ${contextLabel}. Change`}
           disabled={busy}
           onClick={() => setPickerOpen((open) => !open)}
-          className="inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border border-sage/25 bg-sage-soft/40 px-3.5 text-[0.9rem] text-foreground/90 transition-colors hover:bg-sage-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-45 lg:text-[0.8rem]"
+          className="inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border border-sage/25 bg-sage-soft/40 px-3.5 text-sm text-foreground/90 transition-colors hover:bg-sage-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-45 lg:text-xs"
         >
           <MapPin className="size-4 shrink-0 text-sage" aria-hidden="true" />
           <span className="truncate">{contextLabel}</span>
@@ -539,7 +539,7 @@ export function SmartAddInput({
               placeholder={
                 "Two camping chairs in the garage…\nor paste one product link, or add a photo."
               }
-              className="block min-h-28 w-full resize-none rounded-t-2xl bg-transparent px-4 pb-2 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:text-[0.95rem]"
+              className="block min-h-28 w-full resize-none rounded-t-2xl bg-transparent px-4 pb-2 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:text-[0.95rem]"
             />
 
             {photo && (
@@ -554,7 +554,7 @@ export function SmartAddInput({
                   ) : (
                     <Camera className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   )}
-                  <span className="truncate text-[0.85rem]">{photo.name || "Photo"}</span>
+                  <span className="truncate text-sm">{photo.name || "Photo"}</span>
                   <button
                     type="button"
                     className={iconButton}
@@ -575,7 +575,7 @@ export function SmartAddInput({
                 className="flex flex-wrap items-center gap-2 border-t border-border/60 px-3 py-2"
               >
                 <span className="size-2.5 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
-                <span className="text-[0.9rem] tabular-nums lg:text-[0.82rem]">
+                <span className="text-sm tabular-nums lg:text-xs">
                   <span className="sr-only">Recording </span>
                   {formatDuration(recorder.elapsed)} / {formatDuration(maxSeconds)}
                 </span>
@@ -591,7 +591,7 @@ export function SmartAddInput({
             ) : transcribing ? (
               <div
                 role="status"
-                className="flex items-center gap-2 border-t border-border/60 px-4 py-3 text-[0.9rem] text-muted-foreground lg:text-[0.82rem]"
+                className="flex items-center gap-2 border-t border-border/60 px-4 py-3 text-sm text-muted-foreground lg:text-xs"
               >
                 <Spinner /> Transcribing your voice note…
               </div>
@@ -643,7 +643,7 @@ export function SmartAddInput({
                 )}
                 <div aria-live="polite" className="ml-auto pr-2">
                   {chipLabel && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-[0.8rem] font-medium text-foreground/80 lg:text-[0.72rem]">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground/80 lg:text-2xs">
                       {kind === "link" && <Link2 className="size-3.5" aria-hidden="true" />}
                       {(kind === "photo" || kind === "photo-note") && (
                         <Camera className="size-3.5" aria-hidden="true" />
@@ -686,17 +686,17 @@ export function SmartAddInput({
 
           <div aria-live="polite" className="empty:hidden">
             {kind === "conflict" && (
-              <p className="text-[0.9rem] leading-snug text-destructive lg:text-[0.8rem]">
+              <p className="text-sm leading-snug text-destructive lg:text-xs">
                 {CONFLICT_MESSAGE}
               </p>
             )}
             {recorder.error && (
-              <p className="text-[0.9rem] leading-snug text-destructive lg:text-[0.8rem]">
+              <p className="text-sm leading-snug text-destructive lg:text-xs">
                 {recorder.error}
               </p>
             )}
             {micHint && (
-              <p className="text-[0.9rem] leading-snug text-muted-foreground lg:text-[0.8rem]">
+              <p className="text-sm leading-snug text-muted-foreground lg:text-xs">
                 {micHint === VOICE_NOT_CONFIGURED ? (
                   <>
                     Voice needs transcription —{" "}
@@ -719,7 +719,7 @@ export function SmartAddInput({
             <Link
               to={manualHref}
               onClick={onFinish}
-              className="order-2 inline-flex min-h-11 items-center justify-center text-[0.9rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:order-1 lg:text-[0.8rem]"
+              className="order-2 inline-flex min-h-11 items-center justify-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:order-1 lg:text-xs"
             >
               or fill in the form yourself
             </Link>

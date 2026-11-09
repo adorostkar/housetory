@@ -37,12 +37,12 @@ function ImageDetails({ image, state }: { image: ItemImage; state: ItemImageStat
       data-testid="image-source-details"
       className="group mt-2 rounded-xl border border-border/60 bg-background/35"
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-[0.68rem] font-medium text-muted-foreground transition-colors hover:text-foreground">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         Image details
         <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
       </summary>
       <div className="border-t border-border/60 px-3 py-2.5">
-        <dl className="grid gap-1.5 text-[0.66rem] leading-relaxed">
+        <dl className="grid gap-1.5 text-2xs leading-relaxed">
           <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
             <dt className="text-muted-foreground">Source</dt>
             <dd className="max-w-[75%] break-words text-right">
@@ -140,12 +140,12 @@ function ImageDetails({ image, state }: { image: ItemImage; state: ItemImageStat
           )}
         </dl>
         {image.license_note && (
-          <p className="mt-2 border-t border-border/60 pt-2 text-[0.63rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 border-t border-border/60 pt-2 text-2xs leading-relaxed text-muted-foreground">
             {image.license_note}
           </p>
         )}
         {image.source_type === "ai" && (
-          <p className="mt-2 border-t border-border/60 pt-2 text-[0.63rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 border-t border-border/60 pt-2 text-2xs leading-relaxed text-muted-foreground">
             This existing AI illustration is not evidence of the item's condition or
             exact model. It remains viewable and removable; new illustrations are no
             longer generated.
@@ -221,7 +221,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       className="rounded-2xl border border-border/65 bg-card/45 px-3.5 py-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[0.66rem] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
+        <span className="text-2xs font-semibold uppercase tracking-[0.11em] text-muted-foreground">
           Image source
         </span>
         {image ? (
@@ -234,7 +234,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
         {actual && <Badge variant="sage">Actual photo is used</Badge>}
       </div>
 
-      <p className="mt-1.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+      <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
         {actual
           ? "Your actual photograph always takes priority over reference images and existing AI illustrations."
           : image
@@ -243,7 +243,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       </p>
 
       {!actual && image?.source_type === "reference" && sourceLink && (
-        <p className="mt-1 text-[0.66rem] text-muted-foreground">
+        <p className="mt-1 text-2xs text-muted-foreground">
           Source:{" "}
           <a
             href={sourceLink}
@@ -282,7 +282,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
                   : "Find online image"}
               </Button>
               {!searchReady && (
-                <Badge variant="brass" className="text-[0.58rem]">
+                <Badge variant="brass" className="text-2xs">
                   Setup required
                 </Badge>
               )}
@@ -302,7 +302,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
           </div>
 
           {showSearchSetup && !searchReady && (
-            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-[0.7rem] leading-relaxed">
+            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-2xs leading-relaxed">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground/85">
                   Online image lookup setup required
@@ -330,7 +330,7 @@ export function ItemImageControls({ itemId }: { itemId: string }) {
       {!actual && image && <ImageDetails image={image} state={state} />}
 
       {!canWrite && image && (
-        <p className="mt-2 flex items-center gap-1.5 text-[0.66rem] text-muted-foreground">
+        <p className="mt-2 flex items-center gap-1.5 text-2xs text-muted-foreground">
           <Info className="size-3" />
           Viewers can see the source label but cannot change item images.
         </p>

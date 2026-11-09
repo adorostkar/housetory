@@ -463,9 +463,9 @@ export function DocumentScanDialog({
       }}
     >
       <DialogContent className="max-w-6xl overflow-hidden p-0">
-        <div className="flex max-h-[calc(100dvh-4rem)] min-h-0 flex-col">
+        <div className="flex max-h-[calc(100dvh-4rem)] min-h-0 flex-col max-sm:max-h-[90dvh]">
           <div className="shrink-0 border-b border-border/60 px-5 pb-3 pt-5 sm:px-7">
-            <DialogHeader className="pr-10">
+            <DialogHeader className="pr-10 max-sm:static max-sm:z-auto max-sm:mx-0 max-sm:p-0">
               <DialogTitle className="flex items-center gap-2">
                 <ScanLine className="size-5 text-brass" />
                 Scan document
@@ -476,7 +476,7 @@ export function DocumentScanDialog({
                 Cancel discards them.
               </DialogDescription>
             </DialogHeader>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.7rem] text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
               <span className="rounded-full bg-secondary px-2.5 py-1">1 · Add pages</span>
               <span className="rounded-full bg-secondary px-2.5 py-1">2 · Adjust</span>
               <span className="rounded-full bg-secondary px-2.5 py-1">
@@ -535,7 +535,7 @@ export function DocumentScanDialog({
             Choose pages
           </Button>
           {uploading && (
-            <span className="flex items-center gap-1.5 text-[0.72rem] text-muted-foreground">
+            <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               {uploadProgress || "Adding pages…"}
             </span>
@@ -550,7 +550,7 @@ export function DocumentScanDialog({
             <p className="mt-4 font-display text-xl tracking-[-0.02em]">
               Start with a page
             </p>
-            <p className="mx-auto mt-1 max-w-md text-[0.78rem] leading-relaxed text-muted-foreground">
+            <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
               Take a photo or choose several images. Basic cropping, rotation and contrast
               work locally on your Housetory server without an AI provider.
             </p>
@@ -582,7 +582,7 @@ export function DocumentScanDialog({
                       />
                     </button>
                     <div className="mt-1.5 flex items-center justify-between gap-1">
-                      <span className="text-[0.68rem] font-medium">Page {index + 1}</span>
+                      <span className="text-2xs font-medium">Page {index + 1}</span>
                       <div className="flex items-center">
                         <button
                           type="button"
@@ -623,8 +623,8 @@ export function DocumentScanDialog({
                 <section className="rounded-xl border border-border/70 bg-secondary/15 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-[0.78rem] font-medium">Original · adjust corners</p>
-                      <p className="text-[0.68rem] text-muted-foreground">
+                      <p className="text-xs font-medium">Original · adjust corners</p>
+                      <p className="text-2xs text-muted-foreground">
                         Drag a corner, or focus a corner and use the arrow keys. The exact
                         original file is preserved.
                       </p>
@@ -638,7 +638,7 @@ export function DocumentScanDialog({
                         alt={`Cleaned page ${activePage.page_number}`}
                         className="mx-auto max-h-[52vh] max-w-full rounded-lg object-contain"
                       />
-                      <p className="rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+                      <p className="rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                         This browser cannot preview the original{" "}
                         {activePage.original_content_type} file. The original is preserved
                         and downloadable; the cleaned copy is shown here.
@@ -719,8 +719,8 @@ export function DocumentScanDialog({
                 <section className="rounded-xl border border-border/70 bg-secondary/15 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-[0.78rem] font-medium">Cleaned preview</p>
-                      <p className="text-[0.68rem] text-muted-foreground">
+                      <p className="text-xs font-medium">Cleaned preview</p>
+                      <p className="text-2xs text-muted-foreground">
                         A reversible derivative. The original page is never overwritten.
                       </p>
                     </div>
@@ -773,7 +773,7 @@ export function DocumentScanDialog({
                       })
                     }
                     disabled={busy}
-                    className="h-9 rounded-lg text-[0.8rem]"
+                    className="h-9 rounded-lg text-xs"
                   >
                     <option value="color">Color</option>
                     <option value="grayscale">Grayscale</option>
@@ -814,7 +814,7 @@ export function DocumentScanDialog({
               </div>
             )}
 
-            <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               The cleaned PDF is the default download. Exact original page files remain
               available from the saved document. PDFs from scanner apps can still be
               uploaded unchanged through <span className="font-medium">Add document</span>;
@@ -881,7 +881,7 @@ export function DocumentScanDialog({
           </div>
 
           <div className="shrink-0 border-t border-border/60 bg-popover px-5 py-3 sm:px-7">
-            <DialogFooter>
+            <DialogFooter className="max-sm:static max-sm:mx-0 max-sm:border-0 max-sm:p-0">
               <Button type="button" variant="ghost" onClick={() => void close()} disabled={busy}>
                 <X />
                 Cancel scan

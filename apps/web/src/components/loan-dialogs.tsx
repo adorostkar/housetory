@@ -133,13 +133,13 @@ export function LendLoanDialog({
             create.mutate();
           }}
         >
-          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-2.5 text-[0.74rem] text-muted-foreground">
+          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-2.5 text-2xs text-muted-foreground">
             <strong className="font-medium text-foreground">{available}</strong> unit(s)
             available at home. Owned quantity includes loaned stock.
           </div>
           {optionsQuery.data?.has_contents && (
             <div className="rounded-xl border border-border/60 bg-background/40 p-3.5">
-              <label className="flex items-start gap-2.5 text-[0.78rem]">
+              <label className="flex items-start gap-2.5 text-xs">
                 <input
                   type="checkbox"
                   className="mt-0.5 size-4 rounded border-border"
@@ -152,7 +152,7 @@ export function LendLoanDialog({
                 />
                 <span>
                   Include the contents in this loan
-                  <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                  <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
                     {includeContents
                       ? "Each available child item is loaned separately with the same borrower and dates. Returning the parent does not mark children returned."
                       : "Off by default. The parent can be lent alone; its contents stay recorded at home and are not implied to be with the borrower."}
@@ -161,12 +161,12 @@ export function LendLoanDialog({
               </label>
               {includeContents && (
                 <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-                  <p className="text-[0.7rem] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     {optionsQuery.data.contents_items.length} item(s) ·{" "}
                     {optionsQuery.data.contents_available_quantity} available unit(s)
                     will be included:
                   </p>
-                  <ul className="max-h-32 space-y-1 overflow-y-auto text-[0.7rem]">
+                  <ul className="max-h-32 space-y-1 overflow-y-auto text-2xs">
                     {optionsQuery.data.contents_items.map((entry) => (
                       <li
                         key={entry.item_id}
@@ -180,7 +180,7 @@ export function LendLoanDialog({
                     ))}
                   </ul>
                   {optionsQuery.data.excluded_items.length > 0 && (
-                    <div className="text-[0.66rem] leading-relaxed text-muted-foreground">
+                    <div className="text-2xs leading-relaxed text-muted-foreground">
                       <p className="font-medium">Not included:</p>
                       <ul className="mt-1 space-y-0.5">
                         {optionsQuery.data.excluded_items.map((entry) => (
@@ -197,7 +197,7 @@ export function LendLoanDialog({
             </div>
           )}
           {optionsQuery.isPending && open && (
-            <p className="text-[0.68rem] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               Checking whether this item holds contents…
             </p>
           )}
@@ -503,7 +503,7 @@ export function CorrectLoanDialog({
               onChange={(event) => setNotes(event.target.value)}
             />
           </Field>
-          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             {loan.returned_quantity > 0
               ? `${loan.returned_quantity} unit(s) have already been returned.`
               : "No returns have been recorded for this loan."}

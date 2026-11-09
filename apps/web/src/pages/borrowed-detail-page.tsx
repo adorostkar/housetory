@@ -119,14 +119,14 @@ export function BorrowedDetailPage() {
                   {record.outstanding_quantity} of {record.quantity} held from{" "}
                   {record.owner_name}
                 </h2>
-                <p className="mt-1 text-[0.76rem] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {record.returned_quantity > 0
                     ? `${record.returned_quantity} already returned to the owner · ${record.outstanding_quantity} still held`
                     : "No units have been returned to the owner yet."}{" "}
                   Borrowed goods are not household-owned stock.
                 </p>
               </div>
-              <div className="flex items-center gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.72rem] text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs text-muted-foreground">
                 <HandCoins className="size-4 text-brass" />
                 <span>
                   Owner:{" "}
@@ -155,22 +155,22 @@ export function BorrowedDetailPage() {
             </dl>
 
             {(record.brand || record.model) && (
-              <p className="mt-4 text-[0.76rem] text-muted-foreground">
+              <p className="mt-4 text-xs text-muted-foreground">
                 {[record.brand, record.model].filter(Boolean).join(" ")}
               </p>
             )}
             {record.notes && (
               <div className="mt-5 border-t border-border/60 pt-4">
-                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Private notes
                 </p>
-                <p className="mt-2 whitespace-pre-line text-[0.8rem] leading-relaxed text-muted-foreground">
+                <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
                   {record.notes}
                 </p>
               </div>
             )}
             {record.overdue && (
-              <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                 Past the recorded due date by {record.days_past_due} day
                 {record.days_past_due === 1 ? "" : "s"}. This is a private household
                 record, not an automatic reminder to the owner.
@@ -184,7 +184,7 @@ export function BorrowedDetailPage() {
                 <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
                   Returns to owner
                 </h2>
-                <p className="mt-1 text-[0.72rem] text-muted-foreground">
+                <p className="mt-1 text-2xs text-muted-foreground">
                   Partial returns stay attached to this borrowed record and its history.
                 </p>
               </div>
@@ -196,7 +196,7 @@ export function BorrowedDetailPage() {
               )}
             </div>
             {record.returns.length === 0 ? (
-              <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-5 text-[0.76rem] text-muted-foreground">
+              <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-5 text-xs text-muted-foreground">
                 No returns recorded.
               </p>
             ) : (
@@ -204,20 +204,20 @@ export function BorrowedDetailPage() {
                 {record.returns.map((entry) => (
                   <li
                     key={entry.id}
-                    className="rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-[0.76rem]"
+                    className="rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-xs"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>
                         <strong className="font-medium">{entry.quantity}</strong> returned{" "}
                         {formatDate(entry.returned_on)}
                       </span>
-                      <span className="text-[0.68rem] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         {entry.created_by_name ?? "Household"} · recorded{" "}
                         {formatDate(entry.created_at)}
                       </span>
                     </div>
                     {entry.notes && (
-                      <p className="mt-1 whitespace-pre-line text-[0.7rem] leading-relaxed text-muted-foreground">
+                      <p className="mt-1 whitespace-pre-line text-2xs leading-relaxed text-muted-foreground">
                         {entry.notes}
                       </p>
                     )}
@@ -232,10 +232,10 @@ export function BorrowedDetailPage() {
 
         <aside className="space-y-4">
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Borrowed-record history
             </h2>
-            <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               Creation, partial returns, corrections, cancellation and photo changes are
               preserved as separate events. Returns are never silently deleted.
             </p>
@@ -285,10 +285,10 @@ function Detail({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-2.5 text-[0.8rem]">
+    <div className="flex items-start gap-2.5 text-xs">
       <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <div>
-        <dt className="text-[0.66rem] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+        <dt className="text-2xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
           {label}
         </dt>
         <dd className="mt-1">{children}</dd>

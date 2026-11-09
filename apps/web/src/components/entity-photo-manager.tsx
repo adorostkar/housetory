@@ -150,7 +150,7 @@ export function EntityPhotoManager({
               <p className="font-display text-lg tracking-[-0.02em] text-foreground/80">
                 Add a photograph
               </p>
-              <p className="mt-0.5 max-w-md text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-0.5 max-w-md text-2xs leading-relaxed text-muted-foreground">
                 Take or choose a photo so this {kind === "room" ? "room" : "place"} is easier
                 to recognise later.
               </p>
@@ -165,7 +165,7 @@ export function EntityPhotoManager({
                 />
               </div>
             ) : (
-              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 Viewers can browse photographs but cannot upload or change them.
               </p>
             )}
@@ -228,7 +228,7 @@ export function EntityPhotoManager({
           </div>
         )}
         {canWrite && upload.isPending && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background/65 text-[0.78rem] backdrop-blur-sm">
+          <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-background/65 text-xs backdrop-blur-sm">
             <Spinner /> Uploading photograph…
           </div>
         )}

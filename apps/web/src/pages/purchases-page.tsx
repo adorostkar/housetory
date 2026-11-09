@@ -18,7 +18,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
 import { ItemMultiSelect } from "@/components/item-multi-select";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -94,12 +94,12 @@ export function PurchasesPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Ownership"
-        title="Purchases"
-        description="What you paid, where it came from, and the receipt trail. One purchase can cover several items."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Ownership",
+        title: "Purchases",
+        description: "What you paid, where it came from, and the receipt trail. One purchase can cover several items.",
+        actions: (
           <>
             <Button variant="outline" asChild>
               <a href="/api/v1/exports/purchases.csv">
@@ -114,9 +114,9 @@ export function PurchasesPage() {
               </Button>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="surface p-4 sm:p-5">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_150px_150px_150px]">
           <div className="relative min-w-0">
@@ -171,7 +171,7 @@ export function PurchasesPage() {
           />
         </div>
         <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
-          <p className="text-[0.72rem] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             {purchasesQuery.data
               ? `${pluralize(purchasesQuery.data.total, "purchase")}${hasFilters ? " matching" : ""}`
               : "Loading…"}
@@ -186,7 +186,7 @@ export function PurchasesPage() {
                 setDateTo("");
                 setSearchParams({}, { replace: true });
               }}
-              className="text-[0.72rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              className="text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               Clear filters
             </button>
@@ -251,7 +251,7 @@ export function PurchasesPage() {
                         </Badge>
                       )}
                     </div>
-                    <p className="mt-1 text-[0.72rem] text-muted-foreground">
+                    <p className="mt-1 text-2xs text-muted-foreground">
                       {purchase.purchase_date
                         ? formatDate(purchase.purchase_date)
                         : "No purchase date"}
@@ -264,7 +264,7 @@ export function PurchasesPage() {
                         {formatCurrency(purchase.price_cents, purchase.currency)}
                       </p>
                     ) : (
-                      <p className="text-[0.75rem] text-muted-foreground">No amount</p>
+                      <p className="text-2xs text-muted-foreground">No amount</p>
                     )}
                     {canWrite && (
                       <div className="mt-2 flex justify-end gap-0.5">
@@ -294,7 +294,7 @@ export function PurchasesPage() {
 
                 {purchase.items.length > 0 && (
                   <div className="mt-3.5">
-                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                       Items in this purchase
                     </p>
                     <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
@@ -302,7 +302,7 @@ export function PurchasesPage() {
                         <Link
                           key={item.id}
                           to={`/items/${item.id}`}
-                          className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-[0.8rem] font-medium leading-snug text-foreground/85 transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                          className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium leading-snug text-foreground/85 transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                         >
                           <Package className="size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
                           <span className="min-w-0 break-words text-left">{item.name}</span>
@@ -313,7 +313,7 @@ export function PurchasesPage() {
                 )}
 
                 {purchase.allocations.length > 0 && (
-                  <div className="mt-3 rounded-xl border border-border/60 bg-secondary/20 p-3 text-[0.7rem]">
+                  <div className="mt-3 rounded-xl border border-border/60 bg-secondary/20 p-3 text-2xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-medium text-foreground/80">
                         Reviewed item allocations
@@ -331,7 +331,7 @@ export function PurchasesPage() {
                         >
                           <span className="min-w-0 truncate">
                             {allocation.item.name} ×{allocation.quantity}
-                            <span className="ml-1 text-muted-foreground/70">
+                            <span className="ml-1 text-muted-foreground">
                               {allocation.description}
                             </span>
                           </span>
@@ -347,7 +347,7 @@ export function PurchasesPage() {
                       ))}
                     </ul>
                     {purchase.unallocated_cents != null && purchase.unallocated_cents !== 0 && (
-                      <p className="mt-2 border-t border-border/60 pt-2 text-[0.66rem] text-muted-foreground">
+                      <p className="mt-2 border-t border-border/60 pt-2 text-2xs text-muted-foreground">
                         {purchase.unallocated_cents > 0
                           ? `${formatCurrency(
                               purchase.unallocated_cents,
@@ -362,7 +362,7 @@ export function PurchasesPage() {
                   </div>
                 )}
 
-                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/60 pt-3 text-[0.72rem]">
+                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/60 pt-3 text-2xs">
                   {purchase.receipt ? (
                     <Link
                       to={`/documents/${purchase.receipt.id}`}
@@ -411,7 +411,7 @@ export function PurchasesPage() {
           await remove.mutateAsync(purchaseToDelete.id);
         }}
       />
-    </div>
+    </PageLayout>
   );
 }
 
@@ -579,7 +579,7 @@ function PurchaseDialog({
             </Field>
           </div>
 
-          <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             Enter the total paid for all selected items. If one item is a multi-unit
             pack, its item page shows the effective per-unit cost derived from this
             package total and its quantity.

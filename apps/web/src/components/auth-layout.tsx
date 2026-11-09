@@ -31,7 +31,7 @@ export function AuthLayout({
         </div>
 
         <div className="relative max-w-md pb-10">
-          <p className="mb-5 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-[#F3EFE4]/50">
+          <p className="mb-5 text-2xs font-semibold uppercase tracking-[0.18em] text-[#F3EFE4]/50">
             Everything has a place
           </p>
           <h1 className="font-display text-[3.25rem] font-normal leading-[1.04] tracking-[-0.035em] text-[#F6F2E9]">
@@ -43,7 +43,7 @@ export function AuthLayout({
           </p>
         </div>
 
-        <div className="relative flex items-center gap-2.5 text-[0.72rem] text-[#F3EFE4]/45">
+        <div className="relative flex items-center gap-2.5 text-2xs text-[#F3EFE4]/45">
           <LockKeyhole className="size-3.5" strokeWidth={1.6} />
           Private by design. Hosted on your own server.
         </div>
@@ -65,7 +65,7 @@ export function AuthLayout({
             <div className="mt-9">{children}</div>
           </div>
         </div>
-        <p className="mt-auto pt-8 text-center text-[0.68rem] tracking-[0.01em] text-muted-foreground/70 lg:text-left">
+        <p className="mt-auto pt-8 text-center text-2xs tracking-[0.01em] text-muted-foreground lg:text-left">
           Housetory · Your home, considered.
         </p>
       </main>

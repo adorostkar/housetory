@@ -174,10 +174,10 @@ export function HouseholdSwitcher({ compact = false }: { compact?: boolean }) {
             {!compact && (
               <>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[0.8rem] font-medium">
+                  <span className="block truncate text-xs font-medium">
                     {current?.name ?? "Choose household"}
                   </span>
-                  <span className="mt-0.5 block truncate text-[0.65rem] text-muted-foreground">
+                  <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
                     {session.data?.role ? ROLE_LABELS[session.data.role] : "No household"}
                     {households.length > 1 ? ` · ${households.length} households` : ""}
                   </span>
@@ -208,8 +208,8 @@ export function HouseholdSwitcher({ compact = false }: { compact?: boolean }) {
                   ) : null}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[0.8rem]">{household.name}</span>
-                  <span className="block text-[0.65rem] text-muted-foreground">
+                  <span className="block truncate text-xs">{household.name}</span>
+                  <span className="block text-2xs text-muted-foreground">
                     {ROLE_LABELS[household.role]} ·{" "}
                     {household.property_count}{" "}
                     {household.property_count === 1 ? "property" : "properties"}

@@ -103,8 +103,8 @@ export function PhotoLightbox({
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 bg-gradient-to-t from-black/60 to-transparent px-5 pb-6 pt-16 sm:px-8">
-          <p className="min-w-0 truncate text-[0.78rem] text-white/65">{itemName}</p>
-          <p className="shrink-0 text-[0.72rem] tabular-nums text-white/55">
+          <p className="min-w-0 truncate text-xs text-white/65">{itemName}</p>
+          <p className="shrink-0 text-2xs tabular-nums text-white/55">
             {index + 1} / {photos.length}
           </p>
         </div>

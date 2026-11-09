@@ -13,6 +13,7 @@ export function PageHeader({
   backLabel,
   className,
   actionsPlacement = "bottom",
+  size = "compact",
 }: {
   eyebrow?: string;
   title: string;
@@ -23,13 +24,14 @@ export function PageHeader({
   backLabel?: string;
   className?: string;
   actionsPlacement?: "bottom" | "title";
+  size?: "compact" | "large";
 }) {
   return (
-    <header className={cn("mb-9", className)}>
+    <header className={cn(size === "large" ? "mb-9" : "mb-6", className)}>
       {backTo && (
         <Link
           to={backTo}
-          className="mb-5 inline-flex items-center gap-1 text-[0.8rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-5 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" />
           {backLabel ?? "Back"}
@@ -43,7 +45,13 @@ export function PageHeader({
       >
         <div className="min-w-0 sm:min-w-[14rem] sm:flex-1">
           {eyebrow && <p className="eyebrow mb-2.5">{eyebrow}</p>}
-          <h1 className="display-title">{title}</h1>
+          <h1
+            className={
+              size === "large" ? "display-title" : "display-title-compact"
+            }
+          >
+            {title}
+          </h1>
           {titleAddon}
           {description && (
             <p className="mt-3 max-w-2xl text-pretty text-[0.95rem] leading-relaxed text-muted-foreground">

@@ -21,7 +21,7 @@ export function SectionHeading({
       <div>
         <h2 className="section-title">{title}</h2>
         {description && (
-          <p className="mt-1.5 text-[0.82rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             {description}
           </p>
         )}
@@ -29,7 +29,7 @@ export function SectionHeading({
       {actionLabel && actionTo && (
         <Link
           to={actionTo}
-          className="group inline-flex shrink-0 items-center gap-1.5 pb-1 text-[0.78rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="group inline-flex shrink-0 items-center gap-1.5 pb-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           {actionLabel}
           <ArrowRight className="size-3.5 transition-transform duration-300 group-hover:translate-x-0.5" />

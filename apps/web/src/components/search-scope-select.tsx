@@ -38,7 +38,7 @@ export function SearchScopeSelect({
         value={encode(selection.householdId, selection.propertyId)}
         onChange={(event) => setSelection(decode(event.target.value))}
         className={cn(
-          compact ? "h-9 rounded-lg text-[0.78rem]" : "h-10 rounded-xl text-[0.8rem]",
+          compact ? "h-9 rounded-lg text-xs" : "h-10 rounded-xl text-xs",
           "min-w-[180px]",
         )}
       >

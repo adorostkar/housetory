@@ -160,7 +160,7 @@ export function AnswerText({
       dir={direction}
       data-testid="answer-text"
       className={cn(
-        "space-y-2 text-start text-[0.9rem] leading-[1.8] text-foreground/90",
+        "space-y-2 text-start text-sm leading-[1.8] text-foreground/90",
         className,
       )}
     >

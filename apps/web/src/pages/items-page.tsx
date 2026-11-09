@@ -20,7 +20,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard, ItemRow } from "@/components/item-card";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -288,24 +288,22 @@ export function ItemsPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Collection"
-        title="Items"
-        description={
-          itemsQuery.data
-            ? `${pluralize(total, "item")} recorded${hasFilters ? " matching your filters" : " across your home"}.`
-            : "Everything in your home, in one considered place."
-        }
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Collection",
+        title: "Items",
+        description: itemsQuery.data
+          ? `${pluralize(total, "item")} recorded${hasFilters ? " matching your filters" : " across your home"}.`
+          : "Everything in your home, in one considered place.",
+        actions: (
           <AddItemsButton
             context={propertyId ? { propertyId } : undefined}
           />
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="surface mb-8 p-3.5 sm:p-4">
-        <div className="flex items-center gap-2 text-[0.75rem] text-muted-foreground">
+        <div className="flex items-center gap-2 text-2xs text-muted-foreground">
           <SlidersHorizontal className="size-3.5" />
           <span>Filters</span>
         </div>
@@ -316,7 +314,7 @@ export function ItemsPage() {
               aria-label="Filter by property"
               value={propertyId}
               onChange={(event) => updatePropertyFilter(event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
+              className="h-9 rounded-lg text-xs"
             >
               <option value="">All properties</option>
               {properties.map((property) => (
@@ -331,7 +329,7 @@ export function ItemsPage() {
               aria-label="Filter by room"
               value={roomFilter}
               onChange={(event) => updateRoomFilter(event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
+              className="h-9 rounded-lg text-xs"
             >
               <option value="">All rooms</option>
               {roomOptions.map(({ room }) => (
@@ -350,7 +348,7 @@ export function ItemsPage() {
               value={locationFilter}
               disabled={!roomFilter}
               onChange={(event) => updateParam("location_id", event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
+              className="h-9 rounded-lg text-xs"
             >
               <option value="">{roomFilter ? "All places" : "Choose a room"}</option>
               {locationOptions.map(({ location }) => (
@@ -369,7 +367,7 @@ export function ItemsPage() {
                 aria-label="Filter by category"
                 value={categoryFilter}
                 onChange={(event) => updateParam("category_id", event.target.value)}
-                className="h-9 rounded-lg text-[0.8rem]"
+                className="h-9 rounded-lg text-xs"
               >
                 <option value="">All categories</option>
                 {categoryOptions.map((category) => (
@@ -380,7 +378,7 @@ export function ItemsPage() {
               </Select>
             </div>
           ) : (
-            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-[0.72rem] text-muted-foreground sm:min-w-0">
+            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-2xs text-muted-foreground sm:min-w-0">
               No categories yet
             </div>
           )}
@@ -391,7 +389,7 @@ export function ItemsPage() {
                 aria-label="Filter by tag"
                 value={tagFilter}
                 onChange={(event) => updateParam("tag_id", event.target.value)}
-                className="h-9 rounded-lg text-[0.8rem]"
+                className="h-9 rounded-lg text-xs"
               >
                 <option value="">All tags</option>
                 {tagOptions.map((tag) => (
@@ -402,7 +400,7 @@ export function ItemsPage() {
               </Select>
             </div>
           ) : (
-            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-[0.72rem] text-muted-foreground sm:min-w-0">
+            <div className="flex min-w-[145px] shrink-0 items-center rounded-lg border border-dashed border-border/70 px-3 text-2xs text-muted-foreground sm:min-w-0">
               No tags yet
             </div>
           )}
@@ -412,7 +410,7 @@ export function ItemsPage() {
               aria-label="Filter by purchase information"
               value={purchaseInfo}
               onChange={(event) => updateParam("purchase_info", event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
+              className="h-9 rounded-lg text-xs"
             >
               <option value="">Any purchase info</option>
               <option value="missing">Missing or unknown</option>
@@ -429,7 +427,7 @@ export function ItemsPage() {
               aria-label="Sort items"
               value={sort}
               onChange={(event) => updateParam("sort", event.target.value)}
-              className="h-9 rounded-lg text-[0.8rem]"
+              className="h-9 rounded-lg text-xs"
             >
               {Object.entries(SORTS).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -439,7 +437,7 @@ export function ItemsPage() {
             </Select>
           </div>
 
-          <label className="flex h-9 min-w-[120px] shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-[0.78rem] text-muted-foreground sm:min-w-0">
+          <label className="flex h-9 min-w-[120px] shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-xs text-muted-foreground sm:min-w-0">
             <Switch
               checked={archived}
               onCheckedChange={(checked) => updateParam("archived", checked ? "1" : "")}
@@ -468,7 +466,7 @@ export function ItemsPage() {
               <Badge
                 key={chip.key}
                 variant="secondary"
-                className="gap-1 py-1 pl-2.5 pr-1.5 text-[0.68rem]"
+                className="gap-1 py-1 pl-2.5 pr-1.5 text-2xs"
               >
                 <span className="max-w-64 truncate">{chip.label}</span>
                 <button
@@ -484,7 +482,7 @@ export function ItemsPage() {
             <button
               type="button"
               onClick={clearFilters}
-              className="ml-1 text-[0.68rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              className="ml-1 text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               Reset all filters
             </button>
@@ -620,7 +618,7 @@ export function ItemsPage() {
             </div>
           )}
           <div className="mt-8 flex flex-col items-center gap-3">
-            <p className="text-[0.72rem] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               Showing {items.length} of {total}
             </p>
             {itemsQuery.hasNextPage && (
@@ -636,7 +634,7 @@ export function ItemsPage() {
         </>
       )}
 
-    </div>
+    </PageLayout>
   );
 }
 

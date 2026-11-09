@@ -198,7 +198,7 @@ export function PlaceTransferDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground/85">{source.label}</p>
             {preview ? (
               <>
@@ -279,7 +279,7 @@ export function PlaceTransferDialog({
           </div>
 
           {preview?.destination && (
-            <p className="flex items-start gap-1.5 rounded-xl border border-border/60 bg-background/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="flex items-start gap-1.5 rounded-xl border border-border/60 bg-background/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               <MapPin className="mt-0.5 size-3.5 shrink-0" />
               <span>
                 Destination: <strong className="font-medium text-foreground/80">{destinationLabel}</strong>
@@ -289,14 +289,14 @@ export function PlaceTransferDialog({
 
           {preview?.items_preview.length ? (
             <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-              <p className="text-[0.7rem] font-medium text-foreground/80">
+              <p className="text-2xs font-medium text-foreground/80">
                 First items in this move
               </p>
               <ul className="mt-2 space-y-1.5">
                 {preview.items_preview.slice(0, 6).map((item) => (
                   <li
                     key={item.id}
-                    className="flex flex-wrap items-baseline justify-between gap-2 text-[0.7rem]"
+                    className="flex flex-wrap items-baseline justify-between gap-2 text-2xs"
                   >
                     <span className="min-w-0 break-words">
                       {item.quantity > 1 ? `${item.quantity} × ` : ""}
@@ -307,14 +307,14 @@ export function PlaceTransferDialog({
                         </Badge>
                       ) : null}
                     </span>
-                    <span className="text-[0.64rem] text-muted-foreground">
+                    <span className="text-2xs text-muted-foreground">
                       {item.place_label}
                     </span>
                   </li>
                 ))}
               </ul>
               {preview.total_item_count > preview.items_preview.length && (
-                <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                <p className="mt-2 text-2xs text-muted-foreground">
                   and {preview.total_item_count - preview.items_preview.length} more item(s)
                 </p>
               )}
@@ -323,7 +323,7 @@ export function PlaceTransferDialog({
 
           {preview?.nested_places_preview.length ? (
             <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-              <p className="text-[0.7rem] font-medium text-foreground/80">
+              <p className="text-2xs font-medium text-foreground/80">
                 Nested places moved with their contents
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -341,7 +341,7 @@ export function PlaceTransferDialog({
 
           {preview?.child_rooms_preview.length ? (
             <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-              <p className="text-[0.7rem] font-medium text-foreground/80">
+              <p className="text-2xs font-medium text-foreground/80">
                 Child rooms reparented under the destination room
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -361,7 +361,7 @@ export function PlaceTransferDialog({
           {preview?.warnings.map((warning) => (
             <p
               key={warning}
-              className="flex items-start gap-1.5 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground"
+              className="flex items-start gap-1.5 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground"
             >
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-brass" />
               <span>{warning}</span>
@@ -371,14 +371,14 @@ export function PlaceTransferDialog({
           {preview?.blockers.map((blocker) => (
             <p
               key={blocker}
-              className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-destructive"
+              className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-2xs leading-relaxed text-destructive"
             >
               {blocker}
             </p>
           ))}
 
           {deleting && (
-            <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-destructive">
+            <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-2xs leading-relaxed text-destructive">
               Deleting {source.label} is permanent. Its inventory moves to the
               destination first; this workflow does not promise undo for the deleted
               source.

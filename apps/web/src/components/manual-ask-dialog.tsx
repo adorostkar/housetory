@@ -148,7 +148,7 @@ export function ManualAskDialog({
           </Field>
           {ask.error && <FormError message={getApiErrorMessage(ask.error)} />}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               Manuals are treated as untrusted source text. Missing or conflicting evidence is
               reported instead of guessed.
             </p>
@@ -166,18 +166,18 @@ export function ManualAskDialog({
               <Badge variant="outline">
                 {answer.ai_status.configured ? "AI available" : "No AI required"}
               </Badge>
-              <span className="text-[0.68rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 Attached-manual answer
               </span>
             </div>
 
-            <p className="whitespace-pre-line text-pretty text-[0.86rem] leading-[1.7]">
+            <p className="whitespace-pre-line text-pretty text-sm leading-[1.7]">
               {answer.answer}
             </p>
 
             {answer.citations.length > 0 && (
               <div className="space-y-2">
-                <h3 className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <h3 className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Citations
                 </h3>
                 <ul className="max-h-64 space-y-2 overflow-y-auto overscroll-contain pr-1">
@@ -191,7 +191,7 @@ export function ManualAskDialog({
             )}
 
             {answer.manuals.length > 0 && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-[0.7rem]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-2xs">
                 <span className="text-muted-foreground">Sources:</span>
                 {answer.manuals.map((manual) => (
                   <span key={manual.id} className="inline-flex items-center gap-1.5">
@@ -217,7 +217,7 @@ export function ManualAskDialog({
             )}
 
             {answer.notices.length > 0 && (
-              <ul className="space-y-1 border-t border-border/60 pt-3 text-[0.7rem] leading-relaxed text-muted-foreground">
+              <ul className="space-y-1 border-t border-border/60 pt-3 text-2xs leading-relaxed text-muted-foreground">
                 {answer.notices.map((notice, index) => (
                   <li key={`${notice}-${index}`} className="flex gap-1.5">
                     <ShieldCheck className="mt-0.5 size-3 shrink-0" />
@@ -228,7 +228,7 @@ export function ManualAskDialog({
             )}
 
             {answer.ai_status.configured && (
-              <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 {answer.ai_status.provider_label ?? answer.ai_status.provider} ·{" "}
                 {answer.ai_status.mode}. {answer.ai_status.privacy_note}
               </p>
@@ -240,16 +240,16 @@ export function ManualAskDialog({
           <section className="rounded-xl border border-border/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="flex items-center gap-1.5 text-[0.78rem] font-medium">
+                <h3 className="flex items-center gap-1.5 text-xs font-medium">
                   <Globe2 className="size-3.5 text-muted-foreground" />
                   Ask configured online sources
                 </h3>
-                <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   Optional. Only the confirmed product identity, variant and your question are
                   sent to the configured search service. Borrower, loan and household data are
                   never included.
                 </p>
-                <p className="mt-1 break-all text-[0.66rem] text-muted-foreground">
+                <p className="mt-1 break-all text-2xs text-muted-foreground">
                   {profile.manufacturer} · {profile.model_identifier}
                   {profile.variant ? ` · ${profile.variant}` : ""}
                 </p>
@@ -273,7 +273,7 @@ export function ManualAskDialog({
             </div>
 
             {!canAskOnline && (
-              <p className="mt-2 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+              <p className="mt-2 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 {manuals?.search.reason ??
                   "A real online search service must be configured by the operator before online questions can be used."}
               </p>
@@ -281,7 +281,7 @@ export function ManualAskDialog({
 
             {canAskOnline && onlineArmed && (
               <div className="mt-3 space-y-3 rounded-lg border border-brass/25 bg-brass-soft/25 p-3">
-                <p className="text-[0.7rem] leading-relaxed">
+                <p className="text-2xs leading-relaxed">
                   Send this question to the configured online search service? Results are
                   external sources and are cited by URL. No household inventory or loan data is
                   sent.
@@ -319,7 +319,7 @@ export function ManualAskDialog({
                   </Badge>
                   <Badge variant="brass">Online sources</Badge>
                 </div>
-                <p className="whitespace-pre-line text-pretty text-[0.84rem] leading-[1.7]">
+                <p className="whitespace-pre-line text-pretty text-sm leading-[1.7]">
                   {onlineAnswer.answer}
                 </p>
                 {onlineAnswer.citations.length > 0 && (
@@ -332,7 +332,7 @@ export function ManualAskDialog({
                   </ul>
                 )}
                 {onlineAnswer.notices.length > 0 && (
-                  <ul className="space-y-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+                  <ul className="space-y-1 text-2xs leading-relaxed text-muted-foreground">
                     {onlineAnswer.notices.map((notice, index) => (
                       <li key={`${notice}-${index}`}>{notice}</li>
                     ))}
@@ -359,7 +359,7 @@ function CitationItem({ citation, index }: { citation: ManualCitation; index: nu
     : citation.section || `Excerpt ${index}`;
   return (
     <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
         <a
           href={citation.url}
           target="_blank"
@@ -378,7 +378,7 @@ function CitationItem({ citation, index }: { citation: ManualCitation; index: nu
           Open document
         </Link>
       </div>
-      <p className={cn("mt-1.5 whitespace-pre-line text-[0.72rem] leading-relaxed text-muted-foreground")}>
+      <p className={cn("mt-1.5 whitespace-pre-line text-2xs leading-relaxed text-muted-foreground")}>
         {citation.excerpt}
       </p>
     </div>
@@ -388,7 +388,7 @@ function CitationItem({ citation, index }: { citation: ManualCitation; index: nu
 function WebCitationItem({ citation }: { citation: WebCitation }) {
   return (
     <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs">
         <Badge variant={citation.source_type === "manufacturer" ? "sage" : "outline"}>
           {citation.source_type === "manufacturer"
             ? "Manufacturer"
@@ -412,10 +412,10 @@ function WebCitationItem({ citation }: { citation: WebCitation }) {
           <span className="text-muted-foreground">{citation.language}</span>
         )}
       </div>
-      <p className="mt-1.5 line-clamp-3 text-[0.72rem] leading-relaxed text-muted-foreground">
+      <p className="mt-1.5 line-clamp-3 text-2xs leading-relaxed text-muted-foreground">
         {citation.excerpt || "No excerpt was supplied by the source."}
       </p>
-      <p className="mt-1 break-all text-[0.62rem] text-muted-foreground/80">{citation.url}</p>
+      <p className="mt-1 break-all text-2xs text-muted-foreground">{citation.url}</p>
     </div>
   );
 }

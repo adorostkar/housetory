@@ -227,26 +227,26 @@ export function EvidenceExportDialog({
           <section className="rounded-xl border border-border/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Scope preview
                 </p>
-                <p className="mt-1 break-words text-[0.88rem] font-medium">
+                <p className="mt-1 break-words text-sm font-medium">
                   {preview?.scope_label ?? "Preparing scope…"}
                 </p>
                 {preview && (
-                  <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+                  <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                     {pluralize(preview.item_count, "item")} ·{" "}
                     {pluralize(preview.unit_count, "unit")} · at home{" "}
                     {preview.at_home_unit_count} · recorded on loan{" "}
                     {preview.on_loan_unit_count}
                   </p>
                 )}
-                <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   Borrowed-from-others records and their private photos are excluded. This
                   package covers household-owned inventory only.
                 </p>
               </div>
-              <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground">
+              <label className="flex items-center gap-2 text-2xs text-muted-foreground">
                 <input
                   type="checkbox"
                   className="size-4 accent-[hsl(var(--primary))]"
@@ -257,14 +257,14 @@ export function EvidenceExportDialog({
               </label>
             </div>
             {previewQuery.isPending && (
-              <div className="mt-3 flex items-center gap-2 text-[0.74rem] text-muted-foreground">
+              <div className="mt-3 flex items-center gap-2 text-2xs text-muted-foreground">
                 <Spinner />
                 Reading recorded inventory and evidence…
               </div>
             )}
             {previewQuery.error && <FormError message={getApiErrorMessage(previewQuery.error)} />}
             {preview && preview.items.length > 0 && (
-              <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-[0.7rem]">
+              <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-2xs">
                 {preview.items.slice(0, 12).map((entry) => (
                   <li key={entry.id} className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
                     <span className="min-w-0 break-words">
@@ -285,7 +285,7 @@ export function EvidenceExportDialog({
               </ul>
             )}
             {preview && preview.item_count === 0 && (
-              <p className="mt-3 rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-[0.74rem] text-muted-foreground">
+              <p className="mt-3 rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-2xs text-muted-foreground">
                 No items are in this selection. Choose another room, container or item.
               </p>
             )}
@@ -295,15 +295,15 @@ export function EvidenceExportDialog({
             <section className="rounded-xl border border-border/70 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                     Evidence and formats
                   </p>
-                  <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     PDF is always included. Supporting originals are optional and may be large.
                   </p>
                 </div>
                 {previewBusy && (
-                  <span className="inline-flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" />
                     Updating preview
                   </span>
@@ -371,8 +371,8 @@ export function EvidenceExportDialog({
               {preview.documents.length > 0 && (
                 <div className="mt-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[0.7rem] font-medium">Supporting documents</p>
-                    <p className="text-[0.66rem] text-muted-foreground">
+                    <p className="text-2xs font-medium">Supporting documents</p>
+                    <p className="text-2xs text-muted-foreground">
                       {preview.included_document_count} of {preview.document_count} included
                     </p>
                   </div>
@@ -382,7 +382,7 @@ export function EvidenceExportDialog({
                       return (
                         <li
                           key={document.id}
-                          className="flex items-start gap-3 px-3 py-2.5 text-[0.7rem]"
+                          className="flex items-start gap-3 px-3 py-2.5 text-2xs"
                         >
                           <input
                             type="checkbox"
@@ -413,7 +413,7 @@ export function EvidenceExportDialog({
                                 </Badge>
                               )}
                             </div>
-                            <p className="mt-0.5 text-[0.64rem] text-muted-foreground">
+                            <p className="mt-0.5 text-2xs text-muted-foreground">
                               {document.merchant ? `${document.merchant} · ` : ""}
                               {formatFileSize(document.original_byte_size)} original ·{" "}
                               {categoryOn ? "category included" : "category excluded"}
@@ -430,7 +430,7 @@ export function EvidenceExportDialog({
               )}
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-[0.7rem]">
+                <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-2xs">
                   <p className="font-medium">Package estimate</p>
                   <p className="mt-1 text-muted-foreground">
                     Evidence files about {formatFileSize(preview.bundle_estimated_bytes)} ·
@@ -442,7 +442,7 @@ export function EvidenceExportDialog({
                     </p>
                   )}
                 </div>
-                <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-[0.7rem]">
+                <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-2xs">
                   <p className="font-medium">Value semantics</p>
                   <p className="mt-1 text-muted-foreground">
                     Currencies stay separate. Current estimate totals multiply per-unit
@@ -454,7 +454,7 @@ export function EvidenceExportDialog({
 
               {preview.currency_totals.length > 0 && (
                 <div className="mt-3 overflow-x-auto">
-                  <table className="w-full min-w-[420px] text-[0.68rem]">
+                  <table className="w-full min-w-[420px] text-2xs">
                     <thead>
                       <tr className="border-b border-border/60 text-left text-muted-foreground">
                         <th className="py-1.5 pr-3 font-medium">Currency</th>
@@ -489,7 +489,7 @@ export function EvidenceExportDialog({
               )}
 
               {preview.warnings.length > 0 && (
-                <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/25 px-3 py-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+                <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                   {preview.warnings.map((warning, index) => (
                     <li key={`${warning}-${index}`} className="flex gap-1.5">
                       <ShieldCheck className="mt-0.5 size-3 shrink-0" />
@@ -512,21 +512,21 @@ export function EvidenceExportDialog({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-[0.74rem] font-semibold">Evidence package</p>
+                    <p className="text-2xs font-semibold">Evidence package</p>
                     <Badge variant={STATUS_TONES[record.status]}>
                       {STATUS_LABELS[record.status]}
                     </Badge>
                   </div>
-                  <p className="mt-1 break-all text-[0.66rem] text-muted-foreground">
+                  <p className="mt-1 break-all text-2xs text-muted-foreground">
                     {record.id}
                   </p>
-                  <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     {pluralize(record.item_count, "item")} ·{" "}
                     {pluralize(record.unit_count, "unit")} · generated{" "}
                     {formatDate(record.created_at)}
                   </p>
                   {record.expires_at && (
-                    <p className="mt-0.5 text-[0.66rem] text-muted-foreground">
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
                       Private download expires {formatDate(record.expires_at)}
                     </p>
                   )}
@@ -547,7 +547,7 @@ export function EvidenceExportDialog({
               </div>
 
               {(record.status === "queued" || record.status === "running") && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-[0.72rem] text-muted-foreground">
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-2xs text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" />
                   Preparing the PDF, CSV and evidence bundle. This runs in the background.
                 </div>
@@ -555,7 +555,7 @@ export function EvidenceExportDialog({
 
               {record.status === "failed" && (
                 <div className="mt-3 space-y-2">
-                  <p className="rounded-lg border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-[0.72rem] text-destructive">
+                  <p className="rounded-lg border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-2xs text-destructive">
                     {record.error ?? "The evidence package could not be generated."}
                   </p>
                   {record.can_manage && (
@@ -589,7 +589,7 @@ export function EvidenceExportDialog({
 
               {record.status === "expired" && (
                 <div className="mt-3 space-y-2">
-                  <p className="text-[0.72rem] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     This private package expired and its generated files were removed. The
                     source inventory and evidence were not changed.
                   </p>
@@ -638,7 +638,7 @@ export function EvidenceExportDialog({
               )}
 
               {record.warnings.length > 0 && (
-                <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/25 px-3 py-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+                <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                   {record.warnings.map((warning, index) => (
                     <li key={`${warning}-${index}`}>{warning}</li>
                   ))}
@@ -649,19 +649,19 @@ export function EvidenceExportDialog({
 
           {recentQuery.data && recentQuery.data.items.length > 0 && (
             <section className="rounded-xl border border-border/70 p-4">
-              <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Recent evidence packages
               </p>
               <ul className="mt-2 divide-y divide-border/40">
                 {recentQuery.data.items.slice(0, 6).map((entry) => (
-                  <li key={entry.id} className="flex flex-wrap items-center gap-2 py-2 text-[0.7rem]">
+                  <li key={entry.id} className="flex flex-wrap items-center gap-2 py-2 text-2xs">
                     <button
                       type="button"
                       className="min-w-0 flex-1 text-left"
                       onClick={() => setActiveExportId(entry.id)}
                     >
                       <span className="break-words font-medium">{entry.scope_label}</span>
-                      <span className="mt-0.5 block text-[0.64rem] text-muted-foreground">
+                      <span className="mt-0.5 block text-2xs text-muted-foreground">
                         {pluralize(entry.item_count, "item")} ·{" "}
                         {formatDate(entry.created_at)} · {STATUS_LABELS[entry.status]}
                       </span>
@@ -678,7 +678,7 @@ export function EvidenceExportDialog({
         </div>
 
         <DialogFooter>
-          <div className="mr-auto flex flex-wrap items-center gap-2 text-[0.68rem] text-muted-foreground">
+          <div className="mr-auto flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
             <ShieldCheck className="size-3.5" />
             Private, signed-in download only. No automatic sharing.
           </div>
@@ -714,7 +714,7 @@ function OptionCheck({
 }) {
   return (
     <label
-      className={`flex items-start gap-2.5 rounded-lg border border-border/60 px-3 py-2.5 text-[0.72rem] ${
+      className={`flex items-start gap-2.5 rounded-lg border border-border/60 px-3 py-2.5 text-2xs ${
         disabled ? "opacity-55" : "cursor-pointer"
       }`}
     >
@@ -728,7 +728,7 @@ function OptionCheck({
       <span className="min-w-0">
         <span className="block font-medium">{label}</span>
         {hint && (
-          <span className="mt-0.5 block text-[0.64rem] leading-relaxed text-muted-foreground">
+          <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
             {hint}
           </span>
         )}

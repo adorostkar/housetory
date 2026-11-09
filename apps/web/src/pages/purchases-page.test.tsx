@@ -107,7 +107,7 @@ describe("PurchasesPage", () => {
       name: /Hammer drill with a deliberately long catalogue name/,
     });
     expect(drill).toHaveAttribute("href", "/items/item-drill");
-    expect(drill).toHaveClass("text-[0.8rem]");
+    expect(drill).toHaveClass("text-xs");
     expect(drill.querySelector("span")).toHaveClass("break-words");
 
     expect(

@@ -15,7 +15,7 @@ import { toast } from "sonner";
 
 import { CameraUpload } from "@/components/camera-upload";
 import { Field } from "@/components/form-field";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -290,18 +290,18 @@ export function ScanPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Add items · Camera"
-        title="Scan a photo"
-        description="Photograph several objects at once, review every suggestion, choose destinations, then create only what you approve. Processing follows your configured local or consented remote model."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Add items · Camera",
+        title: "Scan a photo",
+        description: "Photograph several objects at once, review every suggestion, choose destinations, then create only what you approve. Processing follows your configured local or consented remote model.",
+        actions: (
           <Button variant="outline" asChild>
             <Link to="/items">Inventory</Link>
           </Button>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-5">
           <section className="surface p-5 sm:p-6">
@@ -309,7 +309,7 @@ export function ScanPage() {
               <ScanLine className="size-4 text-brass" />
               <h2 className="font-display text-[1.4rem] tracking-[-0.02em]">Take or choose a photo</h2>
             </div>
-            <div className="mt-1 space-y-1 text-[0.76rem] leading-relaxed text-muted-foreground">
+            <div className="mt-1 space-y-1 text-xs leading-relaxed text-muted-foreground">
               <p>
                 {aiStatus.data?.configured
                   ? aiStatus.data.capabilities?.includes("vision")
@@ -321,7 +321,7 @@ export function ScanPage() {
               {!aiStatus.data?.capabilities?.includes("vision") && (
                 <Link
                   to="/settings/ai"
-                  className="inline-block text-[0.72rem] font-medium text-foreground underline underline-offset-4"
+                  className="inline-block text-2xs font-medium text-foreground underline underline-offset-4"
                 >
                   Configure vision
                 </Link>
@@ -339,8 +339,8 @@ export function ScanPage() {
                   <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
                     <Camera className="size-6" strokeWidth={1.5} />
                   </span>
-                  <p className="mt-3 text-[0.85rem] font-medium">Point at the objects you want to add</p>
-                  <p className="mx-auto mt-1 max-w-md text-[0.72rem] leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-sm font-medium">Point at the objects you want to add</p>
+                  <p className="mx-auto mt-1 max-w-md text-2xs leading-relaxed text-muted-foreground">
                     A whole-box photo can suggest multiple items. Nothing is written until you review and approve each suggestion.
                   </p>
                 </>
@@ -414,7 +414,7 @@ export function ScanPage() {
                   ))}
                 </Select>
               </Field>
-              <p className="text-[0.68rem] leading-relaxed text-muted-foreground sm:col-span-2">
+              <p className="text-2xs leading-relaxed text-muted-foreground sm:col-span-2">
                 A room is enough. The container/location is optional and clears automatically
                 when you switch rooms.
               </p>
@@ -422,15 +422,15 @@ export function ScanPage() {
           </section>
 
           {recognition && recognition.status !== "succeeded" && recognition.status !== "failed" && (
-            <section className="surface flex items-center gap-3 p-5 text-[0.82rem] text-muted-foreground">
+            <section className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               The backend is analysing the photo…
             </section>
           )}
           {recognition?.status === "failed" && (
             <section className="surface border-destructive/25 p-5">
-              <p className="text-[0.82rem] font-medium text-destructive">Recognition failed</p>
-              <p className="mt-1 text-[0.75rem] leading-relaxed text-muted-foreground">
+              <p className="text-xs font-medium text-destructive">Recognition failed</p>
+              <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                 {recognition.error || "Try another photograph or add the item manually."}
               </p>
               <Button className="mt-3" variant="outline" asChild>
@@ -447,7 +447,7 @@ export function ScanPage() {
                     Review {suggestions.length} suggestion{suggestions.length === 1 ? "" : "s"}
                   </h2>
                   {processing && (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.74rem] text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
                       <Badge variant={processing.variant}>{processing.label}</Badge>
                       <span>{processing.detail}</span>
                       <span>· {formatDate(recognition.created_at)}</span>
@@ -463,7 +463,7 @@ export function ScanPage() {
                 </Button>
               </div>
               {processing && processing.warnings.length > 0 && (
-                <p className="rounded-xl border border-brass/20 bg-brass-soft/50 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="rounded-xl border border-brass/20 bg-brass-soft/50 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                   {processing.warnings.join(" ")}
                 </p>
               )}
@@ -490,15 +490,15 @@ export function ScanPage() {
 
           {result && (
             <section className="surface border-sage/30 bg-sage-soft/40 p-5">
-              <p className="flex items-center gap-2 text-[0.85rem] font-medium">
+              <p className="flex items-center gap-2 text-sm font-medium">
                 <Check className="size-4" /> Scan applied
               </p>
-              <p className="mt-1 text-[0.75rem] text-muted-foreground">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 {result.created} created · {result.updated} updated · {result.rejected} rejected ·{" "}
                 {result.failed} failed
               </p>
               {result.failures.length > 0 && (
-                <div className="mt-2 space-y-1 text-[0.72rem] text-destructive">
+                <div className="mt-2 space-y-1 text-2xs text-destructive">
                   {result.failures.map((failure) => (
                     <p key={failure.suggestion_index}>{failure.message}</p>
                   ))}
@@ -513,16 +513,16 @@ export function ScanPage() {
 
         <aside className="space-y-4 xl:sticky xl:top-8">
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               How this works
             </h2>
-            <ol className="mt-3 space-y-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+            <ol className="mt-3 space-y-3 text-2xs leading-relaxed text-muted-foreground">
               <li><strong className="text-foreground/80">1.</strong> Take a photo with the rear camera or choose an existing image.</li>
               <li><strong className="text-foreground/80">2.</strong> The backend identifies movable possessions; fixed fixtures and uncertain observations are flagged for review. It never creates records automatically.</li>
               <li><strong className="text-foreground/80">3.</strong> Edit quantities and room/container destinations, review duplicates, then approve selected suggestions.</li>
             </ol>
           </section>
-          <section className="surface p-5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <section className="surface p-5 text-2xs leading-relaxed text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground/80">
               <AlertTriangle className="size-3.5 text-brass" /> Accuracy note
             </p>
@@ -535,10 +535,10 @@ export function ScanPage() {
             </p>
           </section>
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Contextual scan
             </h2>
-            <p className="mt-2 text-[0.74rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
               Scan from a room or container to default suggestions there. A room-only
               destination is valid; the container/location is optional. Every suggestion can
               still be changed before approval.
@@ -549,7 +549,7 @@ export function ScanPage() {
           </section>
         </aside>
       </div>
-    </div>
+    </PageLayout>
   );
 }
 
@@ -634,12 +634,12 @@ function SuggestionCard({
                 </Badge>
               )}
             </div>
-            <p className="mt-1 text-[0.68rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Suggestion {entry.sourceIndex + 1}
               {entry.entryKey.includes("-split-") ? " · split record" : ""}
             </p>
             {suggestion.review && suggestion.review_reason && (
-              <p className="mt-1 max-w-xl text-[0.68rem] leading-relaxed text-brass">
+              <p className="mt-1 max-w-xl text-2xs leading-relaxed text-brass">
                 {suggestion.review_reason} It is not preselected; choose it deliberately if it
                 belongs in your inventory.
               </p>
@@ -650,7 +650,7 @@ function SuggestionCard({
           aria-label={`Action for ${suggestion.name}`}
           value={entry.action}
           onChange={(event) => onChange({ action: event.target.value as SuggestionState["action"] })}
-          className="h-8 w-[130px] text-[0.72rem]"
+          className="h-8 w-[130px] text-2xs"
         >
           <option value="create">Create new</option>
           <option value="update">Update existing</option>
@@ -787,7 +787,7 @@ function SuggestionCard({
           </Field>
         </div>
         {duplicates.length > 0 && (
-          <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-3 text-[0.7rem] text-muted-foreground">
+          <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-3 text-2xs text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-brass">
               <AlertTriangle className="size-3.5" /> Possible existing items
             </p>
@@ -818,7 +818,7 @@ function SuggestionCard({
         )}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3 text-[0.68rem] text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
         <MapPin className="size-3" />
         <span className="mr-auto">
           {entry.include ? "Will be reviewed for creation" : "Excluded from this approval"}

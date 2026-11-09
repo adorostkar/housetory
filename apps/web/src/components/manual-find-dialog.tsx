@@ -189,13 +189,13 @@ export function ManualFindDialog({
           <section className="rounded-xl border border-border/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <h3 className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Confirmed product identity
                 </h3>
                 {profile && !editingIdentity ? (
-                  <p className="mt-1 text-[0.86rem] font-medium">{identityLabel(profile)}</p>
+                  <p className="mt-1 text-sm font-medium">{identityLabel(profile)}</p>
                 ) : (
-                  <p className="mt-1 text-[0.76rem] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Enter what is printed on the tool or its rating plate. Recorded item fields
                     are suggestions only and are not changed here.
                   </p>
@@ -264,7 +264,7 @@ export function ManualFindDialog({
                   </Field>
                 </div>
 
-                <label className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2.5 text-[0.74rem] leading-relaxed">
+                <label className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2.5 text-2xs leading-relaxed">
                   <input
                     type="checkbox"
                     className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
@@ -307,7 +307,7 @@ export function ManualFindDialog({
                     </Button>
                   )}
                 </div>
-                <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+                <p className="text-2xs leading-relaxed text-muted-foreground">
                   Generic labels such as “Heavy drill” and unconfirmed fragments are rejected
                   by the server. Completeness means the manufacturer-specific identity you
                   verified, not a pattern such as “must contain a digit”. Saving identity never
@@ -317,7 +317,7 @@ export function ManualFindDialog({
             )}
 
             {profile && !editingIdentity && (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.68rem] text-muted-foreground">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
                 <Badge variant="sage">
                   <ShieldCheck className="mr-1 size-3" />
                   Confirmed
@@ -330,17 +330,17 @@ export function ManualFindDialog({
           <section className="rounded-xl border border-border/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="flex items-center gap-1.5 text-[0.8rem] font-medium">
+                <h3 className="flex items-center gap-1.5 text-xs font-medium">
                   <Globe2 className="size-3.5 text-muted-foreground" />
                   Reviewed online search
                 </h3>
-                <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   Only manufacturer, complete model, variant and (for questions) the question
                   are sent. Search results are saved for review; nothing downloads until you
                   confirm a specific candidate.
                 </p>
                 {status?.configured && status.provider_label && (
-                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     Provider: <span className="font-medium">{status.provider_label}</span>. No
                     provider request is made until you press Search.
                   </p>
@@ -361,13 +361,13 @@ export function ManualFindDialog({
             </div>
 
             {!status?.configured && (
-              <div className="mt-3 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <div className="mt-3 rounded-lg border border-border/60 bg-secondary/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 {status?.reason ??
                   "No real online search capability is configured. Manual upload and attached-manual questions still work."}
               </div>
             )}
             {status?.configured && !profile && (
-              <div className="mt-3 rounded-lg border border-brass/25 bg-brass-soft/25 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <div className="mt-3 rounded-lg border border-brass/25 bg-brass-soft/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 Confirm the exact product identity above before searching online.
               </div>
             )}
@@ -377,7 +377,7 @@ export function ManualFindDialog({
               </div>
             )}
             {!search.isPending && notices.length > 0 && (
-              <ul className="mt-3 space-y-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+              <ul className="mt-3 space-y-1 text-2xs leading-relaxed text-muted-foreground">
                 {notices.map((notice, index) => (
                   <li key={`${notice}-${index}`}>{notice}</li>
                 ))}
@@ -417,7 +417,7 @@ export function ManualFindDialog({
             )}
 
             {duplicateNotice && (
-              <div className="mt-3 rounded-lg border border-brass/25 bg-brass-soft/30 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <div className="mt-3 rounded-lg border border-brass/25 bg-brass-soft/30 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 {duplicateNotice}
               </div>
             )}
@@ -428,7 +428,7 @@ export function ManualFindDialog({
             )}
           </section>
 
-          <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             Downloaded files are stored privately with their source URL, publisher evidence and
             retrieval date. Only PDF manuals from public HTTP(S) sources are accepted.{" "}
             <button
@@ -501,13 +501,13 @@ function CandidateCard({
               ? "Official source"
               : "Other source"}
         </Badge>
-        {candidate.publisher && <span className="text-[0.7rem]">{candidate.publisher}</span>}
+        {candidate.publisher && <span className="text-2xs">{candidate.publisher}</span>}
         {candidate.language && (
-          <span className="text-[0.66rem] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {candidate.language}
           </span>
         )}
-        <span className="text-[0.64rem] text-muted-foreground">
+        <span className="text-2xs text-muted-foreground">
           Retrieved {formatDate(candidate.retrieved_at)}
         </span>
         {candidate.document_id && <Badge variant="sage">Saved</Badge>}
@@ -517,27 +517,27 @@ function CandidateCard({
         href={candidate.source_url}
         target="_blank"
         rel="noreferrer"
-        className="mt-1.5 inline-flex min-w-0 items-center gap-1 text-[0.8rem] font-medium underline-offset-4 hover:underline"
+        className="mt-1.5 inline-flex min-w-0 items-center gap-1 text-xs font-medium underline-offset-4 hover:underline"
       >
         <span className="break-words">{candidate.title}</span>
         <ExternalLink className="size-3 shrink-0" />
       </a>
 
       {candidate.model_coverage.length > 0 && (
-        <p className="mt-1 text-[0.66rem] text-muted-foreground">
+        <p className="mt-1 text-2xs text-muted-foreground">
           Model evidence: {candidate.model_coverage.join(", ")}
         </p>
       )}
       {candidate.snippet && (
-        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+        <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
           {candidate.snippet}
         </p>
       )}
-      <p className="mt-1 break-all text-[0.62rem] text-muted-foreground/80">
+      <p className="mt-1 break-all text-2xs text-muted-foreground">
         {candidate.source_url}
       </p>
       {candidate.direct_file && candidate.file_url !== candidate.source_url && (
-        <p className="mt-0.5 break-all text-[0.62rem] text-muted-foreground/80">
+        <p className="mt-0.5 break-all text-2xs text-muted-foreground">
           PDF:{" "}
           <a
             href={candidate.file_url}
@@ -561,7 +561,7 @@ function CandidateCard({
               <FileWarning className="mr-1 size-3" />
               Source page only
             </Badge>
-            <p className="w-full text-[0.68rem] leading-relaxed text-muted-foreground">
+            <p className="w-full text-2xs leading-relaxed text-muted-foreground">
               No actual PDF link was found on this source page. Open it yourself or upload the
               manual you trust; Housetory will not guess a PDF address.
             </p>
@@ -578,7 +578,7 @@ function CandidateCard({
           </>
         ) : reviewing ? (
           <>
-            <label className="flex w-full items-start gap-2 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-[0.7rem] leading-relaxed">
+            <label className="flex w-full items-start gap-2 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-2xs leading-relaxed">
               <input
                 type="checkbox"
                 className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"

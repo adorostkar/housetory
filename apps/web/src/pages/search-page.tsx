@@ -200,7 +200,7 @@ export function SearchPage() {
               "Find anything"
             )}
           </h1>
-          <p className="mt-1 text-[0.76rem] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             {q
               ? `Searched ${scopeLabel} · current records re-read on submit`
               : "One search across items, places, loans and questions."}
@@ -232,7 +232,7 @@ export function SearchPage() {
                 <h2 className="font-display text-[1.3rem] tracking-[-0.02em]">
                   Search or ask in one box
                 </h2>
-                <p className="mt-1 max-w-2xl text-[0.8rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
                   Type a name, model, serial number, room or container. Press Enter
                   to search; if the wording needs interpretation, the configured
                   assistant is used automatically. Follow-up questions keep the
@@ -244,7 +244,7 @@ export function SearchPage() {
                       key={example}
                       type="button"
                       onClick={() => runExample(example)}
-                      className="rounded-full border border-border/70 bg-background/50 px-3 py-1.5 text-[0.72rem] text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                      className="rounded-full border border-border/70 bg-background/50 px-3 py-1.5 text-2xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
                     >
                       {example}
                     </button>
@@ -271,7 +271,7 @@ export function SearchPage() {
                     {mode.label}
                   </Badge>
                 )}
-                <span className="text-[0.7rem] text-muted-foreground">
+                <span className="text-2xs text-muted-foreground">
                   {mode?.description}
                 </span>
               </div>
@@ -284,13 +284,13 @@ export function SearchPage() {
                 />
               )}
               {response.needs_clarification && response.items.length > 1 && (
-                <p className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3 py-2 text-[0.75rem] leading-relaxed text-muted-foreground">
+                <p className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                   Several concrete records match. Choose the item below, or ask a
                   short follow-up naming the one you meant.
                 </p>
               )}
               {response.notices.length > 0 && (
-                <ul className="mt-3 space-y-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <ul className="mt-3 space-y-1 text-2xs leading-relaxed text-muted-foreground">
                   {response.notices.map((notice) => (
                     <li key={notice}>• {notice}</li>
                   ))}
@@ -308,7 +308,7 @@ export function SearchPage() {
                 </Button>
               )}
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-                <span className="text-[0.68rem] text-muted-foreground">
+                <span className="text-2xs text-muted-foreground">
                   {response.mode === "direct"
                     ? "No model call was needed for this result."
                     : response.mode === "ai"
@@ -318,10 +318,10 @@ export function SearchPage() {
                 {response.interpretation &&
                   response.mode !== "direct" && (
                     <details className="ml-auto">
-                      <summary className="cursor-pointer text-[0.68rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                      <summary className="cursor-pointer text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
                         How this was matched
                       </summary>
-                      <p className="mt-1 max-w-xl text-[0.68rem] leading-relaxed text-muted-foreground">
+                      <p className="mt-1 max-w-xl text-2xs leading-relaxed text-muted-foreground">
                         {response.interpretation}
                       </p>
                     </details>
@@ -338,7 +338,7 @@ export function SearchPage() {
                       "matching item",
                     )}
                   </h2>
-                  <p className="text-[0.7rem] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     {response.scope_label ?? scopeLabel}
                   </p>
                 </div>
@@ -348,7 +348,7 @@ export function SearchPage() {
                   ))}
                 </div>
                 {response.total > response.items.length && (
-                  <p className="mt-3 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-3 text-2xs text-muted-foreground">
                     Showing the first {response.items.length} of {response.total}{" "}
                     matching records.
                   </p>
@@ -356,12 +356,12 @@ export function SearchPage() {
               </section>
             ) : response.borrowed.length === 0 && nonItemQuick.length === 0 ? (
               <section className="surface px-5 py-6 text-center">
-                <p className="text-[0.85rem] font-medium">
+                <p className="text-sm font-medium">
                   {response.mode === "fallback"
                     ? "No direct record matched"
                     : "No matching inventory records"}
                 </p>
-                <p className="mx-auto mt-1 max-w-lg text-[0.74rem] leading-relaxed text-muted-foreground">
+                <p className="mx-auto mt-1 max-w-lg text-2xs leading-relaxed text-muted-foreground">
                   {response.mode === "fallback"
                     ? "The question could not be interpreted without a configured assistant, so this is not presented as a conclusive no-result answer. Try the item's recorded name or configure AI for this household."
                     : "Try a shorter name, a model or serial number, a room or container, or ask a follow-up."}
@@ -487,17 +487,17 @@ function BorrowedResult({ record }: { record: BorrowedRecord }) {
       <HandCoins className="mt-0.5 size-4 shrink-0 text-brass" />
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-[0.84rem] font-medium">
+          <span className="truncate text-sm font-medium">
             {record.item_name}
           </span>
           <Badge variant="brass">Borrowed</Badge>
           {record.due_on && (
-            <span className="text-[0.65rem] text-muted-foreground">
+            <span className="text-2xs text-muted-foreground">
               due {formatDate(record.due_on)}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+        <span className="mt-0.5 block text-2xs text-muted-foreground">
           belongs to {record.owner_name} ·{" "}
           {borrowedLocationPrefix(record)} {place} ·{" "}
           {record.outstanding_quantity} outstanding
@@ -520,17 +520,17 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-[0.84rem] font-medium">
+          <span className="truncate text-sm font-medium">
             {result.title}
           </span>
           <Badge
             variant={result.kind === "container" ? "brass" : "outline"}
-            className="text-[0.6rem]"
+            className="text-2xs"
           >
             {label}
           </Badge>
         </span>
-        <span className="mt-0.5 block truncate text-[0.7rem] text-muted-foreground">
+        <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
           {[result.household?.name, result.subtitle, result.context]
             .filter(Boolean)
             .join(" · ") || "Housetory"}
@@ -543,7 +543,7 @@ function PlaceResult({ result }: { result: QuickSearchResult }) {
 function SearchPending() {
   return (
     <div className="space-y-4" role="status" aria-live="polite">
-      <div className="surface flex items-center gap-3 p-5 text-[0.82rem] text-muted-foreground">
+      <div className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
         Searching current records and interpreting when needed…
       </div>

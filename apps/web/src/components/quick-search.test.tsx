@@ -143,7 +143,7 @@ describe("QuickSearch", () => {
       name: "Search or ask about your inventory",
     });
     await userEvent.type(input, "PS5");
-    expect(await screen.findByRole("option", { name: /PS5/ })).toBeVisible();
+    expect(await screen.findByRole("option", { name: /^PS5/ })).toBeVisible();
     expect(api.get).not.toHaveBeenCalledWith(
       expect.stringContaining("/search/natural"),
       expect.anything(),
@@ -214,6 +214,28 @@ describe("QuickSearch", () => {
       expect(url.searchParams.get("q")).toBe("where is my heavy drill");
       expect(url.searchParams.get("ask")).toBe("1");
     });
+  });
+
+  it("adds a final keyboard-reachable ask-the-assistant row", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), [result({ title: "Heavy drill" })]),
+    );
+    renderSearch();
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "heavy drill?");
+    const row = await screen.findByRole("option", {
+      name: /Ask the assistant: “heavy drill\?”/,
+    });
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+    expect(row).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/assistant?q=heavy%20drill%3F",
+      ),
+    );
   });
 
   it("opens all results with Enter before selecting a result and preserves the query", async () => {

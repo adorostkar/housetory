@@ -154,7 +154,7 @@ export function StocktakeUnexpectedDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-unexpected-name">
+          <label className="block text-2xs font-medium" htmlFor="stocktake-unexpected-name">
             What did you find?
             <Input
               id="stocktake-unexpected-name"
@@ -166,7 +166,7 @@ export function StocktakeUnexpectedDialog({
             />
           </label>
 
-          <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-unexpected-count">
+          <label className="block text-2xs font-medium" htmlFor="stocktake-unexpected-count">
             Found units
             <Input
               id="stocktake-unexpected-count"
@@ -180,7 +180,7 @@ export function StocktakeUnexpectedDialog({
           </label>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-unexpected-room">
+            <label className="block text-2xs font-medium" htmlFor="stocktake-unexpected-room">
               Existing room (optional)
               <Select
                 id="stocktake-unexpected-room"
@@ -198,7 +198,7 @@ export function StocktakeUnexpectedDialog({
               </Select>
             </label>
             <label
-              className="block text-[0.74rem] font-medium"
+              className="block text-2xs font-medium"
               htmlFor="stocktake-unexpected-container"
             >
               Existing place (optional)
@@ -223,11 +223,11 @@ export function StocktakeUnexpectedDialog({
           </div>
 
           <div>
-            <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-unexpected-search">
+            <label className="block text-2xs font-medium" htmlFor="stocktake-unexpected-search">
               Link an existing item (optional)
             </label>
             {linkedItemId ? (
-              <div className="mt-1.5 flex items-center justify-between gap-2 rounded-xl border border-border/70 px-3 py-2 text-[0.74rem]">
+              <div className="mt-1.5 flex items-center justify-between gap-2 rounded-xl border border-border/70 px-3 py-2 text-2xs">
                 <span className="min-w-0 truncate">{linkedItemName}</span>
                 <Button
                   type="button"
@@ -256,7 +256,7 @@ export function StocktakeUnexpectedDialog({
                 {search.trim().length > 1 && (
                   <div className="mt-1.5 max-h-36 overflow-y-auto rounded-xl border border-border/65">
                     {searchQuery.isPending ? (
-                      <p className="px-3 py-2 text-[0.7rem] text-muted-foreground">Searching…</p>
+                      <p className="px-3 py-2 text-2xs text-muted-foreground">Searching…</p>
                     ) : searchQuery.data?.pages[0]?.items.length ? (
                       searchQuery.data.pages[0].items.map((item) => {
                         const container = itemContainer(item);
@@ -264,7 +264,7 @@ export function StocktakeUnexpectedDialog({
                           <button
                             key={item.id}
                             type="button"
-                            className="flex w-full flex-col items-start gap-0.5 border-b border-border/40 px-3 py-2 text-left text-[0.72rem] last:border-b-0 hover:bg-secondary/35"
+                            className="flex w-full flex-col items-start gap-0.5 border-b border-border/40 px-3 py-2 text-left text-2xs last:border-b-0 hover:bg-secondary/35"
                             onClick={() => {
                               setLinkedItemId(item.id);
                               setLinkedItemName(item.name);
@@ -273,7 +273,7 @@ export function StocktakeUnexpectedDialog({
                             }}
                           >
                             <span className="font-medium">{item.name}</span>
-                            <span className="text-[0.64rem] text-muted-foreground">
+                            <span className="text-2xs text-muted-foreground">
                               {item.room?.name ?? "No room"}
                               {container ? ` / ${locationLabel(container)}` : ""}
                             </span>
@@ -281,13 +281,13 @@ export function StocktakeUnexpectedDialog({
                         );
                       })
                     ) : (
-                      <p className="px-3 py-2 text-[0.7rem] text-muted-foreground">
+                      <p className="px-3 py-2 text-2xs text-muted-foreground">
                         No matching active items.
                       </p>
                     )}
                   </div>
                 )}
-                <p className="mt-1.5 text-[0.66rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
                   Linking records the finding only. To create a new item, use the normal reviewed
                   form:{" "}
                   <Link to={newItemHref} className="underline underline-offset-4">
@@ -299,7 +299,7 @@ export function StocktakeUnexpectedDialog({
             )}
           </div>
 
-          <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-unexpected-notes">
+          <label className="block text-2xs font-medium" htmlFor="stocktake-unexpected-notes">
             Notes (optional)
             <Textarea
               id="stocktake-unexpected-notes"

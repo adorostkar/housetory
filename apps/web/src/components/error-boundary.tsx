@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
         <h1 className="mt-8 font-display text-3xl tracking-[-0.03em]">
           Something interrupted the page.
         </h1>
-        <p className="mt-3 max-w-md text-[0.9rem] leading-relaxed text-muted-foreground">
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
           Your data is safe. Reload Housetory to continue.
         </p>
         <Button className="mt-6" onClick={() => window.location.reload()}>

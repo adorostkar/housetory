@@ -61,17 +61,17 @@ export function RoomCard({
           <span className="flex size-11 items-center justify-center rounded-2xl bg-secondary/85 text-foreground/65">
             <Icon className="size-[1.2rem]" strokeWidth={1.6} />
           </span>
-          <ChevronRight className="mt-1 size-4 text-muted-foreground/60 transition-transform duration-300 group-hover:translate-x-0.5" />
+          <ChevronRight className="mt-1 size-4 text-muted-foreground transition-transform duration-300 group-hover:translate-x-0.5" />
         </div>
         <h3 className="mt-5 font-display text-[1.5rem] font-normal leading-tight tracking-[-0.02em]">
           {room.name}
         </h3>
-        <p className="mt-1.5 text-[0.78rem] text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground">
           {pluralize(room.total_item_count, "item")}
           {room.total_location_count > 0 && ` · ${pluralize(room.total_location_count, "place")}`}
         </p>
         {room.description && (
-          <p className="mt-3 line-clamp-2 text-[0.8rem] leading-relaxed text-muted-foreground/90">
+          <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
             {room.description}
           </p>
         )}
@@ -83,7 +83,7 @@ export function RoomCard({
             <Link
               key={child.id}
               to={`/rooms/${child.id}`}
-              className="flex items-center justify-between rounded-lg px-2.5 py-2 text-[0.78rem] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              className="flex items-center justify-between rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
               style={{
                 marginLeft: `${depth * 18}px`,
                 paddingLeft: "10px",
@@ -93,7 +93,7 @@ export function RoomCard({
                 <span className="size-1.5 shrink-0 rounded-full bg-border" />
                 <span className="truncate">{child.name}</span>
               </span>
-              <span className="shrink-0 text-[0.68rem] tabular-nums">
+              <span className="shrink-0 text-2xs tabular-nums">
                 {child.total_item_count}
               </span>
             </Link>

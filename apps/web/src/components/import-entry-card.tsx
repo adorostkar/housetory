@@ -60,7 +60,7 @@ function SourceBadge({ source }: { source: string | undefined }) {
   return (
     <Badge
       variant={source === "explicit" ? "sage" : source === "inferred" ? "brass" : "outline"}
-      className="text-[0.6rem]"
+      className="text-2xs"
     >
       {sourceLabel(source)}
     </Badge>
@@ -227,7 +227,7 @@ export function ImportEntryCard({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[0.9rem] font-medium">{proposed.name}</h3>
+            <h3 className="text-sm font-medium">{proposed.name}</h3>
             {proposed.quantity !== 1 && (
               <Badge variant="secondary">×{proposed.quantity}</Badge>
             )}
@@ -254,7 +254,7 @@ export function ImportEntryCard({
               </Badge>
             ) : null}
           </div>
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] text-muted-foreground">
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <MapPin className="size-3" />
               {proposed.room?.name || "No room"}
@@ -277,12 +277,12 @@ export function ImportEntryCard({
             {entry.source_path && <span className="truncate">{entry.source_path}</span>}
           </p>
           {entry.error && (
-            <p className="mt-2 text-[0.72rem] text-destructive">{entry.error}</p>
+            <p className="mt-2 text-2xs text-destructive">{entry.error}</p>
           )}
           {entry.imported_item_id && (
             <Link
               to={`/items/${entry.imported_item_id}`}
-              className="mt-2 inline-flex items-center gap-1 text-[0.72rem] font-medium underline-offset-4 hover:underline"
+              className="mt-2 inline-flex items-center gap-1 text-2xs font-medium underline-offset-4 hover:underline"
             >
               Open imported item <ArrowUpRight className="size-3" />
             </Link>
@@ -297,7 +297,7 @@ export function ImportEntryCard({
               onChange={(event) =>
                 setDecision({ action: event.target.value as ImportEntryAction })
               }
-              className="h-8 w-[120px] text-[0.72rem]"
+              className="h-8 w-[120px] text-2xs"
             >
               <option value="import">Import new</option>
               <option value="skip">Skip</option>
@@ -320,7 +320,7 @@ export function ImportEntryCard({
 
       {open && (
         <div className="space-y-6 border-t border-border/60 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
             <CircleHelp className="size-3.5" />
             <span>Field confidence:</span>
             {["name", "room", "storage_location", "serial_number", "brand", "model"].map(
@@ -333,7 +333,7 @@ export function ImportEntryCard({
             )}
           </div>
           {inferredFields.length > 0 && (
-            <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
               Inferred by AI/heuristics: {inferredFields.join(", ")}. Verify before
               importing.
             </p>
@@ -458,7 +458,7 @@ export function ImportEntryCard({
           </div>
 
           <div className="rounded-xl border border-border/60 p-4">
-            <p className="text-[0.78rem] font-medium">Location</p>
+            <p className="text-xs font-medium">Location</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Room" htmlFor={`room-${entry.id}`}>
                 {showRoomSelect ? (
@@ -476,9 +476,9 @@ export function ImportEntryCard({
                     ))}
                   </Select>
                 ) : (
-                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-[0.75rem]">
+                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
                     <p className="font-medium">{proposed.room?.name}</p>
-                    <p className="mt-0.5 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
                       Suggested new room
                     </p>
                   </div>
@@ -502,9 +502,9 @@ export function ImportEntryCard({
                     ))}
                   </Select>
                 ) : (
-                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-[0.75rem]">
+                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
                     <p className="font-medium">{proposed.storage_location?.name}</p>
-                    <p className="mt-0.5 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
                       Suggested new storage place
                       {proposed.storage_location?.suggested_parent_id
                         ? " under the selected parent"
@@ -528,7 +528,7 @@ export function ImportEntryCard({
                 </Button>
               )}
               {proposed.room?.status === "ambiguous" && proposed.room.candidates.length > 0 && (
-                <p className="text-[0.7rem] text-brass">
+                <p className="text-2xs text-brass">
                   Multiple rooms match. Choose the correct one before importing.
                 </p>
               )}
@@ -552,7 +552,7 @@ export function ImportEntryCard({
                 )}
               {proposed.storage_location?.status === "ambiguous" &&
                 proposed.storage_location.candidates.length > 0 && (
-                  <p className="text-[0.7rem] text-brass">
+                  <p className="text-2xs text-brass">
                     Multiple storage places match. Choose one before importing.
                   </p>
                 )}
@@ -560,7 +560,7 @@ export function ImportEntryCard({
           </div>
 
           <div className="rounded-xl border border-border/60 p-4">
-            <p className="text-[0.78rem] font-medium">Purchase</p>
+            <p className="text-xs font-medium">Purchase</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Merchant" htmlFor={`merchant-${entry.id}`} optional>
                 <Input
@@ -679,7 +679,7 @@ export function ImportEntryCard({
           </div>
 
           <div className="rounded-xl border border-border/60 p-4">
-            <p className="text-[0.78rem] font-medium">Warranty</p>
+            <p className="text-xs font-medium">Warranty</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Provider" htmlFor={`warranty-provider-${entry.id}`} optional>
                 <Input
@@ -724,7 +724,7 @@ export function ImportEntryCard({
 
           {entry.duplicate_candidates.length > 0 && (
             <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-4">
-              <p className="flex items-center gap-1.5 text-[0.78rem] font-medium text-brass">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-brass">
                 <AlertTriangle className="size-3.5" /> Possible existing items
               </p>
               <div className="mt-3 space-y-2">
@@ -736,11 +736,11 @@ export function ImportEntryCard({
                     <div className="min-w-0">
                       <Link
                         to={`/items/${candidate.item_id}`}
-                        className="text-[0.8rem] font-medium underline-offset-4 hover:underline"
+                        className="text-xs font-medium underline-offset-4 hover:underline"
                       >
                         {candidate.name}
                       </Link>
-                      <p className="text-[0.68rem] text-muted-foreground">
+                      <p className="text-2xs text-muted-foreground">
                         {[candidate.brand, candidate.model, candidate.room_name]
                           .filter(Boolean)
                           .join(" · ")}
@@ -784,15 +784,15 @@ export function ImportEntryCard({
               </div>
               {decision.action === "merge" && (
                 <div className="mt-3 border-t border-border/60 pt-3">
-                  <p className="text-[0.75rem] font-medium">Merge fields</p>
-                  <p className="mt-0.5 text-[0.68rem] text-muted-foreground">
+                  <p className="text-2xs font-medium">Merge fields</p>
+                  <p className="mt-0.5 text-2xs text-muted-foreground">
                     Only checked fields are written into the existing item.
                   </p>
                   <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
                     {MERGE_FIELDS.map((field) => (
                       <label
                         key={field.value}
-                        className="flex items-center gap-2 text-[0.75rem]"
+                        className="flex items-center gap-2 text-2xs"
                       >
                         <input
                           type="checkbox"
@@ -820,18 +820,18 @@ export function ImportEntryCard({
 
           {(entry.source_excerpt || entry.note_title) && (
             <div className="rounded-xl bg-secondary/35 p-4">
-              <p className="flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 <FileText className="size-3.5" />
                 Source context
                 {entry.note_title ? ` · ${entry.note_title}` : ""}
               </p>
               {entry.source_path && (
-                <p className="mt-1 break-all text-[0.68rem] text-muted-foreground">
+                <p className="mt-1 break-all text-2xs text-muted-foreground">
                   {entry.source_path}
                 </p>
               )}
               {entry.source_excerpt && (
-                <p className="mt-2 whitespace-pre-line text-[0.75rem] leading-relaxed text-foreground/75">
+                <p className="mt-2 whitespace-pre-line text-2xs leading-relaxed text-foreground/75">
                   {entry.source_excerpt}
                 </p>
               )}
@@ -841,14 +841,14 @@ export function ImportEntryCard({
           {entry.duplicate_candidates.length > 0 &&
             decision.action === "merge" &&
             !decision.mergeItemId && (
-              <p className="text-[0.72rem] text-destructive">
+              <p className="text-2xs text-destructive">
                 Choose an existing item to merge into.
               </p>
             )}
 
           {!final && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-              <p className="text-[0.7rem] text-muted-foreground">
+              <p className="text-2xs text-muted-foreground">
                 {decision.include
                   ? `Will ${decision.action === "import" ? "create a new item" : decision.action}.`
                   : "Not selected for this approval."}

@@ -99,14 +99,14 @@ export function StocktakeReviewDialog({
 
         <div className="max-h-[62vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
           {reviewQuery.isPending ? (
-            <div className="flex items-center gap-2 rounded-xl border border-border/65 px-3 py-6 text-[0.78rem] text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-xl border border-border/65 px-3 py-6 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               Comparing observations with current inventory…
             </div>
           ) : reviewQuery.error ? (
             <FormError message={getApiErrorMessage(reviewQuery.error)} />
           ) : review && review.proposals.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-[0.78rem] leading-relaxed text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-xs leading-relaxed text-muted-foreground">
               Nothing to change. Present, missing and couldn’t-check observations are saved as
               evidence without editing inventory.
             </div>
@@ -118,7 +118,7 @@ export function StocktakeReviewDialog({
               return (
                 <section
                   key={proposal.observation_id}
-                  className="rounded-xl border border-border/70 px-3.5 py-3 text-[0.74rem]"
+                  className="rounded-xl border border-border/70 px-3.5 py-3 text-2xs"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{proposal.item_name}</span>
@@ -135,7 +135,7 @@ export function StocktakeReviewDialog({
                   </div>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     <div className="rounded-lg border border-border/50 bg-secondary/15 px-2.5 py-2">
-                      <p className="text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground">
+                      <p className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">
                         Current
                       </p>
                       <p className="mt-0.5">
@@ -143,12 +143,12 @@ export function StocktakeReviewDialog({
                           ? `${pluralize(proposal.current_quantity, "owned unit")}`
                           : "Item unavailable"}
                       </p>
-                      <p className="mt-0.5 break-words text-[0.66rem] text-muted-foreground">
+                      <p className="mt-0.5 break-words text-2xs text-muted-foreground">
                         {proposal.current_location_path || "No location recorded"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-sage/20 bg-sage-soft/30 px-2.5 py-2">
-                      <p className="text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground">
+                      <p className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">
                         After apply
                       </p>
                       <p className="mt-0.5">
@@ -156,19 +156,19 @@ export function StocktakeReviewDialog({
                           ? `${pluralize(proposal.proposed_quantity, "owned unit")}`
                           : "No quantity change"}
                       </p>
-                      <p className="mt-0.5 break-words text-[0.66rem] text-muted-foreground">
+                      <p className="mt-0.5 break-words text-2xs text-muted-foreground">
                         {proposal.proposed_location_path || "No location change"}
                       </p>
                     </div>
                   </div>
                   {proposal.counted_quantity != null && (
-                    <p className="mt-2 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-2 text-2xs text-muted-foreground">
                       Counted at home: {proposal.counted_quantity} · on loan:{" "}
                       {proposal.on_loan_quantity} (still owned)
                     </p>
                   )}
                   {locationChanged && (
-                    <p className="mt-1 flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground">
                       <ArrowRight className="size-3" />
                       <span className="break-words">
                         {proposal.current_location_path} → {proposal.proposed_location_path}
@@ -176,13 +176,13 @@ export function StocktakeReviewDialog({
                     </p>
                   )}
                   {proposal.conflict && (
-                    <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-2.5 py-2 text-[0.68rem] leading-relaxed text-destructive">
+                    <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-2.5 py-2 text-2xs leading-relaxed text-destructive">
                       <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                       {proposal.conflict}
                     </p>
                   )}
                   {proposal.warnings.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                    <ul className="mt-2 space-y-1 text-2xs leading-relaxed text-muted-foreground">
                       {proposal.warnings.map((warning, index) => (
                         <li key={`${proposal.observation_id}-${index}`}>• {warning}</li>
                       ))}
@@ -194,7 +194,7 @@ export function StocktakeReviewDialog({
           ) : null}
 
           {review && review.conflict_count > 0 && (
-            <p className="rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               Conflicts must be re-observed against current values. Nothing will be applied while a
               conflict is present.
             </p>
@@ -206,7 +206,7 @@ export function StocktakeReviewDialog({
         )}
 
         <DialogFooter>
-          <div className="mr-auto flex items-center gap-2 text-[0.68rem] text-muted-foreground">
+          <div className="mr-auto flex items-center gap-2 text-2xs text-muted-foreground">
             <Check className="size-3.5" />
             Atomic apply · {review?.actionable_count ?? 0} proposed change
             {(review?.actionable_count ?? 0) === 1 ? "" : "s"}

@@ -184,7 +184,7 @@ export function SettingsPage() {
           <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
             Household
           </h2>
-          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             This is the current editable household. Your account can belong to
             several households with a different role in each; search and the
             assistant default to all your current places.
@@ -270,15 +270,15 @@ export function SettingsPage() {
             id="item-images"
             className="mt-5 rounded-xl border border-border/60 bg-background/35 p-3.5"
           >
-            <p className="text-[0.76rem] font-medium">Item images</p>
-            <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="text-xs font-medium">Item images</p>
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               Item pages use actual photos first, then a public reference image, then a
               category icon. Existing AI illustrations remain viewable and removable;
               new illustration generation was retired.
             </p>
             <div className="mt-3 rounded-lg border border-border/60 bg-background/30 p-3">
-              <p className="text-[0.72rem] font-medium">Online reference-image lookup</p>
-              <p className="mt-1 break-words text-[0.66rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs font-medium">Online reference-image lookup</p>
+              <p className="mt-1 break-words text-2xs leading-relaxed text-muted-foreground">
                 Configure it in{" "}
                 <Link
                   to="/settings#online-search"
@@ -291,7 +291,7 @@ export function SettingsPage() {
                 restriction can narrow downloads.
               </p>
             </div>
-            <label className="mt-3 flex items-start gap-2.5 text-[0.75rem]">
+            <label className="mt-3 flex items-start gap-2.5 text-2xs">
               <input
                 type="checkbox"
                 className="mt-0.5 size-4 rounded border-border"
@@ -301,7 +301,7 @@ export function SettingsPage() {
               />
               <span>
                 Automatically find a reference image for new items
-                <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+                <span className="mt-0.5 block text-2xs text-muted-foreground">
                   Off by default. Requires a configured Brave Image Search key and a
                   saved item with a useful product description.
                 </span>
@@ -320,7 +320,7 @@ export function SettingsPage() {
               </Link>
             </Button>
           ) : (
-            <p className="mt-2 text-[0.72rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               Only the household owner can change these settings or manage members.
             </p>
           )}
@@ -334,15 +334,15 @@ export function SettingsPage() {
           </h2>
           <dl className="mt-5 divide-y divide-border/60">
             <div className="flex items-center justify-between gap-4 py-3 first:pt-0">
-              <dt className="text-[0.78rem] text-muted-foreground">Name</dt>
-              <dd className="text-[0.85rem]">{user?.name}</dd>
+              <dt className="text-xs text-muted-foreground">Name</dt>
+              <dd className="text-sm">{user?.name}</dd>
             </div>
             <div className="flex items-center justify-between gap-4 py-3">
-              <dt className="text-[0.78rem] text-muted-foreground">Email</dt>
-              <dd className="break-all text-right text-[0.85rem]">{user?.email}</dd>
+              <dt className="text-xs text-muted-foreground">Email</dt>
+              <dd className="break-all text-right text-sm">{user?.email}</dd>
             </div>
             <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
-              <dt className="text-[0.78rem] text-muted-foreground">Role</dt>
+              <dt className="text-xs text-muted-foreground">Role</dt>
               <dd>
                 <Badge variant="outline" className="capitalize">
                   {session.data?.role}
@@ -359,7 +359,7 @@ export function SettingsPage() {
           <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
             Appearance
           </h2>
-          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Follow your device, or choose a look for this browser.
           </p>
           <div className="mt-5 grid max-w-md grid-cols-3 gap-2" role="group" aria-label="Theme">
@@ -372,7 +372,7 @@ export function SettingsPage() {
                   onClick={() => setTheme(option.value)}
                   aria-pressed={active}
                   className={cn(
-                    "flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-[0.78rem] transition-colors",
+                    "flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-xs transition-colors",
                     active
                       ? "border-foreground/30 bg-secondary text-foreground"
                       : "border-border bg-card/50 text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
@@ -395,17 +395,17 @@ export function SettingsPage() {
               <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
                 Storage
               </h2>
-              <p className="mt-1 text-[0.78rem] text-muted-foreground">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Photographs and documents live on your server's persistent volume.
               </p>
             </div>
-            <p className="shrink-0 text-[0.85rem] tabular-nums text-foreground/80">
+            <p className="shrink-0 text-sm tabular-nums text-foreground/80">
               {formatFileSize(storageBytes)}
             </p>
           </div>
-          <p className="mt-4 text-[0.72rem] text-muted-foreground">
+          <p className="mt-4 text-2xs text-muted-foreground">
             Back up your database and uploads regularly with{" "}
-            <code className="rounded bg-secondary px-1.5 py-0.5 text-[0.7rem]">scripts/backup.sh</code>.
+            <code className="rounded bg-secondary px-1.5 py-0.5 text-2xs">scripts/backup.sh</code>.
           </p>
         </section>
 
@@ -427,7 +427,7 @@ export function SettingsPage() {
               Check provider
             </Button>
           </div>
-          <p className="mt-1 text-[0.78rem] text-muted-foreground">
+          <p className="mt-1 text-xs text-muted-foreground">
             Optional local or cloud inference. Ordinary inventory, import, OCR and
             keyword search work without it.
           </p>
@@ -465,7 +465,7 @@ export function SettingsPage() {
                 )}
               </div>
               <dl className="divide-y divide-border/60 rounded-xl border border-border/60">
-                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-xs">
                   <dt className="text-muted-foreground">Provider</dt>
                   <dd className="min-w-0 break-all text-right">
                     {aiStatus.data.provider_label ??
@@ -474,26 +474,26 @@ export function SettingsPage() {
                         : aiStatus.data.provider)}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-xs">
                   <dt className="text-muted-foreground">Selected model</dt>
                   <dd className="min-w-0 break-all text-right">
                     {aiStatus.data.model ?? "None"}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-xs">
                   <dt className="text-muted-foreground">Processing</dt>
                   <dd className="min-w-0 break-all text-right">
                     {processingLabel(aiStatus.data.mode)}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-xs">
                   <dt className="text-muted-foreground">Data consent</dt>
                   <dd className="min-w-0 break-all text-right">
                     {consentLabel(aiStatus.data)}
                   </dd>
                 </div>
                 {aiStatus.data.catalog_checked && (
-                  <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-[0.78rem]">
+                  <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-xs">
                     <dt className="text-muted-foreground">Provider catalog</dt>
                     <dd className="min-w-0 text-right">
                       {aiStatus.data.catalog_count > 0
@@ -505,17 +505,17 @@ export function SettingsPage() {
                   </div>
                 )}
               </dl>
-              <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 {aiStatus.data.privacy_note}
               </p>
-              <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 Status checks provider configuration and, when configured, the
                 provider&apos;s model catalog. A listed model is not proof of inference
                 access, billing eligibility or output quality; Housetory does not send a
                 test prompt. Choose or search models on the AI providers page.
               </p>
               {aiStatus.data.error && (
-                <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                   {aiStatus.data.error}
                 </p>
               )}
@@ -539,7 +539,7 @@ export function SettingsPage() {
               On your iPhone
             </h2>
           </div>
-          <p className="mt-2 max-w-xl text-[0.8rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
             Open Housetory at its trusted HTTPS address — your public domain, a
             trusted LAN address, or an optional Tailscale address — in Safari, tap
             the Share button, then choose{" "}
@@ -553,7 +553,7 @@ export function SettingsPage() {
             <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
               Sign out
             </h2>
-            <p className="mt-1 text-[0.78rem] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               End this session on this device.
             </p>
           </div>

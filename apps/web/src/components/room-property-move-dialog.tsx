@@ -120,7 +120,7 @@ export function RoomPropertyMoveDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/65 bg-secondary/20 px-3 py-2.5 text-[0.74rem]">
+          <div className="rounded-xl border border-border/65 bg-secondary/20 px-3 py-2.5 text-2xs">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{room.name}</span>
               <Badge variant="outline">
@@ -133,7 +133,7 @@ export function RoomPropertyMoveDialog({
             </div>
           </div>
 
-          <label className="block text-[0.74rem] font-medium" htmlFor="room-property-destination">
+          <label className="block text-2xs font-medium" htmlFor="room-property-destination">
             Destination property
             <Select
               id="room-property-destination"
@@ -154,12 +154,12 @@ export function RoomPropertyMoveDialog({
           </label>
 
           {previewQuery.isPending ? (
-            <div className="flex items-center gap-2 text-[0.74rem] text-muted-foreground">
+            <div className="flex items-center gap-2 text-2xs text-muted-foreground">
               <Spinner />
               Calculating the affected subtree…
             </div>
           ) : preview ? (
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/65 px-3 py-3 text-[0.74rem] sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/65 px-3 py-3 text-2xs sm:grid-cols-4">
               <Metric label="Rooms" value={preview.descendant_room_count} />
               <Metric label="Places" value={preview.descendant_container_count} />
               <Metric label="Items" value={preview.item_count} />
@@ -168,7 +168,7 @@ export function RoomPropertyMoveDialog({
           ) : null}
 
           {preview && preview.item_count > 0 && (
-            <p className="rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               {pluralize(preview.total_quantity, "owned unit")} move with this subtree.{" "}
               {preview.on_loan_quantity > 0
                 ? `${preview.on_loan_quantity} unit(s) remain on loan; moving the usual home does not return borrowed stock.`
@@ -178,7 +178,7 @@ export function RoomPropertyMoveDialog({
           )}
 
           {preview && !preview.can_move && (
-            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-[0.72rem] leading-relaxed text-destructive">
+            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-2xs leading-relaxed text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               {preview.warning}
             </p>
@@ -217,7 +217,7 @@ function Metric({
 }) {
   return (
     <div>
-      <p className="text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+      <p className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
       <p className={tone === "brass" && value ? "mt-0.5 text-brass" : "mt-0.5"}>{value}</p>
     </div>
   );

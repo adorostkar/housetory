@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { FormError } from "@/components/form-field";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -233,12 +233,12 @@ export function LabelsPage() {
 
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Printable labels"
-        title="Labels"
-        description="Preview and print A4 adhesive labels with the permanent identifier, optional display name and a live QR code. Print at 100% / Actual size."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Printable labels",
+        title: "Labels",
+        description: "Preview and print A4 adhesive labels with the permanent identifier, optional display name and a live QR code. Print at 100% / Actual size.",
+        actions: (
           <>
             <Button variant="outline" asChild>
               <Link to="/containers">Containers</Link>
@@ -251,11 +251,11 @@ export function LabelsPage() {
               Download PDF
             </Button>
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       {containersQuery.data?.qr_warning && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-brass" />
           <span>{containersQuery.data.qr_warning}</span>
         </div>
@@ -289,15 +289,15 @@ export function LabelsPage() {
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[0.8rem] font-medium">{entry.name}</span>
+                      <span className="text-xs font-medium">{entry.name}</span>
                       {entry.manufacturer_code && (
                         <Badge variant="outline">{entry.manufacturer_code}</Badge>
                       )}
                     </div>
-                    <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-1 text-2xs text-muted-foreground">
                       {entry.description}
                     </p>
-                    <p className="mt-1 text-[0.66rem] text-muted-foreground">
+                    <p className="mt-1 text-2xs text-muted-foreground">
                       {entry.columns} × {entry.rows} = {entry.columns * entry.rows} per A4
                     </p>
                   </button>
@@ -316,8 +316,8 @@ export function LabelsPage() {
                       : "border-dashed border-border/70 hover:bg-secondary/30",
                   )}
                 >
-                  <span className="text-[0.8rem] font-medium">Custom geometry</span>
-                  <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                  <span className="text-xs font-medium">Custom geometry</span>
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     Paper, label size, margins, rows, columns and pitch.
                   </p>
                 </button>
@@ -326,7 +326,7 @@ export function LabelsPage() {
 
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               <div>
-                <label htmlFor="label-layout" className="text-[0.75rem] font-medium">
+                <label htmlFor="label-layout" className="text-2xs font-medium">
                   Layout
                 </label>
                 <Select
@@ -341,7 +341,7 @@ export function LabelsPage() {
                 </Select>
               </div>
               <div>
-                <label htmlFor="label-copies" className="text-[0.75rem] font-medium">
+                <label htmlFor="label-copies" className="text-2xs font-medium">
                   Copies per container
                 </label>
                 <Input
@@ -357,7 +357,7 @@ export function LabelsPage() {
                 />
               </div>
               <div>
-                <label htmlFor="label-start" className="text-[0.75rem] font-medium">
+                <label htmlFor="label-start" className="text-2xs font-medium">
                   First empty position
                 </label>
                 <Select
@@ -377,10 +377,10 @@ export function LabelsPage() {
 
             <div className="mt-4">
               <div className="flex items-center justify-between">
-                <p className="text-[0.72rem] font-medium text-muted-foreground">
+                <p className="text-2xs font-medium text-muted-foreground">
                   Partially used sheet preview
                 </p>
-                <p className="text-[0.66rem] text-muted-foreground">
+                <p className="text-2xs text-muted-foreground">
                   Positions before {startSlot + 1} stay blank
                 </p>
               </div>
@@ -397,7 +397,7 @@ export function LabelsPage() {
                       type="button"
                       onClick={() => setStartSlot(index)}
                       className={cn(
-                        "flex h-9 items-center justify-center rounded border text-[0.62rem] tabular-nums",
+                        "flex h-9 items-center justify-center rounded border text-2xs tabular-nums",
                         index === startSlot
                           ? "border-primary bg-primary text-primary-foreground"
                           : used
@@ -417,7 +417,7 @@ export function LabelsPage() {
 
             {template === "custom" && customOpen && custom && (
               <div className="mt-5 rounded-xl border border-border/60 p-4">
-                <p className="text-[0.78rem] font-medium">Custom label geometry</p>
+                <p className="text-xs font-medium">Custom label geometry</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
                   {(
                     [
@@ -434,7 +434,7 @@ export function LabelsPage() {
                     ] as const
                   ).map(([key, label]) => (
                     <div key={key}>
-                      <label htmlFor={`custom-${key}`} className="text-[0.68rem] text-muted-foreground">
+                      <label htmlFor={`custom-${key}`} className="text-2xs text-muted-foreground">
                         {label}
                       </label>
                       <Input
@@ -448,12 +448,12 @@ export function LabelsPage() {
                             [key]: Number(event.target.value),
                           })
                         }
-                        className="mt-1 h-8 text-[0.75rem]"
+                        className="mt-1 h-8 text-2xs"
                       />
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                <p className="mt-2 text-2xs text-muted-foreground">
                   The server validates that every label fits inside the paper.
                 </p>
               </div>
@@ -473,7 +473,7 @@ export function LabelsPage() {
             )}
             <div className="mt-4 overflow-hidden rounded-xl border border-border/70 bg-secondary/20">
               {preview.isPending && !previewUrl ? (
-                <div className="flex h-[520px] items-center justify-center gap-2 text-[0.8rem] text-muted-foreground">
+                <div className="flex h-[520px] items-center justify-center gap-2 text-xs text-muted-foreground">
                   <Spinner />
                   Building preview…
                 </div>
@@ -484,13 +484,13 @@ export function LabelsPage() {
                   className="h-[520px] w-full bg-white"
                 />
               ) : (
-                <div className="flex h-[520px] items-center justify-center px-6 text-center text-[0.8rem] text-muted-foreground">
+                <div className="flex h-[520px] items-center justify-center px-6 text-center text-xs text-muted-foreground">
                   Select at least one container to preview a label sheet.
                 </div>
               )}
             </div>
             {preview.isPending && previewUrl && (
-              <p className="mt-2 flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+              <p className="mt-2 flex items-center gap-1.5 text-2xs text-muted-foreground">
                 <Spinner /> Refreshing preview…
               </p>
             )}
@@ -499,16 +499,16 @@ export function LabelsPage() {
 
         <aside className="space-y-5 xl:sticky xl:top-8">
           <section className="surface p-4 sm:p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Containers on this sheet
             </h2>
             <div className="mt-3 max-h-[320px] space-y-1 overflow-y-auto pr-1">
               {containersQuery.isPending ? (
-                <p className="py-6 text-center text-[0.75rem] text-muted-foreground">
+                <p className="py-6 text-center text-2xs text-muted-foreground">
                   Loading…
                 </p>
               ) : containers.length === 0 ? (
-                <p className="py-6 text-center text-[0.75rem] text-muted-foreground">
+                <p className="py-6 text-center text-2xs text-muted-foreground">
                   No containers yet.
                 </p>
               ) : (
@@ -516,7 +516,7 @@ export function LabelsPage() {
                   <label
                     key={container.id}
                     className={cn(
-                      "flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-[0.74rem] transition-colors hover:bg-secondary/40",
+                      "flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-2xs transition-colors hover:bg-secondary/40",
                       selected.has(container.id) && "bg-secondary/35",
                     )}
                   >
@@ -530,7 +530,7 @@ export function LabelsPage() {
                       <span className="block truncate font-medium">
                         {container.identifier ?? container.name}
                       </span>
-                      <span className="block truncate text-[0.64rem] text-muted-foreground">
+                      <span className="block truncate text-2xs text-muted-foreground">
                         {container.name !== container.identifier ? container.name : "Unnamed"} ·{" "}
                         {container.total_item_count} items
                       </span>
@@ -557,17 +557,17 @@ export function LabelsPage() {
           </section>
 
           <section className="surface p-4 sm:p-5">
-            <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               <Settings2 className="size-3.5" /> Calibration
             </h2>
-            <p className="mt-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
               Print the calibration sheet on plain paper, hold it against a label sheet,
               then adjust the offsets until the outlines align. Settings are saved in this
               browser.
             </p>
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="offset-x" className="text-[0.68rem] text-muted-foreground">
+                <label htmlFor="offset-x" className="text-2xs text-muted-foreground">
                   Horizontal (mm)
                 </label>
                 <Input
@@ -583,11 +583,11 @@ export function LabelsPage() {
                       offsetX: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-8 text-[0.75rem]"
+                  className="mt-1 h-8 text-2xs"
                 />
               </div>
               <div>
-                <label htmlFor="offset-y" className="text-[0.68rem] text-muted-foreground">
+                <label htmlFor="offset-y" className="text-2xs text-muted-foreground">
                   Vertical (mm)
                 </label>
                 <Input
@@ -603,7 +603,7 @@ export function LabelsPage() {
                       offsetY: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-8 text-[0.75rem]"
+                  className="mt-1 h-8 text-2xs"
                 />
               </div>
             </div>
@@ -627,7 +627,7 @@ export function LabelsPage() {
             </div>
           </section>
 
-          <section className="surface p-4 text-[0.7rem] leading-relaxed text-muted-foreground">
+          <section className="surface p-4 text-2xs leading-relaxed text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground/80">
               <Check className="size-3.5 text-sage" />
               Printer checklist
@@ -660,6 +660,6 @@ export function LabelsPage() {
           />
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 }

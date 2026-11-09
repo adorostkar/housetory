@@ -99,7 +99,7 @@ export function LoginPage() {
         <div className="text-center">
           <Link
             to="/forgot-password"
-            className="text-[0.75rem] font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            className="text-2xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
             Forgot password?
           </Link>

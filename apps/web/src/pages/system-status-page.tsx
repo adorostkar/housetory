@@ -32,7 +32,7 @@ export function SystemStatusPage() {
           <h2 className="mt-4 font-display text-2xl tracking-[-0.03em]">
             Owner only.
           </h2>
-          <p className="mt-2 text-[0.8rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             Only the household owner can view release identity, readiness, worker
             jobs and task diagnostics.
           </p>

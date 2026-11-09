@@ -105,7 +105,7 @@ export function StocktakeFinishDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/65 px-3 py-3 text-[0.76rem] sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-border/65 px-3 py-3 text-xs sm:grid-cols-4">
             <Metric label="Expected" value={expected} />
             <Metric label="Checked" value={checked} />
             <Metric label="Unchecked" value={unchecked} tone={unchecked ? "brass" : undefined} />
@@ -115,7 +115,7 @@ export function StocktakeFinishDialog({
           {(session.missing_item_count > 0 ||
             session.quantity_discrepancy_count > 0 ||
             unknown > 0) && (
-            <div className="space-y-1 rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <div className="space-y-1 rounded-xl border border-brass/20 bg-brass-soft/25 px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               {session.missing_item_count > 0 && (
                 <p>{pluralize(session.missing_item_count, "missing observation")} recorded.</p>
               )}
@@ -135,7 +135,7 @@ export function StocktakeFinishDialog({
           )}
 
           {completed && (
-            <div className="rounded-xl border border-sage/20 bg-sage-soft/30 px-3 py-2.5 text-[0.72rem] leading-relaxed">
+            <div className="rounded-xl border border-sage/20 bg-sage-soft/30 px-3 py-2.5 text-2xs leading-relaxed">
               <p className="font-medium">
                 {coverage.partial ? "Completed with partial coverage" : "Completed"}
               </p>
@@ -148,7 +148,7 @@ export function StocktakeFinishDialog({
           )}
 
           {mode === "complete" && partial && !completed && (
-            <div className="rounded-xl border border-brass/25 bg-brass-soft/30 px-3 py-2.5 text-[0.72rem] leading-relaxed">
+            <div className="rounded-xl border border-brass/25 bg-brass-soft/30 px-3 py-2.5 text-2xs leading-relaxed">
               <p className="flex items-start gap-2 font-medium text-brass">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                 This is a partial stocktake.
@@ -174,7 +174,7 @@ export function StocktakeFinishDialog({
           )}
 
           {mode === "abandon" && (
-            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-[0.72rem] leading-relaxed text-destructive">
+            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-2xs leading-relaxed text-destructive">
               <CircleSlash className="mt-0.5 size-3.5 shrink-0" />
               This cannot be resumed. The observations stay inspectable, but no item last-checked
               dates will be updated.
@@ -214,7 +214,7 @@ function Metric({
 }) {
   return (
     <div>
-      <p className="text-[0.62rem] uppercase tracking-[0.09em] text-muted-foreground">{label}</p>
+      <p className="text-2xs uppercase tracking-[0.09em] text-muted-foreground">{label}</p>
       <p className={cn("mt-0.5 font-display text-[1.15rem] tabular-nums", tone === "brass" && "text-brass")}>
         {value}
       </p>

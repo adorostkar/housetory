@@ -22,7 +22,7 @@ export function FormSection({
       <div className="mb-6">
         <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">{title}</h2>
         {description && (
-          <p className="mt-1 text-[0.78rem] leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
         )}
       </div>
       <div className="space-y-5">{children}</div>
@@ -57,15 +57,15 @@ export function OptionalFormSection({
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-display text-[1.18rem] tracking-[-0.02em]">{title}</span>
-            <span className="text-[0.63rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            <span className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
               Optional
             </span>
           </span>
-          <span className="mt-1 block text-[0.72rem] leading-relaxed text-muted-foreground">
+          <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
             {summary}
           </span>
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-[0.66rem] font-medium text-muted-foreground">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-2xs font-medium text-muted-foreground">
           {open ? "Hide" : "Edit"}
           <ChevronDown
             className={cn("size-3.5 transition-transform", open && "rotate-180")}

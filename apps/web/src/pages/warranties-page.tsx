@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,21 +48,21 @@ export function WarrantiesPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Ownership"
-        title="Warranties"
-        description="Active coverage, upcoming expirations and what has already run out."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Ownership",
+        title: "Warranties",
+        description: "Active coverage, upcoming expirations and what has already run out.",
+        actions: (
           <Button variant="outline" asChild>
             <a href="/api/v1/exports/warranties.csv">
               <Download />
               Export
             </a>
           </Button>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="surface p-3 sm:p-4">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Warranty status">
           {FILTERS.map((filter) => {
@@ -81,8 +81,8 @@ export function WarrantiesPage() {
                 }
                 className={
                   active
-                    ? "rounded-full bg-primary px-3.5 py-2 text-[0.75rem] font-medium text-primary-foreground"
-                    : "rounded-full px-3.5 py-2 text-[0.75rem] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    ? "rounded-full bg-primary px-3.5 py-2 text-2xs font-medium text-primary-foreground"
+                    : "rounded-full px-3.5 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 }
               >
                 {filter.label}
@@ -94,7 +94,7 @@ export function WarrantiesPage() {
           })}
         </div>
         {data && (
-          <p className="mt-2 px-2 text-[0.7rem] text-muted-foreground">
+          <p className="mt-2 px-2 text-2xs text-muted-foreground">
             Reminders use the household window of {pluralize(data.reminder_days, "day")}, unless
             an individual warranty overrides it.
           </p>
@@ -140,7 +140,7 @@ export function WarrantiesPage() {
                         {WARRANTY_STATUS_LABELS[warranty.status]}
                       </Badge>
                     </div>
-                    <p className="mt-1 text-[0.75rem] text-muted-foreground">
+                    <p className="mt-1 text-2xs text-muted-foreground">
                       {warranty.provider || "Provider not recorded"} ·{" "}
                       {warrantyRemainingLabel(warranty.days_remaining, warranty.status)}
                     </p>
@@ -162,15 +162,15 @@ export function WarrantiesPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 text-[0.76rem] sm:grid-cols-4">
+                <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 text-xs sm:grid-cols-4">
                   <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Starts
                     </p>
                     <p className="mt-1">{warranty.start_date ? formatDate(warranty.start_date) : "—"}</p>
                   </div>
                   <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Duration
                     </p>
                     <p className="mt-1">
@@ -180,13 +180,13 @@ export function WarrantiesPage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Expires
                     </p>
                     <p className="mt-1">{warranty.end_date ? formatDate(warranty.end_date) : "No end date"}</p>
                   </div>
                   <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Reminder
                     </p>
                     <p className="mt-1">{pluralize(warranty.effective_reminder_days, "day")} before</p>
@@ -194,7 +194,7 @@ export function WarrantiesPage() {
                 </div>
 
                 {(warranty.notes || warranty.document) && (
-                  <div className="mt-4 flex flex-col gap-2 border-t border-border/60 pt-3 text-[0.75rem] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                  <div className="mt-4 flex flex-col gap-2 border-t border-border/60 pt-3 text-2xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                     {warranty.notes ? (
                       <p className="min-w-0 flex-1 whitespace-pre-line leading-relaxed">
                         {warranty.notes}
@@ -218,6 +218,6 @@ export function WarrantiesPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageLayout>
   );
 }

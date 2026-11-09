@@ -56,7 +56,7 @@ function selectionSummary(items: ItemSummary[]) {
 function SelectionSummary({ items }: { items: ItemSummary[] }) {
   const summary = selectionSummary(items);
   return (
-    <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+    <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
       <p>
         <strong className="font-medium text-foreground">
           {pluralize(summary.count, "item")}
@@ -212,7 +212,7 @@ export function BulkMoveDialog({
               </Select>
             </Field>
           </div>
-          <div className="rounded-xl border border-border/60 bg-background/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-border/60 bg-background/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground/80">Preview</p>
             <p className="mt-1">
               {summary.count} selected item(s), {summary.units} recorded unit(s). Moving
@@ -351,7 +351,7 @@ export function BulkTagDialog({
                 aria-pressed={mode === value}
                 onClick={() => setMode(value)}
                 className={cn(
-                  "rounded-lg border px-3 py-2 text-[0.76rem] font-medium transition-colors",
+                  "rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
                   mode === value
                     ? "border-foreground/15 bg-foreground text-background"
                     : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
@@ -362,7 +362,7 @@ export function BulkTagDialog({
             ))}
           </div>
           {tags.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border/70 px-3.5 py-4 text-[0.75rem] text-muted-foreground">
+            <p className="rounded-xl border border-dashed border-border/70 px-3.5 py-4 text-2xs text-muted-foreground">
               No tags exist yet. Create one below or from an item's edit form.
             </p>
           ) : (
@@ -383,7 +383,7 @@ export function BulkTagDialog({
                       })
                     }
                     className={cn(
-                      "rounded-full border px-2.5 py-1 text-[0.72rem] transition-colors",
+                      "rounded-full border px-2.5 py-1 text-2xs transition-colors",
                       active
                         ? "border-sage/30 bg-sage-soft text-accent-foreground"
                         : "border-border/70 bg-card/45 text-muted-foreground hover:text-foreground",
@@ -424,7 +424,7 @@ export function BulkTagDialog({
               </Button>
             </div>
           )}
-          <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             {mode === "add"
               ? "Selected tags are added; every other tag on each item stays in place."
               : "Selected tags are removed from the selected items. No replacement is applied."}
@@ -531,7 +531,7 @@ export function BulkCategoryDialog({
                   aria-pressed={mode === value}
                   onClick={() => setMode(value)}
                   className={cn(
-                    "rounded-lg border px-3 py-2 text-[0.76rem] font-medium transition-colors",
+                    "rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
                     mode === value
                       ? value === "clear"
                         ? "border-destructive/20 bg-destructive/10 text-destructive"
@@ -570,7 +570,7 @@ export function BulkCategoryDialog({
                 </Button>
               </div>
             ) : (
-              <p className="rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3.5 py-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+              <p className="rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                 This explicitly removes the category from {summary.count} selected
                 item(s). Items and tags are not deleted.
               </p>

@@ -93,7 +93,7 @@ export function CategoryDialog({
                 type="button"
                 onClick={() => setColor(null)}
                 className={cn(
-                  "size-8 rounded-full border border-border bg-card text-[0.6rem] text-muted-foreground transition-shadow",
+                  "size-8 rounded-full border border-border bg-card text-2xs text-muted-foreground transition-shadow",
                   color === null && "ring-2 ring-ring ring-offset-2 ring-offset-background",
                 )}
                 aria-label="No colour"

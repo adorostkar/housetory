@@ -10,7 +10,7 @@ import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -83,12 +83,12 @@ export function DocumentsPage() {
   );
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Library"
-        title="Documents"
-        description="Receipts, invoices, warranties, manuals and specifications — searchable and linked to the things they belong to."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Library",
+        title: "Documents",
+        description: "Receipts, invoices, warranties, manuals and specifications — searchable and linked to the things they belong to.",
+        actions: (
           <>
             {documentsQuery.data && documentsQuery.data.total > 0 && (
               <Button variant="outline" asChild>
@@ -111,9 +111,9 @@ export function DocumentsPage() {
               </>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="surface p-4 sm:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative min-w-0 flex-1">
@@ -148,7 +148,7 @@ export function DocumentsPage() {
               aria-label="Filter by document type"
               value={typeFilter}
               onChange={(event) => updateParam("type", event.target.value)}
-              className="h-10 rounded-lg text-[0.8rem]"
+              className="h-10 rounded-lg text-xs"
             >
               <option value="">All types</option>
               {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => (
@@ -162,20 +162,20 @@ export function DocumentsPage() {
               aria-label="Documents from date"
               value={dateFrom}
               onChange={(event) => updateParam("date_from", event.target.value)}
-              className="h-10 text-[0.8rem]"
+              className="h-10 text-xs"
             />
             <Input
               type="date"
               aria-label="Documents to date"
               value={dateTo}
               onChange={(event) => updateParam("date_to", event.target.value)}
-              className="h-10 text-[0.8rem]"
+              className="h-10 text-xs"
             />
             <Select
               aria-label="Sort documents"
               value={sort}
               onChange={(event) => updateParam("sort", event.target.value)}
-              className="h-10 rounded-lg text-[0.8rem]"
+              className="h-10 rounded-lg text-xs"
             >
               <option value="created_desc">Newest added</option>
               <option value="created_asc">Oldest added</option>
@@ -192,11 +192,11 @@ export function DocumentsPage() {
               onChange={(event) => updateParam("merchant", event.target.value)}
               placeholder="Filter by merchant"
               aria-label="Filter by merchant"
-              className="h-8 max-w-56 text-[0.78rem]"
+              className="h-8 max-w-56 text-xs"
             />
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-[0.72rem] text-muted-foreground">
+            <span className="text-2xs text-muted-foreground">
               {documentsQuery.data
                 ? `${pluralize(documentsQuery.data.total, "document")}${hasFilters ? " matching" : ""}`
                 : "Loading…"}
@@ -205,7 +205,7 @@ export function DocumentsPage() {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="text-[0.72rem] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                className="text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 Clear filters
               </button>
@@ -262,7 +262,7 @@ export function DocumentsPage() {
       </div>
 
       {documentsQuery.data && documentsQuery.data.total > documents.length && (
-        <p className="mt-5 text-center text-[0.75rem] text-muted-foreground">
+        <p className="mt-5 text-center text-2xs text-muted-foreground">
           Showing the first {documents.length} of {documentsQuery.data.total} documents.
           Narrow the search to find the rest.
         </p>
@@ -298,6 +298,6 @@ export function DocumentsPage() {
           await remove.mutateAsync(documentToDelete.id);
         }}
       />
-    </div>
+    </PageLayout>
   );
 }

@@ -21,6 +21,9 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { FormError } from "@/components/form-field";
 import { ModelPicker } from "@/components/model-picker";
 import { PageHeader } from "@/components/page-header";
+import { PageSkeleton } from "@/components/page-layout";
+import { SectionNav } from "@/components/section-nav";
+import { StickySaveBar } from "@/components/sticky-save-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +36,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
@@ -332,13 +334,7 @@ export function AiSettingsPage() {
   });
 
   if (session.isPending || settingsQuery.isPending) {
-    return (
-      <div>
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="mt-4 h-12 w-72" />
-        <Skeleton className="mt-8 h-72 rounded-2xl" />
-      </div>
-    );
+    return <PageSkeleton variant="detail" />;
   }
   if (!isOwner) {
     return (
@@ -378,6 +374,9 @@ export function AiSettingsPage() {
     (model) => model.id === defaultModel,
   );
   const defaultTaskState = defaultSelectedModel?.task_states?.assistant;
+  const defaultDirty =
+    defaultProviderId !== (settings.default_text.provider_id ?? "") ||
+    defaultModel !== (settings.default_text.model ?? "");
   const defaultCompatible =
     !defaultSelectedModel ||
     (defaultTaskState
@@ -458,31 +457,31 @@ export function AiSettingsPage() {
     >
       <div data-testid="ai-task-name" className="min-w-0 break-words">
         <div className="flex flex-wrap items-center gap-1.5">
-          <p className="text-[0.78rem] font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
+          <p className="text-xs font-medium">{TASK_LABELS[task.task] ?? task.task}</p>
           {isTextTask(task.task) ? (
             !task.provider_id || !task.model ? (
-              <Badge variant="outline" className="text-[0.55rem]">
+              <Badge variant="outline" className="text-2xs">
                 Not configured
               </Badge>
             ) : isInheritedTask(task) ? (
-              <Badge variant="sage" className="text-[0.55rem]">
+              <Badge variant="sage" className="text-2xs">
                 Inherited
               </Badge>
             ) : (
-              <Badge variant="brass" className="text-[0.55rem]">
+              <Badge variant="brass" className="text-2xs">
                 Custom override
               </Badge>
             )
           ) : null}
         </div>
-        <p className="text-[0.65rem] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {task.enabled
             ? (selectedModel?.capabilities ?? task.capabilities).join(" · ") ||
               "Capabilities need verification"
             : "Disabled"}
         </p>
         {task.model && !selectedModel ? (
-          <p className="mt-0.5 text-[0.62rem] leading-relaxed text-brass">
+          <p className="mt-0.5 text-2xs leading-relaxed text-brass">
             Saved ID is not in the provider catalog. It is not rewritten
             automatically; choose a discovered model or run Test model to
             verify the exact ID.
@@ -570,7 +569,7 @@ export function AiSettingsPage() {
           }
         />
         {noCompatibleDiscovered ? (
-          <p className="mt-1 text-[0.64rem] leading-relaxed text-brass">
+          <p className="mt-1 text-2xs leading-relaxed text-brass">
             No discovered model supports this task. Refresh models or
             choose another provider.
           </p>
@@ -594,7 +593,7 @@ export function AiSettingsPage() {
             Reset to default
           </Button>
         ) : null}
-        <label className="flex shrink-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+        <label className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
           <input
             type="checkbox"
             className="size-3.5 accent-primary"
@@ -661,11 +660,11 @@ export function AiSettingsPage() {
       />
 
       {settings.warning && (
-        <div className="mb-4 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mb-4 rounded-xl border border-brass/25 bg-brass-soft/45 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
           {settings.warning}
         </div>
       )}
-      <div className="mb-4 rounded-xl border border-border/70 bg-secondary/25 px-4 py-3 text-[0.73rem] leading-relaxed text-muted-foreground">
+      <div className="mb-4 rounded-xl border border-border/70 bg-secondary/25 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
         <p className="flex items-center gap-1.5 font-medium text-foreground/80">
           <ShieldCheck className="size-3.5 text-sage" /> Privacy boundary
         </p>
@@ -676,7 +675,17 @@ export function AiSettingsPage() {
         </p>
       </div>
 
-      <section className="surface p-5 sm:p-6">
+      <SectionNav
+        sections={[
+          { id: "providers", label: "Providers" },
+          { id: "default-model", label: "Default text model" },
+          { id: "vision-voice", label: "Vision & voice" },
+          { id: "advanced", label: "Advanced overrides" },
+          { id: "credentials", label: "Credentials" },
+        ]}
+      />
+
+      <section id="providers" className="surface scroll-mt-32 p-5 sm:p-6">
         <div className="flex items-center gap-2">
           <Cloud className="size-4 text-muted-foreground" />
           <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Providers</h2>
@@ -684,7 +693,7 @@ export function AiSettingsPage() {
         {settings.providers.length === 0 ? (
           <div className="mt-5 rounded-xl border border-dashed border-border/70 px-5 py-10 text-center">
             <p className="font-display text-2xl tracking-[-0.02em]">No provider configured.</p>
-            <p className="mx-auto mt-2 max-w-md text-[0.8rem] leading-relaxed text-muted-foreground">
+            <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
               Deterministic imports, search, QR labels and assistant answers continue to
               work. Add a provider when you want model-written assistance or vision.
             </p>
@@ -722,10 +731,10 @@ export function AiSettingsPage() {
                         </Badge>
                         {provider.cloud_consent && <Badge variant="brass">Data consent on</Badge>}
                       </div>
-                      <p className="mt-1 break-all text-[0.68rem] text-muted-foreground">
+                      <p className="mt-1 break-all text-2xs text-muted-foreground">
                         {providerLabel(provider.provider)} · {provider.base_url}
                       </p>
-                      <p className="mt-1 break-all text-[0.7rem] text-muted-foreground">
+                      <p className="mt-1 break-all text-2xs text-muted-foreground">
                         {provider.default_model ?? "No default model"} ·{" "}
                         {provider.has_api_key
                           ? "API key saved"
@@ -783,7 +792,7 @@ export function AiSettingsPage() {
                   {result && (
                     <p
                       className={cn(
-                        "mt-2 text-[0.7rem]",
+                        "mt-2 text-2xs",
                         result.ok ? "text-accent-foreground" : "text-destructive",
                       )}
                     >
@@ -791,15 +800,15 @@ export function AiSettingsPage() {
                     </p>
                   )}
                   {providerModelStatus?.loading && providerModels.length === 0 ? (
-                    <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                    <p className="mt-2 text-2xs text-muted-foreground">
                       Discovering models from the provider…
                     </p>
                   ) : providerModelStatus?.error ? (
-                    <p className="mt-2 text-[0.66rem] text-destructive">
+                    <p className="mt-2 text-2xs text-destructive">
                       {providerModelStatus.error}
                     </p>
                   ) : providerModels.length > 0 ? (
-                    <p className="mt-2 text-[0.66rem] text-muted-foreground">
+                    <p className="mt-2 text-2xs text-muted-foreground">
                       {providerModels.length} model(s) available
                       {providerModelStatus?.cached ? " · cached" : ""}
                     </p>
@@ -811,26 +820,26 @@ export function AiSettingsPage() {
         )}
       </section>
 
-      <section className="surface mt-5 p-5 sm:p-6">
+      <section id="default-model" className="surface scroll-mt-32 mt-5 p-5 sm:p-6">
         <div className="flex items-center gap-2">
           <SparklesIcon />
           <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
             Default text model
           </h2>
         </div>
-        <p className="mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-muted-foreground">
+        <p className="mt-1 max-w-3xl text-2xs leading-relaxed text-muted-foreground">
           One provider and model for the Assistant, document interpretation, smart
           imports and natural-language search. Capability-specific vision and voice
           remain separate below. Advanced text overrides keep their own settings.
         </p>
         {settings.providers.length === 0 ? (
-          <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-[0.74rem] text-muted-foreground">
+          <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-2xs text-muted-foreground">
             Add a provider to configure a default text model.
           </p>
         ) : (
           <>
-            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_auto] lg:items-start">
-              <label className="space-y-1.5 text-[0.72rem]">
+            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:items-start">
+              <label className="space-y-1.5 text-2xs">
                 <span className="field-label">Default text provider</span>
                 <Select
                   aria-label="Default text provider"
@@ -899,22 +908,8 @@ export function AiSettingsPage() {
                   }
                 />
               </div>
-              <Button
-                type="button"
-                className="lg:mt-6"
-                disabled={
-                  saveDefaultText.isPending ||
-                  !defaultProviderId ||
-                  !defaultModel ||
-                  !defaultCompatible
-                }
-                onClick={() => saveDefaultText.mutate()}
-              >
-                {saveDefaultText.isPending ? <Spinner /> : <Check />}
-                Save default
-              </Button>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.68rem] text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
               <Badge
                 variant={settings.default_text.configured ? "sage" : "outline"}
               >
@@ -930,7 +925,7 @@ export function AiSettingsPage() {
                 <Badge variant="destructive">Incompatible</Badge>
               ) : null}
             </div>
-            <p className="mt-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
               Inherited:{" "}
               <span className="text-foreground/80">
                 {inheritedLabels.length > 0 ? inheritedLabels.join(", ") : "None"}
@@ -940,12 +935,12 @@ export function AiSettingsPage() {
                 {overrideLabels.length > 0 ? overrideLabels.join(", ") : "None"}
               </span>
             </p>
-            <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               Changing the default updates only inherited text tasks. Existing custom
               overrides, vision, voice, provider credentials and consent are not changed.
             </p>
             {!defaultCompatible && defaultModel ? (
-              <p className="mt-2 text-[0.68rem] text-destructive">
+              <p className="mt-2 text-2xs text-destructive">
                 The selected model is confirmed incompatible with Housetory's text
                 task API/input/output contract. Choose another model.
               </p>
@@ -954,14 +949,14 @@ export function AiSettingsPage() {
         )}
       </section>
 
-      <section className="surface mt-5 p-5 sm:p-6">
+      <section id="vision-voice" className="surface scroll-mt-32 mt-5 p-5 sm:p-6">
         <div className="flex items-center gap-2">
           <SparklesIcon />
           <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
             Vision &amp; voice
           </h2>
         </div>
-        <p className="mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-muted-foreground">
+        <p className="mt-1 max-w-3xl text-2xs leading-relaxed text-muted-foreground">
           These tasks need their own capability-specific choices. Vision requires image
           input; voice transcription requires OpenAI/Gemini audio support or an
           OpenRouter STT/audio-input model. They are never switched by the text default.
@@ -977,7 +972,8 @@ export function AiSettingsPage() {
       </section>
 
       <details
-        className="surface mt-5 p-5 sm:p-6"
+        id="advanced"
+        className="surface scroll-mt-32 mt-5 p-5 sm:p-6"
         data-testid="advanced-task-overrides"
       >
         <summary className="cursor-pointer list-none">
@@ -991,7 +987,7 @@ export function AiSettingsPage() {
                 : "Using default"}
             </Badge>
           </span>
-          <span className="mt-1 block max-w-3xl text-[0.72rem] leading-relaxed text-muted-foreground">
+          <span className="mt-1 block max-w-3xl text-2xs leading-relaxed text-muted-foreground">
             Optional per-task provider and model. Overrides stay unchanged when the
             default text model changes. Reset an override to return that task to the
             current default.
@@ -1006,7 +1002,7 @@ export function AiSettingsPage() {
         </div>
       </details>
 
-      <section className="surface mt-5 p-5 text-[0.73rem] leading-relaxed text-muted-foreground">
+      <section id="credentials" className="surface scroll-mt-32 mt-5 p-5 text-2xs leading-relaxed text-muted-foreground">
         <p className="flex items-center gap-1.5 font-medium text-foreground/80">
           <KeyRound className="size-3.5 text-brass" /> Credential operations
         </p>
@@ -1026,6 +1022,19 @@ export function AiSettingsPage() {
         </Button>
       </section>
 
+      <StickySaveBar
+        dirty={defaultDirty}
+        saving={saveDefaultText.isPending}
+        canSave={Boolean(defaultProviderId && defaultModel && defaultCompatible)}
+        statusText="Default text model has unsaved changes"
+        saveLabel="Save default"
+        onSave={() => saveDefaultText.mutate()}
+        onDiscard={() => {
+          setDefaultProviderId(settings.default_text.provider_id ?? "");
+          setDefaultModel(settings.default_text.model ?? "");
+        }}
+      />
+
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -1044,7 +1053,7 @@ export function AiSettingsPage() {
           >
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <div className="min-w-0">
-                <label htmlFor="provider-type" className="text-[0.78rem] font-medium">Provider</label>
+                <label htmlFor="provider-type" className="text-xs font-medium">Provider</label>
                 <Select
                   id="provider-type"
                   className="mt-1.5"
@@ -1082,7 +1091,7 @@ export function AiSettingsPage() {
                 </Select>
               </div>
               <div className="min-w-0">
-                <label htmlFor="provider-name" className="text-[0.78rem] font-medium">Display name</label>
+                <label htmlFor="provider-name" className="text-xs font-medium">Display name</label>
                 <Input
                   id="provider-name"
                   className="mt-1.5"
@@ -1093,7 +1102,7 @@ export function AiSettingsPage() {
               </div>
             </div>
             <div className="min-w-0">
-              <label htmlFor="provider-url" className="text-[0.78rem] font-medium">Base URL</label>
+              <label htmlFor="provider-url" className="text-xs font-medium">Base URL</label>
               <Input
                 id="provider-url"
                 className="mt-1.5 min-w-0"
@@ -1107,7 +1116,7 @@ export function AiSettingsPage() {
             </div>
             <div className="grid min-w-0 gap-4 sm:grid-cols-2">
               <div className="min-w-0">
-                <label htmlFor="provider-model" className="text-[0.78rem] font-medium">
+                <label htmlFor="provider-model" className="text-xs font-medium">
                   Default model
                 </label>
                 <div className="mt-1.5">
@@ -1149,7 +1158,7 @@ export function AiSettingsPage() {
                     }
                   />
                 </div>
-                <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   {!editing
                     ? "Models are discovered after the provider is saved. You can also type an exact ID manually."
                     : catalogStale
@@ -1160,7 +1169,7 @@ export function AiSettingsPage() {
                 </p>
               </div>
               <div className="min-w-0">
-                <label htmlFor="provider-key" className="text-[0.78rem] font-medium">
+                <label htmlFor="provider-key" className="text-xs font-medium">
                   API key {editing && <span className="font-normal text-muted-foreground">(leave blank to keep)</span>}
                 </label>
                 <Input
@@ -1177,7 +1186,7 @@ export function AiSettingsPage() {
                 />
               </div>
             </div>
-            <label className="flex items-start gap-2 rounded-xl border border-border/60 p-3 text-[0.75rem]">
+            <label className="flex items-start gap-2 rounded-xl border border-border/60 p-3 text-2xs">
               <input
                 type="checkbox"
                 className="mt-0.5 size-3.5 accent-primary"
@@ -1186,13 +1195,13 @@ export function AiSettingsPage() {
               />
               <span>
                 <span className="font-medium">Enable this provider</span>
-                <span className="block text-[0.68rem] text-muted-foreground">
+                <span className="block text-2xs text-muted-foreground">
                   Disabling keeps the credential but prevents calls.
                 </span>
               </span>
             </label>
             {endpointScope(draft.provider, draft.base_url) !== "local" && (
-              <label className="flex min-w-0 items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 p-3 text-[0.75rem]">
+              <label className="flex min-w-0 items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 p-3 text-2xs">
                 <input
                   type="checkbox"
                   className="mt-0.5 size-3.5 shrink-0 accent-primary"
@@ -1209,7 +1218,7 @@ export function AiSettingsPage() {
                       </>
                     ) : null}
                   </span>
-                  <span className="block text-[0.68rem] leading-relaxed text-muted-foreground">
+                  <span className="block text-2xs leading-relaxed text-muted-foreground">
                     This endpoint is not on the Housetory host. Prompts, inventory excerpts,
                     documents, photographs, recordings and transcripts for selected tasks
                     will leave this server. Audio is sent only for the Voice transcription

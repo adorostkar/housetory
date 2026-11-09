@@ -49,16 +49,16 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           )}
           aria-label="Account menu"
         >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-[0.68rem] font-semibold tracking-[0.04em] text-foreground ring-1 ring-border/60">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-2xs font-semibold tracking-[0.04em] text-foreground ring-1 ring-border/60">
             {user ? initials(user.name) : <UserRound className="size-4" />}
           </span>
           {!compact && (
             <>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[0.84rem] font-medium leading-tight text-foreground">
+                <span className="block truncate text-sm font-medium leading-tight text-foreground">
                   {user?.name ?? "Account"}
                 </span>
-                <span className="mt-0.5 block truncate text-[0.72rem] text-muted-foreground">
+                <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
                   {household?.name ?? ""}
                 </span>
               </span>
@@ -69,8 +69,8 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side={compact ? "bottom" : "top"} className="w-56">
         <DropdownMenuLabel className="normal-case tracking-normal">
-          <span className="block text-[0.82rem] font-medium text-foreground">{user?.name}</span>
-          <span className="mt-0.5 block truncate text-[0.72rem] font-normal text-muted-foreground">
+          <span className="block text-xs font-medium text-foreground">{user?.name}</span>
+          <span className="mt-0.5 block truncate text-2xs font-normal text-muted-foreground">
             {user?.email}
           </span>
         </DropdownMenuLabel>
@@ -98,7 +98,7 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
             </span>
             <span className="min-w-0 flex-1 truncate">
               {entry.name}
-              <span className="ml-1 text-[0.65rem] capitalize text-muted-foreground">
+              <span className="ml-1 text-2xs capitalize text-muted-foreground">
                 {entry.role}
               </span>
             </span>

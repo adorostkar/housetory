@@ -305,4 +305,40 @@ describe("AssistantPage", () => {
     await user.click(screen.getByRole("button", { name: /Privacy & model/ }));
     expect(screen.getByText(/never creates, edits or deletes/)).toBeVisible();
   });
+
+  it("copies an answer to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
+    await screen.findByText(/Alex has 1 of your 2 units/);
+    await userEvent.click(screen.getByRole("button", { name: /Copy answer/ }));
+    expect(writeText).toHaveBeenCalledWith(firstAnswer.answer);
+  });
+
+  it("offers follow-up chips that ask a new question", async () => {
+    renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
+    await screen.findByText(/Alex has 1 of your 2 units/);
+    await userEvent.click(screen.getByRole("button", { name: "Who owns it?" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.post).mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ query: "Who owns it?" }),
+    );
+  });
+
+  it("regenerates the latest answer in place without duplicating it", async () => {
+    renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
+    await screen.findByText(/Alex has 1 of your 2 units/);
+    await userEvent.click(screen.getByRole("button", { name: /Regenerate/ }));
+    expect(
+      await screen.findByText("That loan is recorded as due on 2026-11-15."),
+    ).toBeVisible();
+    expect(screen.queryByText(/Alex has 1 of your 2 units/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Regenerate/ })).toHaveLength(1);
+    expect(vi.mocked(api.post).mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ query: "where is my heavy drill", history: [] }),
+    );
+  });
 });

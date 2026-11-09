@@ -13,6 +13,7 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 
 import { AddItemsButton, useAddItems } from "@/components/add-items";
+import { FirstRunChecklist } from "@/components/first-run-checklist";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
@@ -196,7 +197,7 @@ export function OverviewPage() {
           to="/loans"
           className="surface mt-4 flex flex-col gap-2 border-brass/25 bg-brass-soft/25 px-4 py-3.5 transition-colors hover:bg-brass-soft/40 sm:flex-row sm:items-center sm:justify-between"
         >
-          <span className="flex items-start gap-2.5 text-[0.8rem] leading-relaxed">
+          <span className="flex items-start gap-2.5 text-xs leading-relaxed">
             <HandCoins className="mt-0.5 size-4 shrink-0 text-brass" />
             <span>
               <strong className="font-medium">
@@ -206,7 +207,7 @@ export function OverviewPage() {
               Owned totals still include them.
             </span>
           </span>
-          <span className="flex shrink-0 items-center gap-2 text-[0.72rem] text-muted-foreground">
+          <span className="flex shrink-0 items-center gap-2 text-2xs text-muted-foreground">
             {data.overdue_loan_count > 0 && (
               <Badge variant="brass">{data.overdue_loan_count} past due</Badge>
             )}
@@ -217,23 +218,20 @@ export function OverviewPage() {
 
       {data.item_count === 0 ? (
         <div className="mt-9">
-          <EmptyState
-            title="Your home, ready for its first story."
-            description={
-              canWrite
-                ? "Add something you own — a camera, a favourite pan, the keys by the door. Then give it a room, an exact place, and a paper trail."
-                : "This household does not have any inventory items yet."
-            }
-            actionLabel={canWrite ? "Add items" : undefined}
-            onAction={canWrite ? () => openAddItems() : undefined}
-            secondary={
-              canWrite ? (
-                <Button variant="ghost" onClick={() => setRoomDialogOpen(true)}>
-                  {rootRooms.length > 0 ? "Add another room" : "Add a room first"}
-                </Button>
-              ) : undefined
-            }
-          />
+          {canWrite ? (
+            <FirstRunChecklist
+              roomCount={data.room_count}
+              itemCount={data.item_count}
+              documentCount={data.document_count}
+              onCreateRoom={() => setRoomDialogOpen(true)}
+              onAddItems={() => openAddItems()}
+            />
+          ) : (
+            <EmptyState
+              title="Your home, ready for its first story."
+              description="This household does not have any inventory items yet."
+            />
+          )}
           {rootRooms.length > 0 && (
             <section className="mt-10">
               <SectionHeading
@@ -296,7 +294,7 @@ export function OverviewPage() {
             ) : (
               <div className="surface p-6">
                 <p className="font-display text-xl tracking-[-0.02em]">Give things a place.</p>
-                <p className="mt-2 text-[0.82rem] leading-relaxed text-muted-foreground">
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                   Rooms and shelves make everything easier to find — and easier to put
                   away.
                 </p>
@@ -355,7 +353,7 @@ export function OverviewPage() {
                 />
               </div>
             ) : (
-              <div className="surface px-5 py-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+              <div className="surface px-5 py-4 text-xs leading-relaxed text-muted-foreground">
                 Warranty dates and documents stay with each item when you add them.
                 Nothing is tracked as expiring yet.
               </div>
@@ -404,7 +402,7 @@ function OwnershipSection({
         <Skeleton className="h-24 rounded-2xl" />
       ) : !hasValues ? (
         <div className="surface flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-[0.8rem] leading-relaxed text-muted-foreground">
+          <div className="text-xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground/85">No purchase values yet.</p>
             <p className="mt-1">
               {financial.items_missing_purchase_count > 0
@@ -429,7 +427,7 @@ function OwnershipSection({
             {financial.currency_totals.slice(0, 2).map((entry) => (
               <div key={entry.currency} className="surface p-5">
                 <div className="flex items-center justify-between">
-                  <p className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                  <p className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                     {entry.currency}
                   </p>
                   <Badge variant="outline">
@@ -437,7 +435,7 @@ function OwnershipSection({
                   </Badge>
                 </div>
                 <div className="mt-5">
-                  <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+                  <p className="text-2xs uppercase tracking-[0.1em] text-muted-foreground">
                     Purchase
                   </p>
                   <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
@@ -446,7 +444,7 @@ function OwnershipSection({
                     })}
                   </p>
                 </div>
-                <p className="mt-4 text-[0.68rem] leading-relaxed text-muted-foreground">
+                <p className="mt-4 text-2xs leading-relaxed text-muted-foreground">
                   {entry.purchase_item_count} items with purchase data. Values are not
                   converted between currencies.
                 </p>
@@ -455,14 +453,14 @@ function OwnershipSection({
             <div className="surface p-5">
               <div className="flex items-center gap-2">
                 <FileText className="size-4 text-muted-foreground" strokeWidth={1.7} />
-                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                <p className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                   Missing purchase info
                 </p>
               </div>
               <p className="mt-5 font-display text-[2rem] leading-none tracking-[-0.03em] tabular-nums">
                 {financial.items_missing_purchase_count}
               </p>
-              <p className="mt-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
                 Items without recorded purchase details and not marked not applicable.
                 Explicitly Unknown remains unresolved.
               </p>
@@ -471,7 +469,7 @@ function OwnershipSection({
               </Button>
               <a
                 href="/api/v1/exports/inventory.csv"
-                className="mt-3 inline-flex items-center gap-1.5 text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                className="mt-3 inline-flex items-center gap-1.5 text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 <Download className="size-3.5" />
                 Inventory CSV
@@ -511,14 +509,14 @@ function BreakdownTable({
         <ReceiptText className="size-4 text-muted-foreground" strokeWidth={1.7} />
       </div>
       {rows.length === 0 ? (
-        <p className="px-5 py-8 text-center text-[0.78rem] text-muted-foreground">
+        <p className="px-5 py-8 text-center text-xs text-muted-foreground">
           No values recorded yet.
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] text-left text-[0.76rem]">
+          <table className="w-full min-w-[420px] text-left text-xs">
             <thead>
-              <tr className="border-b border-border/60 text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+              <tr className="border-b border-border/60 text-2xs uppercase tracking-[0.1em] text-muted-foreground">
                 <th className="px-5 py-2.5 font-medium">Name</th>
                 <th className="px-3 py-2.5 font-medium">Currency</th>
                 <th className="px-5 py-2.5 text-right font-medium">Purchase</th>
@@ -529,7 +527,7 @@ function BreakdownTable({
                 <tr key={`${row.name}-${row.currency}`} className="border-b border-border/40 last:border-0">
                   <td className="px-5 py-2.5">
                     <span className="block max-w-40 truncate">{row.name}</span>
-                    <span className="text-[0.65rem] text-muted-foreground">
+                    <span className="text-2xs text-muted-foreground">
                       {pluralize(row.item_count, "item")}
                     </span>
                   </td>
@@ -563,12 +561,12 @@ function WarrantyGroup({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge variant={WARRANTY_STATUS_TONE[status]}>{title}</Badge>
-          <span className="text-[0.72rem] tabular-nums text-muted-foreground">{total}</span>
+          <span className="text-2xs tabular-nums text-muted-foreground">{total}</span>
         </div>
         {total > 0 && (
           <Link
             to={`/warranties?status=${status}`}
-            className="text-[0.68rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            className="text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
             View all
           </Link>
@@ -576,7 +574,7 @@ function WarrantyGroup({
       </div>
       <div className="mt-3 flex-1 space-y-1.5">
         {warranties.length === 0 ? (
-          <p className="py-5 text-center text-[0.74rem] text-muted-foreground">
+          <p className="py-5 text-center text-2xs text-muted-foreground">
             Nothing here.
           </p>
         ) : (
@@ -587,15 +585,15 @@ function WarrantyGroup({
               className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-secondary/40"
             >
               <span className="min-w-0">
-                <span className="block truncate text-[0.78rem] font-medium">
+                <span className="block truncate text-xs font-medium">
                   {warranty.item?.name ?? "Warranty"}
                 </span>
-                <span className="block truncate text-[0.66rem] text-muted-foreground">
+                <span className="block truncate text-2xs text-muted-foreground">
                   {warranty.provider || "Provider not set"}
                   {warranty.end_date ? ` · ${formatDate(warranty.end_date)}` : ""}
                 </span>
               </span>
-              <span className="shrink-0 text-[0.66rem] text-muted-foreground">
+              <span className="shrink-0 text-2xs text-muted-foreground">
                 {warrantyRemainingLabel(warranty.days_remaining, warranty.status)}
               </span>
             </Link>
@@ -603,7 +601,7 @@ function WarrantyGroup({
         )}
       </div>
       {status === "expiring" && total > 0 && (
-        <p className="mt-3 border-t border-border/50 pt-3 text-[0.66rem] leading-relaxed text-muted-foreground">
+        <p className="mt-3 border-t border-border/50 pt-3 text-2xs leading-relaxed text-muted-foreground">
           {WARRANTY_STATUS_LABELS[status]} within the configured reminder window.
         </p>
       )}

@@ -102,6 +102,9 @@ export function QuickSearch({
     results: results.filter((result) => result.kind === group.kind),
   })).filter((group) => group.results.length > 0);
   const flatResults = groups.flatMap((group) => group.results);
+  const showAskRow = term.length >= 2 && !loading && !error;
+  const askIndex = flatResults.length;
+  const optionCount = flatResults.length + (showAskRow ? 1 : 0);
 
   React.useEffect(() => {
     setActiveIndex(-1);
@@ -216,6 +219,11 @@ export function QuickSearch({
     navigate(`/search?${params.toString()}`);
   };
 
+  const askAssistant = () => {
+    setFocused(false);
+    navigate(`/assistant?q=${encodeURIComponent(term)}`);
+  };
+
   const choose = (result: QuickSearchResult) => {
     setFocused(false);
     navigate(withHousehold(result.url, result.household?.id));
@@ -230,25 +238,54 @@ export function QuickSearch({
       return;
     }
     if (!showPanel) return;
-    if (event.key === "ArrowDown" && flatResults.length > 0) {
+    if (event.key === "ArrowDown" && optionCount > 0) {
       event.preventDefault();
-      setActiveIndex((current) => (current + 1) % flatResults.length);
+      setActiveIndex((current) => (current + 1) % optionCount);
       return;
     }
-    if (event.key === "ArrowUp" && flatResults.length > 0) {
+    if (event.key === "ArrowUp" && optionCount > 0) {
       event.preventDefault();
       setActiveIndex((current) =>
-        current <= 0 ? flatResults.length - 1 : current - 1,
+        current <= 0 ? optionCount - 1 : current - 1,
       );
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      if (showAskRow && activeIndex === askIndex && !event.shiftKey) {
+        askAssistant();
+        return;
+      }
       const active = flatResults[activeIndex];
       if (active && !event.shiftKey) choose(active);
       else submitToResults(event.shiftKey);
     }
   };
+
+  const askRow = showAskRow ? (
+    <button
+      type="button"
+      role="option"
+      aria-selected={activeIndex === askIndex}
+      id={`quick-search-option-${askIndex}`}
+      onMouseEnter={() => setActiveIndex(askIndex)}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={askAssistant}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-xs transition-colors",
+        activeIndex === askIndex
+          ? "bg-secondary text-foreground"
+          : "text-foreground/85 hover:bg-secondary/70",
+      )}
+    >
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-brass-soft/40 text-brass">
+        <Sparkles className="size-3.5" />
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium">
+        Ask the assistant: “{term}”
+      </span>
+    </button>
+  ) : null;
 
   const panel =
     showPanel && typeof document !== "undefined"
@@ -260,15 +297,15 @@ export function QuickSearch({
             id="quick-search-panel"
           >
             {term.length < 2 ? (
-              <p className="px-4 py-3 text-[0.75rem] text-muted-foreground" role="status">
+              <p className="px-4 py-3 text-2xs text-muted-foreground" role="status">
                 Keep typing to find items, boxes and places — then press Enter.
               </p>
             ) : error ? (
-              <div className="flex items-start gap-2.5 px-4 py-4 text-[0.78rem]" role="alert">
+              <div className="flex items-start gap-2.5 px-4 py-4 text-xs" role="alert">
                 <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
                 <div className="min-w-0">
                   <p>Search is unavailable just now.</p>
-                  <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-0.5 text-2xs text-muted-foreground">
                     {getApiErrorMessage(search.error)}
                   </p>
                   <Button
@@ -284,7 +321,7 @@ export function QuickSearch({
               </div>
             ) : loading ? (
               <div
-                className="flex items-center gap-2 px-4 py-4 text-[0.78rem] text-muted-foreground"
+                className="flex items-center gap-2 px-4 py-4 text-xs text-muted-foreground"
                 role="status"
                 aria-live="polite"
               >
@@ -293,7 +330,7 @@ export function QuickSearch({
               </div>
             ) : results.length === 0 ? (
               <div
-                className="space-y-3 px-4 py-4 text-[0.78rem] text-muted-foreground"
+                className="space-y-3 px-4 py-4 text-xs text-muted-foreground"
                 role="status"
                 aria-live="polite"
               >
@@ -301,7 +338,7 @@ export function QuickSearch({
                   <Search className="size-4" />
                   No quick matches for “{term}”.
                 </p>
-                <p className="text-[0.7rem] leading-relaxed">
+                <p className="text-2xs leading-relaxed">
                   Press Enter to search all records. Housetory will interpret the
                   question with the configured assistant when needed.
                 </p>
@@ -314,6 +351,13 @@ export function QuickSearch({
                   <Sparkles />
                   Ask Housetory
                 </Button>
+                <div
+                  role="listbox"
+                  id="quick-search-results"
+                  aria-label="Assistant"
+                >
+                  {askRow}
+                </div>
               </div>
             ) : (
               <>
@@ -325,7 +369,7 @@ export function QuickSearch({
                 >
                   {groups.map((group) => (
                     <section key={group.kind} aria-label={group.label}>
-                      <p className="px-2.5 pb-1 pt-2 text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      <p className="px-2.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         {group.label}
                       </p>
                       {group.results.map((result) => {
@@ -353,14 +397,14 @@ export function QuickSearch({
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-1.5">
-                                <span className="truncate text-[0.78rem] font-medium">
+                                <span className="truncate text-xs font-medium">
                                   {result.title}
                                 </span>
-                                <Badge variant={group.tone} className="shrink-0 text-[0.56rem]">
+                                <Badge variant={group.tone} className="shrink-0 text-2xs">
                                   {resultLabel(result.kind)}
                                 </Badge>
                               </span>
-                              <span className="mt-0.5 block truncate text-[0.68rem] text-muted-foreground">
+                              <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
                                 {contextLine(result) || "Housetory"}
                               </span>
                             </span>
@@ -369,9 +413,10 @@ export function QuickSearch({
                       })}
                     </section>
                   ))}
+                  {askRow}
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
-                  <span className="text-[0.65rem] text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     {results.length} quick match{results.length === 1 ? "" : "es"}
                     {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}
                   </span>
@@ -380,7 +425,7 @@ export function QuickSearch({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-[0.68rem]"
+                      className="h-7 px-2 text-2xs"
                       onClick={() => submitToResults(true)}
                       title="Ask the configured assistant (Shift+Enter)"
                     >
@@ -391,7 +436,7 @@ export function QuickSearch({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-[0.68rem]"
+                      className="h-7 px-2 text-2xs"
                       onClick={() => submitToResults(false)}
                     >
                       {isItemsPage ? "Filter items" : "View all results"}
@@ -425,7 +470,7 @@ export function QuickSearch({
         role="combobox"
         aria-expanded={showPanel}
         aria-controls={
-          showPanel && results.length > 0 ? "quick-search-results" : undefined
+          showPanel && optionCount > 0 ? "quick-search-results" : undefined
         }
         aria-autocomplete="list"
         aria-activedescendant={
@@ -445,7 +490,7 @@ export function QuickSearch({
             : "h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft",
         )}
       />
-      <kbd className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-[0.6rem] font-medium text-muted-foreground sm:block">
+      <kbd className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block">
         ⌘K
       </kbd>
       {query ? (

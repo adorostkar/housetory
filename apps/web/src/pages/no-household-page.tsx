@@ -24,7 +24,7 @@ export function NoHouseholdPage() {
       title="Start a household."
       subtitle="This account is signed in but is not a member of a household yet. Create one, or open an invitation from an owner."
     >
-      <div className="space-y-5 text-[0.78rem] leading-relaxed text-muted-foreground">
+      <div className="space-y-5 text-xs leading-relaxed text-muted-foreground">
         <p className="flex items-center gap-2 rounded-xl border border-border/70 bg-card/60 p-4 text-foreground">
           <Mail className="size-4 shrink-0" />
           <span className="min-w-0 break-all">{session.data?.user?.email}</span>

@@ -152,10 +152,10 @@ export function DocumentUploadDialog({
                 <FileUp className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[0.82rem] font-medium">
+                <span className="block truncate text-xs font-medium">
                   {file ? file.name : "Choose a file"}
                 </span>
-                <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+                <span className="mt-0.5 block text-2xs text-muted-foreground">
                   {file ? `${Math.ceil(file.size / 1024)} KB` : "Tap to browse"}
                 </span>
               </span>

@@ -487,11 +487,17 @@ describe("AiSettingsPage", () => {
     settingsData = withOverride;
     vi.mocked(api.put).mockResolvedValue(withOverride);
     renderPage();
+    expect(screen.queryByRole("button", { name: "Save default" })).toBeNull();
+    const defaultModelInput = screen.getByLabelText("Default text model", {
+      selector: "input",
+    });
+    await userEvent.clear(defaultModelInput);
+    await userEvent.type(defaultModelInput, "gpt-4o-mini{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save default" }));
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith("/ai/default-text", {
         provider_id: "provider-openai",
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
       }),
     );
     expect(screen.getByText(/Custom overrides:/)).toHaveTextContent(

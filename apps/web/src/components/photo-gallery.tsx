@@ -202,10 +202,10 @@ export function PhotoGallery({
                 className="size-4"
               />
             </span>
-            <p className="mt-3 text-[0.82rem] font-medium text-foreground/75">
+            <p className="mt-3 text-xs font-medium text-foreground/75">
               No photograph yet
             </p>
-            <p className="mt-1 text-[0.72rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Take or choose a photo.
             </p>
             {canWrite && (
@@ -282,7 +282,7 @@ export function PhotoGallery({
         {canWrite && upload.isPending && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/65 backdrop-blur-sm">
             <Spinner className="size-5" />
-            <span className="text-[0.75rem] font-medium text-foreground">
+            <span className="text-2xs font-medium text-foreground">
               Adding photographs…
             </span>
           </div>

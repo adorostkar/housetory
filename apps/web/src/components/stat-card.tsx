@@ -24,7 +24,7 @@ export function StatCard({
   const content = (
     <>
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+        <p className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
           {label}
         </p>
         <span
@@ -40,7 +40,7 @@ export function StatCard({
         {value}
       </div>
       {detail && (
-        <div className="mt-2.5 flex items-center gap-1 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mt-2.5 flex items-center gap-1 text-2xs leading-relaxed text-muted-foreground">
           {detail}
           {to && (
             <ArrowUpRight className="size-3 opacity-0 transition-opacity duration-200 group-hover:opacity-70" />

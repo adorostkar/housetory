@@ -178,7 +178,7 @@ export function MembersSettingsPage() {
       />
 
       {!emailConfigured && (
-        <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-[0.76rem] leading-relaxed text-muted-foreground">
+        <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
           Email delivery is not configured, so invitations cannot be sent. Add the SMTP
           settings from <code className="rounded bg-secondary px-1 py-0.5">.env.example</code>{" "}
           and restart the API. Existing login and inventory continue to work.
@@ -192,7 +192,7 @@ export function MembersSettingsPage() {
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Members</h2>
             <Badge variant="outline">{members.length}</Badge>
           </div>
-          <p className="mt-1 text-[0.74rem] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             Members can manage inventory. Viewers can browse only. Owners manage people,
             household settings and AI configuration.
           </p>
@@ -212,11 +212,11 @@ export function MembersSettingsPage() {
                     className="flex flex-wrap items-center gap-3 px-4 py-3"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[0.82rem] font-medium">
+                      <p className="truncate text-xs font-medium">
                         {member.name}
                         {isSelf ? " · you" : ""}
                       </p>
-                      <p className="truncate text-[0.7rem] text-muted-foreground">
+                      <p className="truncate text-2xs text-muted-foreground">
                         {member.email} · joined {formatDate(member.joined_at)}
                       </p>
                     </div>
@@ -230,7 +230,7 @@ export function MembersSettingsPage() {
                           nextRole: event.target.value as MemberRole,
                         })
                       }
-                      className="h-9 w-[130px] text-[0.76rem]"
+                      className="h-9 w-[130px] text-xs"
                     >
                       {Object.entries(ROLE_LABELS).map(([value, label]) => (
                         <option key={value} value={value}>
@@ -258,7 +258,7 @@ export function MembersSettingsPage() {
             <Mail className="size-4 text-muted-foreground" strokeWidth={1.7} />
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Invitations</h2>
           </div>
-          <p className="mt-1 text-[0.74rem] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             Invitations are single-use, expire automatically and only work for the invited
             email address.
           </p>
@@ -269,7 +269,7 @@ export function MembersSettingsPage() {
               <FormError message={getApiErrorMessage(invitationsQuery.error)} />
             </div>
           ) : invitations.length === 0 ? (
-            <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[0.78rem] text-muted-foreground">
+            <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-xs text-muted-foreground">
               No invitations yet.
             </p>
           ) : (
@@ -280,10 +280,10 @@ export function MembersSettingsPage() {
                   className="flex flex-wrap items-center gap-3 px-4 py-3"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[0.82rem] font-medium">
+                    <p className="truncate text-xs font-medium">
                       {invitation.email}
                     </p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[0.7rem] text-muted-foreground">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
                       <span>{ROLE_LABELS[invitation.role]}</span>
                       <span>·</span>
                       <span>expires {formatDate(invitation.expires_at)}</span>

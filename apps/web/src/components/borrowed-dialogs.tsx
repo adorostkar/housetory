@@ -72,8 +72,8 @@ export function NewLoanChoiceDialog({
             <span className="flex size-10 items-center justify-center rounded-full bg-sage-soft text-accent-foreground">
               <Package className="size-4" />
             </span>
-            <span className="mt-3 block text-[0.86rem] font-medium">Lend out an item</span>
-            <span className="mt-1 block text-[0.72rem] leading-relaxed text-muted-foreground">
+            <span className="mt-3 block text-sm font-medium">Lend out an item</span>
+            <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
               Choose something the household owns and record who has it.
             </span>
           </button>
@@ -85,8 +85,8 @@ export function NewLoanChoiceDialog({
             <span className="flex size-10 items-center justify-center rounded-full bg-brass-soft text-brass">
               <HandCoins className="size-4" />
             </span>
-            <span className="mt-3 block text-[0.86rem] font-medium">Borrow from someone</span>
-            <span className="mt-1 block text-[0.72rem] leading-relaxed text-muted-foreground">
+            <span className="mt-3 block text-sm font-medium">Borrow from someone</span>
+            <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
               Track a possession kept here temporarily without adding fake owned stock.
             </span>
           </button>
@@ -273,7 +273,7 @@ export function BorrowRecordDialog({
             </Field>
             <Field label="Actual photo" htmlFor="borrowed-photo" optional>
               <div id="borrowed-photo">
-                <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-[0.75rem] text-muted-foreground transition-colors hover:bg-secondary/60">
+                <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-2xs text-muted-foreground transition-colors hover:bg-secondary/60">
                   <ImageOff className="size-4" />
                   <span className="min-w-0 flex-1 truncate">
                     {photo ? photo.name : "Choose a photo of the borrowed item"}
@@ -393,7 +393,7 @@ export function ReturnBorrowedDialog({
             create.mutate();
           }}
         >
-          <div className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-[0.74rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             <strong className="font-medium text-foreground">{record.item_name}</strong>{" "}
             belongs to {record.owner_name}. This return changes borrowed quantities only;
             owned inventory is unaffected.
@@ -621,7 +621,7 @@ export function CorrectBorrowedDialog({
               onChange={(event) => setNotes(event.target.value)}
             />
           </Field>
-          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             {record.returned_quantity > 0
               ? `${record.returned_quantity} unit(s) have already been returned to ${record.owner_name}.`
               : "No returns have been recorded for this borrowed item."}
@@ -676,7 +676,7 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
           <h2 className="flex items-center gap-2 font-display text-[1.3rem] tracking-[-0.02em]">
             Actual photo
           </h2>
-          <p className="mt-1 max-w-xl text-[0.74rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-xl text-2xs leading-relaxed text-muted-foreground">
             Private to this borrowed record. It is not ownership evidence and is not
             included in item evidence exports.
           </p>
@@ -703,7 +703,7 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
           />
           <div className="space-y-2">
             <Badge variant="brass">Borrowed photo</Badge>
-            <p className="max-w-xs break-all text-[0.7rem] text-muted-foreground">
+            <p className="max-w-xs break-all text-2xs text-muted-foreground">
               {record.photo.original_filename} · {Math.max(1, Math.round(record.photo.byte_size / 1024))} KB
             </p>
             {canWrite && (
@@ -723,8 +723,8 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
             <ImageOff className="size-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-[0.8rem] font-medium">No actual photo yet</p>
-            <p className="mt-0.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="text-xs font-medium">No actual photo yet</p>
+            <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
               A photo can help identify the item, but it stays attached to this borrowed
               record only.
             </p>
@@ -738,7 +738,7 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
           />
         </div>
       ) : (
-        <p className="mt-4 rounded-xl border border-border/60 bg-background/35 px-3.5 py-3 text-[0.74rem] text-muted-foreground">
+        <p className="mt-4 rounded-xl border border-border/60 bg-background/35 px-3.5 py-3 text-2xs text-muted-foreground">
           No borrowed-item photo is recorded. Viewers can read the record but cannot add
           photos.
         </p>
@@ -816,7 +816,7 @@ export function CancelBorrowedDialog({
               placeholder="e.g. recorded against the wrong owner"
             />
           </Field>
-          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="rounded-xl border border-brass/20 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             {record.item_name} from {record.owner_name} has {record.returned_quantity}{" "}
             returned unit(s).
           </p>

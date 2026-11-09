@@ -213,7 +213,7 @@ export function ModelPicker({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "h-10 w-full min-w-0 rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-[0.8rem] text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
+          "h-10 w-full min-w-0 rounded-xl border border-input/90 bg-card/65 pl-8 pr-14 text-xs text-foreground outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
       <div className="absolute right-1.5 top-[1.15rem] flex -translate-y-1/2 items-center gap-0.5">
@@ -235,19 +235,19 @@ export function ModelPicker({
       </div>
 
       {selectedUnsupported && !open ? (
-        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-2xs text-brass">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           Saved model is {selected ? "confirmed incompatible" : "not listed"} for this
           task. Keep it only for inspection or choose a compatible replacement.
         </p>
       ) : selectedUnverified && !open ? (
-        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-2xs text-brass">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           Capability is unverified from the current catalog metadata. Run Test model
           before relying on it.
         </p>
       ) : value && !selected && models.length > 0 && !open ? (
-        <p className="mt-1 flex min-w-0 items-start gap-1 text-[0.66rem] text-brass">
+        <p className="mt-1 flex min-w-0 items-start gap-1 text-2xs text-brass">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           Exact ID is not in the current catalog. Support is unverified; confirmed
           incompatible IDs are rejected on save. Run Test model after saving.
@@ -257,12 +257,12 @@ export function ModelPicker({
       {open ? (
         <div className="mt-1 min-w-0 overflow-hidden rounded-xl border border-border/80 bg-popover shadow-lift">
           {loading ? (
-            <div className="flex min-w-0 items-center gap-2 px-3 py-3 text-[0.72rem] text-muted-foreground" role="status">
+            <div className="flex min-w-0 items-center gap-2 px-3 py-3 text-2xs text-muted-foreground" role="status">
               <Loader2 className="size-3.5 shrink-0 animate-spin" />
               <span className="min-w-0 break-words">Discovering models from the provider…</span>
             </div>
           ) : error ? (
-            <div className="min-w-0 px-3 py-3 text-[0.72rem]" role="alert">
+            <div className="min-w-0 px-3 py-3 text-2xs" role="alert">
               <p className="flex min-w-0 items-start gap-1.5 text-destructive">
                 <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
                 <span className="min-w-0 break-words">{error}</span>
@@ -274,7 +274,7 @@ export function ModelPicker({
               ) : null}
             </div>
           ) : models.length === 0 ? (
-            <div className="min-w-0 px-3 py-3 text-[0.72rem] text-muted-foreground">
+            <div className="min-w-0 px-3 py-3 text-2xs text-muted-foreground">
               <p className="break-words">No models discovered yet.</p>
               {onDiscover ? (
                 <Button
@@ -289,7 +289,7 @@ export function ModelPicker({
               ) : null}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="min-w-0 px-3 py-3 text-[0.72rem] text-muted-foreground">
+            <div className="min-w-0 px-3 py-3 text-2xs text-muted-foreground">
               <p className="break-words">
                 No compatible catalog model matches “{search}”. Press Enter to use that
                 exact ID manually; the server validates task capability when you save.
@@ -320,30 +320,30 @@ export function ModelPicker({
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                         <span
-                          className="min-w-0 max-w-full truncate text-[0.76rem] font-medium"
+                          className="min-w-0 max-w-full truncate text-xs font-medium"
                           title={model.display_name || model.id}
                         >
                           {model.display_name || model.id}
                         </span>
                         {model.id !== (model.display_name || model.id) ? (
                           <code
-                            className="min-w-0 max-w-full truncate rounded bg-secondary px-1 py-0.5 text-[0.6rem] text-muted-foreground"
+                            className="min-w-0 max-w-full truncate rounded bg-secondary px-1 py-0.5 text-2xs text-muted-foreground"
                             title={model.id}
                           >
                             {model.id}
                           </code>
                         ) : null}
-                        <Badge variant="outline" className="shrink-0 text-[0.55rem]">
+                        <Badge variant="outline" className="shrink-0 text-2xs">
                           {KIND_LABELS[model.kind]}
                         </Badge>
                         {taskKey &&
                         modelState(model) === "compatible" &&
                         model.capability_source === "provider_metadata" ? (
-                          <Badge variant="sage" className="shrink-0 text-[0.55rem]">
+                          <Badge variant="sage" className="shrink-0 text-2xs">
                             Suggested
                           </Badge>
                         ) : taskKey && modelState(model) === "unverified" ? (
-                          <Badge variant="brass" className="shrink-0 text-[0.55rem]">
+                          <Badge variant="brass" className="shrink-0 text-2xs">
                             Unverified
                           </Badge>
                         ) : null}
@@ -354,15 +354,15 @@ export function ModelPicker({
                             <Badge
                               key={capability}
                               variant="secondary"
-                              className="shrink-0 text-[0.55rem]"
+                              className="shrink-0 text-2xs"
                             >
                               {CAPABILITY_LABELS[capability] ?? capability}
                             </Badge>
                           ))
                         ) : (
-                          <span className="text-[0.62rem] text-muted-foreground">No task capabilities</span>
+                          <span className="text-2xs text-muted-foreground">No task capabilities</span>
                         )}
-                        <span className="min-w-0 break-words text-[0.6rem] text-muted-foreground">
+                        <span className="min-w-0 break-words text-2xs text-muted-foreground">
                           {model.capability_source === "provider_metadata"
                             ? "Provider metadata"
                             : "Heuristic — verify"}
@@ -373,7 +373,7 @@ export function ModelPicker({
                   </button>
                 ))}
               </div>
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-[0.62rem] text-muted-foreground">
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 px-2.5 py-1.5 text-2xs text-muted-foreground">
                 <span className="min-w-0 break-words">
                   {filtered.length > visible.length
                     ? `Showing ${visible.length} of ${filtered.length}; type to narrow.`
@@ -381,7 +381,7 @@ export function ModelPicker({
                   {cached ? " · cached" : ""}
                 </span>
                 {onRefresh ? (
-                  <Button type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-[0.62rem]" onClick={onRefresh}>
+                  <Button type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-2xs" onClick={onRefresh}>
                     <RefreshCw className="size-2.5" /> Refresh
                   </Button>
                 ) : null}

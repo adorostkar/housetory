@@ -1,6 +1,5 @@
 import {
   Boxes,
-  ChevronDown,
   ClipboardCheck,
   DoorOpen,
   FileText,
@@ -8,17 +7,29 @@ import {
   House,
   MoreHorizontal,
   Package,
-  ReceiptText,
   Search,
   Settings,
-  ShieldCheck,
+  Plus,
   Sparkles,
+  Wallet,
+  type LucideIcon,
 } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Suspense, useEffect } from "react";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import { AccountMenu } from "@/components/account-menu";
-import { AddItemsButton, AddItemsProvider } from "@/components/add-items";
+import {
+  AddItemsButton,
+  AddItemsProvider,
+  useAddItems,
+} from "@/components/add-items";
+import { isFinancialsPath } from "@/components/financials-layout";
 import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
@@ -36,48 +47,84 @@ import { useCanWrite } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { cn } from "@/lib/utils";
 
-const coreNav = [
-  { to: "/", label: "Overview", icon: House, end: true },
-  { to: "/items", label: "Items", icon: Package, end: false },
-  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
-  { to: "/loans", label: "Loans", icon: HandCoins, end: false },
-] as const;
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  match?: (pathname: string) => boolean;
+};
 
-const libraryNav = [
-  { to: "/documents", label: "Documents", icon: FileText, end: false },
-  { to: "/containers", label: "Containers", icon: Boxes, end: false },
-] as const;
+const navGroups: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Home",
+    items: [
+      { to: "/", label: "Overview", icon: House, end: true },
+      { to: "/assistant", label: "Assistant", icon: Sparkles },
+    ],
+  },
+  {
+    label: "Inventory",
+    items: [
+      { to: "/items", label: "Items", icon: Package },
+      { to: "/rooms", label: "Rooms", icon: DoorOpen },
+      { to: "/containers", label: "Containers", icon: Boxes },
+      { to: "/loans", label: "Loans", icon: HandCoins },
+    ],
+  },
+  {
+    label: "Records",
+    items: [
+      { to: "/documents", label: "Documents", icon: FileText },
+      {
+        to: "/purchases",
+        label: "Financials",
+        icon: Wallet,
+        match: isFinancialsPath,
+      },
+    ],
+  },
+  {
+    label: "Tools",
+    items: [{ to: "/review", label: "Review", icon: ClipboardCheck }],
+  },
+];
 
-const occasionalNav = [
-  { to: "/review", label: "Review", icon: ClipboardCheck, end: false },
-  { to: "/insurance", label: "Insurance", icon: ShieldCheck, end: false },
-  { to: "/purchases", label: "Purchases", icon: ReceiptText, end: false },
-  { to: "/warranties", label: "Warranties", icon: ShieldCheck, end: false },
-  { to: "/assistant", label: "Assistant", icon: Sparkles, end: false },
-] as const;
-
-const mobileNav = [
+const mobileLeftNav: NavItem[] = [
   { to: "/", label: "Home", icon: House, end: true },
-  { to: "/items", label: "Items", icon: Package, end: false },
-  { to: "/rooms", label: "Rooms", icon: DoorOpen, end: false },
-  { to: "/loans", label: "Loans", icon: HandCoins, end: false },
-] as const;
+  { to: "/items", label: "Items", icon: Package },
+];
 
-const mobileMoreNav = [
-  { to: "/review", label: "Review", icon: ClipboardCheck },
-  { to: "/insurance", label: "Insurance", icon: ShieldCheck },
-  { to: "/documents", label: "Documents", icon: FileText },
-  { to: "/purchases", label: "Purchases", icon: ReceiptText },
-  { to: "/warranties", label: "Warranties", icon: ShieldCheck },
-  { to: "/containers", label: "Containers", icon: Boxes },
+const mobileRightNav: NavItem[] = [
   { to: "/assistant", label: "Assistant", icon: Sparkles },
+];
+
+const mobileMoreNav: NavItem[] = [
+  { to: "/rooms", label: "Rooms", icon: DoorOpen },
+  { to: "/containers", label: "Containers", icon: Boxes },
+  { to: "/loans", label: "Loans", icon: HandCoins },
+  { to: "/documents", label: "Documents", icon: FileText },
+  {
+    to: "/purchases",
+    label: "Financials",
+    icon: Wallet,
+    match: isFinancialsPath,
+  },
+  { to: "/review", label: "Review", icon: ClipboardCheck },
   { to: "/search", label: "Search", icon: Search },
   { to: "/settings", label: "Settings", icon: Settings },
-] as const;
+];
+
+function navItemActive(item: NavItem, pathname: string) {
+  if (item.match) return item.match(pathname);
+  return item.end
+    ? pathname === item.to
+    : pathname === item.to || pathname.startsWith(`${item.to}/`);
+}
 
 function mobileTabClass(active: boolean) {
   return cn(
-    "relative flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[0.72rem] font-medium tracking-[0.01em] transition-colors",
+    "relative flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-2xs font-medium tracking-[0.01em] transition-colors",
     active ? "text-foreground" : "text-muted-foreground",
   );
 }
@@ -98,21 +145,10 @@ function AppShellLayout() {
   const canWrite = useCanWrite();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
   const isAssistant = location.pathname === "/assistant";
-  const moreActive = mobileMoreNav.some(
-    (item) =>
-      location.pathname === item.to ||
-      location.pathname.startsWith(`${item.to}/`),
+  const { openAddItems } = useAddItems();
+  const moreActive = mobileMoreNav.some((item) =>
+    navItemActive(item, location.pathname),
   );
-  const desktopMoreActive = occasionalNav.some(
-    (item) =>
-      location.pathname === item.to ||
-      location.pathname.startsWith(`${item.to}/`),
-  );
-  const [desktopMoreOpen, setDesktopMoreOpen] = useState(desktopMoreActive);
-
-  useEffect(() => {
-    if (desktopMoreActive) setDesktopMoreOpen(true);
-  }, [desktopMoreActive]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -144,6 +180,28 @@ function AppShellLayout() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [location.pathname]);
 
+  const renderMobileTab = (item: NavItem) => {
+    const active = navItemActive(item, location.pathname);
+    return (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        end={item.end}
+        aria-current={active ? "page" : undefined}
+        className={mobileTabClass(active)}
+      >
+        <item.icon className="size-[1.25rem]" strokeWidth={active ? 2 : 1.7} />
+        {item.label}
+        <span
+          className={cn(
+            "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
+            active ? "opacity-100" : "opacity-0",
+          )}
+        />
+      </NavLink>
+    );
+  };
+
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
       <aside className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
@@ -158,64 +216,27 @@ function AppShellLayout() {
 
         <AddItemsButton className="mt-4 w-full justify-start pl-4" />
 
-        <nav className="mt-8 space-y-1" aria-label="Primary">
-          <p className="eyebrow mb-3 px-3">Everything has a place</p>
-          {coreNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => cn("nav-link", isActive && "nav-link-active")}
-            >
-              <item.icon className="size-[1.05rem]" strokeWidth={1.8} />
-              {item.label}
-            </NavLink>
-          ))}
-          <p className="eyebrow mb-2 mt-6 px-3">Library</p>
-          {libraryNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => cn("nav-link", isActive && "nav-link-active")}
-            >
-              <item.icon className="size-[1.05rem]" strokeWidth={1.8} />
-              {item.label}
-            </NavLink>
-          ))}
-          <details
-            className="group mt-4 border-t border-border/60 pt-3"
-            open={desktopMoreOpen}
-            onToggle={(event) => setDesktopMoreOpen(event.currentTarget.open)}
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl px-3 py-2 text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-secondary/45 hover:text-foreground">
-              <span className="flex items-center gap-1.5">
-                More
-                {desktopMoreActive ? (
-                  <span className="size-1.5 rounded-full bg-sage" aria-hidden />
-                ) : null}
-              </span>
-              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="mt-1 space-y-1">
-              {occasionalNav.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    cn(
-                      "nav-link text-[0.78rem]",
-                      isActive && "nav-link-active",
-                    )
-                  }
-                >
-                  <item.icon className="size-4" strokeWidth={1.8} />
-                  {item.label}
-                </NavLink>
-              ))}
+        <nav className="mt-6 space-y-5" aria-label="Primary">
+          {navGroups.map((group) => (
+            <div key={group.label} className="space-y-1">
+              <p className="eyebrow mb-2 px-3">{group.label}</p>
+              {group.items.map((item) => {
+                const active = navItemActive(item, location.pathname);
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    aria-current={active ? "page" : undefined}
+                    className={cn("nav-link", active && "nav-link-active")}
+                  >
+                    <item.icon className="size-[1.05rem]" strokeWidth={1.8} />
+                    {item.label}
+                  </NavLink>
+                );
+              })}
             </div>
-          </details>
+          ))}
         </nav>
 
         <div className="mt-auto">
@@ -223,7 +244,7 @@ function AppShellLayout() {
             <p className="font-display text-[1.05rem] leading-snug tracking-[-0.01em] text-foreground/90">
               A calm record of everything you own.
             </p>
-            <p className="mt-1.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
               Private, self-hosted, and yours.
             </p>
           </div>
@@ -234,7 +255,11 @@ function AppShellLayout() {
       <div className="min-w-0">
         <header className="glass safe-top sticky top-0 z-40 border-b border-border/60 lg:hidden">
           <div className="flex h-16 items-center justify-between px-5">
-            <Link to="/" aria-label="Housetory home" className="flex items-center">
+            <Link
+              to="/"
+              aria-label="Housetory home"
+              className="flex items-center"
+            >
               <BrandMark compact />
               <span className="ml-2.5 font-display text-[1.25rem] tracking-[-0.02em]">
                 Housetory
@@ -282,10 +307,11 @@ function AppShellLayout() {
             </div>
           )}
           {!canWrite && (
-            <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
-              <span className="font-medium text-brass">Viewer access.</span> You can browse
-              and search this household. Inventory changes, scans, imports and settings are
-              disabled; ask an owner if you need member access.
+            <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-brass">Viewer access.</span> You
+              can browse and search this household. Inventory changes, scans,
+              imports and settings are disabled; ask an owner if you need member
+              access.
             </div>
           )}
           <div
@@ -305,30 +331,23 @@ function AppShellLayout() {
             data-testid="mobile-bottom-nav"
           >
             <div className="mx-auto flex max-w-md items-stretch justify-around">
-              {mobileNav.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) => mobileTabClass(isActive)}
+              {mobileLeftNav.map(renderMobileTab)}
+              {canWrite ? (
+                <button
+                  type="button"
+                  aria-label="Add items"
+                  onClick={(event) =>
+                    openAddItems(undefined, event.currentTarget)
+                  }
+                  className="relative -mt-4 flex min-w-0 flex-1 flex-col items-center justify-start gap-0.5 px-1 text-2xs font-medium text-muted-foreground"
                 >
-                  {({ isActive }) => (
-                    <>
-                      <item.icon
-                        className="size-[1.25rem]"
-                        strokeWidth={isActive ? 2 : 1.7}
-                      />
-                      {item.label}
-                      <span
-                        className={cn(
-                          "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
-                          isActive ? "opacity-100" : "opacity-0",
-                        )}
-                      />
-                    </>
-                  )}
-                </NavLink>
-              ))}
+                  <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lift">
+                    <Plus className="size-5" strokeWidth={2.2} />
+                  </span>
+                  Add
+                </button>
+              ) : null}
+              {mobileRightNav.map(renderMobileTab)}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -337,7 +356,10 @@ function AppShellLayout() {
                     aria-label="More destinations"
                     data-active={moreActive}
                   >
-                    <MoreHorizontal className="size-[1.25rem]" strokeWidth={1.8} />
+                    <MoreHorizontal
+                      className="size-[1.25rem]"
+                      strokeWidth={1.8}
+                    />
                     More
                     <span
                       className={cn(
@@ -360,7 +382,7 @@ function AppShellLayout() {
                   {mobileMoreNav.map((item) => (
                     <DropdownMenuItem
                       key={item.to}
-                      className="min-h-11 cursor-pointer gap-2.5 px-3 text-[0.9rem]"
+                      className="min-h-11 cursor-pointer gap-2.5 px-3 text-sm"
                       onSelect={() => navigate(item.to)}
                     >
                       <item.icon className="size-4" />

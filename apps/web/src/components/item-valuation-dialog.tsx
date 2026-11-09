@@ -187,7 +187,7 @@ export function ItemValuationDialog({
 
         <div className="space-y-5">
           <section className="space-y-2">
-            <p className="text-[0.72rem] font-medium text-foreground/85">
+            <p className="text-2xs font-medium text-foreground/85">
               What is this value for?
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -197,7 +197,7 @@ export function ItemValuationDialog({
                   <label
                     key={value}
                     className={cn(
-                      "cursor-pointer rounded-xl border px-3.5 py-3 text-[0.74rem] leading-relaxed transition-colors",
+                      "cursor-pointer rounded-xl border px-3.5 py-3 text-2xs leading-relaxed transition-colors",
                       purpose === value
                         ? "border-brass/40 bg-brass-soft/35"
                         : "border-border/60 bg-background/30 hover:bg-secondary/30",
@@ -228,7 +228,7 @@ export function ItemValuationDialog({
             </div>
           </section>
 
-          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
             {item.current_value_cents == null ? (
               "No current value is recorded. Missing is not zero."
             ) : item.current_value_basis === "legacy_record_total" ? (
@@ -270,7 +270,7 @@ export function ItemValuationDialog({
               </Select>
             </Field>
             <div className="flex items-end">
-              <label className="flex items-start gap-2 rounded-xl border border-border/60 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <label className="flex items-start gap-2 rounded-xl border border-border/60 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                 <input
                   type="checkbox"
                   className="mt-0.5 size-3.5 accent-primary"
@@ -282,7 +282,7 @@ export function ItemValuationDialog({
                 />
                 <span>
                   Try online comparisons (Brave)
-                  <span className="mt-0.5 block text-[0.65rem]">
+                  <span className="mt-0.5 block text-2xs">
                     Sends a generic item name/brand/model/condition query only. No
                     location, borrower, serial, receipt or account data.
                   </span>
@@ -301,13 +301,13 @@ export function ItemValuationDialog({
               {estimate.isPending ? <Spinner /> : <Sparkles />}
               Get AI estimate
             </Button>
-            <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               Uses your existing Assistant/text default provider and consent. Manual
               entry below works without AI.
             </p>
           </div>
           {estimateError && (
-            <div className="rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <div className="rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               <p className="font-medium text-foreground/85">AI estimate unavailable</p>
               <p className="mt-1">{estimateError}</p>
               <p className="mt-1">
@@ -319,7 +319,7 @@ export function ItemValuationDialog({
           {preview && (
             <section
               data-testid="valuation-preview"
-              className="space-y-3 rounded-xl border border-sage/25 bg-sage-soft/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
+              className="space-y-3 rounded-xl border border-sage/25 bg-sage-soft/20 px-3.5 py-3 text-2xs leading-relaxed"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground">
@@ -332,7 +332,7 @@ export function ItemValuationDialog({
               <div>
                 <p className="font-display text-[1.6rem] leading-none tracking-[-0.02em] tabular-nums">
                   {formatCurrency(preview.suggested_cents, preview.currency)}
-                  <span className="ml-1 font-sans text-[0.7rem] font-normal text-muted-foreground">
+                  <span className="ml-1 font-sans text-2xs font-normal text-muted-foreground">
                     per unit suggested
                   </span>
                 </p>
@@ -382,7 +382,7 @@ export function ItemValuationDialog({
                       href={sourceEntry.url}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="block rounded-lg border border-border/50 bg-background/40 px-2.5 py-2 text-[0.68rem] text-foreground/80 underline-offset-4 hover:underline"
+                      className="block rounded-lg border border-border/50 bg-background/40 px-2.5 py-2 text-2xs text-foreground/80 underline-offset-4 hover:underline"
                     >
                       <span className="inline-flex max-w-full items-center gap-1 font-medium">
                         <span className="truncate">{sourceEntry.title}</span>
@@ -406,14 +406,14 @@ export function ItemValuationDialog({
                       </span>
                     </a>
                   ))}
-                  <p className="text-[0.64rem] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     Links are retrieved search results. Asking/listed prices are not
                     confirmed sold prices; open the original listing before relying on
                     it.
                   </p>
                 </div>
               )}
-              <p className="flex gap-1.5 text-[0.66rem] text-muted-foreground">
+              <p className="flex gap-1.5 text-2xs text-muted-foreground">
                 <Info className="mt-0.5 size-3 shrink-0" />
                 {preview.disclaimer}
               </p>
@@ -422,10 +422,10 @@ export function ItemValuationDialog({
 
           <section className="space-y-3 rounded-xl border border-border/60 bg-background/35 px-3.5 py-3">
             <div>
-              <p className="text-[0.74rem] font-medium text-foreground/85">
+              <p className="text-2xs font-medium text-foreground/85">
                 Value to save
               </p>
-              <p className="mt-0.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+              <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
                 Edit the per-unit amount if needed. You can save manually without
                 requesting an AI estimate.
               </p>
@@ -464,7 +464,7 @@ export function ItemValuationDialog({
             {amountCents != null && !amountInvalid && (
               <p
                 data-testid="valuation-save-total"
-                className="text-[0.7rem] text-muted-foreground"
+                className="text-2xs text-muted-foreground"
               >
                 {item.quantity} owned {item.quantity === 1 ? "unit" : "units"} ×{" "}
                 {formatCurrency(amountCents, currency)} ={" "}

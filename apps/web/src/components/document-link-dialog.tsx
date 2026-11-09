@@ -101,19 +101,19 @@ export function DocumentLinkDialog({
           </div>
 
           {error && (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-[0.74rem] text-destructive">
+            <div className="rounded-lg border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-2xs text-destructive">
               {error}
             </div>
           )}
 
           <div className="max-h-[52vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60">
             {documentsQuery.isPending ? (
-              <div className="flex items-center justify-center gap-2 px-4 py-10 text-[0.76rem] text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 px-4 py-10 text-xs text-muted-foreground">
                 <Spinner />
                 Loading document library…
               </div>
             ) : documentsQuery.isError ? (
-              <div className="flex flex-col items-center justify-center px-4 py-10 text-center text-[0.76rem] text-muted-foreground">
+              <div className="flex flex-col items-center justify-center px-4 py-10 text-center text-xs text-muted-foreground">
                 <p>Document library could not be loaded.</p>
                 <Button
                   type="button"
@@ -127,11 +127,11 @@ export function DocumentLinkDialog({
               </div>
             ) : available.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
-                <FileText className="size-5 text-muted-foreground/70" strokeWidth={1.5} />
-                <p className="mt-3 text-[0.8rem] font-medium">
+                <FileText className="size-5 text-muted-foreground" strokeWidth={1.5} />
+                <p className="mt-3 text-xs font-medium">
                   {term ? "No matching unlinked documents" : "No unlinked documents"}
                 </p>
-                <p className="mt-1 max-w-sm text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 max-w-sm text-2xs leading-relaxed text-muted-foreground">
                   {term
                     ? "Try a different title or merchant."
                     : "Upload a new document, then link it here or from the library."}
@@ -165,7 +165,7 @@ export function DocumentLinkDialog({
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="min-w-0 break-words text-[0.8rem] font-medium">
+                          <span className="min-w-0 break-words text-xs font-medium">
                             {document.title}
                           </span>
                           <Badge variant="outline">
@@ -184,7 +184,7 @@ export function DocumentLinkDialog({
                             </Badge>
                           )}
                         </div>
-                        <p className="mt-0.5 text-[0.66rem] text-muted-foreground">
+                        <p className="mt-0.5 text-2xs text-muted-foreground">
                           {document.merchant ? `${document.merchant} · ` : ""}
                           {formatDate(document.created_at)}
                         </p>

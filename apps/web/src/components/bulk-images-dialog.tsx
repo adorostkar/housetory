@@ -139,32 +139,32 @@ export function BulkImagesDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/65 bg-background/40 px-3.5 py-3 text-[0.78rem]">
+          <div className="rounded-xl border border-border/65 bg-background/40 px-3.5 py-3 text-xs">
             <Search className="mb-1.5 size-4" />
             <span className="block font-medium">Find reference images</span>
-            <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+            <span className="mt-0.5 block text-2xs text-muted-foreground">
               Automatic public-web lookup; no AI generation.
             </span>
           </div>
 
           {previewQuery.isPending ? (
-            <div className="flex items-center gap-2 text-[0.75rem] text-muted-foreground">
+            <div className="flex items-center gap-2 text-2xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Checking eligible items…
             </div>
           ) : previewQuery.isError ? (
-            <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-[0.74rem] text-destructive">
+            <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-2xs text-destructive">
               {getApiErrorMessage(previewQuery.error)}
             </p>
           ) : preview ? (
-            <div className="rounded-xl border border-border/65 bg-background/35 p-3.5 text-[0.74rem]">
+            <div className="rounded-xl border border-border/65 bg-background/35 p-3.5 text-2xs">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <Metric label="Eligible" value={preview.eligible_count} />
                 <Metric label="Has a real photo" value={preview.skipped_has_photo} />
                 <Metric label="Unavailable" value={preview.skipped_unavailable} />
               </div>
               {preview.notices.length > 0 && (
-                <ul className="mt-2 space-y-1 text-[0.68rem] leading-relaxed text-muted-foreground">
+                <ul className="mt-2 space-y-1 text-2xs leading-relaxed text-muted-foreground">
                   {preview.notices.map((notice) => (
                     <li key={notice} className="flex items-start gap-1.5">
                       <AlertTriangle className="mt-0.5 size-3 shrink-0 text-brass" />
@@ -178,7 +178,7 @@ export function BulkImagesDialog({
 
           {current && (
             <div className="rounded-xl border border-border/65 bg-background/35 p-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[0.74rem]">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-2xs">
                 <span className="font-medium">
                   {current.status === "cancelled"
                     ? "Cancelled"
@@ -201,11 +201,11 @@ export function BulkImagesDialog({
                 />
               </div>
               {current.error && (
-                <p className="mt-2 text-[0.68rem] text-destructive">{current.error}</p>
+                <p className="mt-2 text-2xs text-destructive">{current.error}</p>
               )}
             </div>
           )}
-          {error && <p className="text-[0.74rem] text-destructive">{error}</p>}
+          {error && <p className="text-2xs text-destructive">{error}</p>}
         </div>
 
         <DialogFooter>
@@ -252,7 +252,7 @@ export function BulkImagesDialog({
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <p className="text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground">
+      <p className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
       <p className="mt-0.5 tabular-nums">{value}</p>

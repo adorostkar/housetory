@@ -47,7 +47,7 @@ import {
   type PlaceTransferSource,
 } from "@/components/place-transfer-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -249,7 +249,7 @@ export function ContainerDetailPage() {
     },
   });
 
-  if (containerQuery.isPending) return <ContainerDetailSkeleton />;
+  if (containerQuery.isPending) return <PageSkeleton variant="detail" />;
   if (containerQuery.isError) {
     return (
       <ErrorState
@@ -268,20 +268,19 @@ export function ContainerDetailPage() {
     .join(" / ");
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Container"
-        title={identifier}
-        description={
+    <PageLayout
+      header={{
+        eyebrow: "Container",
+        title: identifier,
+        description:
           detail.name !== identifier
             ? detail.name
             : detail.is_container
               ? "Unnamed container"
-              : "Fixed storage place"
-        }
-        backTo="/containers"
-        backLabel="Containers"
-        actions={
+              : "Fixed storage place",
+        backTo: "/containers",
+        backLabel: "Containers",
+        actions: (
           <>
             {canWrite && (
               <Button variant="outline" asChild>
@@ -328,9 +327,9 @@ export function ContainerDetailPage() {
               </Button>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <StocktakeEntry containerId={detail.id} />
 
       <BorrowedKeptHere locationId={detail.id} />
@@ -344,12 +343,12 @@ export function ContainerDetailPage() {
                   ? CONTAINER_TYPE_LABELS[detail.container_type ?? "other"]
                   : "Fixed place"}
               </Badge>
-              <span className="text-[0.75rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 {pluralize(detail.total_item_count, "item")} · {detail.total_quantity} units ·{" "}
                 {pluralize(detail.child_count, "nested place")}
               </span>
             </div>
-            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.82rem] text-muted-foreground">
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <MapPin className="size-3.5" />
               {detail.property && (
                 <>
@@ -365,7 +364,7 @@ export function ContainerDetailPage() {
                 </>
               )}
             </p>
-            <p className="mt-1 text-[0.7rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Updated {formatRelativeDate(detail.updated_at)}
               {detail.label_generated_at
                 ? ` · label generated ${formatDate(detail.label_generated_at)}`
@@ -380,7 +379,7 @@ export function ContainerDetailPage() {
           )}
         </div>
         {detail.description && (
-          <p className="mt-3 max-w-3xl whitespace-pre-line text-[0.82rem] leading-relaxed text-foreground/75">
+          <p className="mt-3 max-w-3xl whitespace-pre-line text-xs leading-relaxed text-foreground/75">
             {detail.description}
           </p>
         )}
@@ -394,7 +393,7 @@ export function ContainerDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
                 <PackageOpen className="size-4" />
                 Ownership details
               </h2>
@@ -412,7 +411,7 @@ export function ContainerDetailPage() {
                 >
                   {detail.owner_item.name}
                 </Link>
-                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   Purchase, warranty, photos, documents, value, tags and history are kept on
                   this owned item. The container keeps its identifier, QR code and contents.
                 </p>
@@ -434,7 +433,7 @@ export function ContainerDetailPage() {
                 )}
               </>
             ) : (
-              <p className="mt-2 max-w-2xl text-[0.75rem] leading-relaxed text-muted-foreground">
+              <p className="mt-2 max-w-2xl text-2xs leading-relaxed text-muted-foreground">
                 Link an owned item to add purchase, warranty, photos, documents and value.
               </p>
             )}
@@ -464,12 +463,12 @@ export function ContainerDetailPage() {
             <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
               Inside {identifier}
             </h2>
-            <p className="mt-1 text-[0.75rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               {scope === "direct"
                 ? "Only items assigned directly to this place."
                 : "Direct and nested items, including quantities and photos."}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
               <span>
                 {pluralize(detail.summary.item_count, "item")} ·{" "}
                 {detail.summary.total_quantity} units total
@@ -530,8 +529,8 @@ export function ContainerDetailPage() {
                   }}
                   className={
                     scope === value
-                      ? "rounded-full bg-primary px-3 py-1.5 text-[0.7rem] font-medium text-primary-foreground"
-                      : "rounded-full px-3 py-1.5 text-[0.7rem] font-medium text-muted-foreground"
+                      ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
+                      : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
                   }
                 >
                   {value === "nested" ? "Include nested" : "Direct only"}
@@ -553,7 +552,7 @@ export function ContainerDetailPage() {
                   { replace: true },
                 );
               }}
-              className="h-9 rounded-lg text-[0.8rem] lg:max-w-44"
+              className="h-9 rounded-lg text-xs lg:max-w-44"
             >
               {Object.entries(ITEM_SORTS).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -622,7 +621,7 @@ export function ContainerDetailPage() {
                   {scope === "nested" &&
                     item.location?.id !== detail.id &&
                     item.location && (
-                      <p className="mt-1.5 flex items-center gap-1 px-1 text-[0.66rem] text-muted-foreground">
+                      <p className="mt-1.5 flex items-center gap-1 px-1 text-2xs text-muted-foreground">
                         <MapPin className="size-3" />
                         {itemContainer(item)?.identifier ?? item.location.name}
                       </p>
@@ -659,7 +658,7 @@ export function ContainerDetailPage() {
                   <p className="font-display text-[1.2rem] tracking-[-0.02em]">
                     {child.identifier ?? child.name}
                   </p>
-                  <p className="truncate text-[0.72rem] text-muted-foreground">
+                  <p className="truncate text-2xs text-muted-foreground">
                     {child.identifier ? child.name : child.kind} ·{" "}
                     {pluralize(child.total_item_count, "item")}
                   </p>
@@ -675,7 +674,7 @@ export function ContainerDetailPage() {
         <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
           Movement history
         </h2>
-        <p className="mt-1 text-[0.74rem] leading-relaxed text-muted-foreground">
+        <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
           Container moves describe the contents that moved with it. Items are not given
           duplicate individual move events for an inherited container move.
         </p>
@@ -702,7 +701,7 @@ export function ContainerDetailPage() {
               <Link
                 key={document.id}
                 to={`/documents/${document.id}`}
-                className="surface flex items-center justify-between gap-3 p-3.5 text-[0.8rem] transition-colors hover:bg-secondary/30"
+                className="surface flex items-center justify-between gap-3 p-3.5 text-xs transition-colors hover:bg-secondary/30"
               >
                 <span className="truncate">{document.title}</span>
                 <Badge variant="outline">{document.document_type.replace("_", " ")}</Badge>
@@ -747,7 +746,7 @@ export function ContainerDetailPage() {
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label htmlFor="container-edit-name" className="text-[0.78rem] font-medium">
+                <label htmlFor="container-edit-name" className="text-xs font-medium">
                   Display name
                 </label>
                 <Input
@@ -759,7 +758,7 @@ export function ContainerDetailPage() {
                 />
               </div>
               <div>
-                <label htmlFor="container-edit-type" className="text-[0.78rem] font-medium">
+                <label htmlFor="container-edit-type" className="text-xs font-medium">
                   Type
                 </label>
                 <Select
@@ -778,7 +777,7 @@ export function ContainerDetailPage() {
               </div>
             </div>
             <div>
-              <label htmlFor="container-edit-notes" className="text-[0.78rem] font-medium">
+              <label htmlFor="container-edit-notes" className="text-xs font-medium">
                 Notes
               </label>
               <Textarea
@@ -849,20 +848,6 @@ export function ContainerDetailPage() {
           }
         }}
       />
-    </div>
-  );
-}
-
-function ContainerDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="mt-4 h-14 w-64" />
-      <Skeleton className="mt-8 h-36 rounded-2xl" />
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Skeleton className="h-44 rounded-2xl" />
-        <Skeleton className="h-44 rounded-2xl" />
-      </div>
-    </div>
+    </PageLayout>
   );
 }

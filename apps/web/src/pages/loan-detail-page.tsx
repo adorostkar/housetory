@@ -15,14 +15,13 @@ import { toast } from "sonner";
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import {
   CorrectLoanDialog,
   ReturnLoanDialog,
 } from "@/components/loan-dialogs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useCanWrite, useLoan } from "@/lib/queries";
@@ -61,7 +60,7 @@ export function LoanDetailPage() {
     },
   });
 
-  if (loanQuery.isPending) return <LoanDetailSkeleton />;
+  if (loanQuery.isPending) return <PageSkeleton variant="detail" />;
   if (loanQuery.isError) {
     return (
       <ErrorState
@@ -81,18 +80,18 @@ export function LoanDetailPage() {
     loan.status !== "cancelled";
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Lending · Loan"
-        title={loan.borrower_name}
-        description={`${loan.item_name} · ${loan.home_room_name_snapshot ?? "home location not recorded"}${
+    <PageLayout
+      header={{
+        eyebrow: "Lending · Loan",
+        title: loan.borrower_name,
+        description: `${loan.item_name} · ${loan.home_room_name_snapshot ?? "home location not recorded"}${
           loan.home_location_name_snapshot
             ? ` / ${loan.home_location_name_snapshot}`
             : ""
-        }`}
-        backTo={loansOrigin}
-        backLabel="All loans"
-        actions={
+        }`,
+        backTo: loansOrigin,
+        backLabel: "All loans",
+        actions: (
           <>
             {canWrite && open && (
               <Button variant="outline" onClick={() => setReturnOpen(true)}>
@@ -119,9 +118,9 @@ export function LoanDetailPage() {
               </Button>
             )}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
         <div className="space-y-5">
           <section className="surface p-5 sm:p-6">
@@ -138,7 +137,7 @@ export function LoanDetailPage() {
                   {loan.parent_loan_id && (
                     <Link
                       to={`/loans/${loan.parent_loan_id}`}
-                      className="text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      className="text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     >
                       Contents of parent loan
                     </Link>
@@ -148,13 +147,13 @@ export function LoanDetailPage() {
                   {loan.outstanding_quantity} of {loan.quantity} still out
                 </h2>
                 {loan.returned_quantity > 0 && (
-                  <p className="mt-1 text-[0.76rem] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {loan.returned_quantity} already returned ·{" "}
                     {loan.quantity - loan.returned_quantity} outstanding
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-[0.72rem] text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-2xs text-muted-foreground">
                 <HandCoins className="size-4 text-brass" />
                 {loan.item_id ? (
                   <Link
@@ -190,16 +189,16 @@ export function LoanDetailPage() {
 
             {loan.notes && (
               <div className="mt-5 border-t border-border/60 pt-4">
-                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Private notes
                 </p>
-                <p className="mt-2 whitespace-pre-line text-[0.8rem] leading-relaxed text-muted-foreground">
+                <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
                   {loan.notes}
                 </p>
               </div>
             )}
             {loan.overdue && (
-              <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                 Past the recorded due date by {loan.days_past_due} day
                 {loan.days_past_due === 1 ? "" : "s"}. This is a household record, not an
                 accusation or an automatic message to the borrower.
@@ -213,7 +212,7 @@ export function LoanDetailPage() {
                 <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
                   Contents on this loan
                 </h2>
-                <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                   Each child item has its own loan record, return history and availability.
                   Returning this parent alone does not mark any child returned.
                 </p>
@@ -222,7 +221,7 @@ export function LoanDetailPage() {
                 {loan.contents_loans?.map((child) => (
                   <li
                     key={child.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-[0.76rem]"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-xs"
                   >
                     <span className="min-w-0">
                       <Link
@@ -239,7 +238,7 @@ export function LoanDetailPage() {
                       <Badge variant={LOAN_STATUS_TONE[child.status]}>
                         {LOAN_STATUS_LABELS[child.status]}
                       </Badge>
-                      <span className="text-[0.68rem] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         {child.outstanding_quantity === 0
                           ? "Returned"
                           : child.due_on
@@ -259,14 +258,14 @@ export function LoanDetailPage() {
                 <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
                   Returns
                 </h2>
-                <p className="mt-1 text-[0.72rem] text-muted-foreground">
+                <p className="mt-1 text-2xs text-muted-foreground">
                   Partial returns stay attached to this loan and its history.
                 </p>
               </div>
               {loan.item_id && (
                 <Link
                   to={`/items/${loan.item_id}`}
-                  className="text-[0.72rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                  className="text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                 >
                   <ArrowLeft className="mr-1 inline size-3" />
                   Item
@@ -274,7 +273,7 @@ export function LoanDetailPage() {
               )}
             </div>
             {loan.returns.length === 0 ? (
-              <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-5 text-[0.76rem] text-muted-foreground">
+              <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-5 text-xs text-muted-foreground">
                 No returns recorded.
               </p>
             ) : (
@@ -282,7 +281,7 @@ export function LoanDetailPage() {
                 {loan.returns.map((entry) => (
                   <li
                     key={entry.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-[0.76rem]"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-xs"
                   >
                     <span>
                       <strong className="font-medium">{entry.quantity}</strong> returned{" "}
@@ -293,7 +292,7 @@ export function LoanDetailPage() {
                         </Badge>
                       )}
                     </span>
-                    <span className="text-[0.68rem] text-muted-foreground">
+                    <span className="text-2xs text-muted-foreground">
                       {entry.created_by_name ?? "Household"} · recorded{" "}
                       {formatDate(entry.created_at)}
                     </span>
@@ -306,10 +305,10 @@ export function LoanDetailPage() {
 
         <aside className="space-y-4">
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Loan history
             </h2>
-            <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               Undo is a new compensating event and is only offered when current state still
               permits it.
             </p>
@@ -352,7 +351,7 @@ export function LoanDetailPage() {
           }
         }}
       />
-    </div>
+    </PageLayout>
   );
 }
 
@@ -366,29 +365,13 @@ function Detail({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-2.5 text-[0.8rem]">
+    <div className="flex items-start gap-2.5 text-xs">
       <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <div>
-        <dt className="text-[0.66rem] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+        <dt className="text-2xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
           {label}
         </dt>
         <dd className="mt-1">{children}</dd>
-      </div>
-    </div>
-  );
-}
-
-function LoanDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-28" />
-      <Skeleton className="mt-4 h-12 w-48" />
-      <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
-        <div className="space-y-5">
-          <Skeleton className="h-56 rounded-2xl" />
-          <Skeleton className="h-40 rounded-2xl" />
-        </div>
-        <Skeleton className="h-72 rounded-2xl" />
       </div>
     </div>
   );

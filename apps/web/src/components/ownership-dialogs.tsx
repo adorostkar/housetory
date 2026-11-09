@@ -115,7 +115,7 @@ export function ItemStorageDialog({
             enable.mutate();
           }}
         >
-          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
             {item.quantity === 1 ? (
               <>
                 A storage place will be created in{" "}
@@ -157,7 +157,7 @@ export function ItemStorageDialog({
             </Field>
           )}
           {containersQuery.isError && (
-            <p className="text-[0.72rem] text-destructive">
+            <p className="text-2xs text-destructive">
               Existing containers could not be checked. You can still create new storage.
             </p>
           )}
@@ -266,14 +266,14 @@ export function ContainerOwnershipDialog({
               type="button"
               onClick={() => setMode("create")}
               className={cn(
-                "rounded-xl border px-3.5 py-3 text-left text-[0.78rem]",
+                "rounded-xl border px-3.5 py-3 text-left text-xs",
                 mode === "create"
                   ? "border-foreground/30 bg-secondary"
                   : "border-border/65 bg-background/40",
               )}
             >
               <span className="block font-medium">Create owned item</span>
-              <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+              <span className="mt-0.5 block text-2xs text-muted-foreground">
                 Keep the container name and add ownership fields afterwards.
               </span>
             </button>
@@ -281,14 +281,14 @@ export function ContainerOwnershipDialog({
               type="button"
               onClick={() => setMode("link")}
               className={cn(
-                "rounded-xl border px-3.5 py-3 text-left text-[0.78rem]",
+                "rounded-xl border px-3.5 py-3 text-left text-xs",
                 mode === "link"
                   ? "border-foreground/30 bg-secondary"
                   : "border-border/65 bg-background/40",
               )}
             >
               <span className="block font-medium">Link existing item</span>
-              <span className="mt-0.5 block text-[0.67rem] text-muted-foreground">
+              <span className="mt-0.5 block text-2xs text-muted-foreground">
                 Deliberately avoid a duplicate ownership record.
               </span>
             </button>
@@ -316,11 +316,11 @@ export function ContainerOwnershipDialog({
               </div>
               <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-border/70 bg-background/35 p-1.5">
                 {itemsQuery.isPending ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-[0.75rem] text-muted-foreground">
+                  <div className="flex items-center justify-center gap-2 py-8 text-2xs text-muted-foreground">
                     <Spinner /> Loading items…
                   </div>
                 ) : candidates.length === 0 ? (
-                  <p className="px-3 py-8 text-center text-[0.75rem] text-muted-foreground">
+                  <p className="px-3 py-8 text-center text-2xs text-muted-foreground">
                     No quantity-1 item is recorded directly outside this container. Create
                     a new owned item instead, or move the intended item here first.
                   </p>
@@ -381,8 +381,8 @@ function ItemLinkRow({
         {selected && <Check className="size-3" />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[0.8rem] font-medium">{item.name}</span>
-        <span className="block truncate text-[0.68rem] text-muted-foreground">
+        <span className="block truncate text-xs font-medium">{item.name}</span>
+        <span className="block truncate text-2xs text-muted-foreground">
           {[item.room?.name, item.category?.name].filter(Boolean).join(" · ") ||
             "No place yet"}
         </span>

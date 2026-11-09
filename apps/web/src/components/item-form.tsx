@@ -533,7 +533,7 @@ export function ItemForm({
               </div>
 
               <div className="rounded-xl border border-border/60 bg-background/30 p-3.5">
-                <p className="mb-3 text-[0.7rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                <p className="mb-3 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                   Place
                 </p>
                 <div className="space-y-4">
@@ -614,7 +614,7 @@ export function ItemForm({
                     </Field>
                   </div>
                   {selectedLocationPath.length > 1 && (
-                    <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+                    <p className="text-2xs leading-relaxed text-muted-foreground">
                       {selectedLocationPath
                         .map((location) => locationLabel(location))
                         .join(" / ")}
@@ -702,8 +702,8 @@ export function ItemForm({
               </Field>
 
               <div>
-                <p className="text-[0.8rem] font-medium">Tags</p>
-                <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+                <p className="text-xs font-medium">Tags</p>
+                <p className="mt-0.5 text-2xs text-muted-foreground">
                   Loose labels that cut across rooms.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -722,7 +722,7 @@ export function ItemForm({
                           )
                         }
                         className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[0.75rem] transition-colors",
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-2xs transition-colors",
                           selected
                             ? "border-primary bg-primary text-primary-foreground"
                             : "border-border bg-card/60 text-muted-foreground hover:border-foreground/25 hover:text-foreground",
@@ -734,7 +734,7 @@ export function ItemForm({
                     );
                   })}
                   {tagsQuery.data?.items.length === 0 && (
-                    <p className="text-[0.75rem] text-muted-foreground">
+                    <p className="text-2xs text-muted-foreground">
                       No tags yet. Create one below.
                     </p>
                   )}
@@ -755,7 +755,7 @@ export function ItemForm({
                       }
                     }}
                     placeholder="Add a tag"
-                    className="h-9 text-[0.8rem]"
+                    className="h-9 text-xs"
                   />
                   <Button
                     type="button"
@@ -769,7 +769,7 @@ export function ItemForm({
                     {createTag.isPending ? <Spinner /> : <Plus />}
                   </Button>
                 </div>
-                {tagError && <p className="text-[0.74rem] text-destructive">{tagError}</p>}
+                {tagError && <p className="text-2xs text-destructive">{tagError}</p>}
               </div>
             </OptionalFormSection>
 
@@ -780,12 +780,12 @@ export function ItemForm({
               open={purchaseOpen}
               onToggle={() => setPurchaseOpen((current) => !current)}
             >
-              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 The original transaction or package total and receipt trail. Current
                 value is recorded separately per owned unit.
               </p>
               {item?.purchase?.is_shared && (
-                <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-[0.74rem] leading-relaxed text-muted-foreground">
+                <div className="rounded-xl border border-brass/20 bg-brass-soft/60 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
                   This purchase is shared by {item.purchase.item_count} items. The
                   amount is the purchase transaction total, not a per-unit price, and
                   is not multiplied by quantity. Editing it updates the single shared
@@ -794,7 +794,7 @@ export function ItemForm({
               )}
               {canUseUnitPrice && (
                 <div className="space-y-2">
-                  <p className="text-[0.8rem] font-medium">Amount entered</p>
+                  <p className="text-xs font-medium">Amount entered</p>
                   <div
                     className="flex flex-wrap gap-2"
                     role="group"
@@ -819,7 +819,7 @@ export function ItemForm({
                       Price per unit
                     </Button>
                   </div>
-                  <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+                  <p className="text-2xs leading-relaxed text-muted-foreground">
                     This item has quantity {parsedQuantity}. Enter the package total or
                     the price for one unit; the other value is calculated.
                   </p>
@@ -917,7 +917,7 @@ export function ItemForm({
                   </Select>
                 </Field>
               </div>
-              <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 {priceBasisActive === "unit"
                   ? "Enter the price for one unit. The package total is calculated from the item quantity shown above."
                   : item?.purchase?.is_shared
@@ -927,7 +927,7 @@ export function ItemForm({
               {packagePriceCents != null && Number.isFinite(packagePriceCents) && (
                 <div
                   data-testid="purchase-price-preview"
-                  className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-[0.74rem] leading-relaxed"
+                  className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed"
                 >
                   <p className="font-medium">
                     {formatCurrency(packagePriceCents, currency)} {purchaseTotalLabel}
@@ -996,7 +996,7 @@ export function ItemForm({
                 open={legacyEstimateOpen}
                 onToggle={() => setLegacyEstimateOpen((current) => !current)}
               >
-                <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+                <p className="text-2xs leading-relaxed text-muted-foreground">
                   This older value is read-only and is preserved when you edit the item.
                   Create a fresh replacement estimate only when you need an insurance list.
                 </p>
@@ -1013,7 +1013,7 @@ export function ItemForm({
               open={warrantyOpen}
               onToggle={() => setWarrantyOpen((current) => !current)}
             >
-              <p className="text-[0.74rem] leading-relaxed text-muted-foreground">
+              <p className="text-2xs leading-relaxed text-muted-foreground">
                 Keep the end date in view so nothing slips past.
               </p>
               {warrantyDatesInvalid && (

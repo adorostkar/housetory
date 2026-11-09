@@ -15,7 +15,7 @@
     --secondary: 36 20% 92%;
     --secondary-foreground: 30 10% 16%;
     --muted: 36 19% 92%;
-    --muted-foreground: 30 6% 43%;
+    --muted-foreground: 30 7% 38%;
     --accent: 140 12% 89%;
     --accent-foreground: 145 14% 24%;
     --destructive: 2 58% 45%;
@@ -114,7 +114,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    @apply text-muted-foreground/70;
+    @apply text-muted-foreground;
   }
 
   ::-webkit-scrollbar {
@@ -157,11 +157,15 @@
   }
 
   .eyebrow {
-    @apply text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground;
+    @apply text-2xs font-semibold uppercase tracking-[0.14em] text-muted-foreground;
   }
 
   .display-title {
     @apply font-display text-[2.15rem] font-normal leading-[1.08] tracking-[-0.025em] sm:text-[2.75rem];
+  }
+
+  .display-title-compact {
+    @apply font-display text-[1.75rem] font-normal leading-[1.1] tracking-[-0.02em] sm:text-[2.1rem];
   }
 
   .section-title {

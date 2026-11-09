@@ -251,10 +251,10 @@ export function RecognitionPage() {
                 />
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 p-4">
                   <div>
-                    <p className="text-[0.82rem] font-medium">
+                    <p className="text-xs font-medium">
                       {recognition.original_filename}
                     </p>
-                    <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
                       {recognition.width} × {recognition.height} ·{" "}
                       {formatDate(recognition.created_at)}
                     </p>
@@ -293,20 +293,20 @@ export function RecognitionPage() {
                 <p className="mt-5 font-display text-2xl tracking-[-0.025em]">
                   Start with a photograph
                 </p>
-                <p className="mt-2 max-w-md text-[0.8rem] leading-relaxed text-muted-foreground">
+                <p className="mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
                   AI vision is used when configured. Without a model, readable text on
                   packaging can still provide an OCR-based suggestion.
                 </p>
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   <label
                     htmlFor="recognition-upload"
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-primary px-4 py-2 text-[0.78rem] font-medium text-primary-foreground"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground"
                   >
                     <Upload className="size-4" /> Choose photo
                   </label>
                   <label
                     htmlFor="recognition-camera"
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-4 py-2 text-[0.78rem] font-medium sm:hidden"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-border px-4 py-2 text-xs font-medium sm:hidden"
                   >
                     <Camera className="size-4" /> Take photo
                   </label>
@@ -329,23 +329,23 @@ export function RecognitionPage() {
               onChange={onSelectFile}
             />
             {upload.isPending && (
-              <div className="flex items-center justify-center gap-2 border-t border-border/60 p-5 text-[0.8rem] text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 border-t border-border/60 p-5 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /> Uploading photograph…
               </div>
             )}
           </section>
 
           {recognition?.status === "queued" || recognition?.status === "processing" ? (
-            <div className="surface flex items-center gap-3 p-5 text-[0.82rem] text-muted-foreground">
+            <div className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Reading the photograph on the server…
             </div>
           ) : recognition?.status === "failed" ? (
             <div className="surface border-destructive/25 p-5">
-              <p className="text-[0.82rem] font-medium text-destructive">
+              <p className="text-xs font-medium text-destructive">
                 Recognition failed
               </p>
-              <p className="mt-1 text-[0.75rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
                 {recognition.error ||
                   "Configure a vision-capable model or upload a photo with readable text."}
               </p>
@@ -357,7 +357,7 @@ export function RecognitionPage() {
                   Review the suggestion
                 </h2>
                 {processing && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[0.78rem] text-muted-foreground">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant={processing.variant}>{processing.label}</Badge>
                     <span>{processing.detail}</span>
                     {recognition.confidence != null ? (
@@ -366,12 +366,12 @@ export function RecognitionPage() {
                   </div>
                 )}
                 {processing && processing.warnings.length > 0 && (
-                  <div className="mt-3 rounded-xl border border-brass/20 bg-brass-soft/50 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+                  <div className="mt-3 rounded-xl border border-brass/20 bg-brass-soft/50 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                     {processing.warnings.join(" ")}
                   </div>
                 )}
                 {suggestions[0]?.review && suggestions[0].review_reason && (
-                  <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-brass">
+                  <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-2xs leading-relaxed text-brass">
                     <span className="font-medium">Review this observation. </span>
                     {suggestions[0].review_reason} It is not a confirmed possession.
                   </div>
@@ -390,8 +390,8 @@ export function RecognitionPage() {
                       }}
                       className={
                         index === suggestionIndex
-                          ? "rounded-full bg-primary px-3 py-1.5 text-[0.72rem] text-primary-foreground"
-                          : "rounded-full border border-border px-3 py-1.5 text-[0.72rem] text-muted-foreground"
+                          ? "rounded-full bg-primary px-3 py-1.5 text-2xs text-primary-foreground"
+                          : "rounded-full border border-border px-3 py-1.5 text-2xs text-muted-foreground"
                       }
                     >
                       {suggestion.name}
@@ -458,15 +458,15 @@ export function RecognitionPage() {
               </div>
 
               <div className="rounded-xl border border-border/70 p-4">
-                <p className="text-[0.8rem] font-medium">What should happen?</p>
+                <p className="text-xs font-medium">What should happen?</p>
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
                     onClick={() => setTargetMode("new")}
                     className={
                       targetMode === "new"
-                        ? "flex-1 rounded-lg bg-secondary px-3 py-2 text-[0.76rem] font-medium"
-                        : "flex-1 rounded-lg border border-border px-3 py-2 text-[0.76rem] text-muted-foreground"
+                        ? "flex-1 rounded-lg bg-secondary px-3 py-2 text-xs font-medium"
+                        : "flex-1 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground"
                     }
                   >
                     Create a new item
@@ -476,8 +476,8 @@ export function RecognitionPage() {
                     onClick={() => setTargetMode("existing")}
                     className={
                       targetMode === "existing"
-                        ? "flex-1 rounded-lg bg-secondary px-3 py-2 text-[0.76rem] font-medium"
-                        : "flex-1 rounded-lg border border-border px-3 py-2 text-[0.76rem] text-muted-foreground"
+                        ? "flex-1 rounded-lg bg-secondary px-3 py-2 text-xs font-medium"
+                        : "flex-1 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground"
                     }
                   >
                     Update an existing item
@@ -501,7 +501,7 @@ export function RecognitionPage() {
                     </Field>
                   </div>
                 )}
-                <label className="mt-3 flex items-center gap-2 text-[0.75rem]">
+                <label className="mt-3 flex items-center gap-2 text-2xs">
                   <input
                     type="checkbox"
                     checked={attachPhoto}
@@ -513,7 +513,7 @@ export function RecognitionPage() {
               </div>
 
               <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-[0.7rem] text-muted-foreground">
+                <p className="text-2xs text-muted-foreground">
                   Nothing changes until you review and confirm.
                 </p>
                 <Button
@@ -530,7 +530,7 @@ export function RecognitionPage() {
               </div>
             </section>
           ) : (
-            <section className="surface p-5 text-[0.82rem] text-muted-foreground">
+            <section className="surface p-5 text-xs text-muted-foreground">
               Choose a photograph or open a recent recognition to begin.
             </section>
           )}
@@ -538,10 +538,10 @@ export function RecognitionPage() {
 
         <aside className="space-y-4">
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Recognition mode
             </h2>
-            <p className="mt-2 text-[0.8rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               {aiStatus.data?.available
                 ? `A vision-capable model is configured (${aiStatus.data.model}).`
                 : "No vision model is available. Housetory will fall back to OCR text and mark suggestions as inferred."}
@@ -552,16 +552,16 @@ export function RecognitionPage() {
           </section>
 
           <section className="surface p-5">
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Recent recognitions
             </h2>
             <div className="mt-3 space-y-2">
               {recognitionsQuery.isPending ? (
-                <p className="py-4 text-center text-[0.75rem] text-muted-foreground">
+                <p className="py-4 text-center text-2xs text-muted-foreground">
                   Loading…
                 </p>
               ) : (recognitionsQuery.data?.items.length ?? 0) === 0 ? (
-                <p className="py-4 text-center text-[0.75rem] text-muted-foreground">
+                <p className="py-4 text-center text-2xs text-muted-foreground">
                   No photographs yet.
                 </p>
               ) : (
@@ -583,10 +583,10 @@ export function RecognitionPage() {
                       className="size-9 shrink-0 rounded-lg object-cover"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[0.75rem] font-medium">
+                      <span className="block truncate text-2xs font-medium">
                         {entry.original_filename}
                       </span>
-                      <span className="block text-[0.66rem] text-muted-foreground">
+                      <span className="block text-2xs text-muted-foreground">
                         {entry.status} · {formatDate(entry.created_at)}
                       </span>
                     </span>
@@ -597,10 +597,10 @@ export function RecognitionPage() {
           </section>
 
           <section className="surface p-5">
-            <h2 className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               <Package className="size-3.5" /> Privacy
             </h2>
-            <p className="mt-2 text-[0.75rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
               Local models keep the photograph on your server. Cloud vision requires
               explicit configuration and consent. The original photo is private and
               authenticated.

@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { Field, FormError } from "@/components/form-field";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -97,23 +97,23 @@ export function ImportsPage() {
   const imports = importsQuery.data?.items ?? [];
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Intelligence"
-        title="Import"
-        description="Turn notes, spreadsheets, documents, images or an Obsidian ZIP vault into proposed inventory entries for review."
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Intelligence",
+        title: "Import",
+        description: "Turn notes, spreadsheets, documents, images or an Obsidian ZIP vault into proposed inventory entries for review.",
+        actions: (
           <Button variant="outline" asChild>
             <Link to="/assistant">
               <Sparkles />
               Ask Housetory
             </Link>
           </Button>
-        }
-      />
-
+        ),
+      }}
+    >
       {(roomId || locationId) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-sage/25 bg-sage-soft/40 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-sage/25 bg-sage-soft/40 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
           <MapPin className="size-4 shrink-0 text-sage" />
           <span className="mr-auto">
             New entries without their own location will default to{" "}
@@ -159,8 +159,8 @@ export function ImportsPage() {
               aria-pressed={mode === entry.id}
               className={
                 mode === entry.id
-                  ? "inline-flex items-center gap-2 rounded-full bg-primary px-3.5 py-2 text-[0.75rem] font-medium text-primary-foreground"
-                  : "inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.75rem] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  ? "inline-flex items-center gap-2 rounded-full bg-primary px-3.5 py-2 text-2xs font-medium text-primary-foreground"
+                  : "inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               }
             >
               <entry.icon className="size-3.5" />
@@ -193,7 +193,7 @@ export function ImportsPage() {
                     placeholder={
                       "Winter clothes are in the blue boxes in the attic.\\nTwo suitcases are stored under the guest bed.\\nCamera equipment is in the office cupboard."
                     }
-                    className="min-h-44 font-mono text-[0.78rem] leading-relaxed"
+                    className="min-h-44 font-mono text-xs leading-relaxed"
                   />
                 </Field>
               ) : (
@@ -210,10 +210,10 @@ export function ImportsPage() {
                       <Upload className="size-5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[0.85rem] font-medium">
+                      <span className="block truncate text-sm font-medium">
                         {file ? file.name : "Choose a file"}
                       </span>
-                      <span className="mt-1 block text-[0.7rem] text-muted-foreground">
+                      <span className="mt-1 block text-2xs text-muted-foreground">
                         {file
                           ? formatFileSize(file.size)
                           : "Tap to browse or take a photo"}
@@ -275,7 +275,7 @@ export function ImportsPage() {
                   placeholder="Household notes"
                 />
               </Field>
-              <div className="rounded-xl border border-border/70 bg-secondary/25 p-4 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <div className="rounded-xl border border-border/70 bg-secondary/25 p-4 text-2xs leading-relaxed text-muted-foreground">
                 <p className="flex items-center gap-1.5 font-medium text-foreground/80">
                   <Sparkles className="size-3.5 text-brass" />
                   Nothing is created automatically
@@ -315,7 +315,7 @@ export function ImportsPage() {
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
             <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">Import history</h2>
-            <p className="mt-1 text-[0.78rem] text-muted-foreground">
+            <p className="mt-1 text-xs text-muted-foreground">
               Sources, processing state and approved records.
             </p>
           </div>
@@ -344,7 +344,7 @@ export function ImportsPage() {
           </div>
         )}
       </section>
-    </div>
+    </PageLayout>
   );
 }
 
@@ -363,7 +363,7 @@ function ImportHistoryCard({ batch }: { batch: ImportBatch }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-[0.88rem] font-medium">{batch.title}</h3>
+          <h3 className="truncate text-sm font-medium">{batch.title}</h3>
           <Badge variant={IMPORT_STATUS_TONE[batch.status] ?? "outline"}>
             {IMPORT_STATUS_LABELS[batch.status] ?? batch.status}
           </Badge>
@@ -371,16 +371,16 @@ function ImportHistoryCard({ batch }: { batch: ImportBatch }) {
             {IMPORT_SOURCE_LABELS[batch.source_type] ?? batch.source_type}
           </Badge>
         </div>
-        <p className="mt-1 truncate text-[0.7rem] text-muted-foreground">
+        <p className="mt-1 truncate text-2xs text-muted-foreground">
           {formatDate(batch.created_at)}
           {batch.original_filename ? ` · ${batch.original_filename}` : ""}
           {batch.total_entries ? ` · ${pluralize(batch.total_entries, "proposal")}` : ""}
         </p>
         {batch.error && (
-          <p className="mt-1 line-clamp-1 text-[0.7rem] text-destructive">{batch.error}</p>
+          <p className="mt-1 line-clamp-1 text-2xs text-destructive">{batch.error}</p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-4 text-[0.7rem] text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-4 text-2xs text-muted-foreground">
         <span>{batch.imported_entries} imported</span>
         <span>{batch.skipped_entries} skipped</span>
         <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />

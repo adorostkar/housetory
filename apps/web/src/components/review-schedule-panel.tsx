@@ -141,7 +141,7 @@ function ScheduleStatus({
 }) {
   if (!schedule || !schedule.configured) return null;
   return (
-    <div className="mt-2 space-y-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+    <div className="mt-2 space-y-1 text-2xs leading-relaxed text-muted-foreground">
       {schedule.enabled && (
         <>
           <p>
@@ -164,7 +164,7 @@ function ScheduleStatus({
             )}`}
       </p>
       {schedule.last_run_detail && (
-        <p className="break-words rounded-lg border border-border/60 bg-background/40 px-2.5 py-2 text-[0.68rem]">
+        <p className="break-words rounded-lg border border-border/60 bg-background/40 px-2.5 py-2 text-2xs">
           {schedule.last_run_detail}
         </p>
       )}
@@ -179,7 +179,7 @@ function ScheduleStatus({
         </p>
       )}
       {!compact && schedule.enabled && (
-        <p className="text-[0.66rem]">
+        <p className="text-2xs">
           Offline rules are bounded to {schedule.max_items} item
           {schedule.max_items === 1 ? "" : "s"} per run; up to{" "}
           {schedule.max_runs_per_day} scheduled run
@@ -188,7 +188,7 @@ function ScheduleStatus({
         </p>
       )}
       {schedule.state === "attention" && schedule.state_detail && (
-        <p className="flex items-start gap-1.5 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-2.5 py-2 text-[0.68rem] text-destructive">
+        <p className="flex items-start gap-1.5 rounded-lg border border-destructive/20 bg-destructive/[0.05] px-2.5 py-2 text-2xs text-destructive">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
           <span className="break-words">{schedule.state_detail}</span>
         </p>
@@ -302,7 +302,7 @@ function ScheduleDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <label className="flex items-start gap-2.5 rounded-xl border border-border/60 bg-background/35 p-3.5 text-[0.78rem]">
+          <label className="flex items-start gap-2.5 rounded-xl border border-border/60 bg-background/35 p-3.5 text-xs">
             <input
               type="checkbox"
               className="mt-0.5 size-4 accent-primary"
@@ -316,7 +316,7 @@ function ScheduleDialog({
               <span className="font-medium">
                 Enable scheduled review (offline rules)
               </span>
-              <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+              <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
                 Off by default. Disabling stops future dispatch; a run already queued
                 is cancelled and a run already in progress may finish. Opening this
                 screen or enabling offline scheduling never calls AI.
@@ -325,7 +325,7 @@ function ScheduleDialog({
           </label>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Scope</span>
               <Select
                 aria-label="Schedule scope type"
@@ -346,10 +346,10 @@ function ScheduleDialog({
                 ))}
               </Select>
             </label>
-            <div className="space-y-1.5 text-[0.74rem]">
+            <div className="space-y-1.5 text-2xs">
               <span className="field-label">Scope detail</span>
               {form.scopeType === "household" ? (
-                <p className="rounded-lg border border-border/60 bg-background/35 px-3 py-2 text-[0.72rem] text-muted-foreground">
+                <p className="rounded-lg border border-border/60 bg-background/35 px-3 py-2 text-2xs text-muted-foreground">
                   Every active item in this household.
                 </p>
               ) : form.scopeType === "property" ? (
@@ -411,7 +411,7 @@ function ScheduleDialog({
               )}
             </div>
 
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Frequency</span>
               <Select
                 aria-label="Schedule frequency"
@@ -428,7 +428,7 @@ function ScheduleDialog({
               </Select>
             </label>
             {form.frequency === "weekly" ? (
-              <label className="space-y-1.5 text-[0.74rem]">
+              <label className="space-y-1.5 text-2xs">
                 <span className="field-label">Day</span>
                 <Select
                   aria-label="Weekly day"
@@ -448,7 +448,7 @@ function ScheduleDialog({
                 </Select>
               </label>
             ) : (
-              <label className="space-y-1.5 text-[0.74rem]">
+              <label className="space-y-1.5 text-2xs">
                 <span className="field-label">Day of month</span>
                 <Select
                   aria-label="Monthly day"
@@ -468,7 +468,7 @@ function ScheduleDialog({
                 </Select>
               </label>
             )}
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Local hour</span>
               <Select
                 aria-label="Schedule hour"
@@ -487,7 +487,7 @@ function ScheduleDialog({
                 ))}
               </Select>
             </label>
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Timezone</span>
               <Input
                 aria-label="Schedule timezone"
@@ -504,7 +504,7 @@ function ScheduleDialog({
                 ))}
               </datalist>
             </label>
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Maximum items per run</span>
               <Input
                 aria-label="Maximum items per run"
@@ -522,12 +522,12 @@ function ScheduleDialog({
                   }))
                 }
               />
-              <span className="text-[0.66rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 Server hard cap: 500. New and recently changed items are prioritised;
                 older items rotate in on later runs.
               </span>
             </label>
-            <label className="space-y-1.5 text-[0.74rem]">
+            <label className="space-y-1.5 text-2xs">
               <span className="field-label">Maximum scheduled runs per day</span>
               <Select
                 aria-label="Maximum scheduled runs per day"
@@ -545,23 +545,23 @@ function ScheduleDialog({
                   </option>
                 ))}
               </Select>
-              <span className="text-[0.66rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 Hard server cap: 4. Manual reviews are not counted against this cap.
               </span>
             </label>
           </div>
 
           <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-            <div className="flex items-start gap-2.5 text-[0.76rem]">
+            <div className="flex items-start gap-2.5 text-xs">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-brass" />
               <div className="min-w-0">
                 <p className="font-medium">Optional scheduled AI</p>
-                <p className="mt-0.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+                <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
                   Offline rules are always the base of a scheduled run. This separate
                   option adds one bounded organisation pass using the existing household
                   Assistant task.
                 </p>
-                <p className="mt-1 break-words text-[0.68rem] text-muted-foreground">
+                <p className="mt-1 break-words text-2xs text-muted-foreground">
                   Current Assistant route:{" "}
                   <strong className="font-medium text-foreground/85">{aiLabel}</strong>
                   {aiModel ? ` · ${aiModel}` : ""}
@@ -569,7 +569,7 @@ function ScheduleDialog({
                 </p>
               </div>
             </div>
-            <label className="mt-3 flex items-start gap-2.5 text-[0.74rem]">
+            <label className="mt-3 flex items-start gap-2.5 text-2xs">
               <input
                 type="checkbox"
                 className="mt-0.5 size-4 accent-primary"
@@ -586,7 +586,7 @@ function ScheduleDialog({
               />
               <span>
                 Include AI-assisted category and tag suggestions in scheduled runs
-                <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
                   {aiReady
                     ? "Requires the separate consent below. If the provider, endpoint or model changes, AI is skipped until consent is reconfirmed."
                     : "Configure the Assistant task first. Offline-only scheduling remains available."}
@@ -595,7 +595,7 @@ function ScheduleDialog({
             </label>
             {form.includeAi && (
               <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/35 p-3">
-                <label className="flex items-start gap-2.5 text-[0.74rem]">
+                <label className="flex items-start gap-2.5 text-2xs">
                   <input
                     type="checkbox"
                     className="mt-0.5 size-4 accent-primary"
@@ -610,7 +610,7 @@ function ScheduleDialog({
                   />
                   <span className="min-w-0 break-words">
                     I consent to scheduled AI using this provider
-                    <span className="mt-1 block text-[0.68rem] leading-relaxed text-muted-foreground">
+                    <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
                       One bounded request per scheduled run sends at most 40 items that
                       need a category or tags. Only item names, descriptions, brand/model,
                       current category/tag names and existing household category/tag names
@@ -624,14 +624,14 @@ function ScheduleDialog({
                   </span>
                 </label>
                 {schedule?.ai_consent_reason && !schedule.ai_consent_valid && (
-                  <p className="mt-2 flex items-start gap-1.5 text-[0.68rem] text-brass">
+                  <p className="mt-2 flex items-start gap-1.5 text-2xs text-brass">
                     <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
                     <span>{schedule.ai_consent_reason}</span>
                   </p>
                 )}
               </div>
             )}
-            <p className="mt-2 text-[0.66rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               Provider request cap: 1 per scheduled run. AI consent is independent of
               on-demand review and of the provider-level cloud consent.
             </p>
@@ -701,7 +701,7 @@ export function ReviewSchedulePanel({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
             Inventory care schedule
           </p>
           <h2
@@ -711,7 +711,7 @@ export function ReviewSchedulePanel({
             <CalendarClock className="size-4 text-muted-foreground" strokeWidth={1.7} />
             Scheduled review
           </h2>
-          <p className="mt-1 max-w-2xl text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-2xs leading-relaxed text-muted-foreground">
             Optional weekly or monthly review. Off by default; scheduled runs only create
             persistent suggestions and never change inventory automatically.
           </p>
@@ -741,18 +741,18 @@ export function ReviewSchedulePanel({
         </div>
       ) : (
         <>
-          <p className="mt-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
             {view?.state_detail ?? "No scheduled review has been configured. Automatic review is off."}
           </p>
           <ScheduleStatus schedule={view} />
           {!view?.configured && isOwner && (
-            <p className="mt-2 text-[0.68rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               Set up a schedule to run offline inventory rules automatically. Enabling a
               schedule does not enable AI or make any provider call.
             </p>
           )}
           {view?.include_ai && view.enabled && !view.ai_consent_valid && (
-            <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.68rem] text-muted-foreground">
+            <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs text-muted-foreground">
               <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-brass" />
               <span>
                 Scheduled AI will be skipped and offline rules will still run until the
@@ -761,7 +761,7 @@ export function ReviewSchedulePanel({
             </p>
           )}
           {!isOwner && (
-            <p className="mt-2 text-[0.66rem] text-muted-foreground">
+            <p className="mt-2 text-2xs text-muted-foreground">
               Only the household owner can change the schedule or AI consent. All
               members can see whether a run is scheduled.
             </p>

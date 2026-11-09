@@ -158,7 +158,7 @@ export function HierarchyReview({
 
   return (
     <div className="space-y-2" aria-label="Proposed hierarchy">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2 text-[0.68rem] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2 text-2xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <FolderTree className="size-3.5 text-sage" /> Rooms and containers are created in
           dependency order.
@@ -306,7 +306,7 @@ function HierarchyRow({
               )}
             </button>
           ) : (
-            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center text-muted-foreground/40">
+            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center text-muted-foreground">
               {type === "item" ? <Package className="size-3.5" /> : <CornerDownRight className="size-3.5" />}
             </span>
           )}
@@ -322,7 +322,7 @@ function HierarchyRow({
           )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="text-[0.86rem] font-medium">{proposed.name}</h3>
+              <h3 className="text-sm font-medium">{proposed.name}</h3>
               <Badge variant={ENTITY_TONE[type]}>{ENTITY_LABELS[type]}</Badge>
               {(type === "item" || type === "container") && proposed.quantity !== 1 && (
                 <Badge variant="secondary">×{proposed.quantity}</Badge>
@@ -346,7 +346,7 @@ function HierarchyRow({
                 </Badge>
               )}
             </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.68rem] text-muted-foreground">
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
               <span className="inline-flex items-center gap-1">
                 <MapPin className="size-3" />
                 {parent ? parent.proposed.name : "Top level"}
@@ -355,10 +355,10 @@ function HierarchyRow({
               {entry.source_path && <span className="truncate">{entry.source_path}</span>}
             </p>
             {entry.error && (
-              <p className="mt-1.5 text-[0.7rem] text-destructive">{entry.error}</p>
+              <p className="mt-1.5 text-2xs text-destructive">{entry.error}</p>
             )}
             {highDuplicate && !final && (
-              <div className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/40 px-2.5 py-2 text-[0.68rem] text-muted-foreground">
+              <div className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/40 px-2.5 py-2 text-2xs text-muted-foreground">
                 <p className="font-medium text-foreground/80">Existing item may match</p>
                 {entry.duplicate_candidates
                   .filter((candidate) => candidate.score >= 55)
@@ -381,10 +381,10 @@ function HierarchyRow({
               </div>
             )}
             <details className="mt-1.5">
-              <summary className="cursor-pointer text-[0.65rem] text-muted-foreground">
+              <summary className="cursor-pointer text-2xs text-muted-foreground">
                 Source reference
               </summary>
-              <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-secondary/35 px-2.5 py-2 font-mono text-[0.65rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-secondary/35 px-2.5 py-2 font-mono text-2xs leading-relaxed text-muted-foreground">
                 {entry.source_excerpt || "No source excerpt available."}
               </p>
             </details>
@@ -399,7 +399,7 @@ function HierarchyRow({
                   onChange={(event) =>
                     setDecision({ action: event.target.value as ImportDecision["action"] })
                   }
-                  className="h-8 w-[108px] text-[0.7rem]"
+                  className="h-8 w-[108px] text-2xs"
                 >
                   <option value="import">Import</option>
                   <option value="skip">Skip</option>
@@ -445,7 +445,7 @@ function HierarchyRow({
         {editing && (
           <div className="space-y-3 border-t border-border/60 p-3 sm:p-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="text-[0.7rem] font-medium">
+              <label className="text-2xs font-medium">
                 Name
                 <Input
                   className="mt-1.5"
@@ -455,7 +455,7 @@ function HierarchyRow({
                   onChange={(event) => update({ name: event.target.value })}
                 />
               </label>
-              <label className="text-[0.7rem] font-medium">
+              <label className="text-2xs font-medium">
                 Entity type
                 <Select
                   className="mt-1.5"
@@ -471,7 +471,7 @@ function HierarchyRow({
                   <option value="location">Fixed location</option>
                 </Select>
               </label>
-              <label className="text-[0.7rem] font-medium">
+              <label className="text-2xs font-medium">
                 Parent
                 <Select
                   className="mt-1.5"
@@ -489,7 +489,7 @@ function HierarchyRow({
                   ))}
                 </Select>
               </label>
-              <label className="text-[0.7rem] font-medium">
+              <label className="text-2xs font-medium">
                 Quantity
                 <Input
                   className="mt-1.5"
@@ -502,7 +502,7 @@ function HierarchyRow({
                 />
               </label>
               {type === "container" && (
-                <label className="text-[0.7rem] font-medium">
+                <label className="text-2xs font-medium">
                   Container type
                   <Select
                     className="mt-1.5"
@@ -527,7 +527,7 @@ function HierarchyRow({
                 </label>
               )}
               {(type === "container" || type === "location") && (
-                <label className="text-[0.7rem] font-medium">
+                <label className="text-2xs font-medium">
                   Legacy identifier
                   <Input
                     className="mt-1.5"
@@ -547,7 +547,7 @@ function HierarchyRow({
               )}
             </div>
             {type === "item" && (
-              <label className="block text-[0.7rem] font-medium">
+              <label className="block text-2xs font-medium">
                 Description
                 <Textarea
                   className="mt-1.5"
@@ -558,7 +558,7 @@ function HierarchyRow({
                 />
               </label>
             )}
-            <p className="text-[0.66rem] leading-relaxed text-muted-foreground">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               Parent changes are validated for cycles by the backend. Creating a room or
               container reuses an existing record when its name, room, parent and legacy
               identifier already match.

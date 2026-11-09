@@ -151,7 +151,7 @@ export function BulkSelectionControls({
   total: number;
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2 text-[0.74rem] text-muted-foreground">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-2xs text-muted-foreground">
       {selection.selectableItems.length > 0 && (
         <label className="flex min-w-0 items-center gap-2">
           <input
@@ -178,7 +178,7 @@ export function BulkSelectionNotice({ selection }: { selection: BulkSelection })
   if (!selection.notice) return null;
   return (
     <div
-      className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-secondary/25 px-3.5 py-2.5 text-[0.74rem] leading-relaxed text-muted-foreground"
+      className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-secondary/25 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground"
       role="status"
     >
       <span>{selection.notice}</span>
@@ -217,12 +217,12 @@ export function BulkItemActionBar({
   return (
     <>
       <div className="surface mb-4 flex flex-col gap-3 border-brass/25 bg-brass-soft/25 p-3.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 text-[0.78rem]">
+        <div className="min-w-0 text-xs">
           <p className="font-medium">
             {pluralize(summary.count, "item")} selected ·{" "}
             {pluralize(summary.units, "unit")}
           </p>
-          <p className="mt-0.5 text-[0.68rem] text-muted-foreground">
+          <p className="mt-0.5 text-2xs text-muted-foreground">
             {summary.onLoan > 0
               ? `${summary.onLoan} unit(s) on loan; their home place can move without changing loans.`
               : "Bulk actions apply to the selected loaded records only."}

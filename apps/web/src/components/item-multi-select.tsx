@@ -44,13 +44,13 @@ export function ItemMultiSelect({
     <div>
       {label && (
         <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-[0.8rem] font-medium">{label}</span>
-          <span className="text-[0.7rem] text-muted-foreground">
+          <span className="text-xs font-medium">{label}</span>
+          <span className="text-2xs text-muted-foreground">
             {pluralize(selected.length, "item")} selected
           </span>
         </div>
       )}
-      {hint && <p className="mb-2 text-[0.72rem] text-muted-foreground">{hint}</p>}
+      {hint && <p className="mb-2 text-2xs text-muted-foreground">{hint}</p>}
       <div className="rounded-xl border border-border bg-background/50">
         <div className="relative border-b border-border/70">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -61,16 +61,16 @@ export function ItemMultiSelect({
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find an item…"
             aria-label="Find items"
-            className="h-10 w-full rounded-t-xl bg-transparent pl-9 pr-3 text-[0.8rem] outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30 disabled:opacity-50"
+            className="h-10 w-full rounded-t-xl bg-transparent pl-9 pr-3 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30 disabled:opacity-50"
           />
         </div>
         <div className="max-h-56 overflow-y-auto p-1.5">
           {itemsQuery.isPending ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-[0.75rem] text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 py-8 text-2xs text-muted-foreground">
               <Spinner /> Loading items…
             </div>
           ) : items.length === 0 ? (
-            <p className="py-8 text-center text-[0.75rem] text-muted-foreground">
+            <p className="py-8 text-center text-2xs text-muted-foreground">
               {search.trim() ? "No items match that search." : "No items yet."}
             </p>
           ) : (
@@ -107,15 +107,15 @@ export function ItemMultiSelect({
                       className="size-8 shrink-0 rounded-lg object-cover"
                     />
                   ) : (
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground/60">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground">
                       <Package className="size-3.5" />
                     </span>
                   )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.8rem] font-medium">
+                    <span className="block truncate text-xs font-medium">
                       {item.name}
                     </span>
-                    <span className="block truncate text-[0.68rem] text-muted-foreground">
+                    <span className="block truncate text-2xs text-muted-foreground">
                       {[item.room?.name, item.category?.name].filter(Boolean).join(" · ") ||
                         "No place yet"}
                     </span>

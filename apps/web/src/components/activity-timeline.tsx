@@ -232,7 +232,7 @@ export function ActivityTimeline({
 
   if (events.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-border/70 px-4 py-5 text-[0.76rem] leading-relaxed text-muted-foreground">
+      <p className="rounded-xl border border-dashed border-border/70 px-4 py-5 text-xs leading-relaxed text-muted-foreground">
         {emptyText}
       </p>
     );
@@ -265,16 +265,16 @@ export function ActivityTimeline({
                   <Badge variant={ACTION_TONE[event.action] ?? "outline"}>
                     {ACTION_LABELS[event.action] ?? event.action.replaceAll(".", " ")}
                   </Badge>
-                  <p className="text-[0.78rem] font-medium">{event.summary}</p>
+                  <p className="text-xs font-medium">{event.summary}</p>
                 </div>
                 {(from || to) && (
-                  <p className="mt-1 flex flex-wrap items-center gap-1 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-1 flex flex-wrap items-center gap-1 text-2xs text-muted-foreground">
                     <MapPin className="size-3" />
                     {from ?? "No place"} <span aria-hidden>→</span> {to ?? "No place"}
                   </p>
                 )}
                 {batch && (
-                  <p className="mt-1 text-[0.66rem] text-muted-foreground">
+                  <p className="mt-1 text-2xs text-muted-foreground">
                     Part of a bulk move ·{" "}
                     {typeof batch.batch_item_count === "number"
                       ? batch.batch_item_count
@@ -286,12 +286,12 @@ export function ActivityTimeline({
                     unit(s) selected
                   </p>
                 )}
-                <p className="mt-1 text-[0.66rem] text-muted-foreground">
+                <p className="mt-1 text-2xs text-muted-foreground">
                   {event.actor_name} · {timestamp(event.created_at)}
                   {event.undoes_event_id ? " · compensating event" : ""}
                 </p>
                 {reasons && (
-                  <p className="mt-1 flex items-start gap-1 text-[0.66rem] text-brass">
+                  <p className="mt-1 flex items-start gap-1 text-2xs text-brass">
                     <AlertTriangle className="mt-0.5 size-3 shrink-0" />
                     {restore ? "Restore unavailable" : "Undo unavailable"}: {reasons}
                   </p>
@@ -368,15 +368,15 @@ export function ActivityTimeline({
           </DialogHeader>
 
           {restoreTarget?.loading ? (
-            <div className="flex items-center gap-2 py-6 text-[0.76rem] text-muted-foreground">
+            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
               <Spinner /> Checking current item and container state…
             </div>
           ) : restoreTarget?.error ? (
             <FormError message={restoreTarget.error} />
           ) : restoreTarget?.preview ? (
-            <div className="space-y-3 text-[0.74rem]">
+            <div className="space-y-3 text-2xs">
               {!restoreTarget.preview.available && (
-                <p className="flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 px-3 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+                <p className="flex items-start gap-2 rounded-xl border border-brass/25 bg-brass-soft/35 px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-brass" />
                   <span>
                     {restoreTarget.preview.reason ||
@@ -387,7 +387,7 @@ export function ActivityTimeline({
 
               {restoreTarget.preview.container && (
                 <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-                  <p className="text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     Container identity to restore
                   </p>
                   <p className="mt-1 font-medium">
@@ -399,7 +399,7 @@ export function ActivityTimeline({
                     {restoreContainerPath(restoreTarget.preview)}
                   </p>
                   {restoreTarget.preview.container.deleted_by_name && (
-                    <p className="mt-1 text-[0.68rem] text-muted-foreground">
+                    <p className="mt-1 text-2xs text-muted-foreground">
                       Deleted by {restoreTarget.preview.container.deleted_by_name}
                     </p>
                   )}
@@ -408,7 +408,7 @@ export function ActivityTimeline({
 
               {restoreTarget.preview.item && (
                 <div className="rounded-xl border border-border/60 bg-background/35 p-3.5">
-                  <p className="text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     One item returned
                   </p>
                   <p className="mt-1 font-medium">
@@ -433,14 +433,14 @@ export function ActivityTimeline({
                 </div>
               )}
 
-              <p className="rounded-xl border border-border/60 bg-background/35 px-3 py-2.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+              <p className="rounded-xl border border-border/60 bg-background/35 px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
                 Only this item move is reversed. The original container keeps its
                 identity and QR identifier, no duplicate is created, and a newer
                 item placement is never overwritten without this confirmation.
               </p>
 
               {restoreTarget.preview.legacy_unrecoverable && (
-                <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3 py-2.5 text-[0.7rem] leading-relaxed text-destructive">
+                <p className="rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3 py-2.5 text-2xs leading-relaxed text-destructive">
                   This place predates recoverable deletion metadata. Housetory will
                   not fabricate its identity or room from incomplete history.
                 </p>

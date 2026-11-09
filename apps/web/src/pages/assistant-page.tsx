@@ -3,6 +3,8 @@ import {
   ArrowDown,
   ArrowUpRight,
   Bot,
+  Check,
+  Copy,
   FileText,
   HandCoins,
   Info,
@@ -10,7 +12,6 @@ import {
   MapPin,
   RotateCcw,
   Send,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import * as React from "react";
@@ -27,6 +28,7 @@ import { useSearchScope } from "@/hooks/use-search-scope";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { withHousehold } from "@/lib/household-links";
 import { useAiStatus } from "@/lib/queries";
+import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
 import type { SearchQueryResponse } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
@@ -69,11 +71,20 @@ export function AssistantPage() {
   }, [scopeSignature]);
 
   const ask = useMutation({
-    mutationFn: (value: string) =>
+    mutationFn: ({
+      value,
+      regenerate,
+    }: {
+      value: string;
+      regenerate?: boolean;
+    }) =>
       api.post<SearchQueryResponse>("/search/query", {
         query: value,
         explicit_ask: true,
-        history: searchSession.turns,
+        // Regenerating must not show the model the answer being replaced.
+        history: regenerate
+          ? searchSession.turns.slice(0, -2)
+          : searchSession.turns,
         ...(searchSession.context ? { context: searchSession.context } : {}),
         ...(selection.householdId
           ? { household_id: selection.householdId }
@@ -81,9 +92,9 @@ export function AssistantPage() {
         ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
         limit: 40,
       }),
-    onSuccess: (response, value) => {
+    onSuccess: (response, { value, regenerate }) => {
       setMessages((current) => [
-        ...current,
+        ...(regenerate ? current.slice(0, -2) : current),
         { role: "user", text: value },
         {
           role: "assistant",
@@ -92,8 +103,10 @@ export function AssistantPage() {
           response,
         },
       ]);
+      // record() collapses a repeated last question into the same turn pair,
+      // so regenerating only refreshes the stored context.
       searchSession.record(value, response);
-      setQuestion("");
+      if (!regenerate) setQuestion("");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -103,7 +116,7 @@ export function AssistantPage() {
     if (scopesQuery.isPending) return;
     if (value.length < 2 || autoAskedRef.current === value) return;
     autoAskedRef.current = value;
-    ask.mutate(value);
+    ask.mutate({ value });
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -160,7 +173,7 @@ export function AssistantPage() {
     event?.preventDefault();
     const value = question.trim();
     if (value.length < 2 || ask.isPending) return;
-    ask.mutate(value);
+    ask.mutate({ value });
   };
 
   const newConversation = () => {
@@ -173,7 +186,15 @@ export function AssistantPage() {
 
   const askSuggestion = (value: string) => {
     setQuestion("");
-    ask.mutate(value);
+    ask.mutate({ value });
+  };
+
+  const regenerateLatest = () => {
+    if (ask.isPending) return;
+    const last = messages[messages.length - 1];
+    const previous = messages[messages.length - 2];
+    if (last?.role !== "assistant" || previous?.role !== "user") return;
+    ask.mutate({ value: previous.text, regenerate: true });
   };
 
   const status = aiStatus.data;
@@ -242,7 +263,7 @@ export function AssistantPage() {
           {infoOpen && (
             <div
               id="assistant-info"
-              className="surface absolute left-0 top-full z-40 mt-2 w-[min(32rem,100%)] space-y-1.5 p-3.5 text-[0.72rem] leading-relaxed text-muted-foreground shadow-lg"
+              className="surface absolute left-0 top-full z-40 mt-2 w-[min(32rem,100%)] space-y-1.5 p-3.5 text-2xs leading-relaxed text-muted-foreground shadow-lg"
             >
               <p>
                 {displayStatus?.available
@@ -300,7 +321,7 @@ export function AssistantPage() {
                 <h2 className="mt-2 font-display text-[1.35rem] tracking-[-0.025em]">
                   Ask your home a question.
                 </h2>
-                <p className="mt-2 max-w-md text-[0.78rem] leading-relaxed text-muted-foreground">
+                <p className="mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
                   Answers come from your current records. Pick a suggestion
                   below or type your own.
                 </p>
@@ -311,7 +332,7 @@ export function AssistantPage() {
                 <div key={index} className="flex justify-end">
                   <div
                     dir="auto"
-                    className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-start text-[0.84rem] leading-relaxed text-primary-foreground"
+                    className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-start text-sm leading-relaxed text-primary-foreground"
                   >
                     {message.text}
                   </div>
@@ -327,12 +348,25 @@ export function AssistantPage() {
                   <AssistantAnswer
                     response={message.response}
                     text={message.text}
+                    onRegenerate={
+                      index === messages.length - 1 ? regenerateLatest : undefined
+                    }
+                    regenerateDisabled={ask.isPending}
                   />
+                  {index === messages.length - 1 && !ask.isPending && (
+                    <FollowUps
+                      suggestions={followUpSuggestions(
+                        message.response,
+                        messages[index - 1]?.text ?? "",
+                      )}
+                      onAsk={askSuggestion}
+                    />
+                  )}
                 </div>
               ),
             )}
             {ask.isPending && (
-              <div className="surface flex items-center gap-3 p-5 text-[0.82rem] text-muted-foreground">
+              <div className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Retrieving current records across your places…
               </div>
@@ -366,7 +400,7 @@ export function AssistantPage() {
                   key={suggestion}
                   type="button"
                   onClick={() => askSuggestion(suggestion)}
-                  className="shrink-0 rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-[0.76rem] text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                  className="shrink-0 rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
                 >
                   {suggestion}
                 </button>
@@ -390,7 +424,7 @@ export function AssistantPage() {
                   aria-label="Ask the Housetory assistant"
                   rows={1}
                   maxLength={2000}
-                  className="max-h-40 min-h-11 resize-none border-0 bg-transparent text-[0.9rem] focus-visible:ring-0"
+                  className="max-h-40 min-h-11 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
                 />
                 <Button
                   type="submit"
@@ -441,13 +475,76 @@ function contextualLink(response: SearchQueryResponse): string | null {
   return withHousehold(path, response.households?.[0]?.id);
 }
 
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the legacy path.
+    }
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function FollowUps({
+  suggestions,
+  onAsk,
+}: {
+  suggestions: string[];
+  onAsk: (value: string) => void;
+}) {
+  if (suggestions.length === 0) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2" aria-label="Follow-up questions">
+      {suggestions.map((suggestion) => (
+        <button
+          key={suggestion}
+          type="button"
+          onClick={() => onAsk(suggestion)}
+          className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+        >
+          {suggestion}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function AssistantAnswer({
   response,
   text,
+  onRegenerate,
+  regenerateDisabled,
 }: {
   response?: SearchQueryResponse;
   text: string;
+  onRegenerate?: () => void;
+  regenerateDisabled?: boolean;
 }) {
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    if (await copyText(text)) {
+      setCopied(true);
+      toast.success("Answer copied");
+      window.setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error("Couldn't copy — select the text and copy it manually.");
+    }
+  };
   const link = response ? contextualLink(response) : null;
   return (
     <div className="surface p-5">
@@ -455,7 +552,7 @@ function AssistantAnswer({
         <span className="flex size-7 items-center justify-center rounded-full bg-sage-soft text-accent-foreground">
           <Bot className="size-3.5" />
         </span>
-        <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <span className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Housetory
         </span>
         <Badge variant="outline">
@@ -483,10 +580,10 @@ function AssistantAnswer({
         text={text}
         direction={response?.answer_direction ?? "auto"}
         preserveTerms={response?.preserve_terms ?? []}
-        className="mt-3 text-[0.86rem] leading-[1.8] text-foreground/85"
+        className="mt-3 text-sm leading-[1.8] text-foreground/85"
       />
       {response && response.notices.length > 0 && (
-        <ul className="mt-3 space-y-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+        <ul className="mt-3 space-y-1 text-2xs leading-relaxed text-muted-foreground">
           {response.notices.map((notice) => (
             <li key={notice}>• {notice}</li>
           ))}
@@ -503,17 +600,17 @@ function AssistantAnswer({
                   `/borrowed/${record.id}`,
                   record.household_id,
                 )}
-                className="flex items-center gap-2 rounded-xl border border-brass/25 bg-brass-soft/20 px-3 py-2 text-[0.76rem] transition-colors hover:bg-brass-soft/35"
+                className="flex items-center gap-2 rounded-xl border border-brass/25 bg-brass-soft/20 px-3 py-2 text-xs transition-colors hover:bg-brass-soft/35"
               >
                 <HandCoins className="size-3.5 shrink-0 text-brass" />
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="truncate">{record.item_name}</span>
-                    <Badge variant="brass" className="text-[0.58rem]">
+                    <Badge variant="brass" className="text-2xs">
                       Borrowed
                     </Badge>
                   </span>
-                  <span className="block truncate text-[0.66rem] text-muted-foreground">
+                  <span className="block truncate text-2xs text-muted-foreground">
                     Belongs to {record.owner_name} ·{" "}
                     {borrowedLocationPrefix(record)} {place} ·{" "}
                     {record.outstanding_quantity} outstanding
@@ -546,12 +643,12 @@ function AssistantAnswer({
               <Link
                 key={item.id}
                 to={withHousehold(`/items/${item.id}`, item.household?.id)}
-                className="flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-[0.76rem] transition-colors hover:bg-secondary/40"
+                className="flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-xs transition-colors hover:bg-secondary/40"
               >
                 <MapPin className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{item.name}</span>
-                  <span className="block truncate text-[0.66rem] text-muted-foreground">
+                  <span className="block truncate text-2xs text-muted-foreground">
                     {place}
                     {item.on_loan_quantity
                       ? ` · ${item.on_loan_quantity} on loan`
@@ -587,7 +684,7 @@ function AssistantAnswer({
       )}
       {response && response.references.length > 0 && (
         <div className="mt-4 border-t border-border/60 pt-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Sources
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -611,6 +708,24 @@ function AssistantAnswer({
           </Button>
         </div>
       )}
+      <div className="mt-3 flex items-center gap-1 border-t border-border/60 pt-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => void copy()}>
+          {copied ? <Check /> : <Copy />}
+          Copy answer
+        </Button>
+        {onRegenerate && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRegenerate}
+            disabled={regenerateDisabled}
+          >
+            <RotateCcw />
+            Regenerate
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

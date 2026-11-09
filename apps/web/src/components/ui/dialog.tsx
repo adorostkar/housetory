@@ -34,16 +34,24 @@ const DialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "dialog-safe-bottom fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem-env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-5 overflow-y-auto overscroll-contain rounded-2xl border border-border/80 bg-popover px-6 pt-6 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-fade-in sm:px-7 sm:pt-7",
+        "max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:flex max-sm:max-h-[90dvh] max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:flex-col max-sm:overflow-y-auto max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-b-0 max-sm:pb-0 max-sm:pt-0 max-sm:data-[state=open]:animate-sheet-up",
         className,
       )}
       {...props}
     >
+      <div
+        aria-hidden="true"
+        data-dialog-handle=""
+        className="absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden"
+      />
       {children}
       {!hideClose && (
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground opacity-70 transition-colors hover:bg-secondary hover:text-foreground hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
+        <div className="max-sm:pointer-events-none max-sm:sticky max-sm:top-3 max-sm:z-20 max-sm:order-first max-sm:-mb-5 max-sm:h-0 max-sm:shrink-0 sm:contents">
+          <DialogPrimitive.Close className="pointer-events-auto absolute -right-2 top-0 rounded-full p-2 text-muted-foreground opacity-70 transition-colors hover:bg-secondary hover:text-foreground hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:right-4 sm:top-4">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        </div>
       )}
     </DialogPrimitive.Content>
   </DialogPortal>
@@ -53,7 +61,7 @@ DialogContent.displayName = DialogPrimitive.Content.displayName;
 function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1.5 pr-8", className)}
+      className={cn("flex min-w-0 flex-col gap-1.5 pr-8 max-sm:sticky max-sm:top-0 max-sm:z-10 max-sm:-mx-6 max-sm:bg-popover max-sm:px-6 max-sm:pb-2 max-sm:pt-7", className)}
       {...props}
     />
   );
@@ -63,7 +71,7 @@ function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end",
+        "flex min-w-0 flex-col-reverse gap-2 max-sm:dialog-safe-bottom max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:-mx-6 max-sm:border-t max-sm:border-border/60 max-sm:bg-popover max-sm:px-6 max-sm:pt-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end",
         className,
       )}
       {...props}

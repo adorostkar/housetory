@@ -60,7 +60,7 @@ export function DocumentCard({
         <div className="flex flex-wrap items-center gap-1.5">
           <Link
             to={`/documents/${document.id}`}
-            className="min-w-0 truncate text-[0.88rem] font-medium underline-offset-4 hover:underline"
+            className="min-w-0 truncate text-sm font-medium underline-offset-4 hover:underline"
           >
             {document.title}
           </Link>
@@ -75,7 +75,7 @@ export function DocumentCard({
             </Badge>
           )}
         </div>
-        <p className="mt-1 truncate text-[0.7rem] text-muted-foreground">
+        <p className="mt-1 truncate text-2xs text-muted-foreground">
           {document.merchant ? `${document.merchant} · ` : ""}
           {document.document_date ? `${formatDate(document.document_date)} · ` : ""}
           {formatFileSize(document.byte_size)}
@@ -92,7 +92,7 @@ export function DocumentCard({
               </Link>
             ))}
             {document.items.length > 2 && (
-              <span className="text-[0.68rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 +{document.items.length - 2}
               </span>
             )}

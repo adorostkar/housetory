@@ -394,11 +394,11 @@ export function ContainerQrDialog({
               className="size-56"
             />
           </div>
-          <code className="max-w-full break-all rounded-lg bg-secondary/50 px-3 py-2 text-center text-[0.68rem] text-muted-foreground">
+          <code className="max-w-full break-all rounded-lg bg-secondary/50 px-3 py-2 text-center text-2xs text-muted-foreground">
             {container.qr_payload}
           </code>
           {container.qr_warning && (
-            <p className="rounded-xl border border-brass/25 bg-brass-soft/50 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="rounded-xl border border-brass/25 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
               {container.qr_warning}
             </p>
           )}
@@ -467,7 +467,7 @@ export function ContainerConvertDialog({
               ))}
             </Select>
           </Field>
-          <p className="rounded-xl border border-brass/20 bg-brass-soft/45 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="rounded-xl border border-brass/20 bg-brass-soft/45 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
             Existing inventory and source links are preserved. The conversion is explicit;
             Housetory never converts places automatically.
           </p>

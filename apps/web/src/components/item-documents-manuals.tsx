@@ -79,7 +79,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
               Documents &amp; manuals
             </h2>
           </div>
-          <p className="mt-1 text-[0.78rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             One library for receipts, warranties, manuals and other files. Attached
             manuals answer questions from their stored text and show citations.
           </p>
@@ -113,11 +113,11 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
       <div className="mt-4">
         {documents.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-7 text-center">
-            <FileText className="size-5 text-muted-foreground/70" strokeWidth={1.5} />
-            <p className="mt-3 text-[0.82rem] font-medium">
+            <FileText className="size-5 text-muted-foreground" strokeWidth={1.5} />
+            <p className="mt-3 text-xs font-medium">
               No documents or manuals attached
             </p>
-            <p className="mt-1 max-w-lg text-[0.72rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 max-w-lg text-2xs leading-relaxed text-muted-foreground">
               Upload a receipt, warranty, manual or other file, scan pages, or link an
               existing library document. Manuals do not need make/model fields.
             </p>
@@ -146,7 +146,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
               </div>
             )}
             {manualsQuery.isError && (
-              <p className="mt-2 text-[0.68rem] text-muted-foreground">
+              <p className="mt-2 text-2xs text-muted-foreground">
                 Manual-specific tools could not be loaded.{" "}
                 <button
                   type="button"
@@ -177,7 +177,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Link
                         to={`/documents/${document.id}`}
-                        className="min-w-0 break-words text-[0.83rem] font-medium underline-offset-4 hover:underline"
+                        className="min-w-0 break-words text-sm font-medium underline-offset-4 hover:underline"
                       >
                         {document.title}
                       </Link>
@@ -197,7 +197,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                         </Badge>
                       )}
                     </div>
-                    <p className="mt-0.5 text-[0.67rem] text-muted-foreground">
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
                       {document.merchant ? `${document.merchant} · ` : ""}
                       {formatFileSize(document.byte_size)} ·{" "}
                       {formatDate(document.created_at)}
@@ -236,7 +236,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
 
       {documents.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-          <div className="min-w-0 text-[0.68rem] leading-relaxed text-muted-foreground">
+          <div className="min-w-0 text-2xs leading-relaxed text-muted-foreground">
             {manualsQuery.isPending ? (
               <span>Loading manual details…</span>
             ) : manualsQuery.isError ? (
@@ -286,7 +286,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
       )}
 
       {searchStatus?.configured && !profile && canWrite && documents.length > 0 && (
-        <p className="mt-2 text-[0.66rem] leading-relaxed text-muted-foreground">
+        <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
           Online manual search is configured.{" "}
           <button
             type="button"

@@ -234,7 +234,7 @@ export function StocktakePage() {
 
       <section className="surface mb-5 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-[0.72rem]">
+          <div className="flex flex-wrap items-center gap-2 text-2xs">
             <Badge variant={inProgress ? "brass" : session.status === "completed" ? "sage" : "secondary"}>
               {inProgress ? "In progress" : session.status === "completed" ? "Completed" : "Abandoned"}
             </Badge>
@@ -245,7 +245,7 @@ export function StocktakePage() {
               </Badge>
             )}
           </div>
-          <p className="text-[0.7rem] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             {session.checked_item_count} of {pluralize(expected, "item")} checked ·{" "}
             {session.checked_unit_count} at-home units counted
           </p>
@@ -263,14 +263,14 @@ export function StocktakePage() {
             style={{ width: `${percent}%` }}
           />
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[0.72rem] sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-2 gap-2 text-2xs sm:grid-cols-4">
           <CoverageMetric label="Present" value={statusCounts.present ?? 0} />
           <CoverageMetric label="Missing" value={statusCounts.missing ?? 0} tone="destructive" />
           <CoverageMetric label="Quantity differs" value={statusCounts.quantity_discrepancy ?? 0} tone="brass" />
           <CoverageMetric label="Unexpected" value={session.unexpected_count} />
         </div>
         {session.status === "completed" && (
-          <div className="mt-3 grid gap-2 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2.5 text-[0.7rem] text-muted-foreground sm:grid-cols-2">
+          <div className="mt-3 grid gap-2 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2.5 text-2xs text-muted-foreground sm:grid-cols-2">
             <p>
               Verified items: {session.verified_item_count} · Missing: {session.missing_item_count} ·
               Couldn't check: {session.unknown_item_count}
@@ -310,7 +310,7 @@ export function StocktakePage() {
                   updateQuery(search, entry.value);
                 }}
                 className={cn(
-                  "shrink-0 rounded-full border px-3 py-1.5 text-[0.68rem] font-medium transition-colors",
+                  "shrink-0 rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
                   filter === entry.value
                     ? "border-primary/25 bg-primary text-primary-foreground"
                     : "border-border/70 bg-card/60 text-muted-foreground hover:bg-secondary/40 hover:text-foreground",
@@ -348,10 +348,10 @@ export function StocktakePage() {
       <section className="surface mt-5 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-[0.7rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+            <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               Unexpected findings
             </h2>
-            <p className="mt-1 text-[0.7rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Recorded separately. Nothing is created automatically.
             </p>
           </div>
@@ -363,26 +363,26 @@ export function StocktakePage() {
           )}
         </div>
         {session.unexpected_findings.length === 0 ? (
-          <p className="mt-3 rounded-lg border border-dashed border-border/70 px-3 py-3 text-[0.72rem] text-muted-foreground">
+          <p className="mt-3 rounded-lg border border-dashed border-border/70 px-3 py-3 text-2xs text-muted-foreground">
             No unexpected items recorded for this stocktake.
           </p>
         ) : (
           <ul className="mt-3 divide-y divide-border/50">
             {session.unexpected_findings.map((finding) => (
-              <li key={finding.id} className="py-2.5 text-[0.74rem]">
+              <li key={finding.id} className="py-2.5 text-2xs">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{finding.unexpected_name}</span>
                   <Badge variant="outline">{finding.counted_quantity} found</Badge>
                   {finding.linked_item_id && (
                     <Link
                       to={`/items/${finding.linked_item_id}`}
-                      className="text-[0.66rem] text-muted-foreground underline underline-offset-4"
+                      className="text-2xs text-muted-foreground underline underline-offset-4"
                     >
                       Linked existing item
                     </Link>
                   )}
                 </div>
-                <p className="mt-1 break-words text-[0.66rem] text-muted-foreground">
+                <p className="mt-1 break-words text-2xs text-muted-foreground">
                   {finding.observed_location_path || "No location recorded"} · {finding.verifier_name} ·{" "}
                   {formatDate(finding.observed_at)}
                   {finding.notes ? ` · ${finding.notes}` : ""}
@@ -393,7 +393,7 @@ export function StocktakePage() {
         )}
       </section>
 
-      <section className="mt-5 rounded-2xl border border-border/60 bg-card/40 px-4 py-3 text-[0.7rem] leading-relaxed text-muted-foreground">
+      <section className="mt-5 rounded-2xl border border-border/60 bg-card/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
         <p className="font-medium text-foreground/80">How this stocktake behaves</p>
         <p className="mt-1">
           Unchecked items are never marked present by opening this page. Present, missing and
@@ -461,7 +461,7 @@ function CoverageMetric({
 }) {
   return (
     <div className="rounded-lg border border-border/55 bg-secondary/10 px-2.5 py-1.5">
-      <p className="text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+      <p className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
       <p
         className={cn(
           "mt-0.5 font-display text-[1.05rem] tabular-nums",
@@ -499,7 +499,7 @@ function StocktakeItemCard({
               className="size-full object-cover"
             />
           ) : (
-            <div className="flex size-full items-center justify-center text-muted-foreground/40">
+            <div className="flex size-full items-center justify-center text-muted-foreground">
               <ClipboardCheck className="size-5" />
             </div>
           )}
@@ -509,12 +509,12 @@ function StocktakeItemCard({
             {row.item_id && !row.deleted ? (
               <Link
                 to={`/items/${row.item_id}`}
-                className="min-w-0 break-words text-[0.9rem] font-medium leading-snug underline-offset-4 hover:underline"
+                className="min-w-0 break-words text-sm font-medium leading-snug underline-offset-4 hover:underline"
               >
                 {row.current.name ?? row.item_name}
               </Link>
             ) : (
-              <span className="min-w-0 break-words text-[0.9rem] font-medium leading-snug">
+              <span className="min-w-0 break-words text-sm font-medium leading-snug">
                 {row.item_name}
               </span>
             )}
@@ -528,15 +528,15 @@ function StocktakeItemCard({
               )}
             {row.current.is_archived && <Badge variant="secondary">Archived</Badge>}
           </div>
-          <p className="mt-1 break-words text-[0.68rem] text-muted-foreground">
+          <p className="mt-1 break-words text-2xs text-muted-foreground">
             Expected {expectedSummary(row)}
           </p>
-          <p className="mt-0.5 flex items-start gap-1 break-words text-[0.68rem] text-muted-foreground">
+          <p className="mt-0.5 flex items-start gap-1 break-words text-2xs text-muted-foreground">
             <MapPin className="mt-0.5 size-3 shrink-0" />
             {row.expected_location_path}
           </p>
           {row.changed_since_snapshot && !row.deleted && !row.correction_applied && (
-            <p className="mt-1 break-words rounded-lg border border-brass/20 bg-brass-soft/20 px-2 py-1.5 text-[0.66rem] leading-relaxed text-brass">
+            <p className="mt-1 break-words rounded-lg border border-brass/20 bg-brass-soft/20 px-2 py-1.5 text-2xs leading-relaxed text-brass">
               Current inventory: {row.current.quantity ?? "?"} owned · {row.current.at_home_quantity} at
               home · {row.current.on_loan_quantity} on loan ·{" "}
               {row.current.location_path || "no recorded location"}. Reload before recording if this
@@ -544,7 +544,7 @@ function StocktakeItemCard({
             </p>
           )}
           {observation ? (
-            <div className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+            <div className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
               {observation.status === "moved" && observation.observed_location_path
                 ? `Found at ${observation.observed_location_path}. `
                 : observation.status === "missing"
@@ -560,7 +560,7 @@ function StocktakeItemCard({
               </span>
             </div>
           ) : (
-            <p className="mt-1 text-[0.66rem] text-muted-foreground">
+            <p className="mt-1 text-2xs text-muted-foreground">
               Not checked yet. Opening this page does not mark it present.
             </p>
           )}
@@ -574,7 +574,7 @@ function StocktakeItemCard({
                     type="button"
                     size="sm"
                     variant={active ? "default" : "outline"}
-                    className="h-7 px-2.5 text-[0.66rem]"
+                    className="h-7 px-2.5 text-2xs"
                     disabled={actionsDisabled}
                     aria-label={`Mark ${row.item_name} ${action.label.toLowerCase()}`}
                     onClick={() => onAction(action.status)}
@@ -587,14 +587,14 @@ function StocktakeItemCard({
             </div>
           )}
           {row.deleted && (
-            <p className="mt-2 flex items-start gap-1.5 text-[0.66rem] text-destructive">
+            <p className="mt-2 flex items-start gap-1.5 text-2xs text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               This item was deleted during the stocktake and cannot be marked. Its historical
               observation remains.
             </p>
           )}
           {row.current.is_archived && (
-            <p className="mt-2 flex items-start gap-1.5 text-[0.66rem] text-brass">
+            <p className="mt-2 flex items-start gap-1.5 text-2xs text-brass">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               This item was archived during the stocktake. Reload the session or review the item
               before marking it.

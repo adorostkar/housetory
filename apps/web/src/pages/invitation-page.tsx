@@ -116,7 +116,7 @@ export function InvitationPage() {
       subtitle={`Join ${data.household_name} on Housetory.`}
     >
       <div className="space-y-5">
-        <div className="rounded-xl border border-border/70 bg-card/60 p-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+        <div className="rounded-xl border border-border/70 bg-card/60 p-4 text-xs leading-relaxed text-muted-foreground">
           <p className="flex items-center gap-2 font-medium text-foreground">
             <Mail className="size-4" />
             {data.email}
@@ -136,7 +136,7 @@ export function InvitationPage() {
 
         {loggedIn && !emailMatches && (
           <div className="space-y-3">
-            <p className="text-[0.78rem] leading-relaxed text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               You are signed in as <strong className="text-foreground">{currentUser!.email}</strong>.
               This invitation belongs to <strong className="text-foreground">{data.email}</strong>.
               Sign out and use the invited email.
@@ -156,7 +156,7 @@ export function InvitationPage() {
 
         {!loggedIn && accountExists && (
           <div className="space-y-3">
-            <p className="text-[0.78rem] leading-relaxed text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               An account already exists for this email. Sign in as{" "}
               <strong className="text-foreground">{data.email}</strong> to accept.
             </p>
@@ -246,7 +246,7 @@ export function InvitationPage() {
         )}
 
         {!loggedIn && !accountExists && (
-          <p className="text-center text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="text-center text-2xs leading-relaxed text-muted-foreground">
             Already have an account with another Housetory household?{" "}
             <Link to={loginHref} state={{ from: location }} className="underline underline-offset-4">
               Sign in first
@@ -255,7 +255,7 @@ export function InvitationPage() {
           </p>
         )}
 
-        <p className="flex items-start gap-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+        <p className="flex items-start gap-2 text-2xs leading-relaxed text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
           Invitations are single-use and only work for the invited email. Housetory never
           creates inventory automatically.

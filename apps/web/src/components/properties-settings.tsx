@@ -163,7 +163,7 @@ export function PropertiesSettings() {
           <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
             Properties
           </h2>
-          <p className="mt-1 max-w-xl text-[0.78rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
             Physical homes and sites inside this household. Everyone keeps the same household role
             across every property.
           </p>
@@ -184,13 +184,13 @@ export function PropertiesSettings() {
       </div>
 
       {propertiesQuery.isPending ? (
-        <p className="mt-5 text-[0.78rem] text-muted-foreground">Loading properties…</p>
+        <p className="mt-5 text-xs text-muted-foreground">Loading properties…</p>
       ) : propertiesQuery.isError ? (
         <div className="mt-4">
           <FormError message={getApiErrorMessage(propertiesQuery.error)} />
         </div>
       ) : properties.length === 0 ? (
-        <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-[0.78rem] text-muted-foreground">
+        <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-xs text-muted-foreground">
           No properties yet. Create one before adding rooms.
         </p>
       ) : (
@@ -205,10 +205,10 @@ export function PropertiesSettings() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-[0.85rem] font-medium">{property.name}</span>
+                    <span className="truncate text-sm font-medium">{property.name}</span>
                     {property.is_archived && <Badge variant="secondary">Archived</Badge>}
                   </span>
-                  <span className="mt-0.5 block text-[0.68rem] text-muted-foreground">
+                  <span className="mt-0.5 block text-2xs text-muted-foreground">
                     {pluralize(property.room_count, "room")} ·{" "}
                     {pluralize(property.item_count, "item")} ·{" "}
                     {pluralize(property.total_quantity, "unit")}

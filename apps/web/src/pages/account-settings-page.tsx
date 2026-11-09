@@ -107,7 +107,7 @@ export function AccountSettingsPage() {
                 onChange={(event) => setName(event.target.value)}
               />
             </Field>
-            <div className="grid gap-3 text-[0.78rem] sm:grid-cols-2">
+            <div className="grid gap-3 text-xs sm:grid-cols-2">
               <div>
                 <p className="text-muted-foreground">Email</p>
                 <p className="mt-1 break-all text-foreground">{session.data.user.email}</p>
@@ -137,7 +137,7 @@ export function AccountSettingsPage() {
             <KeyRound className="size-4 text-muted-foreground" strokeWidth={1.7} />
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Password</h2>
           </div>
-          <p className="mt-1 text-[0.74rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
             Changing your password signs out your other sessions. The current session stays
             active.
           </p>

@@ -12,7 +12,7 @@ export function InfoRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 text-[0.82rem] leading-relaxed">
+    <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 text-xs leading-relaxed">
       <dt className="flex items-center gap-1.5 text-muted-foreground">
         <Icon className="size-3.5 shrink-0" strokeWidth={1.7} />
         {label}
@@ -33,7 +33,7 @@ export function LoanQuantity({
 }) {
   return (
     <div className="rounded-xl border border-border/60 bg-background/30 px-2 py-2.5">
-      <p className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+      <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
         {label}
       </p>
       <p

@@ -28,11 +28,11 @@ export function ForgotPasswordPage() {
     >
       {submitted ? (
         <div className="space-y-4">
-          <div className="rounded-xl border border-sage/25 bg-sage-soft/40 p-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+          <div className="rounded-xl border border-sage/25 bg-sage-soft/40 p-4 text-xs leading-relaxed text-muted-foreground">
             If an account exists for that email, a reset link has been sent. The link is
             single-use and expires automatically.
           </div>
-          <p className="text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             If this installation has not configured email delivery, contact the household
             owner. Login and inventory continue to work while email is unconfigured.
           </p>

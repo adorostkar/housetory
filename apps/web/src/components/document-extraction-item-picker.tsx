@@ -31,17 +31,17 @@ export function ItemSearchPicker({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search the household inventory"
           aria-label="Search inventory for this line"
-          className="h-9 pl-8 text-[0.78rem]"
+          className="h-9 pl-8 text-xs"
           disabled={disabled}
         />
       </div>
       <div className="mt-1 max-h-52 overflow-y-auto">
         {itemsQuery.isPending ? (
-          <p className="flex items-center justify-center gap-2 py-4 text-[0.72rem] text-muted-foreground">
+          <p className="flex items-center justify-center gap-2 py-4 text-2xs text-muted-foreground">
             <Spinner className="size-3.5" /> Searching…
           </p>
         ) : items.length === 0 ? (
-          <p className="py-4 text-center text-[0.72rem] text-muted-foreground">
+          <p className="py-4 text-center text-2xs text-muted-foreground">
             No item matches that search.
           </p>
         ) : (
@@ -54,14 +54,14 @@ export function ItemSearchPicker({
               className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary/70"
             >
               <span className="min-w-0">
-                <span className="block truncate text-[0.76rem] font-medium">{item.name}</span>
-                <span className="block truncate text-[0.66rem] text-muted-foreground">
+                <span className="block truncate text-xs font-medium">{item.name}</span>
+                <span className="block truncate text-2xs text-muted-foreground">
                   {[item.room?.name, item.location?.name].filter(Boolean).join(" / ") ||
                     "No place"}
                   {item.purchase?.purchase_date ? ` · ${formatDate(item.purchase.purchase_date)}` : ""}
                 </span>
               </span>
-              <span className="shrink-0 text-[0.66rem] text-muted-foreground">×{item.quantity}</span>
+              <span className="shrink-0 text-2xs text-muted-foreground">×{item.quantity}</span>
             </button>
           ))
         )}

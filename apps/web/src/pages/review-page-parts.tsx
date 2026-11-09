@@ -129,14 +129,14 @@ export function ItemPickerDialog({
         ) : query.isError ? (
           <FormError message={getApiErrorMessage(query.error)} />
         ) : items.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border/70 px-3.5 py-4 text-[0.75rem] text-muted-foreground">
+          <p className="rounded-xl border border-dashed border-border/70 px-3.5 py-4 text-2xs text-muted-foreground">
             No items match that search.
           </p>
         ) : (
           <ul className="divide-y divide-border/60 rounded-xl border border-border/60">
             {items.map((item) => (
               <li key={item.id}>
-                <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 text-[0.78rem] hover:bg-secondary/30">
+                <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 text-xs hover:bg-secondary/30">
                   <input
                     type="checkbox"
                     className="mt-0.5 size-4 accent-primary"
@@ -145,7 +145,7 @@ export function ItemPickerDialog({
                   />
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{item.name}</span>
-                    <span className="mt-0.5 block truncate text-[0.66rem] text-muted-foreground">
+                    <span className="mt-0.5 block truncate text-2xs text-muted-foreground">
                       {[item.room?.name, item.location?.name, item.brand, item.model]
                         .filter(Boolean)
                         .join(" · ") || "No placement or detail"}

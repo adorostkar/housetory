@@ -184,7 +184,7 @@ export function StocktakeObservationDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-border/65 bg-secondary/20 px-3 py-2.5 text-[0.72rem]">
+          <div className="rounded-xl border border-border/65 bg-secondary/20 px-3 py-2.5 text-2xs">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium">Owned {owned}</span>
               <span className="text-muted-foreground">·</span>
@@ -193,12 +193,12 @@ export function StocktakeObservationDialog({
               <span className="text-brass">On loan {onLoan}</span>
               {onLoan > 0 && <Badge variant="brass">Loans excluded</Badge>}
             </div>
-            <p className="mt-1.5 flex items-start gap-1.5 text-[0.66rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1.5 flex items-start gap-1.5 text-2xs leading-relaxed text-muted-foreground">
               <MapPin className="mt-0.5 size-3 shrink-0" />
               <span className="break-words">{row.current.location_path || "No location recorded"}</span>
             </p>
             {onLoan > 0 && (
-              <p className="mt-1.5 text-[0.66rem] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
                 Loaned units remain owned. They are not expected at home and will not be marked
                 missing.
               </p>
@@ -206,7 +206,7 @@ export function StocktakeObservationDialog({
           </div>
 
           {isMissing && (
-            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-[0.72rem] leading-relaxed text-destructive">
+            <p className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2.5 text-2xs leading-relaxed text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               This records an observation only. The item will not be deleted, archived or written
               off. You can review any inventory change separately.
@@ -214,7 +214,7 @@ export function StocktakeObservationDialog({
           )}
 
           {!countedLocked && (
-            <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-counted">
+            <label className="block text-2xs font-medium" htmlFor="stocktake-counted">
               Counted at home
               <Input
                 id="stocktake-counted"
@@ -230,7 +230,7 @@ export function StocktakeObservationDialog({
 
           {isMoved && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-room">
+              <label className="block text-2xs font-medium" htmlFor="stocktake-room">
                 Existing room
                 <Select
                   id="stocktake-room"
@@ -247,7 +247,7 @@ export function StocktakeObservationDialog({
                   ))}
                 </Select>
               </label>
-              <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-container">
+              <label className="block text-2xs font-medium" htmlFor="stocktake-container">
                 Existing place (optional)
                 <Select
                   id="stocktake-container"
@@ -271,13 +271,13 @@ export function StocktakeObservationDialog({
           )}
 
           {isMoved && roomId && (
-            <p className="flex items-center gap-1.5 text-[0.68rem] text-muted-foreground">
+            <p className="flex items-center gap-1.5 text-2xs text-muted-foreground">
               <ArrowRight className="size-3" />
               The recorded location changes only after you review and apply corrections.
             </p>
           )}
 
-          <label className="block text-[0.74rem] font-medium" htmlFor="stocktake-notes">
+          <label className="block text-2xs font-medium" htmlFor="stocktake-notes">
             Notes (optional)
             <Textarea
               id="stocktake-notes"
@@ -297,7 +297,7 @@ export function StocktakeObservationDialog({
           {row.item_id && (
             <Link
               to={`/items/${row.item_id}`}
-              className="inline-flex text-[0.7rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              className="inline-flex text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               View item details and evidence
             </Link>

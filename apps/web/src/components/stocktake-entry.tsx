@@ -98,14 +98,14 @@ export function StocktakeEntry({
     <>
       <section className="surface mb-4 px-4 py-3 sm:px-5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="flex items-center gap-2 text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <span className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             <ClipboardCheck className="size-3.5" />
             Stocktake
           </span>
           {summary.isPending ? (
-            <span className="text-[0.74rem] text-muted-foreground">Reading checks…</span>
+            <span className="text-2xs text-muted-foreground">Reading checks…</span>
           ) : current ? (
-            <span className="min-w-0 text-[0.76rem] text-muted-foreground">
+            <span className="min-w-0 text-xs text-muted-foreground">
               {active ? (
                 <>
                   <span className="font-medium text-foreground">In progress</span> ·{" "}
@@ -120,7 +120,7 @@ export function StocktakeEntry({
               )}
             </span>
           ) : (
-            <span className="text-[0.76rem] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               No completed stocktake recorded for this {roomId ? "room" : "container"} yet.
             </span>
           )}
@@ -155,12 +155,12 @@ export function StocktakeEntry({
           </div>
         </div>
         {active && (
-          <p className="mt-2 text-[0.68rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
             Progress is saved as you check items. Loan units are recorded separately and are
             never marked missing.
           </p>
         )}
-        <p className="mt-1 text-[0.66rem] leading-relaxed text-muted-foreground">
+        <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
           Borrowed-from-others records are kept separate and are never added to owned
           stocktake quantities.
         </p>
@@ -177,7 +177,7 @@ export function StocktakeEntry({
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto overscroll-contain">
             {history.isPending ? (
-              <div className="flex items-center gap-2 px-1 py-6 text-[0.78rem] text-muted-foreground">
+              <div className="flex items-center gap-2 px-1 py-6 text-xs text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />
                 Loading sessions…
               </div>
@@ -190,7 +190,7 @@ export function StocktakeEntry({
                       className="min-w-0 flex-1 rounded-lg px-1 py-1 hover:bg-secondary/35"
                     >
                       <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-[0.8rem] font-medium">
+                        <span className="text-xs font-medium">
                           {formatDate(session.completed_at ?? session.started_at)}
                         </span>
                         <Badge variant={STATUS_TONES[session.status]}>
@@ -200,7 +200,7 @@ export function StocktakeEntry({
                           <Badge variant="outline">Partial</Badge>
                         )}
                       </span>
-                      <span className="mt-1 block text-[0.68rem] text-muted-foreground">
+                      <span className="mt-1 block text-2xs text-muted-foreground">
                         {coverageLabel(session)} · {session.created_by_name}
                         {session.missing_item_count
                           ? ` · ${session.missing_item_count} missing`
@@ -212,7 +212,7 @@ export function StocktakeEntry({
                     </Link>
                     <span
                       className={cn(
-                        "text-[0.65rem] text-muted-foreground",
+                        "text-2xs text-muted-foreground",
                         session.status === "in_progress" && "text-brass",
                       )}
                     >
@@ -222,7 +222,7 @@ export function StocktakeEntry({
                 ))}
               </ul>
             ) : (
-              <p className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-[0.76rem] text-muted-foreground">
+              <p className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-xs text-muted-foreground">
                 No stocktake sessions for this scope yet.
               </p>
             )}

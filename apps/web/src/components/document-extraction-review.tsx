@@ -220,21 +220,21 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 
   if (document.ocr_status === "queued" || document.ocr_status === "processing") {
     return (
-      <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-[0.8rem] text-muted-foreground">
+      <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-xs text-muted-foreground">
         <Spinner /> Waiting for the local OCR worker…
       </div>
     );
   }
   if (extractionQuery.isPending) {
     return (
-      <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-[0.8rem] text-muted-foreground">
+      <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-xs text-muted-foreground">
         <Spinner /> Preparing the line-item proposal…
       </div>
     );
   }
   if (extractionQuery.isError) {
     return (
-      <div className="mt-5 rounded-xl border border-brass/25 bg-brass-soft/40 p-4 text-[0.78rem] leading-relaxed text-muted-foreground">
+      <div className="mt-5 rounded-xl border border-brass/25 bg-brass-soft/40 p-4 text-xs leading-relaxed text-muted-foreground">
         Extraction is not available yet. Retry OCR from the Local OCR panel after
         improving the scan, then review the proposal again.
       </div>
@@ -242,7 +242,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   }
   if (!data) {
     return (
-      <p className="mt-5 text-[0.8rem] leading-relaxed text-muted-foreground">
+      <p className="mt-5 text-xs leading-relaxed text-muted-foreground">
         Run OCR to propose document fields and product lines. Nothing is applied until you
         confirm the reviewed proposal.
       </p>
@@ -250,7 +250,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   }
   if (!canWrite) {
     return (
-      <div className="mt-5 rounded-xl border border-border/70 bg-secondary/25 p-4 text-[0.75rem] leading-relaxed text-muted-foreground">
+      <div className="mt-5 rounded-xl border border-border/70 bg-secondary/25 p-4 text-2xs leading-relaxed text-muted-foreground">
         Extracted fields and matches are visible to viewers for reference. Applying changes
         requires member access.
       </div>
@@ -433,7 +433,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   return (
     <div className="mt-5 space-y-5">
       {applyResult && (
-        <div className="rounded-xl border border-sage/25 bg-sage-soft/60 p-3.5 text-[0.75rem] leading-relaxed">
+        <div className="rounded-xl border border-sage/25 bg-sage-soft/60 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-accent-foreground">
             <Check className="size-3.5" /> Applied
           </p>
@@ -453,7 +453,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             </div>
           )}
           {applyResult.warnings.length > 0 && (
-            <ul className="mt-2 list-disc space-y-1 pl-4 text-[0.7rem] text-brass">
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-2xs text-brass">
               {applyResult.warnings.map((warning) => (
                 <li key={warning}>{warning}</li>
               ))}
@@ -463,7 +463,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       )}
 
       {data.applied.length > 0 && (
-        <div className="rounded-xl border border-brass/25 bg-brass-soft/50 p-3.5 text-[0.75rem] leading-relaxed">
+        <div className="rounded-xl border border-brass/25 bg-brass-soft/50 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-brass">
             <AlertTriangle className="size-3.5" /> This extraction was already applied
           </p>
@@ -472,7 +472,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             same request id return the previous result. To intentionally create another
             purchase or stock increase, explicitly allow a re-apply.
           </p>
-          <label className="mt-2 flex items-center gap-2 text-[0.72rem]">
+          <label className="mt-2 flex items-center gap-2 text-2xs">
             <input
               type="checkbox"
               className="size-3.5 accent-primary"
@@ -485,7 +485,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       )}
 
       {data.duplicate_documents.length > 0 && (
-        <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-3.5 text-[0.74rem] leading-relaxed text-muted-foreground">
+        <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-3.5 text-2xs leading-relaxed text-muted-foreground">
           <p className="flex items-center gap-1.5 font-medium text-brass">
             <AlertTriangle className="size-3.5" /> Identical file content is already in the
             library
@@ -505,7 +505,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       )}
 
       {(refinement || refinementActive) && (
-        <div className="rounded-xl border border-brass/30 bg-brass-soft/35 p-3.5 text-[0.74rem] leading-relaxed">
+        <div className="rounded-xl border border-brass/30 bg-brass-soft/35 p-3.5 text-2xs leading-relaxed">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="flex items-center gap-1.5 font-medium text-brass">
               <Sparkles className="size-3.5" />
@@ -513,7 +513,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               {refinementActive && <Badge variant="brass">Active</Badge>}
             </p>
             {refinement && (
-              <span className="text-[0.66rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 {refinement.ai_status.provider_label ?? refinement.ai_status.provider} ·{" "}
                 {refinement.version.slice(0, 8)}
               </span>
@@ -550,7 +550,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                         : formatCurrency(line.line_total_cents, refinement.fields.currency ?? currency)}
                     </span>
                   </div>
-                  <p className="mt-0.5 line-clamp-2 text-[0.66rem] text-muted-foreground">
+                  <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">
                     {line.evidence.text}
                   </p>
                 </div>
@@ -558,7 +558,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             </div>
           )}
           {refinement?.warnings && refinement.warnings.length > 0 && (
-            <p className="mt-2 text-[0.68rem] text-brass">{refinement.warnings.join(" ")}</p>
+            <p className="mt-2 text-2xs text-brass">{refinement.warnings.join(" ")}</p>
           )}
           {refineMutation.error && (
             <FormError message={getApiErrorMessage(refineMutation.error)} />
@@ -585,8 +585,8 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       <div className="rounded-xl border border-border/70 bg-secondary/20 p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[0.78rem] font-medium">Extracted proposal</p>
-            <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+            <p className="text-xs font-medium">Extracted proposal</p>
+            <p className="mt-0.5 text-2xs text-muted-foreground">
               {data.source_artifact === "cleaned_pdf"
                 ? "Read from the cleaned scan PDF"
                 : "Read from the original document"}{" "}
@@ -603,7 +603,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           </div>
         </div>
         {data.warnings.length > 0 && (
-          <ul className="mt-3 space-y-1.5 rounded-lg border border-brass/20 bg-brass-soft/40 p-3 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <ul className="mt-3 space-y-1.5 rounded-lg border border-brass/20 bg-brass-soft/40 p-3 text-2xs leading-relaxed text-muted-foreground">
             {data.warnings.map((warning) => (
               <li key={warning} className="flex gap-1.5">
                 <AlertTriangle className="mt-0.5 size-3 shrink-0 text-brass" />
@@ -613,7 +613,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           </ul>
         )}
         {data.fields.uncertain_fields.length > 0 && (
-          <p className="mt-2 text-[0.7rem] text-brass">
+          <p className="mt-2 text-2xs text-brass">
             Verify uncertain fields: {data.fields.uncertain_fields.join(", ")}.
           </p>
         )}
@@ -623,7 +623,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="font-display text-[1.25rem] tracking-[-0.02em]">Document fields</h3>
-            <p className="mt-0.5 text-[0.72rem] text-muted-foreground">
+            <p className="mt-0.5 text-2xs text-muted-foreground">
               Empty fields stay empty. Values are not invented from a document type that does
               not support them.
             </p>
@@ -642,7 +642,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               onChange={(event) => setMerchant(event.target.value)}
             />
             {document.merchant && document.merchant !== merchant && (
-              <p className="mt-1 text-[0.68rem] text-muted-foreground">
+              <p className="mt-1 text-2xs text-muted-foreground">
                 Current document value: {document.merchant}
               </p>
             )}
@@ -700,7 +700,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           data.fields.tax_cents != null ||
           data.fields.discount_cents != null ||
           data.fields.shipping_cents != null) && (
-          <p className="mt-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="mt-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
             Recorded subtotal{" "}
             {formatCurrency(data.fields.subtotal_cents ?? 0, currency)} · tax{" "}
             {formatCurrency(data.fields.tax_cents ?? 0, currency)} · discount{" "}
@@ -711,10 +711,10 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         )}
         {Object.keys(data.fields.field_sources).length > 0 && (
           <details className="mt-3">
-            <summary className="cursor-pointer text-[0.7rem] text-muted-foreground">
+            <summary className="cursor-pointer text-2xs text-muted-foreground">
               Field source evidence
             </summary>
-            <dl className="mt-2 space-y-1.5 text-[0.68rem] text-muted-foreground">
+            <dl className="mt-2 space-y-1.5 text-2xs text-muted-foreground">
               {Object.entries(data.fields.field_sources).map(([key, source]) => (
                 <div key={key} className="grid gap-1 sm:grid-cols-[140px_1fr]">
                   <dt className="font-medium text-foreground/70">{key.replaceAll("_", " ")}</dt>
@@ -732,7 +732,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             <h3 className="font-display text-[1.35rem] tracking-[-0.025em]">
               Product lines
             </h3>
-            <p className="mt-0.5 text-[0.72rem] text-muted-foreground">
+            <p className="mt-0.5 text-2xs text-muted-foreground">
               Choose likely matches first, create only the items you want, or skip lines that
               are not inventory.
             </p>
@@ -782,13 +782,13 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         </div>
 
         {aiWarnings.length > 0 && (
-          <div className="rounded-lg border border-brass/20 bg-brass-soft/40 px-3 py-2 text-[0.7rem] text-muted-foreground">
+          <div className="rounded-lg border border-brass/20 bg-brass-soft/40 px-3 py-2 text-2xs text-muted-foreground">
             {aiWarnings.join(" ")}
           </div>
         )}
 
         {drafts.length === 0 ? (
-          <div className="surface px-4 py-6 text-[0.78rem] text-muted-foreground">
+          <div className="surface px-4 py-6 text-xs text-muted-foreground">
             No product lines were recognised. Review the source text and use manual search or
             create an item from the document fields if appropriate.
           </div>
@@ -824,7 +824,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                     {refinementActive && <Badge variant="brass">AI-refined line</Badge>}
                     {edited && <Badge variant="brass">Edited</Badge>}
                   </div>
-                  <span className="text-[0.68rem] text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     {draft.line.purchase_eligible ? "Inventory candidate" : "Review only"}
                   </span>
                 </div>
@@ -891,26 +891,26 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                 </div>
 
                 {draft.line.warnings.length > 0 && (
-                  <ul className="space-y-1 text-[0.7rem] text-brass">
+                  <ul className="space-y-1 text-2xs text-brass">
                     {draft.line.warnings.map((warning) => (
                       <li key={warning}>{warning}</li>
                     ))}
                   </ul>
                 )}
 
-                <details className="text-[0.7rem] text-muted-foreground">
+                <details className="text-2xs text-muted-foreground">
                   <summary className="cursor-pointer">
                     Source line evidence
                     {draft.line.evidence.page ? ` · page ${draft.line.evidence.page}` : ""}
                   </summary>
-                  <p className="mt-1 rounded-lg bg-secondary/35 px-2.5 py-2 font-mono text-[0.68rem] leading-relaxed text-foreground/70">
+                  <p className="mt-1 rounded-lg bg-secondary/35 px-2.5 py-2 font-mono text-2xs leading-relaxed text-foreground/70">
                     {draft.line.evidence.text}
                   </p>
                 </details>
 
                 <div className="rounded-xl border border-border/70 bg-background/40 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[0.75rem] font-medium">Suggested existing items</p>
+                    <p className="text-2xs font-medium">Suggested existing items</p>
                     <Button
                       type="button"
                       size="sm"
@@ -943,18 +943,18 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                             )}
                           >
                             <span className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[0.78rem] font-medium">{candidate.name}</span>
+                              <span className="text-xs font-medium">{candidate.name}</span>
                               {candidate.exact_identifier && (
                                 <Badge variant="sage">Identifier verified</Badge>
                               )}
-                              <span className="text-[0.66rem] text-muted-foreground">
+                              <span className="text-2xs text-muted-foreground">
                                 ×{candidate.quantity}
                                 {candidate.on_loan_quantity
                                   ? ` · ${candidate.on_loan_quantity} on loan`
                                   : ""}
                               </span>
                             </span>
-                            <span className="mt-0.5 block text-[0.68rem] text-muted-foreground">
+                            <span className="mt-0.5 block text-2xs text-muted-foreground">
                               {[candidate.room_name, candidate.location_name]
                                 .filter(Boolean)
                                 .join(" / ") || "No place assigned"}
@@ -968,12 +968,12 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                                 : " · no purchase recorded"}
                             </span>
                             {candidate.reasons.length > 0 && (
-                              <span className="mt-1 block text-[0.66rem] text-brass">
+                              <span className="mt-1 block text-2xs text-brass">
                                 {candidate.reasons.join(" · ")}
                               </span>
                             )}
                             {candidate.warranty && (
-                              <span className="mt-0.5 block text-[0.64rem] text-muted-foreground">
+                              <span className="mt-0.5 block text-2xs text-muted-foreground">
                                 Existing warranty:{" "}
                                 {[candidate.warranty.provider, candidate.warranty.end_date]
                                   .filter(Boolean)
@@ -985,7 +985,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                       })}
                     </div>
                   ) : (
-                    <p className="mt-2 text-[0.72rem] text-muted-foreground">
+                    <p className="mt-2 text-2xs text-muted-foreground">
                       No likely household match. Search all items or create a new one.
                     </p>
                   )}
@@ -1166,7 +1166,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 
                   {draft.action === "update" && selected && (
                     <div className="mt-3 grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
-                      <p className="text-[0.7rem] text-muted-foreground sm:col-span-2">
+                      <p className="text-2xs text-muted-foreground sm:col-span-2">
                         Current values: {selected.name}
                         {selected.brand ? ` · ${selected.brand}` : ""}
                         {selected.model ? ` · ${selected.model}` : ""}
@@ -1280,7 +1280,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                     </div>
                   )}
 
-                  <label className="mt-3 flex items-start gap-2 border-t border-border/60 pt-3 text-[0.72rem]">
+                  <label className="mt-3 flex items-start gap-2 border-t border-border/60 pt-3 text-2xs">
                     <input
                       type="checkbox"
                       className="mt-0.5 size-3.5 accent-primary"
@@ -1295,7 +1295,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                     />
                     <span>
                       <span className="block font-medium">Add this quantity as new stock</span>
-                      <span className="block text-[0.68rem] text-muted-foreground">
+                      <span className="block text-2xs text-muted-foreground">
                         Linking a receipt does not increase an existing item&apos;s quantity
                         unless this is explicitly selected. Open loans are not changed.
                       </span>
@@ -1305,7 +1305,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                   {warrantySupported &&
                     ["create", "link", "update"].includes(draft.action) && (
                       <div className="mt-3 border-t border-border/60 pt-3">
-                        <label className="flex items-start gap-2 text-[0.72rem]">
+                        <label className="flex items-start gap-2 text-2xs">
                           <input
                             type="checkbox"
                             className="mt-0.5 size-3.5 accent-primary"
@@ -1322,7 +1322,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                           />
                           <span>
                             <span className="block font-medium">Apply extracted warranty evidence</span>
-                            <span className="block text-[0.68rem] text-muted-foreground">
+                            <span className="block text-2xs text-muted-foreground">
                               Only the fields present in the source are proposed. Review the
                               existing warranty above before replacing it.
                             </span>
@@ -1397,9 +1397,9 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 
       {charges.length > 0 && (
         <details className="surface p-4 sm:p-5">
-          <summary className="cursor-pointer text-[0.8rem] font-medium">
+          <summary className="cursor-pointer text-xs font-medium">
             Charges, discounts and payment lines
-            <span className="ml-2 text-[0.7rem] font-normal text-muted-foreground">
+            <span className="ml-2 text-2xs font-normal text-muted-foreground">
               {pluralize(charges.length, "separate line")}
             </span>
           </summary>
@@ -1407,12 +1407,12 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             {charges.map((line) => (
               <li key={line.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="min-w-0">
-                  <span className="block text-[0.76rem] font-medium">{line.description}</span>
-                  <span className="block text-[0.66rem] text-muted-foreground">
+                  <span className="block text-xs font-medium">{line.description}</span>
+                  <span className="block text-2xs text-muted-foreground">
                     {line.kind} · source line {line.line_number}
                   </span>
                 </span>
-                <span className="text-[0.76rem] tabular-nums">{formatCurrency(line.line_total_cents ?? 0, currency)}</span>
+                <span className="text-xs tabular-nums">{formatCurrency(line.line_total_cents ?? 0, currency)}</span>
               </li>
             ))}
           </ul>
@@ -1424,7 +1424,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="font-display text-[1.25rem] tracking-[-0.02em]">Purchase review</h3>
-              <p className="mt-0.5 text-[0.72rem] text-muted-foreground">
+              <p className="mt-0.5 text-2xs text-muted-foreground">
                 One shared purchase total is recorded for the selected items. Product line
                 amounts remain review evidence and are not silently allocated as per-item
                 purchase fields.
@@ -1473,7 +1473,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                   ))}
                 </Select>
               </Field>
-              <label className="flex items-center gap-2 text-[0.72rem]">
+              <label className="flex items-center gap-2 text-2xs">
                 <input
                   type="checkbox"
                   className="size-3.5 accent-primary"
@@ -1485,17 +1485,17 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
             </div>
           )}
           {purchaseAction === "create" && (
-            <p className="mt-3 text-[0.72rem] text-muted-foreground">
+            <p className="mt-3 text-2xs text-muted-foreground">
               The reviewed merchant, date, total, currency and order number will be saved as
               one purchase shared by the selected items.
             </p>
           )}
           {purchaseAction !== "none" && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="flex items-start justify-between gap-3 text-[0.75rem] sm:col-span-2">
+              <label className="flex items-start justify-between gap-3 text-2xs sm:col-span-2">
                 <span>
                   <span className="block font-medium">Use this document as the receipt</span>
-                  <span className="block text-[0.68rem] text-muted-foreground">
+                  <span className="block text-2xs text-muted-foreground">
                     Links the document to the purchase record.
                   </span>
                 </span>
@@ -1507,10 +1507,10 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               </label>
             </div>
           )}
-          <label className="mt-3 flex items-start justify-between gap-3 border-t border-border/60 pt-3 text-[0.75rem]">
+          <label className="mt-3 flex items-start justify-between gap-3 border-t border-border/60 pt-3 text-2xs">
             <span>
               <span className="block font-medium">Link document to selected items</span>
-              <span className="block text-[0.68rem] text-muted-foreground">
+              <span className="block text-2xs text-muted-foreground">
                 Attachment links are explicit and can be changed later from the document or
                 item pages.
               </span>
@@ -1523,20 +1523,20 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           </label>
         </section>
       ) : (
-        <div className="surface p-4 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="surface p-4 text-2xs leading-relaxed text-muted-foreground">
           This document type is not treated as proof of purchase. You can review product,
           model, serial and warranty evidence, but purchase recording is disabled.
         </div>
       )}
 
       <details className="surface p-4 sm:p-5">
-        <summary className="cursor-pointer text-[0.8rem] font-medium">
+        <summary className="cursor-pointer text-xs font-medium">
           AI matching details
-          <span className="ml-2 text-[0.7rem] font-normal text-muted-foreground">
+          <span className="ml-2 text-2xs font-normal text-muted-foreground">
             {aiStatus?.configured ? aiStatus.provider_label ?? aiStatus.provider : "not configured"}
           </span>
         </summary>
-        <div className="mt-3 space-y-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+        <div className="mt-3 space-y-2 text-2xs leading-relaxed text-muted-foreground">
           <p>{aiStatus?.privacy_note ?? "No AI ranking is configured."}</p>
           <p>
             Task: documents · Mode: {aiStatus?.mode ?? "disabled"} · Model:{" "}
@@ -1582,7 +1582,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="font-display text-[1.2rem] tracking-[-0.02em]">Change preview</h3>
-            <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+            <p className="mt-0.5 text-2xs text-muted-foreground">
               {createCount} create · {updateCount} update · {linkCount} link · {skipCount} skip
               {purchaseAction !== "none" ? " · purchase review" : ""}
             </p>
@@ -1590,7 +1590,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           <Badge variant="outline">{selectedLineCount} reviewed lines</Badge>
         </div>
         {validationErrors.length > 0 && (
-          <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/40 p-3 text-[0.7rem] text-muted-foreground">
+          <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/40 p-3 text-2xs text-muted-foreground">
             {validationErrors.map((error) => (
               <li key={error}>{error}</li>
             ))}
@@ -1598,7 +1598,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         )}
         {applyMutation.error && <FormError message={getApiErrorMessage(applyMutation.error)} />}
         <div className="mt-4 flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[0.68rem] text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Nothing is created, linked, purchased or overwritten until you confirm. Apply is
             atomic; retries with the same request id are safe.
           </p>

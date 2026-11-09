@@ -54,6 +54,11 @@ export default {
           soft: "hsl(var(--brass-soft))",
         },
       },
+      fontSize: {
+        "2xs": ["0.75rem", { lineHeight: "1.1rem" }],
+        xs: ["0.8125rem", { lineHeight: "1.2rem" }],
+        sm: ["0.875rem", { lineHeight: "1.35rem" }],
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 4px)",

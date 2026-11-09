@@ -124,7 +124,7 @@ export function SetupPage() {
           {!setup.isPending && <ArrowRight className="ml-auto" />}
         </Button>
 
-        <p className="text-pretty text-center text-[0.72rem] leading-relaxed text-muted-foreground">
+        <p className="text-pretty text-center text-2xs leading-relaxed text-muted-foreground">
           This creates the first owner. Setup can only be completed once; additional
           people join through household invitations.
         </p>

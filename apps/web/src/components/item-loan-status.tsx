@@ -59,12 +59,12 @@ export function ItemLoanStatus({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <HandCoins className="size-4 shrink-0 text-brass" aria-hidden="true" />
-            <p className="text-[0.86rem] font-medium leading-snug text-foreground">
+            <p className="text-sm font-medium leading-snug text-foreground">
               {heading}
             </p>
             {overdue && <Badge variant="brass">Past due</Badge>}
           </div>
-          <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
             Owned {ownedQuantity} · at home {atHomeQuantity} · on loan{" "}
             {onLoanQuantity}
             {singleDue ? ` · ${singleDue}` : ""}
@@ -75,7 +75,7 @@ export function ItemLoanStatus({
               {activeLoans.slice(0, 4).map((loan) => (
                 <li
                   key={loan.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/35 px-2.5 py-1.5 text-[0.72rem]"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/35 px-2.5 py-1.5 text-2xs"
                 >
                   <Link
                     to={`/loans/${loan.id}`}
@@ -94,7 +94,7 @@ export function ItemLoanStatus({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-6 px-2 text-[0.68rem]"
+                        className="h-6 px-2 text-2xs"
                         onClick={() => onReturnLoan(loan)}
                         aria-label={`Record return from ${loan.borrower_name}`}
                       >
@@ -110,13 +110,13 @@ export function ItemLoanStatus({
           {activeLoans.length > 4 && (
             <Link
               to={`/loans?item_id=${activeLoans[0]?.item_id ?? ""}`}
-              className="mt-2 inline-block text-[0.68rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              className="mt-2 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               All {activeLoans.length} open loans
             </Link>
           )}
 
-          <p className="mt-1.5 text-[0.68rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
             {fullyLoaned
               ? "The recorded room and container are its usual home, not a current physical location while loaned out."
               : `The recorded room and container are where the ${atHomeQuantity} at-home ${unitLabel(atHomeQuantity)} normally live.`}

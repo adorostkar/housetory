@@ -29,6 +29,7 @@ import {
 } from "@/lib/queries";
 import type { SessionState } from "@/lib/types";
 import { ForgotPasswordPage } from "@/pages/forgot-password-page";
+import { FinancialsLayout } from "@/components/financials-layout";
 import { InvitationPage } from "@/pages/invitation-page";
 import { LoginPage } from "@/pages/login-page";
 import { NoHouseholdPage } from "@/pages/no-household-page";
@@ -36,19 +37,29 @@ import { ResetPasswordPage } from "@/pages/reset-password-page";
 import { SetupPage } from "@/pages/setup-page";
 
 const OverviewPage = React.lazy(() =>
-  import("@/pages/overview-page").then((module) => ({ default: module.OverviewPage })),
+  import("@/pages/overview-page").then((module) => ({
+    default: module.OverviewPage,
+  })),
 );
 const RoomsPage = React.lazy(() =>
-  import("@/pages/rooms-page").then((module) => ({ default: module.RoomsPage })),
+  import("@/pages/rooms-page").then((module) => ({
+    default: module.RoomsPage,
+  })),
 );
 const RoomDetailPage = React.lazy(() =>
-  import("@/pages/room-detail-page").then((module) => ({ default: module.RoomDetailPage })),
+  import("@/pages/room-detail-page").then((module) => ({
+    default: module.RoomDetailPage,
+  })),
 );
 const ItemsPage = React.lazy(() =>
-  import("@/pages/items-page").then((module) => ({ default: module.ItemsPage })),
+  import("@/pages/items-page").then((module) => ({
+    default: module.ItemsPage,
+  })),
 );
 const LoansPage = React.lazy(() =>
-  import("@/pages/loans-page").then((module) => ({ default: module.LoansPage })),
+  import("@/pages/loans-page").then((module) => ({
+    default: module.LoansPage,
+  })),
 );
 const InsurancePage = React.lazy(() =>
   import("@/pages/insurance-page").then((module) => ({
@@ -66,16 +77,24 @@ const BorrowedDetailPage = React.lazy(() =>
   })),
 );
 const ItemNewPage = React.lazy(() =>
-  import("@/pages/item-form-pages").then((module) => ({ default: module.ItemNewPage })),
+  import("@/pages/item-form-pages").then((module) => ({
+    default: module.ItemNewPage,
+  })),
 );
 const ItemEditPage = React.lazy(() =>
-  import("@/pages/item-form-pages").then((module) => ({ default: module.ItemEditPage })),
+  import("@/pages/item-form-pages").then((module) => ({
+    default: module.ItemEditPage,
+  })),
 );
 const ItemDetailPage = React.lazy(() =>
-  import("@/pages/item-detail-page").then((module) => ({ default: module.ItemDetailPage })),
+  import("@/pages/item-detail-page").then((module) => ({
+    default: module.ItemDetailPage,
+  })),
 );
 const DocumentsPage = React.lazy(() =>
-  import("@/pages/documents-page").then((module) => ({ default: module.DocumentsPage })),
+  import("@/pages/documents-page").then((module) => ({
+    default: module.DocumentsPage,
+  })),
 );
 const DocumentDetailPage = React.lazy(() =>
   import("@/pages/document-detail-page").then((module) => ({
@@ -83,16 +102,24 @@ const DocumentDetailPage = React.lazy(() =>
   })),
 );
 const PurchasesPage = React.lazy(() =>
-  import("@/pages/purchases-page").then((module) => ({ default: module.PurchasesPage })),
+  import("@/pages/purchases-page").then((module) => ({
+    default: module.PurchasesPage,
+  })),
 );
 const WarrantiesPage = React.lazy(() =>
-  import("@/pages/warranties-page").then((module) => ({ default: module.WarrantiesPage })),
+  import("@/pages/warranties-page").then((module) => ({
+    default: module.WarrantiesPage,
+  })),
 );
 const SearchPage = React.lazy(() =>
-  import("@/pages/search-page").then((module) => ({ default: module.SearchPage })),
+  import("@/pages/search-page").then((module) => ({
+    default: module.SearchPage,
+  })),
 );
 const ImportsPage = React.lazy(() =>
-  import("@/pages/imports-page").then((module) => ({ default: module.ImportsPage })),
+  import("@/pages/imports-page").then((module) => ({
+    default: module.ImportsPage,
+  })),
 );
 const ImportDetailPage = React.lazy(() =>
   import("@/pages/import-detail-page").then((module) => ({
@@ -100,7 +127,9 @@ const ImportDetailPage = React.lazy(() =>
   })),
 );
 const AssistantPage = React.lazy(() =>
-  import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
+  import("@/pages/assistant-page").then((module) => ({
+    default: module.AssistantPage,
+  })),
 );
 const ScanPage = React.lazy(() =>
   import("@/pages/scan-page").then((module) => ({ default: module.ScanPage })),
@@ -126,16 +155,24 @@ const ContainerDetailPage = React.lazy(() =>
   })),
 );
 const StocktakePage = React.lazy(() =>
-  import("@/pages/stocktake-page").then((module) => ({ default: module.StocktakePage })),
+  import("@/pages/stocktake-page").then((module) => ({
+    default: module.StocktakePage,
+  })),
 );
 const LabelsPage = React.lazy(() =>
-  import("@/pages/labels-page").then((module) => ({ default: module.LabelsPage })),
+  import("@/pages/labels-page").then((module) => ({
+    default: module.LabelsPage,
+  })),
 );
 const SettingsPage = React.lazy(() =>
-  import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })),
+  import("@/pages/settings-page").then((module) => ({
+    default: module.SettingsPage,
+  })),
 );
 const AiSettingsPage = React.lazy(() =>
-  import("@/pages/ai-settings-page").then((module) => ({ default: module.AiSettingsPage })),
+  import("@/pages/ai-settings-page").then((module) => ({
+    default: module.AiSettingsPage,
+  })),
 );
 const AccountSettingsPage = React.lazy(() =>
   import("@/pages/account-settings-page").then((module) => ({
@@ -153,7 +190,9 @@ const SystemStatusPage = React.lazy(() =>
   })),
 );
 const NotFoundPage = React.lazy(() =>
-  import("@/pages/not-found-page").then((module) => ({ default: module.NotFoundPage })),
+  import("@/pages/not-found-page").then((module) => ({
+    default: module.NotFoundPage,
+  })),
 );
 
 export default function App() {
@@ -202,7 +241,8 @@ export default function App() {
       }
       return;
     }
-    if (selectHousehold.isPending || attemptedHouseholdLink.current === target) return;
+    if (selectHousehold.isPending || attemptedHouseholdLink.current === target)
+      return;
     attemptedHouseholdLink.current = target;
     selectHousehold.mutate(target, {
       onSuccess: () => {
@@ -303,14 +343,22 @@ export default function App() {
             </Route>
             <Route path="items/:itemId" element={<ItemDetailPage />} />
             <Route path="review" element={<ReviewPage />} />
-            <Route path="insurance" element={<InsurancePage />} />
             <Route path="loans" element={<LoansPage />} />
             <Route path="loans/:loanId" element={<LoanDetailPage />} />
-            <Route path="borrowed/:borrowedId" element={<BorrowedDetailPage />} />
+            <Route
+              path="borrowed/:borrowedId"
+              element={<BorrowedDetailPage />}
+            />
             <Route path="documents" element={<DocumentsPage />} />
-            <Route path="documents/:documentId" element={<DocumentDetailPage />} />
-            <Route path="purchases" element={<PurchasesPage />} />
-            <Route path="warranties" element={<WarrantiesPage />} />
+            <Route
+              path="documents/:documentId"
+              element={<DocumentDetailPage />}
+            />
+            <Route element={<FinancialsLayout />}>
+              <Route path="purchases" element={<PurchasesPage />} />
+              <Route path="warranties" element={<WarrantiesPage />} />
+              <Route path="insurance" element={<InsurancePage />} />
+            </Route>
             <Route element={<RequireWriter />}>
               <Route path="imports" element={<ImportsPage />} />
               <Route path="imports/:batchId" element={<ImportDetailPage />} />
@@ -321,7 +369,10 @@ export default function App() {
               <Route path="recognize" element={<RecognitionPage />} />
             </Route>
             <Route path="containers" element={<ContainersPage />} />
-            <Route path="containers/:containerId" element={<ContainerDetailPage />} />
+            <Route
+              path="containers/:containerId"
+              element={<ContainerDetailPage />}
+            />
             <Route path="stocktake/:sessionId" element={<StocktakePage />} />
             <Route element={<RequireWriter />}>
               <Route path="labels" element={<LabelsPage />} />
@@ -331,7 +382,10 @@ export default function App() {
             <Route path="settings/account" element={<AccountSettingsPage />} />
             <Route path="settings/members" element={<MembersSettingsPage />} />
             <Route path="settings/ai" element={<AiSettingsPage />} />
-            <Route path="settings/system-status" element={<SystemStatusPage />} />
+            <Route
+              path="settings/system-status"
+              element={<SystemStatusPage />}
+            />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>

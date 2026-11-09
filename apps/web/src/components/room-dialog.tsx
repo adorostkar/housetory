@@ -128,7 +128,7 @@ export function RoomDialog({
             <Field label="Property" htmlFor="room-property">
               <p
                 id="room-property"
-                className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-2.5 text-[0.82rem] text-muted-foreground"
+                className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-2.5 text-xs text-muted-foreground"
               >
                 {room.property?.name ?? "Property"} · use Move to property from the room page to
                 move the whole subtree.

@@ -132,7 +132,7 @@ export function PersonNameInput({
           className="absolute left-0 right-0 z-50 mt-1 overflow-hidden rounded-xl border border-border/80 bg-popover shadow-lift"
         >
           {peopleQuery.isPending ? (
-            <p className="px-3 py-2.5 text-[0.7rem] text-muted-foreground">
+            <p className="px-3 py-2.5 text-2xs text-muted-foreground">
               Looking up household loan names…
             </p>
           ) : people.length > 0 ? (
@@ -149,7 +149,7 @@ export function PersonNameInput({
                   role="option"
                   aria-selected={index === activeIndex}
                   className={cn(
-                    "cursor-pointer rounded-lg px-2.5 py-2 text-[0.78rem]",
+                    "cursor-pointer rounded-lg px-2.5 py-2 text-xs",
                     index === activeIndex
                       ? "bg-secondary text-foreground"
                       : "text-foreground/85 hover:bg-secondary/60",
@@ -161,20 +161,20 @@ export function PersonNameInput({
                   }}
                 >
                   <span className="block truncate font-medium">{person.name}</span>
-                  <span className="mt-0.5 block text-[0.64rem] text-muted-foreground">
+                  <span className="mt-0.5 block text-2xs text-muted-foreground">
                     {suggestionMeta(person)}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="px-3 py-2.5 text-[0.7rem] leading-relaxed text-muted-foreground">
+            <p className="px-3 py-2.5 text-2xs leading-relaxed text-muted-foreground">
               {value.trim()
                 ? "No saved names match. This name is saved only when you save the record."
                 : "No saved names yet. Type a name; it is saved only with this record."}
             </p>
           )}
-          <p className="border-t border-border/60 px-3 py-1.5 text-[0.6rem] text-muted-foreground">
+          <p className="border-t border-border/60 px-3 py-1.5 text-2xs text-muted-foreground">
             From this household's loan and borrowed records. Selecting a name creates
             nothing.
           </p>

@@ -31,7 +31,7 @@ export function BorrowedKeptHere({
             <HandCoins className="size-4 text-brass" />
             Borrowed items kept here
           </h2>
-          <p className="mt-1 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
             These goods belong to other people. They are not included in owned item counts,
             values, stocktake or evidence.
           </p>
@@ -43,11 +43,11 @@ export function BorrowedKeptHere({
           <li key={record.id}>
             <Link
               to={`/borrowed/${record.id}`}
-              className="flex flex-wrap items-center justify-between gap-2 py-2 text-[0.76rem] transition-colors hover:text-foreground"
+              className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs transition-colors hover:text-foreground"
             >
               <span className="min-w-0">
                 <span className="block truncate font-medium">{record.item_name}</span>
-                <span className="block truncate text-[0.68rem] text-muted-foreground">
+                <span className="block truncate text-2xs text-muted-foreground">
                   belongs to {record.owner_name} · {record.outstanding_quantity} held
                   {record.due_on ? ` · due ${formatDate(record.due_on)}` : ""}
                 </span>

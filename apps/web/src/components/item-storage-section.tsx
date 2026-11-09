@@ -114,18 +114,18 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
               <PackageOpen className="size-4 text-brass" />
               Store items inside
             </h2>
-            <p className="mt-2 max-w-2xl text-[0.8rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">
               Make this owned item act as a toolbox, box or piece of furniture that holds
               other inventory. Purchase, warranty, photos, documents, value and history stay
               on this item.
             </p>
             {item.quantity !== 1 ? (
-              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 Quantity must be 1 before storage can be enabled. Represent separate physical
                 boxes or furniture units as separate items; quantities are not split silently.
               </p>
             ) : !item.room ? (
-              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
                 Assign this item to a room first so its storage place has a real location and
                 QR identity.
               </p>
@@ -169,7 +169,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
               <Badge variant="outline">Storage removed</Badge>
             )}
           </div>
-          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.72rem] text-muted-foreground">
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
             <MapPin className="size-3" />
             {storage.active ? (
               <>
@@ -212,7 +212,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
             )}
           </p>
           {storage.active && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
               <span>
                 {pluralize(storage.item_count, "item")} ·{" "}
                 {pluralize(storage.total_quantity, "nested unit")}
@@ -230,7 +230,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
             </div>
           )}
           {!storage.active && (
-            <p className="mt-2 max-w-xl text-[0.74rem] leading-relaxed text-muted-foreground">
+            <p className="mt-2 max-w-xl text-2xs leading-relaxed text-muted-foreground">
               The storage capability was removed only when it was empty. Restoring it reuses
               the same container identity and QR code.
             </p>
@@ -289,7 +289,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
 
       {canWrite && (
         <div className="mt-5 border-t border-border/60 pt-4">
-          <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             Removing storage never deletes this item or its ownership details. Move out every
             item, nested place and borrowed placement first; the server blocks an unsafe
             removal and nothing is deleted.
@@ -377,8 +377,8 @@ function ContentsBody({
                 }}
                 className={
                   scope === value
-                    ? "rounded-full bg-primary px-3 py-1.5 text-[0.7rem] font-medium text-primary-foreground"
-                    : "rounded-full px-3 py-1.5 text-[0.7rem] font-medium text-muted-foreground"
+                    ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
+                    : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
                 }
               >
                 {value === "nested" ? "Include nested" : "Direct only"}
@@ -392,7 +392,7 @@ function ContentsBody({
               selection.clearSelection("Selection cleared because the sort changed.");
               setSort(event.target.value as keyof typeof SORTS);
             }}
-            className="h-9 rounded-lg text-[0.8rem] lg:max-w-44"
+            className="h-9 rounded-lg text-xs lg:max-w-44"
           >
             {Object.entries(SORTS).map(([value, label]) => (
               <option key={value} value={value}>

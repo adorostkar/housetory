@@ -3,11 +3,10 @@ import { useState } from "react";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { RoomCard } from "@/components/room-card";
 import { RoomDialog } from "@/components/room-dialog";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { usePropertyFilter } from "@/hooks/use-property-filter";
 import { useCanWrite, useRooms } from "@/lib/queries";
 import { Select } from "@/components/ui/select";
@@ -19,7 +18,7 @@ export function RoomsPage() {
   const canWrite = useCanWrite();
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  if (roomsQuery.isPending) return <RoomsSkeleton />;
+  if (roomsQuery.isPending) return <PageSkeleton variant="cards" />;
   if (roomsQuery.isError) {
     return (
       <ErrorState
@@ -47,16 +46,15 @@ export function RoomsPage() {
   );
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Your home"
-        title="Rooms"
-        description={
+    <PageLayout
+      header={{
+        eyebrow: "Your home",
+        title: "Rooms",
+        description:
           rooms.length > 0
             ? `${pluralize(rooms.length, "room")}, each with its own places to keep things.`
-            : "The rooms and corners that make up your home."
-        }
-        actions={
+            : "The rooms and corners that make up your home.",
+        actions: (
           <>
             <Select
               aria-label="Filter rooms by property"
@@ -78,9 +76,9 @@ export function RoomsPage() {
               </Button>
             ) : null}
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       {groups.length === 0 ? (
         <EmptyState
           title="No rooms yet."
@@ -101,7 +99,7 @@ export function RoomsPage() {
                   <h2 className="font-display text-[1.2rem] tracking-[-0.02em]">
                     {group.property.name}
                   </h2>
-                  <p className="text-[0.7rem] text-muted-foreground">
+                  <p className="text-2xs text-muted-foreground">
                     {pluralize(group.rooms.length, "room")} ·{" "}
                     {pluralize(group.property.total_quantity, "unit")}
                     {group.property.is_archived ? " · archived" : ""}
@@ -144,20 +142,6 @@ export function RoomsPage() {
         rooms={rooms}
         defaultPropertyId={propertyId || undefined}
       />
-    </div>
-  );
-}
-
-function RoomsSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="mt-4 h-11 w-48" />
-      <div className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-52 rounded-2xl" />
-        ))}
-      </div>
-    </div>
+    </PageLayout>
   );
 }

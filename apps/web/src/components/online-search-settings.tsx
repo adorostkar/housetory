@@ -140,7 +140,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
   if (settingsQuery.isPending) {
     return (
       <section id="online-search" className="surface p-5 sm:p-6">
-        <p className="text-[0.78rem] text-muted-foreground">Loading online search settings…</p>
+        <p className="text-xs text-muted-foreground">Loading online search settings…</p>
       </section>
     );
   }
@@ -176,7 +176,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
             <Globe2 className="size-4 text-brass" />
             Online search
           </h2>
-          <p className="mt-1 max-w-2xl text-[0.78rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
             One Brave Search API credential can power online manual discovery and
             reference-image lookup. The key is encrypted at rest, write-only from this
             screen and never returned to the browser.
@@ -191,13 +191,13 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
       </div>
 
       {settings.warning && (
-        <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-muted-foreground">
+        <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
           {settings.warning}
         </p>
       )}
 
       {settings.credential_source === "environment" && (
-        <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-[0.72rem] leading-relaxed text-muted-foreground">
+        <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
           <p className="font-medium text-foreground/85">Installation fallback is active.</p>
           <p className="mt-1">
             This household has no saved online-search settings, so the server
@@ -210,7 +210,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
       {settings.credential_source === "household" &&
         !settings.has_api_key &&
         settings.environment_api_key_available && (
-          <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
             Household settings are authoritative. The installation fallback key is
             ignored while this household configuration exists.
           </div>
@@ -219,16 +219,16 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-border/65 bg-background/35 p-4">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[0.86rem] font-medium">Online manual search</h3>
+            <h3 className="text-sm font-medium">Online manual search</h3>
             <Badge variant={settings.manual.configured ? "sage" : "outline"}>
               {settings.manual.configured ? "Ready" : "Not configured"}
             </Badge>
           </div>
-          <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
             Find exact manufacturer/model manuals from online sources. Manual uploads
             and attached-manual questions continue to work without it.
           </p>
-          <label className="mt-3 flex items-start gap-2.5 text-[0.76rem]">
+          <label className="mt-3 flex items-start gap-2.5 text-xs">
             <input
               type="checkbox"
               className="mt-0.5 size-4 rounded border-border"
@@ -237,12 +237,12 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
             />
             <span>Enable online manual search</span>
           </label>
-          <p className="mt-2 text-[0.66rem] text-muted-foreground">
+          <p className="mt-2 text-2xs text-muted-foreground">
             Source: {sourceLabel(settings.manual.source)}
             {settings.manual.provider_label ? ` · ${settings.manual.provider_label}` : ""}
           </p>
           {settings.manual.reason && (
-            <p className="mt-1 break-words text-[0.66rem] leading-relaxed text-brass">
+            <p className="mt-1 break-words text-2xs leading-relaxed text-brass">
               {settings.manual.reason}
             </p>
           )}
@@ -250,18 +250,18 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
 
         <div className="rounded-xl border border-border/65 bg-background/35 p-4">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[0.86rem] font-medium">Reference-image search</h3>
+            <h3 className="text-sm font-medium">Reference-image search</h3>
             <Badge variant={settings.reference.configured ? "sage" : "outline"}>
               {settings.reference.configured ? "Ready" : "Not configured"}
             </Badge>
           </div>
-          <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
             Searches public websites and automatically selects one suitable product
             image from the item name, brand or description. Exact model is not
             required for a representative image. Actual photos always take priority;
             a selected reference can be replaced or removed.
           </p>
-          <label className="mt-3 flex items-start gap-2.5 text-[0.76rem]">
+          <label className="mt-3 flex items-start gap-2.5 text-xs">
             <input
               type="checkbox"
               className="mt-0.5 size-4 rounded border-border"
@@ -270,14 +270,14 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
             />
             <span>Enable reference-image search</span>
           </label>
-          <p className="mt-2 text-[0.66rem] text-muted-foreground">
+          <p className="mt-2 text-2xs text-muted-foreground">
             Source: {sourceLabel(settings.reference.source)}
             {settings.reference.provider_label
               ? ` · ${settings.reference.provider_label}`
               : ""}
           </p>
           {settings.reference.reason && (
-            <p className="mt-1 break-words text-[0.66rem] leading-relaxed text-brass">
+            <p className="mt-1 break-words text-2xs leading-relaxed text-brass">
               {settings.reference.reason}
             </p>
           )}
@@ -303,7 +303,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
                 : "Paste the Brave Search subscription token"
             }
           />
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.66rem] text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
             {settings.has_api_key ? (
               <>
                 <Badge variant="sage">
@@ -333,12 +333,12 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         >
           <Textarea
             id="online-search-domains"
-            className="min-h-28 font-mono text-[0.74rem]"
+            className="min-h-28 font-mono text-2xs"
             value={domainsText}
             onChange={(event) => setDomainsText(event.target.value)}
             placeholder={"Leave blank to search public websites\nexample.com (optional)"}
           />
-          <p className="mt-2 text-[0.66rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
             Empty is the default and allows suitable images from public websites.
             Enter registrable domains only if you deliberately want to narrow
             downloads to those sites. Source page, retrieval time and any known
@@ -365,13 +365,13 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
           {testConnection.isPending ? <Spinner /> : <Wifi />}
           Test connection
         </Button>
-        <span className="text-[0.66rem] text-muted-foreground">
+        <span className="text-2xs text-muted-foreground">
           Brave is the only supported provider in this release.
         </span>
       </div>
 
       {keyMissing && (
-        <p className="mt-2 text-[0.7rem] text-brass">
+        <p className="mt-2 text-2xs text-brass">
           Enter a Brave key before enabling manual or reference-image search.
         </p>
       )}
@@ -380,15 +380,15 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         <p
           className={
             testResult.ok
-              ? "mt-3 rounded-xl border border-sage/20 bg-sage-soft/35 px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-accent-foreground"
-              : "mt-3 rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-destructive"
+              ? "mt-3 rounded-xl border border-sage/20 bg-sage-soft/35 px-3.5 py-2.5 text-2xs leading-relaxed text-accent-foreground"
+              : "mt-3 rounded-xl border border-destructive/20 bg-destructive/[0.05] px-3.5 py-2.5 text-2xs leading-relaxed text-destructive"
           }
         >
           {testResult.message}
         </p>
       )}
 
-      <details className="mt-4 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-[0.68rem] leading-relaxed text-muted-foreground">
+      <details className="mt-4 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground/80">
           Installation fallback and advanced gateway
         </summary>

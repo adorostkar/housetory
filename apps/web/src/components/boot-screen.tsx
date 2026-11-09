@@ -6,7 +6,7 @@ export function BootScreen() {
     <div className="flex min-h-[100dvh] flex-col items-center justify-center px-6">
       <div className="flex flex-col items-center animate-fade-in">
         <BrandMark className="scale-110" />
-        <p className="mt-6 text-[0.78rem] text-muted-foreground">Opening your home…</p>
+        <p className="mt-6 text-xs text-muted-foreground">Opening your home…</p>
       </div>
     </div>
   );

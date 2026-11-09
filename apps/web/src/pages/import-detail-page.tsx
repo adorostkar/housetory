@@ -21,10 +21,9 @@ import { EmptyState } from "@/components/empty-state";
 import { HierarchyReview } from "@/components/hierarchy-review";
 import { ErrorState } from "@/components/error-state";
 import { ImportEntryCard } from "@/components/import-entry-card";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
@@ -211,7 +210,7 @@ export function ImportDetailPage() {
     return location;
   };
 
-  if (batchQuery.isPending) return <ImportDetailSkeleton />;
+  if (batchQuery.isPending) return <PageSkeleton variant="detail" />;
   if (batchQuery.isError) {
     return (
       <ErrorState
@@ -222,7 +221,7 @@ export function ImportDetailPage() {
     );
   }
 
-  if (!batch) return <ImportDetailSkeleton />;
+  if (!batch) return <PageSkeleton variant="detail" />;
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
   const categories = categoriesQuery.data?.items ?? [];
@@ -285,20 +284,20 @@ export function ImportDetailPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Import review"
-        title={batch.title}
-        description={[
+    <PageLayout
+      header={{
+        eyebrow: "Import review",
+        title: batch.title,
+        description: [
           IMPORT_SOURCE_LABELS[batch.source_type] ?? batch.source_type,
           batch.original_filename,
           formatDate(batch.created_at),
         ]
           .filter(Boolean)
-          .join(" · ")}
-        backTo="/imports"
-        backLabel="Imports"
-        actions={
+          .join(" · "),
+        backTo: "/imports",
+        backLabel: "Imports",
+        actions: (
           <>
             {batch.source_url && (
               <Button variant="outline" asChild>
@@ -321,9 +320,9 @@ export function ImportDetailPage() {
               </Link>
             </Button>
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <section className="surface p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={IMPORT_STATUS_TONE[batch.status] ?? "outline"}>
@@ -348,39 +347,39 @@ export function ImportDetailPage() {
               "Deterministic extraction"
             )}
           </Badge>
-          <span className="text-[0.75rem] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {pluralize(batch.total_entries, "proposal")} · {batch.imported_entries} imported ·{" "}
             {batch.skipped_entries} skipped · {batch.failed_entries} failed
           </span>
         </div>
         {batch.status === "queued" || batch.status === "processing" ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/30 px-4 py-5 text-[0.82rem] text-muted-foreground">
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/30 px-4 py-5 text-xs text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             {progress.message || "Processing this source in the background…"}
           </div>
         ) : batch.status === "failed" ? (
           <div className="mt-4 rounded-xl border border-destructive/25 bg-destructive/5 p-4">
-            <p className="flex items-center gap-1.5 text-[0.8rem] font-medium text-destructive">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-destructive">
               <AlertTriangle className="size-4" /> Processing failed
             </p>
-            <p className="mt-1 text-[0.75rem] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
               {batch.error || "This source could not be processed."}
             </p>
           </div>
         ) : (
-          <p className="mt-3 text-[0.8rem] leading-relaxed text-muted-foreground">
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
             {hierarchyMode
               ? "Housetory detected a room and container hierarchy. Expand branches, edit names, quantities, types and parents, then approve the tree. Parents are created before their contents."
               : "Review the proposed entries. Nothing is written until you approve the selected entries. Missing rooms and places can be created inline."}
           </p>
         )}
         {batch.error && batch.status !== "failed" && (
-          <p className="mt-3 text-[0.75rem] text-destructive">{batch.error}</p>
+          <p className="mt-3 text-2xs text-destructive">{batch.error}</p>
         )}
       </section>
 
       {importContext && (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-sage/25 bg-sage-soft/35 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-sage/25 bg-sage-soft/35 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
           <MapPin className="mt-0.5 size-4 shrink-0 text-sage" />
           <span>
             Context destination:{" "}
@@ -396,10 +395,10 @@ export function ImportDetailPage() {
 
       {summary && (
         <section className="mt-4 rounded-2xl border border-sage/30 bg-sage-soft/50 p-5">
-          <p className="flex items-center gap-1.5 text-[0.82rem] font-medium">
+          <p className="flex items-center gap-1.5 text-xs font-medium">
             <Check className="size-4" /> Import applied
           </p>
-          <div className="mt-3 grid grid-cols-2 gap-3 text-[0.78rem] sm:grid-cols-5">
+          <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-5">
             {[
               ["Created", summary.created],
               ["Merged", summary.merged],
@@ -408,7 +407,7 @@ export function ImportDetailPage() {
               ["Failed", summary.failed],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg bg-background/50 px-3 py-2">
-                <p className="text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
+                <p className="text-2xs uppercase tracking-[0.1em] text-muted-foreground">
                   {label}
                 </p>
                 <p className="mt-1 font-display text-[1.3rem] tabular-nums">{value}</p>
@@ -416,7 +415,7 @@ export function ImportDetailPage() {
             ))}
           </div>
           {summary.failures.length > 0 && (
-            <div className="mt-3 space-y-1 text-[0.72rem] text-destructive">
+            <div className="mt-3 space-y-1 text-2xs text-destructive">
               {summary.failures.map((failure) => (
                 <p key={failure.entry_id}>{failure.message}</p>
               ))}
@@ -435,10 +434,10 @@ export function ImportDetailPage() {
 
       {batch.warnings.length > 0 && (
         <details className="mt-4 surface p-4 sm:p-5">
-          <summary className="cursor-pointer text-[0.78rem] font-medium">
+          <summary className="cursor-pointer text-xs font-medium">
             {pluralize(batch.warnings.length, "warning")}
           </summary>
-          <ul className="mt-3 space-y-2 text-[0.72rem] leading-relaxed text-muted-foreground">
+          <ul className="mt-3 space-y-2 text-2xs leading-relaxed text-muted-foreground">
             {batch.warnings.map((warning, index) => (
               <li key={index} className="break-words">
                 {String(warning.message ?? warning.type ?? "Warning")}
@@ -459,10 +458,10 @@ export function ImportDetailPage() {
           <div className="space-y-3">
             {batch.files.length > 0 && (
               <details className="surface p-4">
-                <summary className="cursor-pointer text-[0.78rem] font-medium">
+                <summary className="cursor-pointer text-xs font-medium">
                   {pluralize(batch.files.length, "vault file")}
                 </summary>
-                <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto text-[0.7rem]">
+                <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto text-2xs">
                   {batch.files.map((file) => (
                     <li key={file.id} className="flex items-center gap-2">
                       <FileText className="size-3.5 shrink-0 text-muted-foreground" />
@@ -480,10 +479,10 @@ export function ImportDetailPage() {
             )}
             {batch.ignored_notes.length > 0 && (
               <details className="surface p-4">
-                <summary className="cursor-pointer text-[0.78rem] font-medium">
+                <summary className="cursor-pointer text-xs font-medium">
                   {pluralize(batch.ignored_notes.length, "ignored note")}
                 </summary>
-                <ul className="mt-3 space-y-1.5 text-[0.7rem] text-muted-foreground">
+                <ul className="mt-3 space-y-1.5 text-2xs text-muted-foreground">
                   {batch.ignored_notes.map((note) => (
                     <li key={note.path}>
                       <span className="text-foreground/70">{note.path}</span> — {note.reason}
@@ -494,12 +493,12 @@ export function ImportDetailPage() {
             )}
             {batch.broken_links.length > 0 && (
               <details className="surface p-4">
-                <summary className="cursor-pointer text-[0.78rem] font-medium">
+                <summary className="cursor-pointer text-xs font-medium">
                   <span className="inline-flex items-center gap-1.5">
                     <Link2Off className="size-3.5" /> {pluralize(batch.broken_links.length, "broken link")}
                   </span>
                 </summary>
-                <ul className="mt-3 space-y-1.5 text-[0.7rem] text-muted-foreground">
+                <ul className="mt-3 space-y-1.5 text-2xs text-muted-foreground">
                   {batch.broken_links.map((link, index) => (
                     <li key={index}>
                       <span className="text-foreground/70">{link.note}</span> → {link.target}
@@ -525,12 +524,12 @@ export function ImportDetailPage() {
               >
                 {allSelected ? "Clear all" : "Select all"}
               </Button>
-              <span className="text-[0.72rem] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 {selectedCount} selected
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <p className="hidden text-[0.68rem] text-muted-foreground sm:block">
+              <p className="hidden text-2xs text-muted-foreground sm:block">
                 Explicit approval creates only selected entries.
               </p>
               <Button
@@ -618,7 +617,7 @@ export function ImportDetailPage() {
           />
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 }
 
@@ -639,10 +638,10 @@ function VaultTree({
 }) {
   return (
     <details className="surface p-4">
-      <summary className="cursor-pointer text-[0.78rem] font-medium">
+      <summary className="cursor-pointer text-xs font-medium">
         Vault structure
       </summary>
-      <div className="mt-3 max-h-72 overflow-auto text-[0.72rem]">
+      <div className="mt-3 max-h-72 overflow-auto text-2xs">
         {tree.map((node) => (
           <VaultNode key={node.path} node={node} depth={0} />
         ))}
@@ -684,21 +683,6 @@ function VaultNode({
       {node.children?.map((child) => (
         <VaultNode key={child.path} node={child as typeof node} depth={depth + 1} />
       ))}
-    </div>
-  );
-}
-
-function ImportDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-28" />
-      <Skeleton className="mt-4 h-12 w-1/2 max-w-md" />
-      <Skeleton className="mt-8 h-28 rounded-2xl" />
-      <div className="mt-4 space-y-3">
-        <Skeleton className="h-32 rounded-2xl" />
-        <Skeleton className="h-32 rounded-2xl" />
-        <Skeleton className="h-32 rounded-2xl" />
-      </div>
     </div>
   );
 }

@@ -18,13 +18,12 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
 import { LoanItemPickerDialog } from "@/components/loan-item-picker";
-import { PageHeader } from "@/components/page-header";
+import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { PersonNameInput } from "@/components/person-name-input";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useBorrowedList, useCanWrite, useLoans } from "@/lib/queries";
@@ -149,7 +148,7 @@ export function LoansPage() {
   );
 
   if (loansQuery.isPending || (!itemId && borrowedQuery.isPending)) {
-    return <LoansSkeleton />;
+    return <PageSkeleton variant="list" />;
   }
   if (loansQuery.isError || (!itemId && borrowedQuery.isError)) {
     return (
@@ -229,16 +228,14 @@ export function LoansPage() {
   };
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow="Inventory · Lending"
-        title="Loans"
-        description={
-          itemId
-            ? "Owned-item lending history, with borrowed-from-others records kept separate."
-            : "Who has your things and what you're keeping for someone else. Lent-out goods are household-owned; borrowed goods belong to another person and never become owned stock."
-        }
-        actions={
+    <PageLayout
+      header={{
+        eyebrow: "Inventory · Lending",
+        title: "Loans",
+        description: itemId
+          ? "Owned-item lending history, with borrowed-from-others records kept separate."
+          : "Who has your things and what you're keeping for someone else. Lent-out goods are household-owned; borrowed goods belong to another person and never become owned stock.",
+        actions: (
           <>
             {canWrite && (
               <Button ref={newLoanButtonRef} onClick={beginNewLoan}>
@@ -250,9 +247,9 @@ export function LoansPage() {
               <Link to="/items">Inventory</Link>
             </Button>
           </>
-        }
-      />
-
+        ),
+      }}
+    >
       <div className="grid grid-cols-2 gap-3.5 sm:gap-4 xl:grid-cols-3">
         <StatCard
           label="Lent out"
@@ -283,7 +280,7 @@ export function LoansPage() {
       <section className="mt-6 surface p-4 sm:p-5">
         <div className="flex flex-col gap-3">
           {itemId && (
-            <p className="text-[0.7rem] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               Showing loans for one owned item. Borrowed-from-others records are omitted.{" "}
               <Link to="/loans" className="underline underline-offset-4 hover:text-foreground">
                 Clear
@@ -309,7 +306,7 @@ export function LoansPage() {
                       })
                     }
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-[0.72rem] font-medium transition-colors",
+                      "rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
                       direction === entry.value
                         ? entry.value === "borrowed"
                           ? "border-brass/30 bg-brass-soft text-brass"
@@ -337,7 +334,7 @@ export function LoansPage() {
                     })
                   }
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-[0.72rem] font-medium transition-colors",
+                    "rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
                     status === filter.value
                       ? "border-foreground/15 bg-foreground text-background"
                       : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
@@ -348,7 +345,7 @@ export function LoansPage() {
               ))}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <label className="flex items-center gap-2 text-[0.72rem] text-muted-foreground">
+              <label className="flex items-center gap-2 text-2xs text-muted-foreground">
                 <input
                   type="checkbox"
                   className="size-3.5 accent-primary"
@@ -369,7 +366,7 @@ export function LoansPage() {
                   onChange={setPerson}
                   placeholder="Filter by person"
                   className={cn(
-                    "h-9 text-[0.78rem]",
+                    "h-9 text-xs",
                     person.trim() && "pr-8",
                   )}
                 />
@@ -387,7 +384,7 @@ export function LoansPage() {
               <div className="relative min-w-0 sm:w-64">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  className="h-9 pl-8 text-[0.78rem]"
+                  className="h-9 pl-8 text-xs"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Person, owner or item"
@@ -397,7 +394,7 @@ export function LoansPage() {
             </div>
           </div>
           {personParam.trim() && (
-            <p className="text-[0.68rem] leading-relaxed text-muted-foreground">
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               Showing{" "}
               {direction === "all"
                 ? "lent-out and borrowed records"
@@ -416,7 +413,7 @@ export function LoansPage() {
         <div className="mt-4 space-y-2.5">
           {rows.length === 0 ? (
             hasFilters ? (
-              <p className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-[0.8rem] text-muted-foreground">
+              <p className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-xs text-muted-foreground">
                 No loans match these filters.
               </p>
             ) : direction === "lent_out" ? (
@@ -484,7 +481,7 @@ export function LoansPage() {
           )}
         </div>
         {fullTotal > visibleTotal && (
-          <div className="mt-4 space-y-1 text-[0.7rem] text-muted-foreground">
+          <div className="mt-4 space-y-1 text-2xs text-muted-foreground">
             <p>
               Showing {visibleTotal} of {fullTotal} matching lending records. Narrow the
               filters to find an older record.
@@ -585,7 +582,7 @@ export function LoansPage() {
           }}
         />
       )}
-    </div>
+    </PageLayout>
   );
 }
 
@@ -626,7 +623,7 @@ export function LoanRow({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <DirectionBadge direction="lent_out" />
-          <span className="text-[0.86rem] font-medium">to {loan.borrower_name}</span>
+          <span className="text-sm font-medium">to {loan.borrower_name}</span>
           <Badge variant={LOAN_STATUS_TONE[loan.status]}>
             {LOAN_STATUS_LABELS[loan.status]}
           </Badge>
@@ -634,7 +631,7 @@ export function LoanRow({
           {loan.parent_loan_id && <Badge variant="outline">Content loan</Badge>}
           {loan.overdue && <Badge variant="destructive">Past due</Badge>}
         </div>
-        <p className="mt-1 text-[0.76rem] text-foreground/80">
+        <p className="mt-1 text-xs text-foreground/80">
           {loan.item_id ? (
             <Link
               to={`/items/${loan.item_id}`}
@@ -647,7 +644,7 @@ export function LoanRow({
           )}
           <span className="text-muted-foreground"> · from {home}</span>
         </p>
-        <p className="mt-1 text-[0.67rem] text-muted-foreground">
+        <p className="mt-1 text-2xs text-muted-foreground">
           Lent {formatDate(loan.lent_on)}
           {loan.due_on ? ` · due ${formatDate(loan.due_on)}` : " · no return date set"}
         </p>
@@ -656,11 +653,11 @@ export function LoanRow({
         <div className="text-left sm:text-right">
           <p className="font-display text-[1.4rem] leading-none tracking-[-0.02em] tabular-nums">
             {loan.status === "cancelled" ? "—" : loan.outstanding_quantity}
-            <span className="ml-1 font-sans text-[0.68rem] font-normal text-muted-foreground">
+            <span className="ml-1 font-sans text-2xs font-normal text-muted-foreground">
               of {loan.quantity} out
             </span>
           </p>
-          <p className="mt-1 text-[0.66rem] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             {loan.returned_quantity > 0
               ? `${loan.returned_quantity} returned`
               : "No returns"}
@@ -708,13 +705,13 @@ export function BorrowedRow({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <DirectionBadge direction="borrowed" />
-          <span className="text-[0.86rem] font-medium">from {record.owner_name}</span>
+          <span className="text-sm font-medium">from {record.owner_name}</span>
           <Badge variant={LOAN_STATUS_TONE[record.status]}>
             {LOAN_STATUS_LABELS[record.status]}
           </Badge>
           {record.overdue && <Badge variant="destructive">Past due</Badge>}
         </div>
-        <p className="mt-1 text-[0.76rem] text-foreground/80">
+        <p className="mt-1 text-xs text-foreground/80">
           <Link
             to={`/borrowed/${record.id}`}
             className="underline-offset-4 hover:underline"
@@ -732,7 +729,7 @@ export function BorrowedRow({
             · {borrowedLocationPrefix(record)} {place}
           </span>
         </p>
-        <p className="mt-1 text-[0.67rem] text-muted-foreground">
+        <p className="mt-1 text-2xs text-muted-foreground">
           Borrowed {formatDate(record.borrowed_on)}
           {record.due_on
             ? ` · due ${formatDate(record.due_on)}`
@@ -743,11 +740,11 @@ export function BorrowedRow({
         <div className="text-left sm:text-right">
           <p className="font-display text-[1.4rem] leading-none tracking-[-0.02em] tabular-nums">
             {record.status === "cancelled" ? "—" : record.outstanding_quantity}
-            <span className="ml-1 font-sans text-[0.68rem] font-normal text-muted-foreground">
+            <span className="ml-1 font-sans text-2xs font-normal text-muted-foreground">
               of {record.quantity} held
             </span>
           </p>
-          <p className="mt-1 text-[0.66rem] text-muted-foreground">
+          <p className="mt-1 text-2xs text-muted-foreground">
             {record.returned_quantity > 0
               ? `${record.returned_quantity} returned to owner`
               : "No returns yet"}
@@ -770,21 +767,6 @@ export function BorrowedRow({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function LoansSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-28" />
-      <Skeleton className="mt-4 h-12 w-48" />
-      <div className="mt-8 grid gap-4 sm:grid-cols-3">
-        <Skeleton className="h-32 rounded-2xl" />
-        <Skeleton className="h-32 rounded-2xl" />
-        <Skeleton className="h-32 rounded-2xl" />
-      </div>
-      <Skeleton className="mt-6 h-72 rounded-2xl" />
     </div>
   );
 }
