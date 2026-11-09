@@ -11,6 +11,7 @@ import {
 } from "react-router-dom";
 import { toast } from "sonner";
 
+import { AddItemsRedirect } from "@/components/add-items";
 import { AppShell } from "@/components/app-shell";
 import { BootError, BootScreen } from "@/components/boot-screen";
 import { Toaster } from "@/components/toaster";
@@ -45,11 +46,6 @@ const RoomDetailPage = React.lazy(() =>
 );
 const ItemsPage = React.lazy(() =>
   import("@/pages/items-page").then((module) => ({ default: module.ItemsPage })),
-);
-const DescribeItemsPage = React.lazy(() =>
-  import("@/pages/describe-items-page").then((module) => ({
-    default: module.DescribeItemsPage,
-  })),
 );
 const LoansPage = React.lazy(() =>
   import("@/pages/loans-page").then((module) => ({ default: module.LoansPage })),
@@ -108,9 +104,6 @@ const AssistantPage = React.lazy(() =>
 );
 const ScanPage = React.lazy(() =>
   import("@/pages/scan-page").then((module) => ({ default: module.ScanPage })),
-);
-const VoicePage = React.lazy(() =>
-  import("@/pages/voice-page").then((module) => ({ default: module.VoicePage })),
 );
 const RecognitionPage = React.lazy(() =>
   import("@/pages/recognition-page").then((module) => ({
@@ -306,7 +299,7 @@ export default function App() {
             <Route element={<RequireWriter />}>
               <Route path="items/new" element={<ItemNewPage />} />
               <Route path="items/:itemId/edit" element={<ItemEditPage />} />
-              <Route path="add-items" element={<DescribeItemsPage />} />
+              <Route path="add-items" element={<AddItemsRedirect />} />
             </Route>
             <Route path="items/:itemId" element={<ItemDetailPage />} />
             <Route path="review" element={<ReviewPage />} />
@@ -325,7 +318,6 @@ export default function App() {
             <Route path="assistant" element={<AssistantPage />} />
             <Route element={<RequireWriter />}>
               <Route path="scan" element={<ScanPage />} />
-              <Route path="voice" element={<VoicePage />} />
               <Route path="recognize" element={<RecognitionPage />} />
             </Route>
             <Route path="containers" element={<ContainersPage />} />

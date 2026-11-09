@@ -104,11 +104,6 @@ export function RoomCard({
   );
 }
 
-export function RoomIcon({ name, className }: { name: string; className?: string }) {
-  const Icon = roomIcon(name);
-  return <Icon className={className} strokeWidth={1.6} />;
-}
-
 export function LocationIcon({
   kind,
   className,

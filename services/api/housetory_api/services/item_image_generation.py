@@ -20,10 +20,6 @@ from .item_image_search import find_and_select_reference, resolve_image_search_p
 
 NEW_ITEM_TASK = "item_images.new_item"
 BATCH_TASK = "item_images.batch"
-RETIRED_ILLUSTRATION_MESSAGE = (
-    "Item illustration generation was retired. Existing AI illustrations remain "
-    "viewable and removable; public reference-image lookup is unchanged."
-)
 
 
 def _lock_item(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> Item:
@@ -117,13 +113,13 @@ def run_batch_job(payload: dict[str, Any], job_id: uuid.UUID) -> dict[str, Any]:
     action = str(payload["action"])
     item_ids = [uuid.UUID(str(value)) for value in payload.get("item_ids", [])]
     if action != "reference":
+        # Jobs queued before illustration generation was removed.
         return {
-            "status": "retired",
+            "status": "skipped",
             "completed": 0,
             "failed": 0,
             "skipped": len(item_ids),
             "processed": len(item_ids),
-            "message": RETIRED_ILLUSTRATION_MESSAGE,
         }
 
     completed = failed = skipped = 0

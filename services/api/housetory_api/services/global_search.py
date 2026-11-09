@@ -34,6 +34,7 @@ from ..schemas.search import (
 from . import auth as auth_service
 from . import borrowed as borrowed_service
 from .ai_tools import _summaries_with_paths, search_inventory
+from .ai_tools.references import _borrowed_place, _location_display
 from .container_serializers import location_path_map
 from .hierarchy import descendant_ids
 from .lending import loan_overview_for_items
@@ -191,12 +192,6 @@ def _alias_like(column: Any, term: str) -> Any:
     )
 
 
-def _location_label(entry: Any) -> str:
-    if entry.identifier and entry.identifier != entry.name:
-        return f"{entry.identifier} · {entry.name}"
-    return entry.identifier or entry.name
-
-
 def _room_path_labels(room_id: uuid.UUID | None, rooms: dict[uuid.UUID, Room]) -> list[str]:
     if room_id is None:
         return []
@@ -222,7 +217,7 @@ def _context(
     if property_name:
         parts.insert(0, property_name)
     for entry in path:
-        label = _location_label(entry)
+        label = _location_display(entry)
         if label and label not in parts:
             parts.append(label)
     return " · ".join(parts) if parts else None
@@ -240,18 +235,7 @@ def _item_subtitle(item: Item) -> str | None:
 
 
 def _borrowed_context(record) -> str | None:  # noqa: ANN001
-    parts = [
-        record.property_name,
-        record.room_name,
-        (
-            f"{record.storage_location_identifier} · {record.storage_location_name}"
-            if record.storage_location_identifier
-            and record.storage_location_name
-            and record.storage_location_identifier != record.storage_location_name
-            else record.storage_location_identifier or record.storage_location_name
-        ),
-    ]
-    place = " / ".join(part for part in parts if part) or None
+    place = _borrowed_place(record)
     labels = []
     if place:
         labels.append(f"{borrowed_service.location_prefix(record)} {place}")

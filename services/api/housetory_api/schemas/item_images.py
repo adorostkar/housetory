@@ -51,7 +51,7 @@ class ItemImageFindRequest(BaseModel):
 
 class ItemImageBatchPreviewRequest(BaseModel):
     item_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
-    action: Literal["reference", "illustration"]
+    action: Literal["reference"]
 
 
 class ItemImageBatchPreview(BaseModel):

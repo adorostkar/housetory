@@ -231,14 +231,6 @@ def _detail_uuid(details: dict[str, Any], key: str) -> uuid.UUID | None:
         return None
 
 
-def _restore_location_label(location: StorageLocation | None) -> str | None:
-    if location is None:
-        return None
-    if location.identifier and location.identifier != location.name:
-        return f"{location.identifier} · {location.name}"
-    return location.identifier or location.name
-
-
 def _restore_item_preview(
     db: Session,
     household_id: uuid.UUID,
@@ -794,11 +786,6 @@ def _undo_blocked_reason(
         return True, None, None
 
     return False, "This type of action does not support undo.", None
-
-
-def event_can_undo(db: Session, event: ActivityEvent) -> tuple[bool, str | None]:
-    can_undo, reason, _existing = _undo_blocked_reason(db, event)
-    return can_undo, reason
 
 
 def serialize_event(db: Session, event: ActivityEvent) -> ActivityEventOut:

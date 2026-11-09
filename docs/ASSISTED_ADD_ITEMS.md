@@ -1,15 +1,28 @@
 # Assisted add items
 
-**Add items** now has two choices: **Manual add** and **Describe or show**. The
-second is one editable draft rather than separate photo, voice and import tasks.
+**Add items** opens one smart input: a dialog on large screens and a bottom
+sheet below the `lg` breakpoint. There is no separate chooser or `/add-items`
+page; `/add-items?room_id=…` deep links open the same overlay on `/` with that
+context.
 
-## One composer
+## One input
 
-The large textbox accepts natural language, quantities, locations, purchase facts
-and one explicit product URL. Camera/image selection and the existing private
-microphone recorder share the same draft. A transcript is inserted into the
-textbox only after the user can edit it; transcription never triggers the old
-voice interpretation endpoint or writes inventory.
+A single textbox accepts natural language or one product link. Take photo /
+Choose photo (also paste or drag-and-drop, one image) attach a photo shown as a
+removable thumbnail. A live chip shows what will be sent: **Text**, **Link**
+(the whole box is one `http(s)://` URL), **Photo** or **Photo + note**. A photo
+together with a link is blocked with a warning. **Review items** (or
+Cmd/Ctrl+Enter) submits; Enter inserts a newline.
+
+The microphone is its own flow and is only available when the box and photo are
+empty and voice transcription is configured. Stop uploads the recording,
+waits for transcription and creates a text import from the transcript, opening
+its review directly; transcription never triggers the old voice interpretation
+endpoint or writes inventory.
+
+A context chip (`Room · Place` or `No place yet`) shows and edits the default
+property/room/place sent with every submission. **or fill in the form yourself**
+opens `/items/new` with the same context. The purchase date is set during review.
 
 Submission paths all end at the ordinary `/imports/{batchId}` review:
 
@@ -17,8 +30,8 @@ Submission paths all end at the ordinary `/imports/{batchId}` review:
 | --- | --- |
 | Text | `POST /imports` and normal text interpretation |
 | Image + optional context | `POST /ai/recognitions`, then `POST /imports/from-recognition/{id}` |
-| Microphone | `POST /voice` for transcription only, then text import after editing |
-| One product URL + optional purchase date | `POST /imports` with `product_url`, worker-side safe page retrieval |
+| Microphone | `POST /voice` for transcription only, poll `GET /voice/{id}`, then `POST /imports` with the transcript |
+| One product URL | `POST /imports` with `product_url`, worker-side safe page retrieval |
 
 The user confirms entries in the same review before anything is created. Missing
 locations open the **Where is it?** controls immediately. Recognition suggestions
@@ -60,16 +73,17 @@ notes remain ordinary text and do not trigger unexpected outbound requests.
 - One image per assisted draft in this first version.
 - Product URL and image are not fetched as one combined product request.
 - Bot-protected, authenticated or JavaScript-only product pages may fail honestly.
-- The legacy `/scan`, `/voice` and `/imports` routes remain available for deep
-  links, history and focused workflows; they are no longer separate choices in
-  the simple Add items chooser.
+- The legacy `/scan` and `/imports` routes remain available for deep links,
+  history and focused workflows. The standalone `/voice` page was removed; the
+  voice API remains.
 
 ## Verification
 
 - Backend tests cover untrusted recognition context, one idempotent import review,
   duplicate-application guards, product worker fetch, explicit purchase dates,
   failure preservation and URL validation.
-- Frontend tests cover text, image+context, product URL/date and editable
-  transcripts, including no call to `/voice/{id}/interpret`.
-- Browser coverage opens the two-choice chooser with container context and submits
-  a note into the shared import review.
+- Frontend tests cover input detection, text, image+note, product URL, the
+  photo+link conflict, voice disabled states and transcript import, the context
+  chip and the manual-form link.
+- Browser coverage opens the smart input with container context, submits a note
+  into the shared import review, and records a (faked) voice note.

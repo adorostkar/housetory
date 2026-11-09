@@ -98,6 +98,10 @@ export default {
           from: { opacity: "0", transform: "scale(0.97)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
+        "sheet-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
@@ -106,6 +110,7 @@ export default {
         "fade-up": "fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) both",
         "fade-in": "fade-in 250ms ease-out both",
         "scale-in": "scale-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "sheet-up": "sheet-up 280ms cubic-bezier(0.22, 1, 0.36, 1) both",
       },
       transitionTimingFunction: {
         smooth: "cubic-bezier(0.22, 1, 0.36, 1)",

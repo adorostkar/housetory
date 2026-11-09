@@ -56,21 +56,6 @@ def create_user_with_household(
     return user, household
 
 
-def get_membership(db: Session, user_id, household_id) -> tuple[Household, HouseholdMember] | None:
-    membership = db.scalar(
-        select(HouseholdMember).where(
-            HouseholdMember.user_id == user_id,
-            HouseholdMember.household_id == household_id,
-        )
-    )
-    if membership is None:
-        return None
-    household = db.get(Household, membership.household_id)
-    if household is None:
-        return None
-    return household, membership
-
-
 def get_primary_membership(db: Session, user: User) -> tuple[Household, str] | None:
     membership = db.scalar(
         select(HouseholdMember)

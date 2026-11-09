@@ -438,10 +438,6 @@ def _parse_price_value(value: str | None) -> tuple[int | None, str | None]:
     return None, None
 
 
-def _parse_bool(value: str | None) -> bool:
-    return bool(value and value.strip().lower() in {"1", "true", "yes", "y", "checked"})
-
-
 def _parse_tags(value: str | None) -> list[str]:
     if not value:
         return []

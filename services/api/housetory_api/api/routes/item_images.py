@@ -1,4 +1,4 @@
-"""Authenticated item image sources, reference lookup and illustration jobs."""
+"""Authenticated item image sources, reference lookup and batch jobs."""
 
 import uuid
 from datetime import UTC, datetime
@@ -118,35 +118,6 @@ def reset_item_image(
     return remove_item_image(item_id, auth, db)
 
 
-@router.post("/items/{item_id}/illustration")
-def generate_item_illustration(
-    item_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-) -> None:
-    del item_id, auth
-    raise ApiError(
-        410,
-        "feature_retired",
-        "Item illustration generation was retired. Existing AI illustrations remain "
-        "viewable and removable, and public reference-image lookup is unchanged.",
-    )
-
-
-@router.post("/items/{item_id}/images/{image_id}/accept")
-def accept_item_image(
-    item_id: uuid.UUID,
-    image_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-) -> None:
-    del item_id, image_id, auth
-    raise ApiError(
-        410,
-        "feature_retired",
-        "Pending illustration acceptance was retired. Existing AI illustrations "
-        "remain viewable and removable.",
-    )
-
-
 @router.delete("/items/{item_id}/images/{image_id}", response_model=ItemImageState)
 def delete_item_image(
     item_id: uuid.UUID,
@@ -176,13 +147,6 @@ def _preview(
     item_ids: list[uuid.UUID],
     action: str,
 ) -> ItemImageBatchPreview:
-    if action != "reference":
-        raise ApiError(
-            410,
-            "feature_retired",
-            "Bulk illustration generation was retired. Choose public reference-image "
-            "lookup instead.",
-        )
     items = _items_for_batch(db, household_id, item_ids)
     search_ready, _search_label, search_reason = _search_availability(db, household_id)
     eligible = 0

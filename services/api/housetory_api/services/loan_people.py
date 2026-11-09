@@ -16,11 +16,10 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..domain import LoanStatus
 from ..models import BorrowedRecord, Loan
 from ..schemas.lending import LoanPersonListOut, LoanPersonOut
-
-CANCELLED = "cancelled"
-OPEN_STATUSES = {"outstanding", "partially_returned"}
+from .loan_status import OPEN_STATUSES
 
 # Normalise common Arabic/Persian letter variants for comparison and duplicate
 # detection only. The original display spelling is always preserved.
@@ -121,7 +120,7 @@ def _household_people(db: Session, household_id: uuid.UUID) -> dict[str, _Person
     people: dict[str, _Person] = {}
 
     def add(name: str, on_date: date, *, direction: str, status: str) -> None:
-        if status == CANCELLED:
+        if status == LoanStatus.CANCELLED.value:
             return
         key = person_name_key(name)
         if not key:
@@ -222,7 +221,7 @@ def matching_person_names(
     ):
         statement = select(column).where(table.household_id == household_id)
         if not include_cancelled:
-            statement = statement.where(status_column != CANCELLED)
+            statement = statement.where(status_column != LoanStatus.CANCELLED.value)
         names.update(
             name
             for (name,) in db.execute(statement).all()

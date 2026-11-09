@@ -728,11 +728,3 @@ def parse_hierarchy(bundle: SourceBundle) -> HierarchyResult:
             }
         )
     return result
-
-
-def ensure_unique_keys(result: HierarchyResult) -> None:
-    """Make parser keys safe for JSON metadata and deterministic retries."""
-    nodes = {node.key for node in result.nodes}
-    for item in result.items:
-        if item.parent_key not in nodes:
-            raise ValueError("Hierarchy item references an unknown parent.")

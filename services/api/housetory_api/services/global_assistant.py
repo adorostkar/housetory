@@ -26,6 +26,7 @@ from ..schemas.ai import (
 )
 from . import ai
 from .ai_tools import ToolResult, _human_date
+from .ai_tools.references import _location_display, dedupe_by_id, dedupe_references
 from .assistant import (
     _followup_plan,
     _plan_interpretation,
@@ -90,11 +91,7 @@ def _item_place(item: Any) -> str:
     if not entries and getattr(item, "location", None) is not None:
         entries = [item.location]
     for entry in entries:
-        label = (
-            f"{entry.identifier} · {entry.name}"
-            if entry.identifier and entry.identifier != entry.name
-            else entry.identifier or entry.name
-        )
+        label = _location_display(entry)
         if label:
             parts.append(label)
     return " / ".join(parts) if parts else "No place recorded"
@@ -209,40 +206,17 @@ def _execute_plan_arguments(
 
 
 def _dedupe_items(executions: list[ScopeExecution]) -> list[Any]:
-    seen: set[uuid.UUID] = set()
-    items = []
-    for execution in executions:
-        for item in execution.result.items:
-            if item.id in seen:
-                continue
-            seen.add(item.id)
-            items.append(item)
-    return items
+    return dedupe_by_id(item for execution in executions for item in execution.result.items)
 
 
 def _dedupe_borrowed(executions: list[ScopeExecution]) -> list[Any]:
-    seen: set[uuid.UUID] = set()
-    records = []
-    for execution in executions:
-        for record in execution.result.borrowed:
-            if record.id in seen:
-                continue
-            seen.add(record.id)
-            records.append(record)
-    return records
+    return dedupe_by_id(record for execution in executions for record in execution.result.borrowed)
 
 
 def _dedupe_references(executions: list[ScopeExecution]) -> list[AssistantReference]:
-    seen: set[tuple[str, uuid.UUID]] = set()
-    references: list[AssistantReference] = []
-    for execution in executions:
-        for reference in execution.result.references:
-            key = (reference.type, reference.id)
-            if key in seen:
-                continue
-            seen.add(key)
-            references.append(reference)
-    return references
+    return dedupe_references(
+        reference for execution in executions for reference in execution.result.references
+    )
 
 
 def _scope_facts(scope: SearchScope, executions: list[ScopeExecution]) -> dict[str, Any]:

@@ -1,7 +1,8 @@
-import { ArrowRight, Camera, MapPin, PencilLine, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import * as React from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
+import { SmartAddInput, type SmartAddContext } from "@/components/smart-add-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,17 +11,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useCanWrite } from "@/lib/queries";
-import { appendOrigin, itemOrigin } from "@/lib/navigation";
-import { cn } from "@/lib/utils";
 
-export interface AddItemsContext {
-  propertyId?: string;
-  roomId?: string;
-  locationId?: string;
-  roomName?: string;
-  locationName?: string;
-}
+export type AddItemsContext = SmartAddContext;
 
 interface AddItemsApi {
   openAddItems: (context?: AddItemsContext, trigger?: HTMLElement | null) => void;
@@ -79,7 +80,7 @@ export function AddItemsProvider({ children }: { children: React.ReactNode }) {
   return (
     <AddItemsReactContext.Provider value={api}>
       {children}
-      <AddItemsDialog
+      <AddItemsOverlay
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
@@ -87,6 +88,11 @@ export function AddItemsProvider({ children }: { children: React.ReactNode }) {
             setExplicitContext(undefined);
             window.setTimeout(() => triggerRef.current?.focus(), 0);
           }
+        }}
+        onFinish={() => {
+          setOpen(false);
+          setExplicitContext(undefined);
+          triggerRef.current = null;
         }}
         context={context}
       />
@@ -153,102 +159,89 @@ export function AddItemsButton({
   );
 }
 
-const CHOICES = [
-  {
-    id: "manual",
-    title: "Enter manually",
-    description: "Add an item yourself, with just the details you have.",
-    icon: PencilLine,
-    path: "/items/new",
-  },
-  {
-    id: "assisted",
-    title: "Describe or show",
-    description: "Type, speak, paste a product link or add a photo, then review together.",
-    icon: Camera,
-    path: "/add-items",
-  },
-] as const;
+export function AddItemsRedirect() {
+  const { openAddItems } = useAddItems();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    const context: AddItemsContext = {};
+    const propertyId = searchParams.get("property_id");
+    const roomId = searchParams.get("room_id");
+    const locationId = searchParams.get("location_id");
+    if (propertyId) context.propertyId = propertyId;
+    if (roomId) context.roomId = roomId;
+    if (locationId) context.locationId = locationId;
+    navigate("/", { replace: true });
+    openAddItems(propertyId || roomId || locationId ? context : undefined);
+  }, [navigate, openAddItems, searchParams]);
+  return null;
+}
 
-function AddItemsDialog({
+function AddItemsOverlay({
   open,
   onOpenChange,
+  onFinish,
   context,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onFinish: () => void;
   context: AddItemsContext | undefined;
 }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const contextLabel = [context?.roomName, context?.locationName]
-    .filter(Boolean)
-    .join(" · ");
-  const choose = (path: string) => {
-    const params = new URLSearchParams();
-    if (context?.propertyId) params.set("property_id", context.propertyId);
-    if (context?.roomId) params.set("room_id", context.roomId);
-    if (context?.locationId) params.set("location_id", context.locationId);
-    const query = params.toString();
-    const origin = context
-      ? itemOrigin(
-          `${location.pathname}${location.search}`,
-          contextLabel || "add-items source",
-        )
-      : null;
-    onOpenChange(false);
-    navigate(appendOrigin(query ? `${path}?${query}` : path, origin));
+  const desktop = useMediaQuery("(min-width: 1024px)");
+  const [busy, setBusy] = React.useState(false);
+  const escapeRef = React.useRef<(() => boolean) | null>(null);
+  React.useEffect(() => {
+    if (!open) setBusy(false);
+  }, [open]);
+  const changeOpen = (next: boolean) => {
+    if (!next && busy) return;
+    onOpenChange(next);
   };
+  const guard = {
+    onEscapeKeyDown: (event: KeyboardEvent) => {
+      if (busy || escapeRef.current?.()) event.preventDefault();
+    },
+    onInteractOutside: (event: Event) => {
+      if (busy) event.preventDefault();
+    },
+  };
+  const description = "Describe them, paste a product link, add a photo or speak.";
+  const body = (
+    <SmartAddInput
+      context={context}
+      layout={desktop ? "dialog" : "sheet"}
+      onBusyChange={setBusy}
+      onFinish={() => {
+        setBusy(false);
+        onFinish();
+      }}
+      escapeRef={escapeRef}
+    />
+  );
 
+  if (desktop) {
+    return (
+      <Dialog open={open} onOpenChange={changeOpen}>
+        <DialogContent className="max-w-xl overflow-visible" hideClose={busy} {...guard}>
+          <DialogHeader>
+            <DialogTitle>Add items</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
+          {body}
+        </DialogContent>
+      </Dialog>
+    );
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Add items</DialogTitle>
-          <DialogDescription>
-            Choose the easiest way to bring something into your home.
-          </DialogDescription>
-        </DialogHeader>
-
-        {(context?.propertyId || context?.roomId || context?.locationId) && (
-          <div className="flex items-start gap-2.5 rounded-xl border border-sage/25 bg-sage-soft/40 px-3.5 py-3 text-[0.75rem] leading-relaxed text-muted-foreground">
-            <MapPin className="mt-0.5 size-4 shrink-0 text-sage" />
-            <span>
-              Starting from{" "}
-              <strong className="font-medium text-foreground/90">
-                {contextLabel || "the room or place selected on this page"}
-              </strong>
-              . Sources with their own locations keep them; you can change defaults
-              during review.
-            </span>
-          </div>
-        )}
-
-        <div className="grid gap-2.5">
-          {CHOICES.map((choice, index) => (
-            <button
-              key={choice.id}
-              type="button"
-              autoFocus={index === 0}
-              onClick={() => choose(choice.path)}
-              className={cn(
-                "group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card/55 px-3.5 py-3.5 text-left transition-[border-color,background-color,transform] hover:border-border hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.995] sm:px-4 sm:py-4",
-              )}
-            >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-foreground/70 transition-colors group-hover:text-foreground">
-                <choice.icon className="size-[1.1rem]" strokeWidth={1.7} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.86rem] font-medium">{choice.title}</span>
-                <span className="mt-0.5 block text-[0.72rem] leading-relaxed text-muted-foreground">
-                  {choice.description}
-                </span>
-              </span>
-              <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <Sheet open={open} onOpenChange={changeOpen}>
+      <SheetContent hideClose={busy} {...guard}>
+        <SheetHeader className="pr-12">
+          <SheetTitle>Add items</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
+        </SheetHeader>
+        {body}
+      </SheetContent>
+    </Sheet>
   );
 }

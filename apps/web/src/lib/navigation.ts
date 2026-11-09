@@ -56,10 +56,6 @@ export function readOrigin(searchParams: URLSearchParams): ItemOrigin | null {
   return { path, label };
 }
 
-export function originHref(origin: ItemOrigin | null, fallback = "/items"): string {
-  return origin ? appendOrigin(origin.path) : fallback;
-}
-
 export function fallbackOriginLabel(path: string): string {
   if (path.startsWith("/containers/")) return "container";
   if (path.startsWith("/rooms/")) return "room";

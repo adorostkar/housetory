@@ -132,13 +132,3 @@ export const LOAN_STATUS_TONE: Record<
   returned: "outline",
   cancelled: "secondary",
 };
-
-export const IMPORT_ENTRY_STATUS_LABELS: Record<string, string> = {
-  proposed: "Proposed",
-  approved: "Approved",
-  rejected: "Rejected",
-  imported: "Imported",
-  skipped: "Skipped",
-  merged: "Merged",
-  failed: "Failed",
-};

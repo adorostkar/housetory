@@ -125,16 +125,21 @@ test("status screen shows real readiness and task states; optional features are 
     path: "../../docs/walkthrough/local-polish/04-image-lookup-setup-light.png",
     fullPage: false,
   });
-  await page.goto("/voice");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Add items" }).first().click();
+  const micButton = page
+    .getByRole("dialog", { name: "Add items" })
+    .getByRole("button", { name: "Record voice note" });
+  await expect(micButton).toHaveAttribute("aria-disabled", "true");
+  await expect(micButton).toHaveAttribute(
+    "title",
+    "Voice needs transcription — set up in AI settings",
+  );
+  await micButton.click();
   await expect(
-    page.getByRole("heading", { name: "Voice transcription is not set up" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Configure voice transcription" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Start recording/ }),
-  ).toHaveCount(0);
+    page.getByRole("link", { name: "set up in AI settings" }),
+  ).toHaveAttribute("href", "/settings/ai");
+  await page.keyboard.press("Escape");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/system-status");

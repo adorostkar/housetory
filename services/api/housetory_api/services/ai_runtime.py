@@ -531,18 +531,6 @@ def provider_supports_transcription(provider: str) -> bool:
     }
 
 
-def model_supports_transcription(provider: str, model: str | None) -> bool:
-    if not provider_supports_transcription(provider) or not model:
-        return False
-    if provider in {AiProviderType.GEMINI.value, AiProviderType.OPENROUTER.value}:
-        # Gemini accepts audio inline. OpenRouter audio models vary, so the
-        # transcription adapter revalidates discovered modalities/endpoints
-        # before sending any household audio.
-        return True
-    lowered = model.lower()
-    return "whisper" in lowered or "transcribe" in lowered
-
-
 def model_capabilities(provider: str, model: str | None) -> list[str]:
     if not model:
         return []
@@ -610,10 +598,6 @@ def model_capabilities(provider: str, model: str | None) -> list[str]:
     ):
         capabilities.append("vision")
     return list(dict.fromkeys(capabilities))
-
-
-def task_requires_vision(task: str) -> bool:
-    return task == AiTask.VISION.value
 
 
 def status_from_config(

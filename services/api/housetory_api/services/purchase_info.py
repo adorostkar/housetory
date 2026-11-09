@@ -11,7 +11,6 @@ is explicitly marked not applicable. ``unknown`` is an unresolved state and is
 included in missing-information searches, while ``not_applicable`` is excluded.
 """
 
-from typing import Any
 
 from sqlalchemy import and_, func, or_
 
@@ -121,8 +120,3 @@ def explicit_status_value(value: str | None) -> str | None:
     if value == PurchaseInfoStatus.NOT_APPLICABLE.value:
         return PurchaseInfoStatus.NOT_APPLICABLE.value
     raise ValueError("Unsupported purchase information status.")
-
-
-def item_identity(item: Item) -> dict[str, Any]:
-    """Small stable payload helper for tests and future exports."""
-    return {"id": str(item.id), "status": effective_purchase_info_status(item).value}

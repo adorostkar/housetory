@@ -59,7 +59,6 @@ Tailscale Serve (optional) ─────► 127.0.0.1:8080
 housetory/
   apps/
     web/                 React + Vite + TypeScript + Tailwind + shadcn/ui
-    desktop/             Tauri 2 shell (intentionally deferred, see apps/desktop)
   services/
     api/                 FastAPI, SQLAlchemy 2, Alembic, pytest
     worker/              PostgreSQL-backed background worker

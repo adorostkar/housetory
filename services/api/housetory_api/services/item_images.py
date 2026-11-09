@@ -147,17 +147,6 @@ def image_search_fingerprint(item: Item) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def product_text(item: Item, limit: int = 600) -> str:
-    parts = [
-        item.name,
-        item.brand or "",
-        item.model or "",
-        item.description or "",
-        item.category.name if item.category else "",
-    ]
-    return " · ".join(part.strip() for part in parts if part and part.strip())[:limit]
-
-
 def settings_out(household) -> ItemImageSettingsOut:  # noqa: ANN001
     return ItemImageSettingsOut(auto_reference=household.item_image_auto_reference)
 

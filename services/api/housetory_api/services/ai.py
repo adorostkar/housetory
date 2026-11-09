@@ -958,15 +958,3 @@ def complete_text(
     return _chat(
         config or _env_config(AiTask.ASSISTANT.value), system, user, json_mode=False
     ).strip()
-
-
-def ollama_hint() -> dict[str, str]:
-    return {
-        "macos": "brew install ollama && ollama serve && ollama pull <model>",
-        "linux": "install Ollama, run `ollama serve`, then `ollama pull <model>`",
-        "note": "Housetory never downloads models automatically and does not require a GPU.",
-    }
-
-
-def provider_capabilities(provider: str, model: str | None) -> list[str]:
-    return model_capabilities(provider, model)

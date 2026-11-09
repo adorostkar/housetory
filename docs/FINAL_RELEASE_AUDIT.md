@@ -19,7 +19,7 @@ then server release.
 | TypeScript / production build | PASS | `npx tsc -b --pretty false`, `npm run build` |
 | Full disposable browser suite | PASS | Fresh project `housetory-final-audit`, fresh volumes, port 8094: **97 passed, 1 documented skip** in 7.7 min; the skipped Brave-fixture workflow then passed in a targeted 2/2 manuals run with a mock Brave adapter |
 | Focused audit regressions | PASS | 14/14 targeted E2E after fixes |
-| Actual `Inventory.md` parser/import | PASS | 7 backend tests; actual user file comparison; E2E phase6 import of sanitized fixture |
+| Actual `Inventory.md` parser/import | PASS | 7 backend tests; actual user file comparison; E2E ai-camera-import import of sanitized fixture |
 | Responsive matrix | PASS | `/tmp/housetory-final-responsive-audit.json`: 33/33 page/width checks, no page errors, no horizontal overflow; mobile inputs ≥16px |
 | Release-baseline migrations | PASS | disposable DB from server baseline `a1c3e5f7b9d2` to head `c2d3e4f5a6b7`; values and encrypted-key ciphertext preserved |
 | Main 8080 data preservation after local deploy | PENDING FINAL DEPLOY | recorded before/after fingerprints below |
@@ -79,7 +79,7 @@ and the UI explicitly sets the first provider/model as the saved default when no
 default exists. Later provider edits still do not overwrite an existing saved default.
 
 Evidence: `tests/test_ai_providers.py::test_first_provider_model_finishes_setup_by_seeding_the_default`,
-`ai-settings-page.test.tsx` first-provider default test, and full phase6 E2E after fix.
+`ai-settings-page.test.tsx` first-provider default test, and full ai-camera-import E2E after fix.
 
 ### 3. Browser-suite isolation and accessible-role regressions
 
@@ -96,22 +96,22 @@ boundary; **NOT RUN** means intentionally skipped to avoid paid or destructive a
 | Requirement | Result | Concrete evidence |
 | --- | --- | --- |
 | Core CRUD without AI/provider/internet | PASS | full backend + fresh-stack E2E; stack started with `AI_PROVIDER=disabled`, empty Brave/SMTP/search credentials for core specs |
-| Rooms, nested containers, owned-storage items | PASS | `test_item_storage.py`, `test_containers.py`, `item-storage.spec.ts`, phase6/place-management E2E |
+| Rooms, nested containers, owned-storage items | PASS | `test_item_storage.py`, `test_containers.py`, `item-storage.spec.ts`, ai-camera-import/place-management E2E |
 | Borrowed records, partial returns, lending and history undo | PASS | `test_lending.py`, `test_borrowed_items.py`, `lending.spec.ts`, `borrowed-items.spec.ts`, `restore-assisted-undo.spec.ts` |
 | Tombstones and recoverable place restore | PASS | `test_restore_assisted_undo` coverage + `restore-assisted-undo.spec.ts` |
-| Roles, permissions, cross-household and properties | PASS | full backend IDOR/role suites, `zz-properties.spec.ts`, `zzz-households.spec.ts`, viewer borrowed/status tests |
+| Roles, permissions, cross-household and properties | PASS | full backend IDOR/role suites, `properties.spec.ts`, `households.spec.ts`, viewer borrowed/status tests |
 | Search and scoped follow-ups, current loan truth | PASS | unified-search backend/UI tests, `unified-search.spec.ts`, `single-home-polish.spec.ts` |
-| Actual `Inventory.md` hierarchy/quantity | PASS | `test_actual_inventory.py` (7 passed; compares live readable user file to fixture when present) and phase6 actual-hierarchy E2E; no external send, no real-household apply |
+| Actual `Inventory.md` hierarchy/quantity | PASS | `test_actual_inventory.py` (7 passed; compares live readable user file to fixture when present) and ai-camera-import actual-hierarchy E2E; no external send, no real-household apply |
 | Local OCR, documents, receipts, scans, manuals/citations | PASS | backend OCR/scan/manual suites and document-scanning/manuals/document-extraction E2E on disposable storage |
 | Online exact make/model manual discovery | PASS with mock Brave | `manuals.spec.ts` 2/2 in a disposable stack configured with `MANUAL_SEARCH_PROVIDER=brave`, a fixture key and a local mock Brave server; verified exact DeWalt DCD791B query, source review, citation and saved manual; no live Brave call |
-| QR labels excluding item contents | PASS | label/QR backend tests and phase5/responsive E2E |
+| QR labels excluding item contents | PASS | label/QR backend tests and containers-labels/responsive E2E |
 | Purchases, allocations, warranty, per-unit value math | PASS | `test_financial.py`, `test_evidence_exports.py`, current-values/item-valuation specs |
 | Evidence PDF/CSV/ZIP real artifact + permissions | PASS | backend PyPDF assertions and `inventory-evidence.spec.ts` actual download; authenticated no-store checks |
-| Voice / vision routes and provider failures | PASS with mock providers | voice/recognition/provider-capability backend suites; phase6/openrouter-media/voice E2E; no paid calls |
+| Voice / vision routes and provider failures | PASS with mock providers | voice/recognition/provider-capability backend suites; ai-camera-import/openrouter-media/voice E2E; no paid calls |
 | Review queue, off-by-default schedule, consent/staleness | PASS | inventory-review backend/E2E, schedule panel tests, full suite |
-| Persistent default text, overrides and bulk Test all | PASS | `test_ai_providers.py`, `simplification3.spec.ts`, mocked `test-all-ai-tasks.spec.ts` |
+| Persistent default text, overrides and bulk Test all | PASS | `test_ai_providers.py`, `ai-default-model.spec.ts`, mocked `test-all-ai-tasks.spec.ts` |
 | SMTP flexible provider without hardcoded Resend | PASS with manual live boundary | email service token/capture tests; no external mail sent; server Resend env remains untouched |
-| Multi-home, roles, invitations, recovery tokens | PASS with no external mail | households/accounts backend suites and `zzz-households.spec.ts`; tokens exercised locally |
+| Multi-home, roles, invitations, recovery tokens | PASS with no external mail | households/accounts backend suites and `households.spec.ts`; tokens exercised locally |
 | No account/key plaintext or log leakage | PASS | credential-encryption/log/IDOR tests; audit commands did not read server env values or key logs |
 | Unified search scope/cache/current truth | PASS | unified-search/direct/AI/fallback backend + E2E; no automatic writes |
 | 320/390/768/landscape 844/1440 responsive layout | PASS | responsive-mobile E2E and `/tmp/housetory-final-responsive-audit.json` (33 checks); full suite includes 320/390/844 landscape/768/1024/1440 |

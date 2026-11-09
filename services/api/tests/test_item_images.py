@@ -401,10 +401,6 @@ def test_illustration_generation_is_retired_and_existing_ai_media_stays_readable
         room["id"],
         description="Oak frame, pale fabric, reading chair for the study",
     )
-    retired = owner_client.post(f"/api/v1/items/{item['id']}/illustration")
-    assert retired.status_code == 410
-    assert retired.json()["detail"]["code"] == "feature_retired"
-
     household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
     with SessionLocal() as db:
         active_file = storage.store_item_image_bytes(
@@ -460,10 +456,6 @@ def test_illustration_generation_is_retired_and_existing_ai_media_stays_readable
     detail = owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]
     assert detail["representative_image"]["label"] == "AI illustration"
 
-    accept = owner_client.post(f"/api/v1/items/{item['id']}/images/{pending_id}/accept")
-    assert accept.status_code == 410
-    assert accept.json()["detail"]["code"] == "feature_retired"
-
     removed = owner_client.delete(f"/api/v1/items/{item['id']}/image")
     assert removed.status_code == 200
     assert removed.json()["selected"] is None
@@ -472,7 +464,7 @@ def test_illustration_generation_is_retired_and_existing_ai_media_stays_readable
         assert db.get(ItemImage, pending_id) is not None
 
 
-def test_illustration_batch_action_is_retired_without_provider_calls(
+def test_illustration_batch_action_is_rejected_without_provider_calls(
     owner_client,
     monkeypatch,
 ):
@@ -494,8 +486,7 @@ def test_illustration_batch_action_is_retired_without_provider_calls(
         "/api/v1/items/images/batch/preview",
         json={"item_ids": [item["id"]], "action": "illustration"},
     )
-    assert preview.status_code == 410
-    assert preview.json()["detail"]["code"] == "feature_retired"
+    assert preview.status_code == 422
     created = owner_client.post(
         "/api/v1/items/images/batch",
         json={
@@ -504,7 +495,7 @@ def test_illustration_batch_action_is_retired_without_provider_calls(
             "request_id": str(uuid.uuid4()),
         },
     )
-    assert created.status_code == 410
+    assert created.status_code == 422
     assert called == {"search": 0, "download": 0}
 
 
@@ -1962,10 +1953,9 @@ def test_retired_generation_jobs_make_no_provider_or_search_calls(
         },
         uuid.uuid4(),
     )
-    assert result["status"] == "retired"
+    assert result["status"] == "skipped"
     assert result["completed"] == 0
     assert result["skipped"] == 1
-    assert "retired" in result["message"].lower()
 
     skipped = run_new_item_job(
         {

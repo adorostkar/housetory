@@ -41,7 +41,6 @@ from .ai_runtime import (
     config_for_provider,
     endpoint_scope,
     model_capabilities,
-    resolve_config,
 )
 from .task_capabilities import (
     adapter_gap_message,
@@ -170,16 +169,6 @@ def serialize_provider(provider: AiProvider) -> AiProviderOut:
         created_at=provider.created_at,
         updated_at=provider.updated_at,
     )
-
-
-def _task_rows(db: Session, household_id: uuid.UUID) -> list[AiTaskSetting]:
-    rows = {
-        row.task: row
-        for row in db.scalars(
-            select(AiTaskSetting).where(AiTaskSetting.household_id == household_id)
-        ).all()
-    }
-    return [rows[task] for task in TASK_LABELS if task in rows]
 
 
 def serialize_task(db: Session, household_id: uuid.UUID, task: str) -> AiTaskSettingOut:
@@ -876,7 +865,3 @@ def rotate_credentials(db: Session, household_id: uuid.UUID) -> tuple[int, int]:
     _clear_model_cache()
     db.commit()
     return rotated, failed
-
-
-def resolve_task_config(db: Session, household_id: uuid.UUID, task: str):
-    return resolve_config(db, household_id, task)

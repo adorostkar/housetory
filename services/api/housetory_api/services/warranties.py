@@ -8,7 +8,7 @@ the calculation rules are ever revisited.
 """
 
 import calendar
-from datetime import date, timedelta
+from datetime import date
 
 from ..domain import WarrantyStatus
 
@@ -52,8 +52,3 @@ def warranty_status(
     if days_remaining <= reminder_days:
         return WarrantyStatus.EXPIRING, days_remaining
     return WarrantyStatus.ACTIVE, days_remaining
-
-
-def expiry_window(reminder_days: int, today: date | None = None) -> tuple[date, date]:
-    reference = today or date.today()
-    return reference, reference + timedelta(days=reminder_days)

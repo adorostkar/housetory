@@ -99,7 +99,6 @@ PRESETS: dict[str, dict] = {
         "vertical_pitch_mm": 148.0,
     },
 }
-DEFAULT_PRESET = "L7165"
 
 
 def preset_models() -> list[LabelPresetOut]:

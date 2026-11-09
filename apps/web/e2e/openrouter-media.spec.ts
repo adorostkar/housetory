@@ -343,14 +343,18 @@ test("OpenRouter audio models configure and transcribe locally", async ({
   expect(String(inputAudio["data"]).startsWith("data:")).toBeFalsy();
   expect(inputAudio["data"]).toBeTruthy();
 
-  await page.goto(`/voice?note_id=${voiceNote.id}`);
-  await expect(page.getByLabel("Editable voice transcript")).toHaveValue(
-    "There is a cordless drill in the office.",
-  );
+  await page.goto("/");
+  await page.locator("aside").getByRole("button", { name: "Add items" }).click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Add items" })
+      .getByRole("button", { name: "Record voice note" }),
+  ).not.toHaveAttribute("aria-disabled", "true");
   await page.screenshot({
-    path: "../../docs/walkthrough/openrouter-media/02-voice-transcript-light.png",
+    path: "../../docs/walkthrough/openrouter-media/02-add-items-voice-ready-light.png",
     fullPage: false,
   });
+  await page.keyboard.press("Escape");
 
   await page.goto(`/items/${item.item.id}`);
   await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);

@@ -299,10 +299,6 @@ def contains_non_latin(text: str) -> bool:
     return any(character.isalpha() and ord(character) > 127 for character in text)
 
 
-def has_script(text: str) -> bool:
-    return contains_non_latin(text)
-
-
 def normalize_label(text: str) -> str:
     """Normalise a name/label for identity comparison, not display."""
     value = normalize_for_match(text)

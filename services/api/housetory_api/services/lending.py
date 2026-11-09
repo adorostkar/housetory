@@ -13,7 +13,6 @@ from ..api.errors import ApiError
 from ..domain import ActivityAction, LoanStatus
 from ..models import BorrowedRecord, Item, Loan, LoanReturn, User
 from ..schemas.lending import (
-    ActivityEventOut,
     ItemLoanSummaryOut,
     LoanContentsExcludedOut,
     LoanContentsItemOut,
@@ -27,11 +26,7 @@ from ..schemas.lending import (
     LoanReturnOut,
 )
 from . import history, loan_people
-
-OPEN_STATUSES = {
-    LoanStatus.OUTSTANDING.value,
-    LoanStatus.PARTIALLY_RETURNED.value,
-}
+from .loan_status import OPEN_STATUSES, status_for
 
 
 def lock_item(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> Item:
@@ -68,19 +63,6 @@ def outstanding_quantity(db: Session, household_id: uuid.UUID, item_id: uuid.UUI
                     0,
                 )
             ).where(
-                Loan.household_id == household_id,
-                Loan.item_id == item_id,
-                Loan.status.in_(OPEN_STATUSES),
-            )
-        )
-        or 0
-    )
-
-
-def open_loan_count(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> int:
-    return int(
-        db.scalar(
-            select(func.count(Loan.id)).where(
                 Loan.household_id == household_id,
                 Loan.item_id == item_id,
                 Loan.status.in_(OPEN_STATUSES),
@@ -181,16 +163,6 @@ def ensure_item_deletable(db: Session, household_id: uuid.UUID, item: Item) -> N
             "item_has_open_loans",
             f"{outstanding} unit(s) are currently on loan. Record returns before deleting.",
         )
-
-
-def _status_for(quantity: int, returned: int, *, cancelled: bool = False) -> str:
-    if cancelled:
-        return LoanStatus.CANCELLED.value
-    if returned <= 0:
-        return LoanStatus.OUTSTANDING.value
-    if returned >= quantity:
-        return LoanStatus.RETURNED.value
-    return LoanStatus.PARTIALLY_RETURNED.value
 
 
 def _loan_event_details(loan: Loan) -> dict[str, Any]:
@@ -909,7 +881,7 @@ def create_return(
     )
     db.add(loan_return)
     loan.returned_quantity += payload.quantity
-    loan.status = _status_for(loan.quantity, loan.returned_quantity)
+    loan.status = status_for(loan.quantity, loan.returned_quantity)
     db.flush()
     details = _loan_event_details(loan)
     details.update(
@@ -1009,7 +981,7 @@ def correct_loan(
     loan.lent_on = new_lent_on
     loan.due_on = new_due_on
     loan.notes = new_notes
-    loan.status = _status_for(loan.quantity, loan.returned_quantity)
+    loan.status = status_for(loan.quantity, loan.returned_quantity)
     db.flush()
     details = _loan_event_details(loan)
     details["before"] = before
@@ -1101,9 +1073,3 @@ def cancel_loan(
         request_id=request_id,
     )
     return loan_detail(db, household_id, loan.id, on_date=on_date)
-
-
-def load_loan_history(
-    db: Session, household_id: uuid.UUID, loan_id: uuid.UUID
-) -> list[ActivityEventOut]:
-    return history.history_for_loan(db, household_id, loan_id)

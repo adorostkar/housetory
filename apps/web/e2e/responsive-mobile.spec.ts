@@ -507,8 +507,14 @@ test.describe("mobile responsive", () => {
     await expect(addDialog).toBeVisible();
     const box = await addDialog.boundingBox();
     expect(box).not.toBeNull();
-    expect(box?.width ?? 0).toBeLessThanOrEqual(320 - 24);
-    expect(box?.height ?? 0).toBeLessThanOrEqual(568 - 24);
+    // Below lg the Add items surface is a bottom sheet: full width, anchored
+    // to the bottom edge and never taller than the viewport.
+    expect(box?.width ?? 0).toBeLessThanOrEqual(320);
+    expect(box?.height ?? 0).toBeLessThanOrEqual(568 - 16);
+    expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBeGreaterThanOrEqual(567);
+    await expect(
+      addDialog.getByRole("button", { name: "Review items" }),
+    ).toBeInViewport();
     await page.keyboard.press("Escape");
 
     const { itemId } = await seedDenseFixtures(request);

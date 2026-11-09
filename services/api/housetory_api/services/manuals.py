@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 
@@ -1089,16 +1089,3 @@ sources. Clearly distinguish web evidence from attached-manual evidence."""
     if len(clean) > 4000 or _unsupported_page_claim(clean, []):
         return None
     return clean
-
-
-def count_manual_links(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> int:
-    return int(
-        db.scalar(
-            select(func.count(Document.id)).where(
-                Document.household_id == household_id,
-                Document.document_type == DocumentType.MANUAL.value,
-                Document.items.any(Item.id == item_id),
-            )
-        )
-        or 0
-    )

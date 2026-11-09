@@ -250,10 +250,6 @@ export function roomPath(rooms: Room[], roomId: string): Room[] {
   return path;
 }
 
-export function isValidHexColor(value: string): boolean {
-  return /^#[0-9a-fA-F]{6}$/.test(value);
-}
-
 export function addMonthsIso(start: string, months: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isFinite(months)) return null;
   const year = Number(start.slice(0, 4));

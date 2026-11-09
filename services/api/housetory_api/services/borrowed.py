@@ -42,12 +42,8 @@ from ..schemas.borrowed import (
     BorrowedReturnOut,
 )
 from . import history, loan_people, storage
+from .loan_status import OPEN_STATUSES, status_for
 from .query_text import search_term_variants
-
-OPEN_STATUSES = {
-    LoanStatus.OUTSTANDING.value,
-    LoanStatus.PARTIALLY_RETURNED.value,
-}
 
 
 @dataclass(frozen=True)
@@ -75,16 +71,8 @@ def _casefold_contains(column, term: str):  # noqa: ANN001
     return func.lower(column).contains(term.lower())
 
 
-def _fingerprint(payload) -> str:  # noqa: ANN001
-    data = payload.model_dump(mode="json", exclude={"request_id"}, exclude_unset=False)
-    encoded = json.dumps(
-        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _fingerprint_correct(payload: BorrowedCorrect) -> str:
-    data = payload.model_dump(mode="json", exclude={"request_id"}, exclude_unset=True)
+def _fingerprint(payload, *, exclude_unset: bool = False) -> str:  # noqa: ANN001
+    data = payload.model_dump(mode="json", exclude={"request_id"}, exclude_unset=exclude_unset)
     encoded = json.dumps(
         data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
     )
@@ -233,16 +221,6 @@ def _place_from_payload(
         room_id=payload.room_id,
         storage_location_id=payload.storage_location_id,
     )
-
-
-def _status_for(quantity: int, returned: int, *, cancelled: bool = False) -> str:
-    if cancelled:
-        return LoanStatus.CANCELLED.value
-    if returned <= 0:
-        return LoanStatus.OUTSTANDING.value
-    if returned >= quantity:
-        return LoanStatus.RETURNED.value
-    return LoanStatus.PARTIALLY_RETURNED.value
 
 
 def _outstanding(record: BorrowedRecord) -> int:
@@ -843,7 +821,7 @@ def create_return(
     )
     db.add(borrowed_return)
     record.returned_quantity += payload.quantity
-    record.status = _status_for(record.quantity, record.returned_quantity)
+    record.status = status_for(record.quantity, record.returned_quantity)
     db.flush()
     details = _event_details(record)
     details.update(
@@ -887,7 +865,7 @@ def correct_record(
     record = get_record(db, household_id, record_id, for_update=True)
     if record.status == LoanStatus.CANCELLED.value:
         raise ApiError(409, "borrowed_record_cancelled", "A cancelled record cannot be corrected.")
-    fingerprint = _fingerprint_correct(payload)
+    fingerprint = _fingerprint(payload, exclude_unset=True)
     request_event = history.find_request_event(db, household_id, payload.request_id)
     if request_event is not None:
         if (
@@ -954,7 +932,7 @@ def correct_record(
     if {"property_id", "room_id", "storage_location_id"} & fields:
         _, _, _, snapshot = _place_from_payload(db, household_id, payload)
         _apply_place(record, snapshot)
-    record.status = _status_for(record.quantity, record.returned_quantity)
+    record.status = status_for(record.quantity, record.returned_quantity)
     db.flush()
     details = _event_details(record)
     details["before"] = before

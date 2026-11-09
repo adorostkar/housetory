@@ -31,10 +31,6 @@ def unit_value_cents(item: Item) -> int | None:
     return item.current_value_cents if effective_basis(item) == PER_UNIT else None
 
 
-def legacy_total_cents(item: Item) -> int | None:
-    return item.current_value_cents if effective_basis(item) == LEGACY_RECORD_TOTAL else None
-
-
 def owned_quantity(item: Item) -> int:
     # Item.quantity is the owned quantity. Loaned owned units remain included;
     # borrowed-from-others records live in a separate table and never enter here.

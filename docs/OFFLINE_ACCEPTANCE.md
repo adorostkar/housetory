@@ -67,8 +67,8 @@ With no AI/search/mail configuration:
 
 - the item page shows one compact `Configure item images` action and no disabled
   artwork/generation controls;
-- the voice page shows one `Configure voice transcription` action instead of a
-  disabled recorder;
+- the Add items microphone is disabled with "Voice needs transcription — set up
+  in AI settings";
 - status marks optional external services not configured and does not probe or
   claim they work;
 - no paid/live provider call is made by discovery or status.
@@ -109,6 +109,6 @@ npx playwright test e2e/accounts.spec.ts e2e/add-items.spec.ts \
   e2e/item-status.spec.ts e2e/lending.spec.ts e2e/phase5.spec.ts \
   e2e/quick-search.spec.ts e2e/release-stabilisation.spec.ts \
   e2e/single-home-polish.spec.ts e2e/stocktake.spec.ts \
-  e2e/zz-properties.spec.ts e2e/zzz-households.spec.ts \
+  e2e/properties.spec.ts e2e/households.spec.ts \
   e2e/offline-resource-audit.spec.ts
 ```

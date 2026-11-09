@@ -9,7 +9,6 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
-from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -166,9 +165,3 @@ def effective_domains(
         if clean:
             result.add(clean)
     return frozenset(result)
-
-
-def source_for_row(
-    row: HouseholdOnlineSearchSettings | None,
-) -> Literal["household", "none"]:
-    return "household" if row is not None else "none"

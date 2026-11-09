@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
@@ -7,7 +7,6 @@ import {
   Eye,
   Filter,
   Search,
-  Sparkles,
   Undo2,
 } from "lucide-react";
 import * as React from "react";
@@ -56,7 +55,6 @@ import {
   useSession,
 } from "@/lib/queries";
 import type {
-  ItemList,
   ItemSummary,
   ReviewBulkAcceptResult,
   ReviewDecision,
@@ -74,265 +72,19 @@ import {
   pluralize,
   roomPath,
 } from "@/lib/utils";
-
-const SCOPES: Array<{ value: ReviewScopeType; label: string }> = [
-  { value: "household", label: "Whole household" },
-  { value: "property", label: "Property" },
-  { value: "room", label: "Room" },
-  { value: "container", label: "Container or place" },
-  { value: "items", label: "Selected items" },
-];
-
-const TYPE_LABELS: Record<ReviewSuggestionType, string> = {
-  category: "Category",
-  name: "Naming",
-  organisation: "Organisation",
-  possible_duplicate: "Possible duplicate",
-  missing_detail: "Missing detail",
-  location_conflict: "Location wording",
-};
-
-const STATUS_VARIANTS: Record<
-  ReviewSuggestionStatus,
-  "sage" | "brass" | "outline" | "secondary" | "destructive"
-> = {
-  pending: "brass",
-  accepted: "sage",
-  dismissed: "secondary",
-  stale: "destructive",
-  reverted: "outline",
-};
-
-const STATUS_VALUES: ReviewSuggestionStatus[] = [
-  "pending",
-  "accepted",
-  "dismissed",
-  "stale",
-  "reverted",
-];
-const TYPE_VALUES = Object.keys(TYPE_LABELS) as ReviewSuggestionType[];
-
-function stringField(
-  record: Record<string, unknown>,
-  key: string,
-): string | null {
-  const value = record[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
-function organisationTagNames(after: Record<string, unknown>): string[] {
-  if (!Array.isArray(after.tags)) return stringList(after.tag_names);
-  return after.tags.flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    if (entry && typeof entry === "object" && "name" in entry) {
-      const name = (entry as { name?: unknown }).name;
-      return typeof name === "string" && name.trim() ? [name] : [];
-    }
-    return [];
-  });
-}
-
-function timestamp(value: string | null | undefined) {
-  if (!value) return "never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function aiRunSummary(run: ReviewRun) {
-  if (!run.include_ai) return "AI not requested · offline rules only";
-  const route = run.ai_provider_label
-    ? ` via ${run.ai_provider_label}${run.ai_model ? ` · ${run.ai_model}` : ""}`
-    : "";
-  if (run.ai_error && run.ai_used) {
-    return `AI failed${route} · ${run.ai_item_count} items sent · offline suggestions kept`;
-  }
-  if (run.ai_error) return `AI skipped${route} · 0 items sent`;
-  if (!run.ai_used) return "AI skipped · no eligible items need organisation · 0 items sent";
-  const provider = run.ai_provider_label ?? "Assistant";
-  return `AI completed via ${provider}${run.ai_model ? ` · ${run.ai_model}` : ""} · ${run.ai_item_count} items sent`;
-}
-
-function reviewScopeLabel({
-  scopeType,
-  propertyName,
-  roomName,
-  containerLabel,
-  selectedCount,
-}: {
-  scopeType: ReviewScopeType;
-  propertyName: string | null;
-  roomName: string | null;
-  containerLabel: string | null;
-  selectedCount: number;
-}) {
-  if (scopeType === "household") return "Whole household";
-  if (scopeType === "property") return propertyName ?? "Selected property";
-  if (scopeType === "room") return roomName ? `Room: ${roomName}` : "Selected room";
-  if (scopeType === "container") return containerLabel ?? "Selected container";
-  return `${pluralize(selectedCount, "selected item")}`;
-}
-
-function SuggestionStatusBadge({ suggestion }: { suggestion: ReviewSuggestion }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      <Badge variant="outline">{TYPE_LABELS[suggestion.type]}</Badge>
-      {suggestion.source === "ai" && (
-        <Badge variant="brass">
-          <Sparkles className="size-3" /> AI-assisted
-        </Badge>
-      )}
-      <Badge variant={STATUS_VARIANTS[suggestion.status]}>
-        {suggestion.status}
-      </Badge>
-    </div>
-  );
-}
-
-function ItemReference({
-  item,
-  origin,
-  label,
-}: {
-  item: ItemSummary;
-  origin: ReturnType<typeof itemOrigin>;
-  label?: string;
-}) {
-  return (
-    <Link
-      to={appendOrigin(`/items/${item.id}`, origin)}
-      onClick={() => rememberListScroll(origin ?? null)}
-      className="min-w-0 break-words font-medium underline-offset-4 hover:underline"
-    >
-      {label ?? item.name}
-      {item.quantity > 1 ? ` ×${item.quantity}` : ""}
-    </Link>
-  );
-}
-
-function ItemPickerDialog({
-  open,
-  onOpenChange,
-  selectedIds,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  selectedIds: string[];
-  onConfirm: (ids: string[]) => void;
-}) {
-  const [search, setSearch] = React.useState("");
-  const debounced = useDebouncedValue(search, 250);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const query = useQuery({
-    queryKey: ["inventory-review", "picker", debounced],
-    queryFn: () => {
-      const params = new URLSearchParams({ limit: "100", sort: "name_asc" });
-      if (debounced.trim()) params.set("q", debounced.trim());
-      return api.get<ItemList>(`/items?${params.toString()}`);
-    },
-    enabled: open,
-    staleTime: 10_000,
-  });
-
-  React.useEffect(() => {
-    if (!open) return;
-    setSelected(new Set(selectedIds));
-    setSearch("");
-  }, [open, selectedIds]);
-
-  const items = query.data?.items ?? [];
-  const toggle = (id: string) => {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else if (next.size < 100) next.add(id);
-      return next;
-    });
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Select items to review</DialogTitle>
-          <DialogDescription>
-            Choose up to 100 items. Reviewing selected items never changes them.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search items"
-            aria-label="Search items to review"
-            className="pl-10"
-          />
-        </div>
-        {query.isPending ? (
-          <div className="space-y-2">
-            <Skeleton className="h-10 rounded-lg" />
-            <Skeleton className="h-10 rounded-lg" />
-            <Skeleton className="h-10 rounded-lg" />
-          </div>
-        ) : query.isError ? (
-          <FormError message={getApiErrorMessage(query.error)} />
-        ) : items.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border/70 px-3.5 py-4 text-[0.75rem] text-muted-foreground">
-            No items match that search.
-          </p>
-        ) : (
-          <ul className="divide-y divide-border/60 rounded-xl border border-border/60">
-            {items.map((item) => (
-              <li key={item.id}>
-                <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 text-[0.78rem] hover:bg-secondary/30">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-4 accent-primary"
-                    checked={selected.has(item.id)}
-                    onChange={() => toggle(item.id)}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{item.name}</span>
-                    <span className="mt-0.5 block truncate text-[0.66rem] text-muted-foreground">
-                      {[item.room?.name, item.location?.name, item.brand, item.model]
-                        .filter(Boolean)
-                        .join(" · ") || "No placement or detail"}
-                    </span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              onConfirm([...selected]);
-              onOpenChange(false);
-            }}
-          >
-            Use {pluralize(selected.size, "item")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+import {
+  SCOPES,
+  STATUS_VALUES,
+  TYPE_LABELS,
+  TYPE_VALUES,
+  aiRunSummary,
+  organisationTagNames,
+  reviewScopeLabel,
+  stringField,
+  stringList,
+  timestamp,
+} from "@/pages/review-page-helpers";
+import { ItemPickerDialog, ItemReference, SuggestionStatusBadge } from "@/pages/review-page-parts";
 
 export function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();

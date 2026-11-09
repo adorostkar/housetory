@@ -41,12 +41,10 @@ import type {
   LabelTemplateList,
   Overview,
   PhotoList,
-  Property,
   PropertyList,
   PurchaseList,
   QuickSearchResponse,
   RoomList,
-  SearchItemList,
   SearchScopeList,
   OnlineSearchSettings,
   ItemSummary,
@@ -67,7 +65,6 @@ import type {
   VoiceNote,
   ActivityHistory,
   ItemLoanSummary,
-  Loan,
   LoanDetail,
   LoanFilterStatus,
   LoanList,
@@ -76,79 +73,9 @@ import type {
   WarrantyList,
   WarrantyStatus,
 } from "@/lib/types";
+import { queryKeys } from "@/lib/query-keys";
 
-export const queryKeys = {
-  session: ["session"] as const,
-  overview: ["overview"] as const,
-  rooms: ["rooms"] as const,
-  properties: ["properties"] as const,
-  property: (propertyId: string) => ["properties", propertyId] as const,
-  locations: (roomId?: string) => ["locations", roomId ?? "all"] as const,
-  categories: ["categories"] as const,
-  tags: ["tags"] as const,
-  items: ["items"] as const,
-  item: (itemId: string) => ["item", itemId] as const,
-  documents: ["documents"] as const,
-  document: (documentId: string) => ["document", documentId] as const,
-  purchases: ["purchases"] as const,
-  purchase: (purchaseId: string) => ["purchase", purchaseId] as const,
-  warranties: ["warranties"] as const,
-  warrantyList: (status: string) => ["warranties", status] as const,
-  financial: ["financial"] as const,
-  imports: ["imports"] as const,
-  importBatch: (batchId: string) => ["imports", batchId] as const,
-  aiStatus: ["ai", "status"] as const,
-  aiSettings: ["ai", "settings"] as const,
-  onlineSearchSettings: ["settings", "online-search"] as const,
-  placeTransferPreview: (
-    kind: "location" | "room",
-    id: string,
-    roomId: string,
-    locationId: string,
-  ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
-  reviewSummary: ["inventory-review", "summary"] as const,
-  reviewSchedule: ["inventory-review", "schedule"] as const,
-  reviewSuggestions: (filters: Record<string, string>) =>
-    ["inventory-review", "suggestions", filters] as const,
-  reviewScopeItems: (itemIds: string[]) =>
-    ["inventory-review", "scope-items", itemIds] as const,
-  systemStatusSummary: ["system", "status-summary"] as const,
-  systemStatus: ["system", "status"] as const,
-  householdMembers: ["household", "members"] as const,
-  householdInvitations: ["household", "invitations"] as const,
-  invitation: (token: string) => ["invitation", token] as const,
-  recognitions: ["ai", "recognitions"] as const,
-  recognition: (recognitionId: string) => ["ai", "recognition", recognitionId] as const,
-  aiProviderModels: (providerId: string) => ["ai", "provider", providerId, "models"] as const,
-  roomPhotos: (roomId: string) => ["photos", "room", roomId] as const,
-  locationPhotos: (locationId: string) => ["photos", "location", locationId] as const,
-  quickSearch: ["search", "quick"] as const,
-  searchScopes: ["search", "scopes"] as const,
-  containers: ["containers"] as const,
-  container: (containerId: string) => ["containers", containerId] as const,
-  labelTemplates: ["labels", "templates"] as const,
-  qrConfig: ["containers", "qr-config"] as const,
-  voiceConfig: ["voice", "config"] as const,
-  voiceNote: (noteId: string) => ["voice", "note", noteId] as const,
-  loans: ["loans"] as const,
-  loanPeople: ["loans", "people"] as const,
-  loan: (loanId: string) => ["loans", loanId] as const,
-  borrowed: ["borrowed"] as const,
-  borrowedRecord: (recordId: string) => ["borrowed", recordId] as const,
-  itemLoans: (itemId: string) => ["items", itemId, "loans"] as const,
-  itemHistory: (itemId: string) => ["items", itemId, "history"] as const,
-  itemManuals: (itemId: string) => ["items", itemId, "manuals"] as const,
-  itemImage: (itemId: string) => ["items", itemId, "image"] as const,
-  itemManualCandidates: (itemId: string) =>
-    ["items", itemId, "manual-search"] as const,
-  evidenceExports: ["evidence-exports"] as const,
-  evidenceExport: (exportId: string) => ["evidence-exports", exportId] as const,
-  stocktakeSessions: ["stocktake", "sessions"] as const,
-  stocktakeSession: (sessionId: string) => ["stocktake", sessionId] as const,
-  stocktakeSummary: (scopeKey: string) => ["stocktake", "summary", scopeKey] as const,
-  containerHistory: (containerId: string) =>
-    ["containers", containerId, "history"] as const,
-};
+export { queryKeys } from "@/lib/query-keys";
 
 export function applyHouseholdSession(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -274,7 +201,6 @@ export function useItemLoans(itemId: string | undefined) {
   });
 }
 
-
 export function useItemLoanOptions(itemId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ["items", itemId ?? "", "loan-options"],
@@ -364,11 +290,6 @@ export function useContainerHistory(containerId: string | undefined) {
   });
 }
 
-export function useLoanReference(loanId: string | undefined): Loan | undefined {
-  const detail = useLoan(loanId);
-  return detail.data;
-}
-
 export function useSession() {
   return useQuery({
     queryKey: queryKeys.session,
@@ -409,30 +330,6 @@ export function useSearchScopes(enabled = true) {
   });
 }
 
-export function useAllPlacesItems(
-  filters: { q?: string; household_id?: string; property_id?: string; sort?: string },
-  limit = 30,
-  enabled = true,
-) {
-  return useInfiniteQuery({
-    queryKey: [...queryKeys.items, "all-places", filters, limit],
-    queryFn: ({ pageParam }) =>
-      api.get<SearchItemList>(
-        `/search/items${buildQuery({
-          ...filters,
-          limit,
-          offset: pageParam,
-        })}`,
-      ),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage) => {
-      const nextOffset = lastPage.offset + lastPage.items.length;
-      return nextOffset < lastPage.total ? nextOffset : undefined;
-    },
-    enabled,
-  });
-}
-
 export function useOverview() {
   return useQuery({
     queryKey: queryKeys.overview,
@@ -445,14 +342,6 @@ export function useProperties(includeArchived = false) {
     queryKey: [...queryKeys.properties, includeArchived],
     queryFn: () =>
       api.get<PropertyList>(`/properties${buildQuery({ include_archived: includeArchived })}`),
-  });
-}
-
-export function useProperty(propertyId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.property(propertyId ?? ""),
-    queryFn: () => api.get<Property>(`/properties/${propertyId}`),
-    enabled: Boolean(propertyId),
   });
 }
 
@@ -547,15 +436,6 @@ export function useQuickSearch(
       ),
     enabled: enabled && term.length >= 2,
     staleTime: 10_000,
-  });
-}
-
-export function useSearchItems(q: string, limit = 30) {
-  return useQuery({
-    queryKey: [...queryKeys.items, "search", q, limit],
-    queryFn: () => api.get<ItemList>(`/items${buildQuery({ q, limit })}`),
-    enabled: q.trim().length > 0,
-    staleTime: 15_000,
   });
 }
 
@@ -765,7 +645,6 @@ export function useLogout() {
   });
 }
 
-
 export interface ContainerFilters {
   q?: string;
   property_id?: string;
@@ -885,15 +764,6 @@ export function useLabelTemplates() {
   });
 }
 
-export function useQrConfig() {
-  return useQuery({
-    queryKey: queryKeys.qrConfig,
-    queryFn: () => api.get<{ base_url: string; warning: string | null; local_only: boolean }>("/containers/qr-config"),
-    staleTime: 60_000,
-  });
-}
-
-
 export function useAiSettings(enabled = true) {
   return useQuery({
     queryKey: queryKeys.aiSettings,
@@ -1010,17 +880,10 @@ export function useLocationPhotos(locationId: string | undefined) {
   });
 }
 
-
 export function useCanWrite() {
   const session = useSession();
   return session.data?.role === "owner" || session.data?.role === "member";
 }
-
-export function useIsOwner() {
-  const session = useSession();
-  return session.data?.role === "owner";
-}
-
 
 export function useHouseholdMembers() {
   return useQuery({

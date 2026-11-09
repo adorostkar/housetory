@@ -211,9 +211,10 @@ Tailscale is optional.
   lookup first, configured consented AI only when interpretation is needed, and
   honest direct-only results when no provider is available. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
-- One clear **Add items** chooser for **Manual add** and **Describe or show**.
-  Text, an image with optional context, editable microphone transcription and a
-  single product URL all converge on the same import review/apply workflow.
+- One smart **Add items** input (dialog on desktop, bottom sheet on mobile):
+  text, a photo with an optional note, a voice note or a single product link
+  all converge on the same import review/apply workflow, with a link to the
+  manual form.
   Recognition adaptation is idempotent, product pages use bounded SSRF-safe
   retrieval, and no transcript writes inventory before review. See
   [`docs/ASSISTED_ADD_ITEMS.md`](docs/ASSISTED_ADD_ITEMS.md).
@@ -1263,7 +1264,6 @@ The endpoint inventory and data model are documented in
 
 ```
 apps/web/               React application
-apps/desktop/           Tauri 2 placeholder (deferred)
 services/api/           FastAPI, SQLAlchemy, Alembic, pytest
 services/worker/        PostgreSQL job worker
 infrastructure/docker/  Dockerfiles and nginx HTTP/TLS configs

@@ -36,7 +36,7 @@ from ..security import (
     verify_password,
 )
 from . import email as email_service
-from .auth import get_membership, revoke_household_sessions, revoke_user_sessions
+from .auth import revoke_household_sessions, revoke_user_sessions
 
 logger = logging.getLogger("housetory.accounts")
 
@@ -574,10 +574,3 @@ def change_password(
         )
     )
     db.commit()
-
-
-def membership_for_user(
-    db: Session, user_id: uuid.UUID, household_id: uuid.UUID
-) -> HouseholdMember | None:
-    household, membership = get_membership(db, user_id, household_id) or (None, None)
-    return membership if household is not None else None

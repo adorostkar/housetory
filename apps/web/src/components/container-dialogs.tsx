@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Download, ExternalLink, Printer, QrCode } from "lucide-react";
+import { Check, Copy, Download, Printer } from "lucide-react";
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -423,31 +423,6 @@ export function ContainerQrDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-export function ContainerQrButton({ container }: { container: Container }) {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <QrCode />
-        QR
-      </Button>
-      <ContainerQrDialog container={container} open={open} onOpenChange={setOpen} />
-    </>
-  );
-}
-
-export function ContainerExternalLink({ container }: { container: Container }) {
-  return (
-    <Link
-      to={`/containers/${container.id}`}
-      className="inline-flex items-center gap-1 text-[0.72rem] font-medium underline-offset-4 hover:underline"
-    >
-      {container.identifier ?? container.name}
-      <ExternalLink className="size-3" />
-    </Link>
   );
 }
 
