@@ -97,6 +97,7 @@ function AppShellLayout() {
   const navigate = useNavigate();
   const canWrite = useCanWrite();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
+  const isAssistant = location.pathname === "/assistant";
   const moreActive = mobileMoreNav.some(
     (item) =>
       location.pathname === item.to ||
@@ -262,7 +263,19 @@ function AppShellLayout() {
           </header>
         )}
 
-        <main className="mx-auto min-h-[calc(100dvh-4rem)] w-full max-w-[1320px] px-5 pb-28 pt-5 sm:px-8 sm:pt-7 lg:min-h-dvh lg:px-12 lg:pb-20 lg:pt-8">
+        <main
+          className={cn(
+            "mx-auto w-full max-w-[1320px] px-5 sm:px-8 lg:px-12",
+            isAssistant
+              ? cn(
+                  "flex flex-col overflow-hidden pb-3 pt-3 lg:h-dvh lg:pb-6 lg:pt-6",
+                  softwareKeyboardOpen
+                    ? "h-[calc(100dvh-4rem)]"
+                    : "h-[calc(100dvh-4rem-4.75rem-env(safe-area-inset-bottom))]",
+                )
+              : "min-h-[calc(100dvh-4rem)] pb-28 pt-5 sm:pt-7 lg:min-h-dvh lg:pb-20 lg:pt-8",
+          )}
+        >
           {location.pathname !== "/assistant" && (
             <div className="mb-5 lg:hidden">
               <QuickSearch variant="mobile" />
@@ -275,7 +288,10 @@ function AppShellLayout() {
               disabled; ask an owner if you need member access.
             </div>
           )}
-          <div key={location.pathname} className="animate-fade-in">
+          <div
+            key={location.pathname}
+            className={cn("animate-fade-in", isAssistant && "min-h-0 flex-1")}
+          >
             <Suspense fallback={<PageFallback />}>
               <Outlet />
             </Suspense>

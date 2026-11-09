@@ -7,11 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddItemsProvider } from "@/components/add-items";
 import { api } from "@/lib/api";
 import { SearchSessionProvider } from "@/lib/search-session";
-import type {
-  AiStatus,
-  ItemSummary,
-  SearchQueryResponse,
-} from "@/lib/types";
+import type { AiStatus, ItemSummary, SearchQueryResponse } from "@/lib/types";
 import { AssistantPage } from "@/pages/assistant-page";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -45,7 +41,8 @@ const aiStatus: AiStatus = {
   cloud_consent: false,
   data_leaves_server: false,
   error: null,
-  privacy_note: "Local inference is used. Household content stays on this host.",
+  privacy_note:
+    "Local inference is used. Household content stays on this host.",
 };
 
 const item: ItemSummary = {
@@ -238,12 +235,8 @@ beforeEach(() => {
 
 describe("AssistantPage", () => {
   it("answers a handed-off question through the shared submit endpoint", async () => {
-    renderPage(
-      `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
-    );
-    expect(
-      await screen.findByText(/Alex has 1 of your 2 units/),
-    ).toBeVisible();
+    renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
+    expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
     expect(api.post).toHaveBeenCalledWith(
       "/search/query",
       expect.objectContaining({
@@ -253,7 +246,9 @@ describe("AssistantPage", () => {
         limit: 40,
       }),
     );
-    expect(screen.getByText("Privacy & model details")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Privacy & model/ }),
+    ).toBeVisible();
     expect(screen.getByText("Direct lookup")).toBeVisible();
     expect(screen.getByText("Heavy drill loan to Alex")).toBeVisible();
     expect(api.patch).not.toHaveBeenCalled();
@@ -261,15 +256,15 @@ describe("AssistantPage", () => {
   });
 
   it("continues the conversation with bounded prior turns and context", async () => {
-    renderPage(
-      `/assistant?q=${encodeURIComponent("where is my heavy drill")}`,
-    );
+    renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
     await screen.findByText(/Alex has 1 of your 2 units/);
     const input = screen.getByRole("textbox", {
       name: "Ask the Housetory assistant",
     });
     await userEvent.type(input, "when is it due?");
-    await userEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Send question" }),
+    );
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
     const secondCall = vi.mocked(api.post).mock.calls[1] as [
       string,
@@ -295,5 +290,19 @@ describe("AssistantPage", () => {
       await screen.findByText("That loan is recorded as due on 2026-11-15."),
     ).toBeVisible();
     expect(screen.getByText("AI-assisted")).toBeVisible();
+  });
+
+  it("keeps the composer outside the scrolling log and shows privacy info on demand", async () => {
+    const user = userEvent.setup();
+    renderPage("/assistant");
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const composer = screen.getByLabelText("Ask the Housetory assistant");
+    expect(log).not.toContainElement(composer);
+    expect(
+      screen.getByRole("button", { name: "Where is my heavy drill?" }),
+    ).toBeVisible();
+    expect(screen.queryByText(/never creates, edits or deletes/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Privacy & model/ }));
+    expect(screen.getByText(/never creates, edits or deletes/)).toBeVisible();
   });
 });
