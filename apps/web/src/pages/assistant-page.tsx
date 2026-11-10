@@ -217,7 +217,7 @@ export function AssistantPage() {
       ? "AI-assisted answer"
       : lastResponse.mode === "direct"
         ? "Direct inventory lookup"
-        : "AI unavailable · direct results"
+        : "AI unavailable · used basic mode"
     : "AI when needed · grounded in records";
 
   return (
@@ -594,7 +594,7 @@ function AssistantAnswer({
             {response.mode === "ai"
               ? "AI-assisted"
               : response.mode === "fallback"
-                ? "AI unavailable · grounded records"
+                ? "AI unavailable · used basic mode"
                 : "Direct lookup"}
           </Badge>
         )}

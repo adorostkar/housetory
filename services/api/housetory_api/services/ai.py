@@ -11,8 +11,10 @@ no unstructured tool execution. Provider credentials are decrypted per request.
 """
 
 import base64
+import errno
 import json
 import re
+import socket
 import threading
 import time
 import urllib.error
@@ -21,6 +23,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -81,6 +84,67 @@ def _settings():
     return get_settings()
 
 
+CONNECT_TIMEOUT_SECONDS = 5.0
+BREAKER_SECONDS = 60.0
+_breaker_until: dict[str, float] = {}
+_breaker_lock = threading.Lock()
+
+
+def _endpoint_key(url: str) -> tuple[str, str, int] | None:
+    parsed = urlparse(url)
+    if not parsed.hostname or parsed.scheme not in {"http", "https"}:
+        return None
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return f"{parsed.hostname}:{port}", parsed.hostname, port
+
+
+def _trip_breaker(key: str) -> None:
+    with _breaker_lock:
+        _breaker_until[key] = time.monotonic() + BREAKER_SECONDS
+
+
+def reset_ai_breaker() -> None:
+    with _breaker_lock:
+        _breaker_until.clear()
+
+
+def _preflight(url: str) -> str | None:
+    """Fail fast when the provider cannot be reached at all.
+
+    A short TCP connect check is separate from the long read timeout, so a
+    reachable but slow model still gets the full wait. After a connection-level
+    failure further calls skip the provider briefly instead of waiting again.
+    """
+    endpoint = _endpoint_key(url)
+    if endpoint is None:
+        return None
+    key, host, port = endpoint
+    with _breaker_lock:
+        until = _breaker_until.get(key, 0.0)
+    if until > time.monotonic():
+        raise AiUnavailable("Inference provider is unreachable (recent connection failure).")
+    if urllib.request.getproxies().get(urlparse(url).scheme):
+        return key
+    try:
+        with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT_SECONDS):
+            pass
+    except OSError:
+        _trip_breaker(key)
+        raise AiUnavailable("Inference provider is unreachable.") from None
+    return key
+
+
+def _is_connection_failure(exc: BaseException) -> bool:
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
+        return True
+    return isinstance(reason, OSError) and reason.errno in {
+        errno.ENETUNREACH,
+        errno.EHOSTUNREACH,
+        errno.ENETDOWN,
+    }
+
+
 def config_for(
     db: Session | None,
     household_id: uuid.UUID | None,
@@ -103,6 +167,7 @@ def _request_json(
     request_headers = {"Content-Type": "application/json", **(headers or {})}
     data = json.dumps(payload).encode() if payload is not None else None
     attempts = 2
+    breaker_key = _preflight(url)
     for attempt in range(attempts):
         request = urllib.request.Request(
             url,
@@ -136,7 +201,11 @@ def _request_json(
                 time.sleep(min(delay, 5.0))
                 continue
             raise AiUnavailable(f"Inference provider returned HTTP {exc.code}.") from None
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if _is_connection_failure(exc):
+                if breaker_key:
+                    _trip_breaker(breaker_key)
+                raise AiUnavailable("Inference provider is unreachable.") from None
             if attempt + 1 < attempts:
                 time.sleep(1.0)
                 continue
@@ -189,6 +258,7 @@ def request_multipart_json(
         **(headers or {}),
     }
     attempts = 2
+    breaker_key = _preflight(url)
     for attempt in range(attempts):
         request = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
         try:
@@ -213,7 +283,11 @@ def request_multipart_json(
                 time.sleep(min(delay, 5.0))
                 continue
             raise AiUnavailable(f"Inference provider returned HTTP {exc.code}.") from None
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if _is_connection_failure(exc):
+                if breaker_key:
+                    _trip_breaker(breaker_key)
+                raise AiUnavailable("Inference provider is unreachable.") from None
             if attempt + 1 < attempts:
                 time.sleep(1.0)
                 continue

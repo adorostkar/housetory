@@ -52,7 +52,7 @@ const MERGE_FIELDS: Array<{ value: ImportMergeField; label: string }> = [
 
 function sourceLabel(source: string | undefined): string {
   if (source === "explicit") return "Explicit";
-  if (source === "inferred") return "Inferred";
+  if (source === "inferred") return "AI suggested";
   return "Missing";
 }
 

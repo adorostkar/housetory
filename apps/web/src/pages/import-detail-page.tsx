@@ -347,6 +347,9 @@ export function ImportDetailPage() {
               "Deterministic extraction"
             )}
           </Badge>
+          {Boolean(batch.metadata.ai_error) && !batch.metadata.ai_used && (
+            <Badge variant="outline">AI unavailable · used basic mode</Badge>
+          )}
           <span className="text-2xs text-muted-foreground">
             {pluralize(batch.total_entries, "proposal")} · {batch.imported_entries} imported ·{" "}
             {batch.skipped_entries} skipped · {batch.failed_entries} failed

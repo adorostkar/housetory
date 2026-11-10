@@ -88,14 +88,14 @@ def _apply_ai_enhancement(
             metadata["ai_error"] = "AI extraction was unavailable or returned invalid data."
             continue
         metadata["ai_used"] = True
-        all_items.extend(
-            (item.model_dump(mode="json"), label, chunk[:2000]) for item in result.items
-        )
+        all_items.extend((item.model_dump(mode="json"), label, chunk) for item in result.items)
         warnings.extend(result.warnings)
     if not metadata["ai_used"]:
         return drafts, metadata
     by_name = {draft.name.strip().lower(): draft for draft in drafts}
-    for item, source_label, source_excerpt in all_items:
+    for item, source_label, source_text in all_items:
+        source_excerpt = source_text[:2000]
+        _drop_ungrounded(item, source_text)
         name = str(item.get("name") or "").strip()
         if not name:
             continue
@@ -109,7 +109,7 @@ def _apply_ai_enhancement(
                 ),
                 default=0,
             )
-            if similarity >= 0.94:
+            if similarity >= 0.8:
                 draft = next(
                     existing
                     for existing in drafts
@@ -128,9 +128,14 @@ def _apply_ai_enhancement(
                 ("room_text", item.get("room")),
                 ("storage_text", item.get("storage_location")),
             ):
-                if getattr(draft, field_name) in (None, "") and field_value:
+                weak = draft.field_sources.get(field_name) != "explicit"
+                if field_value and (getattr(draft, field_name) in (None, "") or weak):
                     setattr(draft, field_name, str(field_value)[:200])
                     draft.field_sources[field_name] = "inferred"
+            clean_name = str(item.get("name") or "").strip()
+            if clean_name and draft.field_sources.get("name") != "explicit":
+                draft.name = clean_name[:200]
+                draft.field_sources["name"] = "inferred"
             if draft.purchase_date is None and item.get("purchase_date"):
                 try:
                     draft.purchase_date = date.fromisoformat(str(item["purchase_date"]))
@@ -183,7 +188,7 @@ def _apply_ai_enhancement(
             source_excerpt=source_excerpt,
             note_title=bundle.documents[0].title if bundle.documents else None,
             source_file_path=source_label,
-            confidence=min(85, int(item.get("confidence") or 60)),
+            confidence=min(95, int(item.get("confidence") or 60)),
             field_sources={
                 key: "inferred"
                 for key in (
@@ -209,6 +214,40 @@ def _apply_ai_enhancement(
         by_name[normalized] = draft
     metadata["ai_warnings"] = warnings
     return drafts, metadata
+
+
+def _drop_ungrounded(item: dict[str, Any], source: str) -> None:
+    """Remove silent-risk values the source text does not support.
+
+    Names, brands, descriptions and categories may be reworded by the model, but
+    a serial number, price, date or quantity must be traceable to the source.
+    """
+    haystack = source.lower()
+    serial = item.get("serial_number")
+    if serial and str(serial).lower() not in haystack:
+        item["serial_number"] = None
+    price = item.get("price_cents")
+    if price is not None:
+        whole, cents = divmod(int(price), 100)
+        forms = {f"{whole}", f"{whole}.{cents:02d}", f"{whole},{cents:02d}"}
+        if not any(form in haystack for form in forms):
+            item["price_cents"] = None
+            item["currency"] = None
+    for key in ("purchase_date", "warranty_start", "warranty_end"):
+        value = item.get(key)
+        if value and not _date_in_source(str(value), haystack):
+            item[key] = None
+
+
+def _date_in_source(iso: str, haystack: str) -> bool:
+    try:
+        parsed = date.fromisoformat(iso)
+    except ValueError:
+        return False
+    year = str(parsed.year)
+    return iso in haystack or (
+        year in haystack and (f"{parsed.day}" in haystack or f"{parsed.month:02d}" in haystack)
+    )
 
 
 STOPWORDS = {
@@ -263,9 +302,8 @@ def _name_tokens(value: str) -> list[str]:
 def _supported_name(proposed: str, original: str, evidence: str) -> bool:
     """Allow normalization only when no content or number is added or removed.
 
-    Spelling similarity is deliberately not evidence. A rename that changes a
-    word, adds a claim, drops a model number or changes a numeric token is
-    unsupported and must retain the deterministic name.
+    Hierarchy edits stay strict because a wrong rename silently re-parents
+    stored locations. Item names are cleaned up in `_apply_ai_enhancement`.
     """
     proposed_clean = re.sub(r"\s+", " ", proposed).strip().lower()
     original_clean = re.sub(r"\s+", " ", original).strip().lower()
@@ -273,8 +311,6 @@ def _supported_name(proposed: str, original: str, evidence: str) -> bool:
         return False
     if proposed_clean == original_clean:
         return True
-    # The deterministic original is the source-supported fact. The proposed text
-    # may only differ through case, punctuation/pluralization or stopwords.
     return _name_tokens(proposed) == _name_tokens(original)
 
 

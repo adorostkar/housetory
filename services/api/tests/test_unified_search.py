@@ -1170,3 +1170,10 @@ def test_default_all_places_with_one_household_keeps_relevant_recent_dialogue(
     assert len(prompts) == 1
     assert "Look only at the corded drill and not the battery drill." in prompts[0]
     assert "Keep the corded-only constraint in mind." in prompts[0]
+
+
+def test_structured_plan_leaves_broad_questions_to_the_model_when_ai_is_available():
+    from housetory_api.services.assistant.planning import structured_plan
+
+    question = "Where is the drill I bought last summer?"
+    assert structured_plan(None, None, question, ai_available=True) is None

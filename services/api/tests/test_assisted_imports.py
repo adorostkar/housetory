@@ -307,3 +307,17 @@ def test_product_note_imports_with_structured_purchase_fields(owner_client, monk
     assert proposed["purchase"]["merchant"] == "Amazon.se"
     assert proposed["purchase"]["price_cents"] == 30599
     assert proposed["purchase"]["currency"] == "SEK"
+
+
+def test_ai_enhancement_renames_weak_names_but_drops_ungrounded_values(monkeypatch):
+    from housetory_api.services.import_pipeline import ai_enrichment
+
+    item = {"serial_number": "ZZZ999", "price_cents": 12345, "currency": "SEK"}
+    ai_enrichment._drop_ungrounded(item, "Soldering station, paid 305,99 kr")
+    assert item["serial_number"] is None
+    assert item["price_cents"] is None and item["currency"] is None
+
+    grounded = {"serial_number": "AB123", "price_cents": 30599, "currency": "SEK"}
+    ai_enrichment._drop_ungrounded(grounded, "Serial AB123 paid 305,99 kr")
+    assert grounded["serial_number"] == "AB123"
+    assert grounded["price_cents"] == 30599

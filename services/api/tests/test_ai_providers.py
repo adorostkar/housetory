@@ -1464,3 +1464,58 @@ def test_default_text_endpoint_is_owner_only(owner_client):
         json={"provider_id": provider["id"], "model": "gpt-4o-mini"},
     )
     assert response.status_code == 403
+
+
+def test_unreachable_provider_fails_fast_and_trips_breaker(monkeypatch):
+    import socket
+    import time
+
+    ai.reset_ai_breaker()
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    url = f"http://127.0.0.1:{port}/v1"
+
+    started = time.monotonic()
+    with pytest.raises(ai.AiUnavailable, match="unreachable"):
+        ai._request_json(url, {}, timeout=90)
+    assert time.monotonic() - started < 3
+
+    def no_socket(*args, **kwargs):
+        raise AssertionError("breaker should skip the connection attempt")
+
+    monkeypatch.setattr(ai.socket, "create_connection", no_socket)
+    with pytest.raises(ai.AiUnavailable, match="recent connection failure"):
+        ai._request_json(url, {}, timeout=90)
+    ai.reset_ai_breaker()
+
+
+def test_slow_reachable_provider_does_not_trip_breaker():
+    import threading
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    ai.reset_ai_breaker()
+
+    class SlowHandler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            time.sleep(2)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):  # noqa: ANN002
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    try:
+        with pytest.raises(ai.AiUnavailable):
+            ai._request_json(url, {}, timeout=1)
+        assert ai._request_json(url, {}, timeout=10) == {}
+    finally:
+        server.shutdown()
+        server.server_close()
+        ai.reset_ai_breaker()

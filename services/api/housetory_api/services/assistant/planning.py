@@ -285,12 +285,14 @@ def deterministic_plan(db: Session, household_id: uuid.UUID, question: str) -> A
     return AssistantPlan(tool="search_items", arguments=arguments)
 
 
-def structured_plan(db: Session, household_id: uuid.UUID, question: str) -> AssistantPlan | None:
+def structured_plan(
+    db: Session, household_id: uuid.UUID, question: str, *, ai_available: bool = False
+) -> AssistantPlan | None:
     """Return a deterministic plan for clear structured questions.
 
-    Filter-style shopping/list requests are deliberately excluded so they can
-    stay on the normal search-inventory path (and optionally use the configured
-    search model to refine filters).
+    Item codes and loan/ownership questions have one correct answer in the
+    records and are always answered directly. The broader phrase routing only
+    applies when no model is available; otherwise the model gets the question.
     """
     lowered = question.lower()
     if re.search(r"\b([A-Z]{2,12}-[0-9]{3,6})\b", question, re.IGNORECASE):
@@ -309,6 +311,8 @@ def structured_plan(db: Session, household_id: uuid.UUID, question: str) -> Assi
         lowered,
     ):
         return deterministic_plan(db, household_id, question)
+    if ai_available:
+        return None
     if any(
         phrase in lowered
         for phrase in (

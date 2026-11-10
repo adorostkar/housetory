@@ -44,11 +44,11 @@ def answer_question(
 ) -> AssistantResponse:
     status = ai.status_for(db, household_id, AiTask.ASSISTANT.value, probe=False)
 
-    # Clear structured questions are answered deterministically from household
-    # records. This avoids spending a model call merely to look up a loan or a
-    # missing-information count, and keeps the factual wording stable.
+    # Exact lookups (item codes, loans) are answered from records. When a model
+    # is configured everything else goes to it; without one the broader
+    # deterministic routing keeps the assistant useful offline.
     structured = _followup_plan(request.question, request.history) or structured_plan(
-        db, household_id, request.question
+        db, household_id, request.question, ai_available=status.configured
     )
     if structured is not None:
         try:
@@ -131,7 +131,7 @@ def natural_search(
     limit: int = 30,
 ) -> NaturalSearchResponse:
     status = ai.status_for(db, household_id, AiTask.SEARCH.value, probe=False)
-    plan = structured_plan(db, household_id, question)
+    plan = structured_plan(db, household_id, question, ai_available=status.configured)
     if plan is not None:
         result = _execute_plan(
             db,
