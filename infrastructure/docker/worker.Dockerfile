@@ -22,6 +22,7 @@ RUN apk add --no-cache \
         libstdc++ \
         tesseract-ocr \
         tesseract-ocr-data-eng \
+        tesseract-ocr-data-swe \
         poppler-utils \
     && addgroup -S housetory \
     && adduser -S -G housetory -h /home/housetory housetory \

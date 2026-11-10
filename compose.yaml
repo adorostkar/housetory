@@ -190,7 +190,7 @@ services:
       UPLOADS_DIR: /data/uploads
       IMPORTS_DIR: /data/imports
       EXPORTS_DIR: /data/exports
-      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng+swe}
       OCR_MAX_PDF_PAGES: ${OCR_MAX_PDF_PAGES:-5}
       AI_CREDENTIAL_KEY: ${AI_CREDENTIAL_KEY:-}
       AI_CREDENTIAL_KEY_PREVIOUS: ${AI_CREDENTIAL_KEY_PREVIOUS:-}

@@ -579,7 +579,7 @@ honestly.
 
 Requirements: Docker Engine 24+ with Compose v2. Remote access can use a trusted
 LAN address, optional Tailscale Serve, or direct HTTPS with a domain certificate.
-The worker image installs Tesseract, its English language data and Poppler at
+The worker image installs Tesseract, its English and Swedish language data and Poppler at
 build time; no host OCR packages or GPU are needed.
 
 ```bash
