@@ -321,3 +321,69 @@ def test_ai_enhancement_renames_weak_names_but_drops_ungrounded_values(monkeypat
     ai_enrichment._drop_ungrounded(grounded, "Serial AB123 paid 305,99 kr")
     assert grounded["serial_number"] == "AB123"
     assert grounded["price_cents"] == 30599
+
+
+def _enable_import_ai(monkeypatch, payload):
+    from housetory_api.schemas.ai import AiStatus
+    from housetory_api.services import import_pipeline
+
+    status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model="extract-test",
+        configured=True,
+        available=True,
+        privacy_note="Local",
+    )
+    monkeypatch.setattr(import_pipeline.ai, "provider_status", lambda probe=True: status)
+    monkeypatch.setattr(import_pipeline.ai, "complete_json", lambda *a, **k: payload)
+
+
+def test_product_page_ai_refines_the_single_draft_and_cannot_add_items(owner_client, monkeypatch):
+    from housetory_api.services import product_import
+
+    monkeypatch.setattr(
+        product_import,
+        "fetch_product_page",
+        lambda url: ProductPage(
+            text="Soldering station 48 W\nAdjustable temperature",
+            title="Soldering station",
+            final_url=url,
+        ),
+    )
+    _enable_import_ai(
+        monkeypatch,
+        {
+            "refinements": [{"key": "d0", "name": "Velleman VTSS4N Soldering Station"}],
+            "items": [{"name": "Velleman VTSS4N soldering station (48 W)"}],
+            "warnings": [],
+        },
+    )
+    created = owner_client.post(
+        "/api/v1/imports", data={"product_url": "https://shop.example/solder"}
+    )
+    process_import_batch(created.json()["id"])
+    detail = owner_client.get(f"/api/v1/imports/{created.json()['id']}").json()
+    assert len(detail["entries"]) == 1
+
+
+def test_list_source_ai_refines_by_key_and_adds_missing_items(owner_client, monkeypatch):
+    from tests.test_imports import process_import, upload_text_import
+
+    _enable_import_ai(
+        monkeypatch,
+        {
+            "refinements": [
+                {"key": "d0", "name": "Canon AE-1 camera", "brand": "Canon"},
+                {"key": "d99", "name": "Ignored unknown key"},
+            ],
+            "items": [{"name": "Tripod"}],
+            "warnings": [],
+        },
+    )
+    batch = upload_text_import(owner_client, "Camera in the attic.")
+    detail = process_import(owner_client, batch["id"])
+    by_name = {entry["proposed"]["name"]: entry["proposed"] for entry in detail["entries"]}
+    # The user's own wording is explicit and kept; missing fields are filled by key.
+    assert sorted(by_name) == ["Camera", "Tripod"]
+    assert by_name["Camera"]["brand"] == "Canon"

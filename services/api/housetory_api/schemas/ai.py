@@ -78,10 +78,18 @@ class AiImportItem(BaseModel):
     confidence: int | None = Field(default=None, ge=0, le=100)
 
 
+class AiImportRefinement(AiImportItem):
+    """Improved fields for one existing draft, addressed by its stable key."""
+
+    key: trimmed(1, 40)
+    name: trimmed(1, 200) | None = None
+
+
 class AiImportResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[AiImportItem] = Field(max_length=200)
+    refinements: list[AiImportRefinement] = Field(default_factory=list, max_length=200)
+    items: list[AiImportItem] = Field(default_factory=list, max_length=200)
     warnings: list[str] = Field(default_factory=list)
 
 

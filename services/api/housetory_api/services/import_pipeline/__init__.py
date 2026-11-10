@@ -252,7 +252,11 @@ def process_import_batch(
                 }
             else:
                 drafts, ai_metadata = _apply_ai_enhancement(
-                    db, batch.household_id, bundle, parsed.drafts
+                    db,
+                    batch.household_id,
+                    bundle,
+                    parsed.drafts,
+                    single_subject=bool((batch.metadata_json or {}).get("product_url")),
                 )
                 for position, draft in enumerate(drafts):
                     proposed = to_proposed_item(draft, index)
