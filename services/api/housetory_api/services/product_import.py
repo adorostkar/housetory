@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..models import ImportBatch
 from . import storage
-from .product_pages import fetch_product_page
+from .product_pages import fetch_product_page, render_product_note
 
 
 def refresh_product_source(db: Session, batch: ImportBatch) -> None:
@@ -14,10 +14,8 @@ def refresh_product_source(db: Session, batch: ImportBatch) -> None:
     if not url:
         return
     page = fetch_product_page(url)
-    text = page.text
     purchase_date = (batch.metadata_json or {}).get("purchase_date")
-    if purchase_date:
-        text += f"\nPurchase date (explicit user fact): {purchase_date}\n"
+    text = render_product_note(page, str(purchase_date) if purchase_date else None)
     stored = storage.store_import_text(batch.household_id, batch.id, text)
     previous_key = batch.storage_key
     batch.storage_key = stored.storage_key

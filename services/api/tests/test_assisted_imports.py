@@ -83,13 +83,14 @@ def test_recognition_context_becomes_one_idempotent_import_review(owner_client, 
     assert entry["proposed"]["relationships"]["review"] is True
     assert entry["source_excerpt"] == "The blue backpack on the left"
 
-    assert owner_client.post(
-        f"/api/v1/ai/recognitions/{recognition_id}/retry"
-    ).status_code == 409
-    assert owner_client.post(
-        f"/api/v1/ai/recognitions/{recognition_id}/apply",
-        json={"entries": [{"suggestion_index": 0, "action": "reject"}]},
-    ).status_code == 409
+    assert owner_client.post(f"/api/v1/ai/recognitions/{recognition_id}/retry").status_code == 409
+    assert (
+        owner_client.post(
+            f"/api/v1/ai/recognitions/{recognition_id}/apply",
+            json={"entries": [{"suggestion_index": 0, "action": "reject"}]},
+        ).status_code
+        == 409
+    )
 
     applied = owner_client.post(
         f"/api/v1/imports/{batch['id']}/apply",
@@ -234,3 +235,75 @@ def test_fetch_falls_back_to_next_address_when_first_is_unreachable(monkeypatch)
     )
     assert status == 200
     assert attempts == ["3.173.190.67", "2600:9000::1"]
+
+
+PRODUCT_HTML = b"""<html><head>
+<title>VS-ELECTRONIC - 420212 l\xc3\xb6dstation, 48 W, justerbar, VTSS4N : Amazon.se: Bygg</title>
+<meta name="description" content="Soldering station">
+</head><body>
+<a id="bylineInfo" href="/s?node=1&amp;field-brandtextbin=Velleman">Varum\xc3\xa4rke: Velleman</a>
+<script>{"displayPrice":"305,99 kr","priceAmount":305.99}</script>
+</body></html>"""
+
+
+def test_product_page_fields_become_clean_name_brand_merchant_and_price(monkeypatch):
+    from housetory_api.services import product_pages
+    from housetory_api.services.product_pages import fetch_product_page, render_product_note
+
+    monkeypatch.setattr(
+        product_pages,
+        "_request_following_redirects",
+        lambda url, **kwargs: (
+            200,
+            {"content-type": "text/html"},
+            PRODUCT_HTML,
+            "https://www.amazon.se/dp/B004VDJ72E",
+        ),
+    )
+    page = fetch_product_page("https://www.amazon.se/dp/B004VDJ72E")
+    assert page.fields == {
+        "name": "VS-ELECTRONIC - 420212 l\u00f6dstation, 48 W, justerbar, VTSS4N",
+        "brand": "Velleman",
+        "model": "VTSS4N",
+        "merchant": "Amazon.se",
+        "price": "305.99",
+        "currency": "SEK",
+    }
+    note = render_product_note(page, "2026-11-01")
+    assert note.startswith("---\nname: VS-ELECTRONIC")
+    assert "purchase_date: 2026-11-01" in note
+
+
+def test_product_note_imports_with_structured_purchase_fields(owner_client, monkeypatch):
+    from housetory_api.services import product_import
+    from housetory_api.services.product_pages import ProductPage
+
+    monkeypatch.setattr(
+        product_import,
+        "fetch_product_page",
+        lambda url: ProductPage(
+            text="Product page metadata (untrusted source data).",
+            title="Soldering station",
+            final_url=url,
+            fields={
+                "name": "Soldering station 48 W",
+                "brand": "Velleman",
+                "model": "VTSS4N",
+                "merchant": "Amazon.se",
+                "price": "305.99",
+                "currency": "SEK",
+            },
+        ),
+    )
+    created = owner_client.post(
+        "/api/v1/imports", data={"product_url": "https://www.amazon.se/dp/B004VDJ72E"}
+    )
+    process_import_batch(created.json()["id"])
+    detail = owner_client.get(f"/api/v1/imports/{created.json()['id']}").json()
+    proposed = detail["entries"][0]["proposed"]
+    assert proposed["name"] == "Soldering station 48 W"
+    assert proposed["brand"] == "Velleman"
+    assert proposed["model"] == "VTSS4N"
+    assert proposed["purchase"]["merchant"] == "Amazon.se"
+    assert proposed["purchase"]["price_cents"] == 30599
+    assert proposed["purchase"]["currency"] == "SEK"
