@@ -440,3 +440,47 @@ def test_room_only_and_container_destinations_persist_relationships(owner_client
     ).json()["item"]
     assert item["room"]["id"] == room["id"]
     assert item["location"] is None
+
+
+def test_receipt_photo_is_routed_as_document_without_ocr_model(owner_client, monkeypatch):
+    from housetory_api.services import recognition as recognition_service
+
+    recognition = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("receipt.png", make_image(), "image/png")},
+    ).json()
+    receipt = "Clas Ohlson\nKVITTO\nStrykbrada 249.00\nStrykjarn 499.00\nMOMS 149.60\nTotal 748.00"
+    monkeypatch.setattr(
+        recognition_service,
+        "extract_text",
+        lambda path, content_type: ExtractedText(text=receipt, confidence=70, source="ocr"),
+    )
+    run_recognition(recognition["id"])
+    detail = owner_client.get(f"/api/v1/ai/recognitions/{recognition['id']}").json()
+    assert detail["status"] == "succeeded"
+    assert detail["result"]["is_document"] is True
+    assert detail["result"]["document_type"] == "receipt"
+    assert detail["result"]["suggestions"] == []
+
+
+def test_vision_document_verdict_drops_suggestions(owner_client, monkeypatch):
+    fake_vision(monkeypatch, [{"name": "Paper receipt", "quantity": 1}])
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "is_document": True,
+            "document_type": "invoice",
+            "suggestions": [{"name": "Paper receipt", "quantity": 1}],
+            "warnings": [],
+        },
+    )
+    recognition = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("invoice.png", make_image(), "image/png")},
+    ).json()
+    run_recognition(recognition["id"])
+    detail = owner_client.get(f"/api/v1/ai/recognitions/{recognition['id']}").json()
+    assert detail["result"]["is_document"] is True
+    assert detail["result"]["document_type"] == "invoice"
+    assert detail["result"]["suggestions"] == []

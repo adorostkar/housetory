@@ -116,6 +116,10 @@ class AiRecognitionResult(BaseModel):
 
     suggestions: list[AiRecognitionSuggestion] = Field(max_length=30)
     warnings: list[str] = Field(default_factory=list)
+    is_document: bool = False
+    document_type: (
+        Literal["receipt", "invoice", "warranty_certificate", "manual", "other"] | None
+    ) = None
 
 
 class AiRecognitionDuplicateGroup(BaseModel):
@@ -340,9 +344,7 @@ class SearchConversationContext(BaseModel):
     resolved_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=6)
     candidate_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=12)
     loans: list[SearchContextLoanRef] = Field(default_factory=list, max_length=12)
-    dialogue_memory: list[SearchContextMemoryEntry] = Field(
-        default_factory=list, max_length=24
-    )
+    dialogue_memory: list[SearchContextMemoryEntry] = Field(default_factory=list, max_length=24)
 
 
 class SearchQueryRequest(BaseModel):

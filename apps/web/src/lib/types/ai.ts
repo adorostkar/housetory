@@ -47,6 +47,8 @@ export interface AiRecognition {
   result: {
     suggestions?: AiRecognitionSuggestion[];
     warnings?: string[];
+    is_document?: boolean;
+    document_type?: "receipt" | "invoice" | "warranty_certificate" | "manual" | "other" | null;
   };
   field_sources: Record<string, string>;
   confidence: number | null;

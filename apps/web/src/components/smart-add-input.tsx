@@ -30,7 +30,7 @@ import {
   useVoiceConfig,
   useVoiceNote,
 } from "@/lib/queries";
-import type { AiRecognition, ImportBatchDetail, VoiceNote } from "@/lib/types";
+import type { AiRecognition, DocumentRecord, ImportBatchDetail, VoiceNote } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export interface SmartAddContext {
@@ -196,6 +196,22 @@ export function SmartAddInput({
     onError: (caught) => setError(getApiErrorMessage(caught)),
   });
 
+  // A photographed receipt or invoice is stored as a document and read by the
+  // extraction review, which creates items, the purchase and the receipt link.
+  const storeAsDocument = useMutation({
+    mutationFn: ({ file, type }: { file: File; type: string }) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("document_type", type);
+      return api.postForm<DocumentRecord>("/documents", form);
+    },
+    onSuccess: (document) => finishAt(`/documents/${document.id}`),
+    onError: (caught) => {
+      setError(getApiErrorMessage(caught));
+      setRecognitionId(null);
+    },
+  });
+
   const adaptRecognition = useMutation({
     mutationFn: (id: string) =>
       api.post<ImportBatchDetail>(`/imports/from-recognition/${id}`),
@@ -230,9 +246,9 @@ export function SmartAddInput({
     },
   });
 
-  const mutationsRef = React.useRef({ adaptRecognition, createTextImport });
+  const mutationsRef = React.useRef({ adaptRecognition, createTextImport, storeAsDocument });
   React.useEffect(() => {
-    mutationsRef.current = { adaptRecognition, createTextImport };
+    mutationsRef.current = { adaptRecognition, createTextImport, storeAsDocument };
   });
 
   const recognition = recognitionQuery.data;
@@ -240,6 +256,15 @@ export function SmartAddInput({
   React.useEffect(() => {
     if (!recognition || mutationsRef.current.adaptRecognition.isPending) return;
     if (recognitionStatus === "succeeded") {
+      if (recognition.result?.is_document && photo) {
+        if (!mutationsRef.current.storeAsDocument.isPending) {
+          mutationsRef.current.storeAsDocument.mutate({
+            file: photo,
+            type: recognition.result?.document_type ?? "receipt",
+          });
+        }
+        return;
+      }
       mutationsRef.current.adaptRecognition.mutate(recognition.id);
     } else if (recognitionStatus === "failed") {
       setError(recognition.error || "Image recognition failed. Your draft is unchanged.");
@@ -275,6 +300,7 @@ export function SmartAddInput({
     createTextImport.isPending ||
     createRecognition.isPending ||
     adaptRecognition.isPending ||
+    storeAsDocument.isPending ||
     Boolean(recognitionId);
   const busy = transcribing || submitting;
   const inputLocked = busy || recorder.recording;

@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
+import { InvoiceImportButtons } from "@/components/invoice-import-buttons";
 import { ItemMultiSelect } from "@/components/item-multi-select";
 import { ReceiptPicker } from "@/components/receipt-picker";
 import { PageLayout } from "@/components/page-layout";
@@ -107,6 +108,7 @@ export function PurchasesPage() {
                 Export
               </a>
             </Button>
+            {canWrite && <InvoiceImportButtons />}
             {canWrite && (
               <Button onClick={openCreate}>
                 <Plus />

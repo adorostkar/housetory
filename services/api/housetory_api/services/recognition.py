@@ -34,9 +34,13 @@ RECOGNITION_TASK = "ai.recognize"
 
 AI_RECOGNITION_SYSTEM = """Identify clearly visible, movable household possessions in the image.
 Return JSON exactly shaped as:
-{"suggestions":[{"name":"...","quantity":1,"description":null,"category":null,"brand":null,
+{"is_document":false,"document_type":null,"suggestions":[{"name":"...","quantity":1,"description":null,"category":null,"brand":null,
 "model":null,"tags":[],"notes":null,"confidence":0,"review":false,"review_reason":null,
 "field_sources":{"name":"inferred"}}],"warnings":[]}
+If the image is mainly a paper or screen document (receipt, invoice, order
+confirmation, warranty card, manual page) set is_document=true, set document_type to
+receipt, invoice, warranty_certificate, manual or other, and return no suggestions:
+documents are not possessions and are read by a separate step.
 Focus on things a person could pack, carry, store or move. Do not present fixed
 architectural features or installed fixtures as possessions: exclude windows,
 walls, doors, floors, ceilings, built-in cabinets, sinks, toilets, baths, showers,
@@ -196,6 +200,26 @@ def serialize_recognition(
     )
 
 
+RECEIPT_WORDS = re.compile(
+    r"\b(total|subtotal|summa|totalt|att betala|moms|vat|tax|kvitto|receipt|invoice|faktura|"
+    r"belopp|amount due|qty|antal|change|cash|visa|mastercard|org\.?\s?nr|vat\s?no)\b",
+    re.IGNORECASE,
+)
+DECIMAL_AMOUNT = re.compile(r"(?<!\d)\d{1,6}[.,]\d{2}(?!\d)")
+
+
+def looks_like_document(text: str) -> tuple[bool, str | None]:
+    """Offline heuristic: a page with several prices and receipt wording is a document."""
+    amounts = len(DECIMAL_AMOUNT.findall(text))
+    keywords = len({match.group(0).lower() for match in RECEIPT_WORDS.finditer(text)})
+    if amounts >= 3 and keywords >= 2:
+        lowered = text.lower()
+        if "invoice" in lowered or "faktura" in lowered:
+            return True, "invoice"
+        return True, "receipt"
+    return False, None
+
+
 def _fallback_from_ocr(path, content_type: str) -> tuple[AiRecognitionResult, int | None]:
     extracted = extract_text(path, content_type)
     text = extracted.text.strip()
@@ -203,6 +227,14 @@ def _fallback_from_ocr(path, content_type: str) -> tuple[AiRecognitionResult, in
         raise ai.AiUnavailable(
             "No AI model is available and no readable text was found in the image."
         )
+    is_document, document_type = looks_like_document(text)
+    if is_document:
+        return AiRecognitionResult(
+            suggestions=[],
+            is_document=True,
+            document_type=document_type,
+            warnings=["AI unavailable; this looks like a receipt or invoice."],
+        ), extracted.confidence
     parsed = parse_receipt(text)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     product_names = [str(name) for name in parsed.get("product_names") or [] if str(name).strip()]
@@ -288,6 +320,8 @@ def run_recognition(recognition_id: uuid.UUID | str) -> dict[str, Any] | None:
                     )
                     result = AiRecognitionResult.model_validate(raw)
                     vision_succeeded = True
+                    if result.is_document:
+                        result.suggestions = []
                     _review_fixed_features(result.suggestions)
                     confidence = result.suggestions[0].confidence if result.suggestions else None
                     if not result.suggestions:

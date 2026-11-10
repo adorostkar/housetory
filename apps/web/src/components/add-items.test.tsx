@@ -233,6 +233,34 @@ describe("AddItems smart input", () => {
     await waitFor(() => expect(currentUrl().pathname).toBe("/imports/batch-1"));
   });
 
+  it("stores a photographed receipt as a document and opens its review", async () => {
+    vi.mocked(api.postForm).mockImplementation(async (path) => {
+      if (path === "/ai/recognitions") return { id: "recognition-1" };
+      if (path === "/documents") return { id: "doc-9" };
+      return { id: "batch-1", entries: [] };
+    });
+    const view = await open();
+    attachPhoto("receipt.png");
+    await userEvent.click(review());
+    await waitFor(() => expect(api.postForm).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    state.recognition = {
+      id: "recognition-1",
+      status: "succeeded",
+      result: { is_document: true, document_type: "receipt", suggestions: [] },
+    };
+    view.refresh();
+    await waitFor(() =>
+      expect(api.postForm).toHaveBeenCalledWith("/documents", expect.any(FormData)),
+    );
+    const form = vi.mocked(api.postForm).mock.calls.at(-1)![1] as FormData;
+    expect(form.get("document_type")).toBe("receipt");
+    expect(api.post).not.toHaveBeenCalled();
+    await waitFor(() => expect(currentUrl().pathname).toBe("/documents/doc-9"));
+  });
+
   it("keeps the draft and shows the error inline when recognition fails", async () => {
     const view = await open();
     attachPhoto();
