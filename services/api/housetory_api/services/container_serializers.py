@@ -1,6 +1,8 @@
 """Serialization helpers shared by container routes and label generation."""
 
 import uuid
+from collections import Counter
+from dataclasses import dataclass
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -25,7 +27,7 @@ from .containers import (
     room_ancestors,
     summary_for_location,
 )
-from .hierarchy import descendant_ids
+from .hierarchy import descendant_ids, descendant_totals
 from .lending import loan_quantities_for_items
 from .serializers import document_brief, item_load_options, item_summary
 
@@ -40,15 +42,22 @@ def qr_urls(location: StorageLocation) -> tuple[str, str, str | None]:
     )
 
 
-def location_path_map(db: Session, household_id: uuid.UUID) -> dict[uuid.UUID, list[LocationBrief]]:
-    locations = list(
-        db.scalars(
-            select(StorageLocation).where(
-                StorageLocation.household_id == household_id,
-                StorageLocation.active(),
-            )
-        ).all()
-    )
+def location_path_map(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    locations: list[StorageLocation] | None = None,
+    requested_ids: set[uuid.UUID] | None = None,
+) -> dict[uuid.UUID, list[LocationBrief]]:
+    if locations is None:
+        locations = list(
+            db.scalars(
+                select(StorageLocation).where(
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.active(),
+                )
+            ).all()
+        )
     by_id = {location.id: location for location in locations}
     result: dict[uuid.UUID, list[LocationBrief]] = {}
 
@@ -78,9 +87,61 @@ def location_path_map(db: Session, household_id: uuid.UUID) -> dict[uuid.UUID, l
         result[location_id] = briefs
         return briefs
 
-    for location in locations:
-        path_for(location.id)
+    for location_id in requested_ids if requested_ids is not None else by_id:
+        path_for(location_id)
     return result
+
+
+@dataclass
+class ContainerListContext:
+    paths: dict[uuid.UUID, list[LocationBrief]]
+    counts: dict[uuid.UUID, tuple[int, int, int, int, int, int]]
+
+
+def container_list_context(db: Session, household_id: uuid.UUID) -> ContainerListContext:
+    locations = list(
+        db.scalars(
+            select(StorageLocation).where(StorageLocation.household_id == household_id)
+        ).all()
+    )
+    live = [location for location in locations if location.deleted_at is None]
+    live_rows = [(location.id, location.parent_id) for location in live]
+    all_rows = [(location.id, location.parent_id) for location in locations]
+    item_rows = db.execute(
+        select(StorageLocation.id, func.count(Item.id), func.coalesce(func.sum(Item.quantity), 0))
+        .join(Item, Item.storage_location_id == StorageLocation.id)
+        .where(
+            StorageLocation.household_id == household_id,
+            Item.household_id == household_id,
+            Item.is_archived.is_(False),
+        )
+        .group_by(StorageLocation.id)
+    ).all()
+    direct = {location_id: count for location_id, count, quantity in item_rows}
+    quantities = {location_id: quantity for location_id, count, quantity in item_rows}
+    totals = descendant_totals(live_rows, direct)
+    total_quantities = descendant_totals(live_rows, quantities)
+    children = Counter(location.parent_id for location in live)
+    containers = descendant_totals(
+        live_rows, {location.id: 1 for location in live if location.is_container}
+    )
+    deleted = descendant_totals(
+        all_rows, {location.id: 1 for location in locations if location.deleted_at is not None}
+    )
+    return ContainerListContext(
+        paths=location_path_map(db, household_id, locations=live),
+        counts={
+            location.id: (
+                direct.get(location.id, 0),
+                totals.get(location.id, 0),
+                total_quantities.get(location.id, 0),
+                children.get(location.id, 0),
+                containers.get(location.id, 0),
+                deleted.get(location.id, 0),
+            )
+            for location in live
+        },
+    )
 
 
 def _counts(
@@ -152,6 +213,8 @@ def serialize_container(
     db: Session,
     household_id: uuid.UUID,
     location: StorageLocation,
+    *,
+    context: ContainerListContext | None = None,
 ) -> ContainerOut:
     payload, qr_endpoint, warning = qr_urls(location)
     (
@@ -161,7 +224,7 @@ def serialize_container(
         child_count,
         container_count,
         recoverable_deleted_child_count,
-    ) = _counts(db, household_id, location)
+    ) = context.counts[location.id] if context is not None else _counts(db, household_id, location)
     return ContainerOut(
         id=location.id,
         property=PropertyBrief(
@@ -180,7 +243,11 @@ def serialize_container(
         room_id=location.room_id,
         parent_id=location.parent_id,
         room=RoomBrief(id=location.room.id, name=location.room.name),
-        path=location_breadcrumb(db, household_id, location.id),
+        path=(
+            context.paths[location.id]
+            if context is not None
+            else location_breadcrumb(db, household_id, location.id)
+        ),
         item_count=item_count,
         total_item_count=total_item_count,
         total_quantity=total_quantity,

@@ -22,7 +22,7 @@ import type {
   CategoryList,
   ContainerDetail,
   ContainerList,
-  DocumentList,
+  DocumentSummaryList,
   DocumentRecord,
   DocumentRelations,
   EvidenceExportList,
@@ -37,7 +37,7 @@ import type {
   ImportBatchList,
   ItemDetailResponse,
   ItemImageState,
-  ItemList,
+  ItemSummaryList,
   LabelTemplateList,
   Overview,
   PhotoList,
@@ -190,14 +190,15 @@ export function useLoan(loanId: string | undefined) {
   });
 }
 
-export function useItemLoans(itemId: string | undefined) {
+export function useItemLoans(itemId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.itemLoans(itemId ?? ""),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.get<ItemLoanSummary>(
         `/items/${itemId}/loans${buildQuery({ on_date: localDateISO() })}`,
+        { signal },
       ),
-    enabled: Boolean(itemId),
+    enabled: Boolean(itemId) && enabled,
   });
 }
 
@@ -274,11 +275,11 @@ export function useManualCandidates(itemId: string | undefined, enabled = true) 
   });
 }
 
-export function useItemHistory(itemId: string | undefined) {
+export function useItemHistory(itemId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.itemHistory(itemId ?? ""),
-    queryFn: () => api.get<ActivityHistory>(`/items/${itemId}/history`),
-    enabled: Boolean(itemId),
+    queryFn: ({ signal }) => api.get<ActivityHistory>(`/items/${itemId}/history`, { signal }),
+    enabled: Boolean(itemId) && enabled,
   });
 }
 
@@ -293,7 +294,7 @@ export function useContainerHistory(containerId: string | undefined) {
 export function useSession() {
   return useQuery({
     queryKey: queryKeys.session,
-    queryFn: () => api.get<SessionState>("/auth/session", { skipUnauthorizedEvent: true }),
+    queryFn: ({ signal }) => api.get<SessionState>("/auth/session", { skipUnauthorizedEvent: true, signal }),
     staleTime: 30_000,
     retry: false,
   });
@@ -330,10 +331,13 @@ export function useSearchScopes(enabled = true) {
   });
 }
 
-export function useOverview() {
+export function useOverview(includeFinancial = false) {
   return useQuery({
-    queryKey: queryKeys.overview,
-    queryFn: () => api.get<Overview>("/overview"),
+    queryKey: [...queryKeys.overview, includeFinancial],
+    queryFn: ({ signal }) => api.get<Overview>(
+      `/overview${buildQuery({ include_financial: includeFinancial ? true : undefined })}`,
+      { signal },
+    ),
   });
 }
 
@@ -345,34 +349,39 @@ export function useProperties(includeArchived = false) {
   });
 }
 
-export function useRooms(propertyId?: string) {
+export function useRooms(propertyId?: string, enabled = true) {
   return useQuery({
     queryKey: [...queryKeys.rooms, propertyId ?? "all"],
-    queryFn: () => api.get<RoomList>(`/rooms${buildQuery({ property_id: propertyId })}`),
+    queryFn: ({ signal }) => api.get<RoomList>(`/rooms${buildQuery({ property_id: propertyId })}`, { signal }),
+    enabled,
   });
 }
 
-export function useLocations(roomId?: string) {
+export function useLocations(roomId?: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.locations(roomId),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.get<StorageLocationList>(
         `/storage-locations${buildQuery({ room_id: roomId })}`,
+        { signal },
       ),
+    enabled,
   });
 }
 
-export function useCategories() {
+export function useCategories(enabled = true) {
   return useQuery({
     queryKey: queryKeys.categories,
     queryFn: () => api.get<CategoryList>("/categories"),
+    enabled,
   });
 }
 
-export function useTags() {
+export function useTags(enabled = true) {
   return useQuery({
     queryKey: queryKeys.tags,
     queryFn: () => api.get<TagList>("/tags"),
+    enabled,
   });
 }
 
@@ -391,14 +400,16 @@ export interface ItemFilters {
 
 export function useItems(filters: ItemFilters, limit = 24, enabled = true) {
   return useInfiniteQuery({
-    queryKey: [...queryKeys.items, filters, limit],
-    queryFn: ({ pageParam }) =>
-      api.get<ItemList>(
+    queryKey: [...queryKeys.items, "summary", filters, limit],
+    queryFn: ({ pageParam, signal }) =>
+      api.get<ItemSummaryList>(
         `/items${buildQuery({
           ...filters,
           limit,
           offset: pageParam,
+          representation: "summary",
         })}`,
+        { signal },
       ),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => {
@@ -469,9 +480,12 @@ export interface DocumentFilters {
 
 export function useDocuments(filters: DocumentFilters = {}, limit = 100, enabled = true) {
   return useQuery({
-    queryKey: [...queryKeys.documents, filters, limit],
-    queryFn: () =>
-      api.get<DocumentList>(`/documents${buildQuery({ ...filters, limit })}`),
+    queryKey: [...queryKeys.documents, "summary", filters, limit],
+    queryFn: ({ signal }) =>
+      api.get<DocumentSummaryList>(
+        `/documents${buildQuery({ ...filters, limit, representation: "summary" })}`,
+        { signal },
+      ),
     enabled,
   });
 }
@@ -605,30 +619,24 @@ export function useRecognition(recognitionId: string | undefined) {
   });
 }
 
-export function useInvalidateInventory() {
+const inventoryResources = [
+  "overview", "rooms", "properties", "locations", "items", "item", "categories",
+  "tags", "documents", "document", "purchases", "purchase", "warranties",
+  "financial", "imports", "recognitions", "containers", "stocktake", "inventory-review",
+] as const;
+
+export type InventoryResource = typeof inventoryResources[number] | "loans";
+
+export function useInvalidateInventory(
+  resources: readonly InventoryResource[] = inventoryResources,
+) {
   const queryClient = useQueryClient();
   return () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.properties });
-    void queryClient.invalidateQueries({ queryKey: ["locations"] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.items });
-    void queryClient.invalidateQueries({ queryKey: ["item"] });
-    void queryClient.invalidateQueries({ queryKey: ["items"] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.categories });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.tags });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.documents });
-    void queryClient.invalidateQueries({ queryKey: ["document"] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.purchases });
-    void queryClient.invalidateQueries({ queryKey: ["purchase"] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.warranties });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.financial });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.imports });
-    void queryClient.invalidateQueries({ queryKey: ["ai", "recognitions"] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-    void queryClient.invalidateQueries({ queryKey: ["containers"] });
-    void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
-    void queryClient.invalidateQueries({ queryKey: ["inventory-review"] });
+    for (const resource of new Set(resources)) {
+      void queryClient.invalidateQueries({
+        queryKey: resource === "recognitions" ? ["ai", "recognitions"] : [resource],
+      });
+    }
   };
 }
 

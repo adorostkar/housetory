@@ -60,7 +60,6 @@ import {
   useItem,
   useItemHistory,
   useItemLoans,
-  useLocations,
   useRooms,
 } from "@/lib/queries";
 import type { ItemDetail, Loan } from "@/lib/types";
@@ -77,7 +76,6 @@ import {
   formatDate,
   formatRelativeDate,
   locationLabel,
-  locationPath,
   roomPath,
 } from "@/lib/utils";
 import { Fragment, useState } from "react";
@@ -99,12 +97,15 @@ export function ItemDetailPage() {
   const origin = readOrigin(searchParams);
   const itemQuery = useItem(itemId);
   const roomsQuery = useRooms();
-  const locationsQuery = useLocations(itemQuery.data?.item.room?.id);
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
   const canWrite = useCanWrite();
-  const loansQuery = useItemLoans(itemId);
-  const historyQuery = useItemHistory(itemId);
+  const loansQuery = useItemLoans(
+    itemId,
+    Boolean(itemQuery.data) &&
+      (tab === "loans" || (itemQuery.data?.item.on_loan_quantity ?? 0) > 0),
+  );
+  const historyQuery = useItemHistory(itemId, tab === "history");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [dispositionOpen, setDispositionOpen] = useState(false);
   const [lendOpen, setLendOpen] = useState(false);
@@ -142,12 +143,10 @@ export function ItemDetailPage() {
 
   const item = itemQuery.data.item;
   const loanSummary = loansQuery.data;
-  const onLoan = loanSummary?.on_loan_quantity ?? 0;
-  const available = loanSummary?.available_quantity ?? item.quantity;
+  const onLoan = loanSummary?.on_loan_quantity ?? item.on_loan_quantity ?? 0;
+  const available = loanSummary?.available_quantity ?? Math.max(item.quantity - onLoan, 0);
   const warrantyStatus = item.warranty?.status ?? "unknown";
-  const locationTrail = item.location
-    ? locationPath(locationsQuery.data?.items ?? [], item.location.id)
-    : [];
+  const locationTrail = item.location_path;
   const roomTrail = item.room
     ? roomPath(roomsQuery.data?.items ?? [], item.room.id)
     : [];

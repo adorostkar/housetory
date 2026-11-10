@@ -31,7 +31,7 @@ import type {
   BulkMoveResult,
   BulkTagResult,
   Category,
-  ItemSummary,
+  ItemListEntry,
   Tag,
 } from "@/lib/types";
 import { cn, locationPath, pluralize, roomPath } from "@/lib/utils";
@@ -44,7 +44,7 @@ function useRequestId(open: boolean) {
   return requestId;
 }
 
-function selectionSummary(items: ItemSummary[]) {
+function selectionSummary(items: ItemListEntry[]) {
   return {
     count: items.length,
     units: items.reduce((sum, item) => sum + item.quantity, 0),
@@ -53,7 +53,7 @@ function selectionSummary(items: ItemSummary[]) {
   };
 }
 
-function SelectionSummary({ items }: { items: ItemSummary[] }) {
+function SelectionSummary({ items }: { items: ItemListEntry[] }) {
   const summary = selectionSummary(items);
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
@@ -79,15 +79,17 @@ function SelectionSummary({ items }: { items: ItemSummary[] }) {
   );
 }
 
-function useBulkInvalidation() {
-  const invalidate = useInvalidateInventory();
+function useBulkInvalidation(kind: "move" | "tags" | "category" = "move") {
+  const invalidate = useInvalidateInventory(
+    kind === "move" ? undefined : [
+      "items", "item", "overview", "financial", "stocktake", "inventory-review",
+      "loans", kind === "tags" ? "tags" : "categories",
+    ],
+  );
   const client = useQueryClient();
   return () => {
     invalidate();
-    void client.invalidateQueries({ queryKey: ["items"] });
-    void client.invalidateQueries({ queryKey: queryKeys.tags });
-    void client.invalidateQueries({ queryKey: queryKeys.categories });
-    void client.invalidateQueries({ queryKey: ["loans"] });
+    if (kind === "move") void client.invalidateQueries({ queryKey: ["loans"] });
   };
 }
 
@@ -99,11 +101,11 @@ export function BulkMoveDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: ItemSummary[];
+  items: ItemListEntry[];
   onCompleted: (result: BulkMoveResult) => void;
 }) {
-  const roomsQuery = useRooms();
-  const locationsQuery = useLocations();
+  const roomsQuery = useRooms(undefined, open);
+  const locationsQuery = useLocations(undefined, open);
   const invalidate = useBulkInvalidation();
   const requestId = useRequestId(open);
   const [roomId, setRoomId] = React.useState("");
@@ -251,11 +253,11 @@ export function BulkTagDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: ItemSummary[];
+  items: ItemListEntry[];
   onCompleted: (result: BulkTagResult) => void;
 }) {
-  const tagsQuery = useTags();
-  const invalidate = useBulkInvalidation();
+  const tagsQuery = useTags(open);
+  const invalidate = useBulkInvalidation("tags");
   const client = useQueryClient();
   const requestId = useRequestId(open);
   const [mode, setMode] = React.useState<"add" | "remove">("add");
@@ -453,11 +455,11 @@ export function BulkCategoryDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: ItemSummary[];
+  items: ItemListEntry[];
   onCompleted: (result: BulkCategoryResult) => void;
 }) {
-  const categoriesQuery = useCategories();
-  const invalidate = useBulkInvalidation();
+  const categoriesQuery = useCategories(open);
+  const invalidate = useBulkInvalidation("category");
   const requestId = useRequestId(open);
   const [mode, setMode] = React.useState<"set" | "clear">("set");
   const [categoryId, setCategoryId] = React.useState("");

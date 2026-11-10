@@ -5,15 +5,16 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import Text, cast, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer, selectinload
 
 from ...db import get_db
 from ...domain import DocumentType, OcrStatus
-from ...models import Document, Item, Purchase
+from ...models import Document, DocumentScan, DocumentScanPage, Item, Purchase
 from ...schemas.documents import (
     DocumentItemLink,
     DocumentList,
     DocumentOut,
+    DocumentSummaryList,
     DocumentUpdate,
     OcrApplyRequest,
     OcrApplyResponse,
@@ -32,7 +33,7 @@ from ...services.purchases import (
     prune_orphan_purchases,
     resolve_items,
 )
-from ...services.serializers import document_out
+from ...services.serializers import document_out, document_summary
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -56,7 +57,7 @@ def _document_query(household_id: uuid.UUID):
     )
 
 
-@router.get("/documents", response_model=DocumentList)
+@router.get("/documents", response_model=DocumentList | DocumentSummaryList)
 def list_documents(
     q: Annotated[str | None, Query(max_length=200)] = None,
     document_type: Annotated[DocumentType | None, Query(alias="type")] = None,
@@ -67,12 +68,13 @@ def list_documents(
     ocr_status: OcrStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     offset: Annotated[int, Query(ge=0)] = 0,
+    representation: Literal["full", "summary"] = "full",
     sort: Literal["created_desc", "created_asc", "document_date_desc", "title_asc"] = (
         "created_desc"
     ),
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
-) -> DocumentList:
+) -> DocumentList | DocumentSummaryList:
     conditions = [Document.household_id == auth.household.id]
     if document_type is not None:
         conditions.append(Document.document_type == document_type.value)
@@ -126,14 +128,46 @@ def list_documents(
             Document.created_at.desc(),
         ],
         "title_asc": [func.lower(Document.title).asc()],
-    }[sort]
+    }[sort] + [Document.id.asc()]
+    query = (
+        select(Document).options(
+            defer(Document.extracted_text),
+            defer(Document.extracted_metadata),
+            selectinload(Document.items).load_only(Item.id, Item.name),
+        )
+        if representation == "summary"
+        else _document_query(auth.household.id)
+    )
     documents = db.scalars(
-        _document_query(auth.household.id)
-        .where(*conditions)
-        .order_by(*ordering)
-        .limit(limit)
-        .offset(offset)
+        query.where(*conditions).order_by(*ordering).limit(limit).offset(offset)
     ).all()
+    if representation == "summary":
+        ids = [document.id for document in documents]
+        page_counts = {}
+        if ids:
+            for document_id, scan_count, ocr_count in db.execute(
+                select(
+                    Document.id,
+                    func.count(DocumentScanPage.id),
+                    Document.extracted_metadata["ocr_page_count"],
+                )
+                .outerjoin(DocumentScan, DocumentScan.document_id == Document.id)
+                .outerjoin(DocumentScanPage, DocumentScanPage.scan_id == DocumentScan.id)
+                .where(Document.household_id == auth.household.id, Document.id.in_(ids))
+                .group_by(Document.id)
+            ):
+                page_counts[document_id] = scan_count or (
+                    ocr_count if isinstance(ocr_count, int) and ocr_count > 0 else 0
+                )
+        return DocumentSummaryList(
+            items=[
+                document_summary(document, page_counts.get(document.id, 0))
+                for document in documents
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
     return DocumentList(
         items=[document_out(document) for document in documents],
         total=total,

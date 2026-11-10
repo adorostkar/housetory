@@ -24,6 +24,7 @@ from ...schemas.items import (
     ItemDetailResponse,
     ItemList,
     ItemStorageEnableRequest,
+    ItemSummaryList,
     ItemUpdate,
     PhotoList,
     PhotoOrderRequest,
@@ -43,8 +44,10 @@ from ...services.hierarchy import descendant_ids
 from ...services.purchase_info import purchase_info_filter_clause
 from ...services.serializers import (
     item_detail,
+    item_list_entry,
     item_load_options,
     item_summary,
+    item_summary_load_options,
     photo_out,
 )
 from ..deps import AuthContext, require_auth
@@ -106,7 +109,7 @@ def _detail_response(db: Session, household_id: uuid.UUID, item: Item) -> ItemDe
     )
 
 
-@router.get("/items", response_model=ItemList)
+@router.get("/items", response_model=ItemList | ItemSummaryList)
 def list_items(
     q: Annotated[str | None, Query(max_length=200)] = None,
     property_id: uuid.UUID | None = None,
@@ -119,12 +122,13 @@ def list_items(
     include_archived: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     offset: Annotated[int, Query(ge=0)] = 0,
+    representation: Literal["full", "summary"] = "full",
     sort: Literal["created_desc", "created_asc", "name_asc", "name_desc", "updated_desc"] = (
         "created_desc"
     ),
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
-) -> ItemList:
+) -> ItemList | ItemSummaryList:
     conditions = [Item.household_id == auth.household.id]
     if not include_archived:
         conditions.append(Item.is_archived.is_(False))
@@ -216,19 +220,52 @@ def list_items(
         "name_asc": [func.lower(Item.name).asc()],
         "name_desc": [func.lower(Item.name).desc()],
         "updated_desc": [Item.updated_at.desc()],
-    }[sort]
+    }[sort] + [Item.id.asc()]
     items = db.scalars(
         select(Item)
-        .options(*item_load_options())
+        .options(
+            *(
+                item_summary_load_options(compact_purchase=True)
+                if representation == "summary"
+                else item_load_options()
+            )
+        )
         .where(*conditions)
         .order_by(*ordering)
         .limit(limit)
         .offset(offset)
     ).all()
-    path_map = location_path_map(db, auth.household.id)
+    location_ids = {item.storage_location_id for item in items if item.storage_location_id}
+    path_map = (
+        location_path_map(db, auth.household.id, requested_ids=location_ids) if location_ids else {}
+    )
     loan_quantities = lending.loan_quantities_for_items(
         db, auth.household.id, [item.id for item in items]
     )
+    if representation == "summary":
+        purchase_ids = {item.purchase_id for item in items if item.purchase_id}
+        purchase_counts = (
+            dict(
+                db.execute(
+                    select(Item.purchase_id, func.count(Item.id))
+                    .where(
+                        Item.household_id == auth.household.id, Item.purchase_id.in_(purchase_ids)
+                    )
+                    .group_by(Item.purchase_id)
+                ).all()
+            )
+            if purchase_ids
+            else {}
+        )
+        entries = [
+            item_list_entry(
+                item,
+                purchase_item_count=purchase_counts.get(item.purchase_id, 0),
+                on_loan_quantity=loan_quantities.get(item.id, 0),
+            ).model_copy(update={"location_path": path_map.get(item.storage_location_id, [])})
+            for item in items
+        ]
+        return ItemSummaryList(items=entries, total=total, limit=limit, offset=offset)
     summaries = []
     for item in items:
         summary = item_summary(item, on_loan_quantity=loan_quantities.get(item.id, 0))

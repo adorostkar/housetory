@@ -77,6 +77,10 @@ def test_financial_overview_separates_currencies_and_purchase_from_current(owner
     assert overview["items_missing_purchase_count"] == 1
 
     financial = owner_client.get("/api/v1/financial-overview").json()
+    home = owner_client.get("/api/v1/overview", params={"include_financial": True}).json()
+    assert home["financial"] == financial
+    assert home["value_by_currency"] == overview["value_by_currency"]
+    assert home["current_value_by_currency"] == overview["current_value_by_currency"]
     by_currency = {entry["currency"]: entry for entry in financial["currency_totals"]}
     assert by_currency["USD"]["purchase_total_cents"] == 190000
     assert by_currency["USD"]["current_value_total_cents"] == 190000

@@ -12,7 +12,7 @@ import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { DOCUMENT_TYPE_LABELS, OCR_STATUS_LABELS } from "@/lib/labels";
-import type { DocumentRecord, DocumentType } from "@/lib/types";
+import type { DocumentSummary, DocumentType } from "@/lib/types";
 import { formatDate, formatFileSize, pluralize } from "@/lib/utils";
 
 const TYPE_ICONS: Record<DocumentType, typeof FileText> = {
@@ -29,8 +29,8 @@ export function DocumentCard({
   onDelete,
   compact = false,
 }: {
-  document: DocumentRecord;
-  onDelete?: (document: DocumentRecord) => void;
+  document: DocumentSummary;
+  onDelete?: (document: DocumentSummary) => void;
   compact?: boolean;
 }) {
   const Icon = document.content_type.startsWith("image/")

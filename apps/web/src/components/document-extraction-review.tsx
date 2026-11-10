@@ -38,7 +38,7 @@ import type {
   ExtractionMatchResponse,
   ExtractionRefinement,
   ExtractionReview,
-  ItemSummary,
+  ItemListEntry,
 } from "@/lib/types";
 import { cn, formatCurrency, formatDate, pluralize } from "@/lib/utils";
 import {
@@ -330,7 +330,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     }));
   };
 
-  const addManualCandidate = (draft: LineDraft, item: ItemSummary) => {
+  const addManualCandidate = (draft: LineDraft, item: ItemListEntry) => {
     const candidate = candidateFromItem(item);
     setMatches((current) => {
       const existing = current.find((match) => match.line_id === draft.line.id);

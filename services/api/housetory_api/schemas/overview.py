@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 
 from ..schemas.items import ItemSummary
+from ..schemas.ownership import FinancialOverview
 from ..schemas.warranties import WarrantyDashboard
 
 
@@ -26,3 +27,4 @@ class OverviewOut(BaseModel):
     overdue_loan_count: int = 0
     on_loan_quantity: int = 0
     recent_items: list[ItemSummary]
+    financial: FinancialOverview | None = None

@@ -29,7 +29,7 @@ import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useBorrowedList, useCanWrite, useLoans } from "@/lib/queries";
 import type {
   BorrowedRecord,
-  ItemSummary,
+  ItemListEntry,
   Loan,
   LoanFilterStatus,
 } from "@/lib/types";
@@ -89,7 +89,7 @@ export function LoansPage() {
   const [choiceOpen, setChoiceOpen] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [borrowOpen, setBorrowOpen] = React.useState(false);
-  const [selectedItem, setSelectedItem] = React.useState<ItemSummary | null>(null);
+  const [selectedItem, setSelectedItem] = React.useState<ItemListEntry | null>(null);
   const [returnLoan, setReturnLoan] = React.useState<Loan | null>(null);
   const [returnBorrowed, setReturnBorrowed] = React.useState<BorrowedRecord | null>(
     null,
@@ -214,7 +214,7 @@ export function LoansPage() {
     }
     setChoiceOpen(true);
   };
-  const selectItem = (item: ItemSummary) => {
+  const selectItem = (item: ItemListEntry) => {
     setPickerOpen(false);
     setSelectedItem(item);
   };

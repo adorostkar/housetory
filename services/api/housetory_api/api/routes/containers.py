@@ -25,6 +25,7 @@ from ...schemas.containers import (
 from ...services import properties as property_service
 from ...services import storage_items
 from ...services.container_serializers import (
+    container_list_context,
     serialize_container,
     serialize_container_detail,
 )
@@ -34,10 +35,8 @@ from ...services.containers import (
     create_containers,
     delete_location_safely,
     get_location,
-    location_rows,
     move_container,
 )
-from ...services.hierarchy import descendant_ids
 from ...services.labels import qr_image_bytes, qr_payload
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
@@ -118,41 +117,41 @@ def list_containers(
         conditions.append(
             (StorageLocation.identifier.ilike(search)) | (StorageLocation.name.ilike(search))
         )
-    locations = list(
+    context = container_list_context(db, auth.household.id)
+    if empty is not None:
+        conditions.append(
+            StorageLocation.id.in_(
+                [
+                    location_id
+                    for location_id, counts in context.counts.items()
+                    if (counts[1] == 0) == empty
+                ]
+            )
+        )
+    total = int(db.scalar(select(func.count(StorageLocation.id)).where(*conditions)) or 0)
+    page = list(
         db.scalars(
             select(StorageLocation)
-            .options(joinedload(StorageLocation.room).joinedload(Room.property))
+            .options(
+                joinedload(StorageLocation.room).joinedload(Room.property),
+                joinedload(StorageLocation.owner_item),
+            )
             .where(*conditions)
             .order_by(
                 StorageLocation.identifier.asc().nullslast(),
                 func.lower(StorageLocation.name),
+                StorageLocation.id,
             )
+            .limit(limit)
+            .offset(offset)
         ).all()
     )
-    if empty is not None:
-        rows = location_rows(db, auth.household.id)
-        counts: dict[uuid.UUID, int] = {}
-        for item_location_id in db.scalars(
-            select(Item.storage_location_id).where(
-                Item.household_id == auth.household.id,
-                Item.storage_location_id.is_not(None),
-                Item.is_archived.is_(False),
-            )
-        ):
-            if item_location_id is not None:
-                counts[item_location_id] = counts.get(item_location_id, 0) + 1
-        filtered = []
-        for location in locations:
-            subtree = descendant_ids(rows, location.id)
-            has_items = any(counts.get(candidate, 0) > 0 for candidate in subtree)
-            if has_items != empty:
-                filtered.append(location)
-        locations = filtered
-    total = len(locations)
-    page = locations[offset : offset + limit]
     settings = get_settings()
     return ContainerList(
-        items=[serialize_container(db, auth.household.id, location) for location in page],
+        items=[
+            serialize_container(db, auth.household.id, location, context=context)
+            for location in page
+        ],
         total=total,
         qr_base_url=settings.qr_effective_base_url,
         qr_warning=settings.qr_base_url_warning,

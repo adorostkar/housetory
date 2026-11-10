@@ -59,7 +59,7 @@ export interface DocumentScan {
   updated_at: string;
 }
 
-export interface DocumentRecord {
+export interface DocumentSummary {
   id: UUID;
   title: string;
   document_type: DocumentType;
@@ -71,8 +71,6 @@ export interface DocumentRecord {
   document_date: string | null;
   merchant: string | null;
   notes: string | null;
-  extracted_text: string | null;
-  extracted_metadata: ExtractedMetadata;
   ocr_status: OcrStatus;
   ocr_error: string | null;
   ocr_confidence: number | null;
@@ -81,10 +79,15 @@ export interface DocumentRecord {
   updated_at: string;
   items: ItemReference[];
   item_count: number;
-  pages: DocumentPage[];
   page_count: number;
   url: string;
   original_url: string;
+}
+
+export interface DocumentRecord extends DocumentSummary {
+  extracted_text: string | null;
+  extracted_metadata: ExtractedMetadata;
+  pages: DocumentPage[];
 }
 
 export interface ManualProfile {

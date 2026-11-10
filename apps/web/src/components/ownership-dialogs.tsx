@@ -24,7 +24,7 @@ import type {
   ContainerList,
   ItemDetail,
   ItemDetailResponse,
-  ItemSummary,
+  ItemListEntry,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -358,7 +358,7 @@ function ItemLinkRow({
   selected,
   onSelect,
 }: {
-  item: ItemSummary;
+  item: ItemListEntry;
   selected: boolean;
   onSelect: () => void;
 }) {

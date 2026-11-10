@@ -33,7 +33,6 @@ import {
 } from "@/lib/labels";
 import {
   useCanWrite,
-  useFinancialOverview,
   useOverview,
   useRooms,
   useSession,
@@ -50,8 +49,7 @@ import {
 
 export function OverviewPage() {
   const session = useSession();
-  const overview = useOverview();
-  const financialQuery = useFinancialOverview();
+  const overview = useOverview(true);
   const roomsQuery = useRooms();
   const [recentView, setRecentView] = useItemsView(() =>
     typeof window !== "undefined" && window.matchMedia?.("(max-width: 639px)").matches
@@ -337,8 +335,8 @@ export function OverviewPage() {
       {data.item_count > 0 && (
         <>
           <OwnershipSection
-            financial={financialQuery.data}
-            loading={financialQuery.isPending}
+            financial={data.financial ?? undefined}
+            loading={false}
           />
 
           <section className="mt-8">

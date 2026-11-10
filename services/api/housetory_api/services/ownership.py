@@ -13,12 +13,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import Session, joinedload, load_only, raiseload
 
 from ..domain import PurchaseInfoStatus
-from ..models import Item, PurchaseAllocation
-from ..schemas.items import ItemSummary
+from ..models import Item, Purchase, PurchaseAllocation
 from ..schemas.ownership import (
     CurrencyOwnership,
     FinancialOverview,
@@ -27,7 +26,7 @@ from ..schemas.ownership import (
 )
 from . import current_value as current_value_service
 from .purchase_info import effective_purchase_info_status
-from .serializers import item_load_options, item_summary
+from .serializers import item_load_options, item_summary, item_summary_load_options
 
 
 @dataclass
@@ -45,6 +44,49 @@ def _active_items(db: Session, household_id: uuid.UUID) -> list[Item]:
             .options(*item_load_options())
             .where(Item.household_id == household_id, Item.is_archived.is_(False))
             .order_by(Item.created_at.asc())
+        ).all()
+    )
+
+
+def _financial_items(db: Session, household_id: uuid.UUID) -> list[Item]:
+    return list(
+        db.scalars(
+            select(Item)
+            .options(
+                load_only(
+                    Item.id,
+                    Item.household_id,
+                    Item.name,
+                    Item.quantity,
+                    Item.purchase_info_status,
+                    Item.purchase_id,
+                    Item.room_id,
+                    Item.category_id,
+                    Item.current_value_cents,
+                    Item.current_value_currency,
+                    Item.current_value_basis,
+                    Item.created_at,
+                    raiseload=True,
+                ),
+                joinedload(Item.purchase).load_only(
+                    Purchase.id,
+                    Purchase.currency,
+                    Purchase.price_cents,
+                    Purchase.vendor,
+                    Purchase.purchase_date,
+                    Purchase.order_number,
+                    Purchase.notes,
+                    Purchase.receipt_document_id,
+                ),
+                joinedload(Item.room),
+                joinedload(Item.category),
+                joinedload(Item.purchase)
+                .selectinload(Purchase.allocations)
+                .load_only(PurchaseAllocation.id, PurchaseAllocation.purchase_id),
+                raiseload("*"),
+            )
+            .where(Item.household_id == household_id, Item.is_archived.is_(False))
+            .order_by(Item.created_at.asc(), Item.id.asc())
         ).all()
     )
 
@@ -119,19 +161,49 @@ def financial_overview(
     valuable_limit: int = 8,
     missing_limit: int = 20,
 ) -> FinancialOverview:
-    items = _active_items(db, household_id)
+    items = _financial_items(db, household_id)
     allocations = _purchase_shares(db, household_id, items)
 
-    purchase_totals: dict[str, int] = defaultdict(int)
+    active_purchase_ids = select(Item.purchase_id).where(
+        Item.household_id == household_id, Item.is_archived.is_(False)
+    )
+    purchase_totals = {
+        currency: int(total)
+        for currency, total in db.execute(
+            select(Purchase.currency, func.sum(Purchase.price_cents))
+            .where(
+                Purchase.household_id == household_id,
+                Purchase.id.in_(active_purchase_ids),
+                Purchase.price_cents.is_not(None),
+            )
+            .group_by(Purchase.currency)
+        )
+    }
     purchase_item_counts: dict[str, int] = defaultdict(int)
-    current_totals: dict[str, int] = defaultdict(int)
-    current_item_counts: dict[str, int] = defaultdict(int)
-    seen_purchases: set[uuid.UUID] = set()
+    current_total_expression = case(
+        (Item.current_value_basis == "per_unit", Item.current_value_cents * Item.quantity),
+        else_=Item.current_value_cents,
+    )
+    current_rows = db.execute(
+        select(
+            Item.current_value_currency,
+            func.sum(current_total_expression),
+            func.count(Item.id),
+        )
+        .where(
+            Item.household_id == household_id,
+            Item.is_archived.is_(False),
+            Item.current_value_cents.is_not(None),
+        )
+        .group_by(Item.current_value_currency)
+    ).all()
+    current_totals = {currency: int(total) for currency, total, count in current_rows}
+    current_item_counts = {currency: count for currency, total, count in current_rows}
 
     category_rows: dict[tuple[str, str], dict[str, Any]] = {}
     room_rows: dict[tuple[str, str], dict[str, Any]] = {}
-    valuable: list[ValuableItem] = []
-    missing: list[ItemSummary] = []
+    valuable: list[tuple[Item, int, str, str, str | None]] = []
+    missing: list[Item] = []
     with_purchase_count = 0
 
     for item in items:
@@ -145,15 +217,9 @@ def financial_overview(
 
         if purchase is not None:
             purchase_item_counts[purchase.currency] += 1
-            if purchase.id not in seen_purchases and purchase.price_cents is not None:
-                purchase_totals[purchase.currency] += purchase.price_cents
-                seen_purchases.add(purchase.id)
 
         current_total = current_value_service.total_value_cents(item)
         current_basis = current_value_service.effective_basis(item)
-        if current_total is not None:
-            current_totals[item.current_value_currency] += current_total
-            current_item_counts[item.current_value_currency] += 1
 
         if allocation is not None:
             _add_breakdown(
@@ -188,26 +254,15 @@ def financial_overview(
 
         if current_total is not None:
             valuable.append(
-                ValuableItem(
-                    item=item_summary(item, household_reminder_days=household_reminder_days),
-                    value_cents=current_total,
-                    currency=item.current_value_currency,
-                    value_kind="current",
-                    value_basis=current_basis,
-                )
+                (item, current_total, item.current_value_currency, "current", current_basis)
             )
         elif allocation is not None:
             valuable.append(
-                ValuableItem(
-                    item=item_summary(item, household_reminder_days=household_reminder_days),
-                    value_cents=allocation.allocated_cents,
-                    currency=allocation.currency,
-                    value_kind="purchase",
-                )
+                (item, allocation.allocated_cents, allocation.currency, "purchase", None)
             )
 
         if status in {PurchaseInfoStatus.UNRECORDED, PurchaseInfoStatus.UNKNOWN}:
-            missing.append(item_summary(item, household_reminder_days=household_reminder_days))
+            missing.append(item)
 
     currencies = sorted(set(purchase_totals) | set(current_totals))
     currency_totals = [
@@ -240,17 +295,38 @@ def financial_overview(
             ),
         )
 
-    valuable.sort(key=lambda entry: (-entry.value_cents, entry.item.name.lower()))
+    valuable.sort(key=lambda entry: (-entry[1], entry[0].name.lower()))
     missing.sort(key=lambda entry: entry.name.lower())
+    missing_count = len(missing)
+    valuable = valuable[:valuable_limit]
+    missing = missing[:missing_limit]
+    preview_ids = {entry[0].id for entry in valuable} | {item.id for item in missing}
+    if preview_ids:
+        db.scalars(
+            select(Item)
+            .options(*item_summary_load_options())
+            .where(Item.household_id == household_id, Item.id.in_(preview_ids))
+        ).all()
     return FinancialOverview(
         item_count=len(items),
         items_with_purchase_count=with_purchase_count,
-        items_missing_purchase_count=len(missing),
+        items_missing_purchase_count=missing_count,
         currency_totals=currency_totals,
         value_by_category=breakdown(category_rows),
         value_by_room=breakdown(room_rows),
-        most_valuable_items=valuable[:valuable_limit],
-        missing_purchase_items=missing[:missing_limit],
+        most_valuable_items=[
+            ValuableItem(
+                item=item_summary(item, household_reminder_days=household_reminder_days),
+                value_cents=value,
+                currency=currency,
+                value_kind=kind,
+                value_basis=basis,
+            )
+            for item, value, currency, kind, basis in valuable
+        ],
+        missing_purchase_items=[
+            item_summary(item, household_reminder_days=household_reminder_days) for item in missing
+        ],
     )
 
 

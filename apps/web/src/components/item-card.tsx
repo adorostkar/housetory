@@ -5,7 +5,7 @@ import { CategoryIcon } from "@/components/category-icon";
 import { Badge } from "@/components/ui/badge";
 import { ITEM_DISPOSITION_LABELS } from "@/lib/labels";
 import { itemHref, rememberListScroll, type ItemOrigin } from "@/lib/navigation";
-import type { ItemSummary } from "@/lib/types";
+import type { ItemListEntry } from "@/lib/types";
 import {
   cn,
   CONDITION_LABELS,
@@ -27,7 +27,7 @@ export function ItemCard({
   selection,
   origin,
 }: {
-  item: ItemSummary;
+  item: ItemListEntry;
   className?: string;
   selection?: ItemSelection;
   origin?: ItemOrigin | null;
@@ -262,7 +262,7 @@ export function ItemRow({
   selection,
   origin,
 }: {
-  item: ItemSummary;
+  item: ItemListEntry;
   selection?: ItemSelection;
   origin?: ItemOrigin | null;
 }) {

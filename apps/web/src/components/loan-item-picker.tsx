@@ -14,10 +14,10 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useItems } from "@/lib/queries";
-import type { ItemSummary } from "@/lib/types";
+import type { ItemListEntry } from "@/lib/types";
 import { itemContainer, locationLabel } from "@/lib/utils";
 
-function placeLabel(item: ItemSummary) {
+function placeLabel(item: ItemListEntry) {
   const container = itemContainer(item);
   const trail = item.location_path.map((entry) => locationLabel(entry));
   const parts = [
@@ -35,7 +35,7 @@ export function LoanItemPickerDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (item: ItemSummary) => void;
+  onSelect: (item: ItemListEntry) => void;
 }) {
   const [search, setSearch] = React.useState("");
   const debounced = useDebouncedValue(search, 250);

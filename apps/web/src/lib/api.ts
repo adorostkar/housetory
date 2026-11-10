@@ -16,6 +16,7 @@ export function getActiveHouseholdId() {
 }
 
 export function householdScopedQueryHash(queryKey: readonly unknown[]) {
+  if (queryKey[0] === "session") return JSON.stringify(queryKey);
   return `${activeHouseholdId ?? "none"}:${JSON.stringify(queryKey)}`;
 }
 
@@ -88,7 +89,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       body: payload,
       credentials: "include",
     });
-  } catch {
+  } catch (error) {
+    if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw error;
+    }
     throw new ApiError(
       0,
       "network_error",
@@ -135,7 +139,10 @@ async function requestBlob(path: string, options: RequestOptions = {}): Promise<
       body: payload,
       credentials: "include",
     });
-  } catch {
+  } catch (error) {
+    if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw error;
+    }
     throw new ApiError(
       0,
       "network_error",

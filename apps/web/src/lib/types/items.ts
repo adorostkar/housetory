@@ -1,5 +1,5 @@
 import type { ItemCondition, UUID, WarrantyStatus } from "@/lib/types/core";
-import type { DocumentBrief, DocumentRecord, ItemReference } from "@/lib/types/documents";
+import type { DocumentBrief, DocumentRecord, DocumentSummary, ItemReference } from "@/lib/types/documents";
 import type {
   CategoryBrief,
   LocationBrief,
@@ -26,7 +26,7 @@ export interface PurchaseAllocation {
   created_at: string;
 }
 
-export interface Purchase {
+export interface PurchaseBrief {
   id: UUID;
   merchant: string | null;
   vendor: string | null;
@@ -37,14 +37,17 @@ export interface Purchase {
   notes: string | null;
   receipt_document_id: UUID | null;
   receipt: DocumentBrief | null;
-  items: ItemReference[];
-  allocations: PurchaseAllocation[];
-  allocated_total_cents: number;
-  unallocated_cents: number | null;
   item_count: number;
   is_shared: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface Purchase extends PurchaseBrief {
+  items: ItemReference[];
+  allocations: PurchaseAllocation[];
+  allocated_total_cents: number;
+  unallocated_cents: number | null;
 }
 
 export interface Warranty {
@@ -154,7 +157,7 @@ export type ItemDisposition =
   | "consumed"
   | "other";
 
-export interface ItemSummary {
+export interface ItemListEntry {
   id: UUID;
   name: string;
   description: string | null;
@@ -176,7 +179,7 @@ export interface ItemSummary {
   tags: TagBrief[];
   primary_photo: Photo | null;
   representative_image?: ItemImage | null;
-  purchase: Purchase | null;
+  purchase: PurchaseBrief | null;
   purchase_info_status:
     | "recorded"
     | "unrecorded"
@@ -193,6 +196,10 @@ export interface ItemSummary {
   created_at: string;
   updated_at: string;
   last_verified?: LastVerified | null;
+}
+
+export interface ItemSummary extends ItemListEntry {
+  purchase: Purchase | null;
 }
 
 export interface ImportSourceBrief {
@@ -244,6 +251,10 @@ export interface ItemList {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface ItemSummaryList extends Omit<ItemList, "items"> {
+  items: ItemListEntry[];
 }
 
 export interface ItemDetailResponse {
@@ -370,6 +381,10 @@ export interface DocumentList {
   offset: number;
 }
 
+export interface DocumentSummaryList extends Omit<DocumentList, "items"> {
+  items: DocumentSummary[];
+}
+
 export interface PurchaseList {
   items: Purchase[];
   total: number;
@@ -440,6 +455,7 @@ export interface FinancialOverview {
 }
 
 export interface Overview {
+  financial?: FinancialOverview | null;
   room_count: number;
   location_count: number;
   item_count: number;

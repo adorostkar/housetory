@@ -5,14 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useItems } from "@/lib/queries";
-import type { ItemSummary } from "@/lib/types";
+import type { ItemListEntry } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 export function ItemSearchPicker({
   onSelect,
   disabled,
 }: {
-  onSelect: (item: ItemSummary) => void;
+  onSelect: (item: ItemListEntry) => void;
   disabled?: boolean;
 }) {
   const [search, setSearch] = React.useState("");

@@ -33,7 +33,7 @@ os.environ["EXPORTS_DIR"] = str(EXPORTS_ROOT)
 # their own key outside the database.
 os.environ["AI_CREDENTIAL_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import event, text  # noqa: E402
 
 from housetory_api.api.abuse import login_limiter, search_limiter  # noqa: E402
 from housetory_api.db import engine  # noqa: E402
@@ -98,6 +98,20 @@ def clean_state(database: None) -> Iterator[None]:
     search_limiter.reset_all()
     reset_captured_email()
     yield
+
+
+@pytest.fixture
+def sql_statements() -> Iterator[list[str]]:
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
 
 
 @pytest.fixture

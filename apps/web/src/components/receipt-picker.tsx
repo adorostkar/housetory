@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/labels";
 import { useDocument, useDocuments } from "@/lib/queries";
-import type { DocumentRecord } from "@/lib/types";
+import type { DocumentRecord, DocumentSummary } from "@/lib/types";
 
 /**
  * Receipt chooser for purchases. Lists only receipts and invoices by default so
@@ -35,7 +35,7 @@ export function ReceiptPicker({
   const selected = useDocument(value || undefined);
 
   const options = React.useMemo(() => {
-    const documents: DocumentRecord[] = showAll
+    const documents: DocumentSummary[] = showAll
       ? (everything.data?.items ?? [])
       : [...(receipts.data?.items ?? []), ...(invoices.data?.items ?? [])];
     const byId = new Map(documents.map((document) => [document.id, document]));

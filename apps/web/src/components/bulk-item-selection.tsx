@@ -18,13 +18,13 @@ import {
 import { BulkImagesDialog } from "@/components/bulk-images-dialog";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { Button } from "@/components/ui/button";
-import type { ItemSummary } from "@/lib/types";
+import type { ItemListEntry } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
 
 export interface BulkSelection {
   selected: Set<string>;
-  selectedItems: ItemSummary[];
-  selectableItems: ItemSummary[];
+  selectedItems: ItemListEntry[];
+  selectableItems: ItemListEntry[];
   selectedUnits: number;
   selectedOnLoan: number;
   hasArchivedSelection: boolean;
@@ -44,7 +44,7 @@ export function useBulkSelection({
   enabled,
   scopeKey,
 }: {
-  items: ItemSummary[];
+  items: ItemListEntry[];
   enabled: boolean;
   scopeKey: string;
 }): BulkSelection {
@@ -199,7 +199,7 @@ export function BulkItemActionBar({
   onClear,
   onNotice,
 }: {
-  items: ItemSummary[];
+  items: ItemListEntry[];
   onClear: () => void;
   onNotice: (message: string) => void;
 }) {

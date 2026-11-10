@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Literal
 
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload, raiseload, selectinload
 
 from ..config import get_settings
 from ..domain import WarrantyStatus
@@ -19,14 +19,22 @@ from ..models import (
     Warranty,
 )
 from ..schemas.common import ItemReference
-from ..schemas.documents import DocumentBrief, DocumentOut, DocumentPageOut, ScanAdjustments
+from ..schemas.documents import (
+    DocumentBrief,
+    DocumentOut,
+    DocumentPageOut,
+    DocumentSummary,
+    ScanAdjustments,
+)
 from ..schemas.households import HouseholdBrief
 from ..schemas.imports import ImportSourceBrief
 from ..schemas.items import (
     CategoryBrief,
     ItemDetail,
+    ItemListEntry,
     ItemStorageOut,
     ItemSummary,
+    ItemSummaryBase,
     LastVerifiedOut,
     LocationBrief,
     PhotoOut,
@@ -34,7 +42,7 @@ from ..schemas.items import (
     TagBrief,
 )
 from ..schemas.properties import PropertyBrief
-from ..schemas.purchases import PurchaseOut
+from ..schemas.purchases import PurchaseBrief, PurchaseOut
 from ..schemas.warranties import WarrantyOut
 from . import current_value as current_value_service
 from . import valuation as valuation_service
@@ -66,6 +74,90 @@ def item_load_options() -> list:
         selectinload(Item.documents).selectinload(Document.items),
         selectinload(Item.documents).selectinload(Document.scan).selectinload(DocumentScan.pages),
     ]
+
+
+def item_summary_load_options(*, compact_purchase: bool = False) -> list:
+    options = [
+        joinedload(Item.household),
+        joinedload(Item.room).joinedload(Room.property),
+        joinedload(Item.storage_location)
+        .joinedload(StorageLocation.room)
+        .joinedload(Room.property),
+        joinedload(Item.category),
+        joinedload(Item.purchase).joinedload(Purchase.receipt_document).load_only(
+            Document.id, Document.title, Document.document_type, Document.content_type
+        ),
+        joinedload(Item.warranty).joinedload(Warranty.document).load_only(
+            Document.id, Document.title, Document.document_type, Document.content_type
+        ),
+        joinedload(Item.last_verification),
+        selectinload(Item.tags),
+        selectinload(Item.photos),
+        selectinload(Item.images).joinedload(ItemImage.provider),
+    ]
+    if compact_purchase:
+        options.append(
+            joinedload(Item.purchase)
+            .selectinload(Purchase.allocations)
+            .load_only(PurchaseAllocation.id, PurchaseAllocation.purchase_id)
+        )
+    else:
+        options.extend(
+            [
+                joinedload(Item.purchase).selectinload(Purchase.items),
+                joinedload(Item.purchase)
+                .selectinload(Purchase.allocations)
+                .joinedload(PurchaseAllocation.item),
+            ]
+        )
+    return [*options, raiseload("*")]
+
+
+def purchase_brief(purchase: Purchase, item_count: int) -> PurchaseBrief:
+    return PurchaseBrief(
+        id=purchase.id,
+        merchant=purchase.vendor,
+        vendor=purchase.vendor,
+        purchase_date=purchase.purchase_date,
+        price_cents=purchase.price_cents,
+        currency=purchase.currency,
+        order_number=purchase.order_number,
+        notes=purchase.notes,
+        receipt_document_id=purchase.receipt_document_id,
+        receipt=document_brief(purchase.receipt_document) if purchase.receipt_document else None,
+        item_count=item_count,
+        is_shared=item_count > 1,
+        created_at=purchase.created_at,
+        updated_at=purchase.updated_at,
+    )
+
+
+def document_summary(document: Document, page_count: int = 0) -> DocumentSummary:
+    items = sorted(document.items, key=lambda item: item.name.lower())
+    return DocumentSummary(
+        id=document.id,
+        title=document.title,
+        document_type=document.document_type,
+        original_filename=document.original_filename,
+        content_type=document.content_type,
+        original_content_type=document.original_content_type,
+        byte_size=document.byte_size,
+        original_byte_size=document.original_byte_size,
+        document_date=document.document_date,
+        merchant=document.merchant,
+        notes=document.notes,
+        ocr_status=document.ocr_status,
+        ocr_error=document.ocr_error,
+        ocr_confidence=document.ocr_confidence,
+        ocr_processed_at=document.ocr_processed_at,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+        items=[ItemReference(id=item.id, name=item.name) for item in items],
+        item_count=len(items),
+        page_count=page_count,
+        url=document_url(document.id),
+        original_url=document_url(document.id, original=True),
+    )
 
 
 def photo_url(photo_id, *, thumbnail: bool = False) -> str:  # noqa: ANN001
@@ -318,7 +410,39 @@ def item_summary(
     household_reminder_days: int | None = None,
     on_loan_quantity: int = 0,
 ) -> ItemSummary:
-    purchase = item.purchase
+    return _item_summary(
+        item,
+        schema=ItemSummary,
+        purchase=purchase_out(item.purchase) if item.purchase else None,
+        household_reminder_days=household_reminder_days,
+        on_loan_quantity=on_loan_quantity,
+    )
+
+
+def item_list_entry(
+    item: Item,
+    *,
+    purchase_item_count: int = 0,
+    household_reminder_days: int | None = None,
+    on_loan_quantity: int = 0,
+) -> ItemListEntry:
+    return _item_summary(
+        item,
+        schema=ItemListEntry,
+        purchase=purchase_brief(item.purchase, purchase_item_count) if item.purchase else None,
+        household_reminder_days=household_reminder_days,
+        on_loan_quantity=on_loan_quantity,
+    )
+
+
+def _item_summary[Summary: ItemSummaryBase](
+    item: Item,
+    *,
+    schema: type[Summary],
+    purchase: PurchaseBrief | None,
+    household_reminder_days: int | None,
+    on_loan_quantity: int,
+) -> Summary:
     warranty = item.warranty
     reminder_days = (
         household_reminder_days
@@ -334,7 +458,7 @@ def item_summary(
             else None
         )
     )
-    return ItemSummary(
+    return schema(
         id=item.id,
         name=item.name,
         description=item.description,
@@ -386,7 +510,7 @@ def item_summary(
         ],
         primary_photo=_primary_photo(item),
         representative_image=representative_image_out(item),
-        purchase=purchase_out(purchase) if purchase else None,
+        purchase=purchase,
         purchase_info_status=effective_purchase_info_status(item).value,
         purchase_info_missing_fields=missing_purchase_info_fields(item),
         warranty=(warranty_out(warranty, reminder_days) if warranty else None),
@@ -395,9 +519,7 @@ def item_summary(
         current_value_basis=current_value_service.effective_basis(item),
         current_value_total_cents=current_value_service.total_value_cents(item),
         current_value_estimated_at=item.current_value_estimated_at,
-        current_value_estimate=(
-            valuation_service.stored_value_estimate(item)
-        ),
+        current_value_estimate=(valuation_service.stored_value_estimate(item)),
         created_at=item.created_at,
         updated_at=item.updated_at,
         last_verified=last_verified_out(item, on_loan_quantity),

@@ -53,6 +53,49 @@ def create_item(client, name, **extra):
     return response.json()["item"]
 
 
+def test_container_list_batches_queries_and_preserves_nested_counts(
+    owner_client, sql_statements
+):
+    room = create_room(owner_client, "Batch room")
+    parent = create_container(owner_client, room["id"], name="Parent")
+    child = create_container(owner_client, room["id"], parent_id=parent["id"], name="Child")
+    empty = create_container(owner_client, room["id"], name="Empty")
+    deleted = create_container(owner_client, room["id"], parent_id=parent["id"], name="Deleted")
+    assert owner_client.delete(f"/api/v1/storage-locations/{deleted['id']}").status_code == 204
+    create_item(
+        owner_client, "Stored", room_id=room["id"], storage_location_id=child["id"], quantity=3
+    )
+    archived = create_item(
+        owner_client, "Archived", room_id=room["id"], storage_location_id=child["id"]
+    )
+    assert owner_client.patch(
+        f"/api/v1/items/{archived['id']}", json={"is_archived": True}
+    ).status_code == 200
+
+    sql_statements.clear()
+    first = owner_client.get("/api/v1/containers", params={"limit": 1})
+    assert first.status_code == 200, first.text
+    first_count = len(sql_statements)
+    sql_statements.clear()
+    response = owner_client.get("/api/v1/containers", params={"limit": 100})
+    assert response.status_code == 200, response.text
+    assert len(sql_statements) == first_count
+    assert first_count <= 10
+    entries = {entry["id"]: entry for entry in response.json()["items"]}
+    assert entries[parent["id"]]["item_count"] == 0
+    assert entries[parent["id"]]["total_item_count"] == 1
+    assert entries[parent["id"]]["total_quantity"] == 3
+    assert entries[parent["id"]]["container_count"] == 2
+    assert entries[parent["id"]]["recoverable_deleted_child_count"] == 1
+    assert [entry["id"] for entry in entries[child["id"]]["path"]] == [parent["id"], child["id"]]
+    empty_page = owner_client.get("/api/v1/containers", params={"empty": True, "limit": 1}).json()
+    assert empty_page["total"] == 1
+    assert empty_page["items"][0]["id"] == empty["id"]
+    occupied = owner_client.get("/api/v1/containers", params={"empty": False, "limit": 1}).json()
+    assert occupied["total"] == 2
+    assert len(occupied["items"]) == 1
+
+
 def create_text_import(client, text, title="Container import"):
     response = client.post("/api/v1/imports", data={"text": text, "title": title})
     assert response.status_code == 201, response.text

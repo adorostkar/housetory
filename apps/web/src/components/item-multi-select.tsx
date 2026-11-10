@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useItems } from "@/lib/queries";
-import type { ItemSummary } from "@/lib/types";
+import type { ItemListEntry } from "@/lib/types";
 import { cn, pluralize } from "@/lib/utils";
 
 export function ItemMultiSelect({
@@ -32,7 +32,7 @@ export function ItemMultiSelect({
   );
   const selectedSet = new Set(selected);
 
-  const toggle = (item: ItemSummary) => {
+  const toggle = (item: ItemListEntry) => {
     if (selectedSet.has(item.id)) {
       onChange(selected.filter((id) => id !== item.id));
     } else {

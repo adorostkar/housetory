@@ -17,7 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/labels";
 import { useCanWrite, useDocuments, useInvalidateInventory } from "@/lib/queries";
-import type { DocumentRecord, ItemDetail } from "@/lib/types";
+import type { DocumentRecord, DocumentSummary, ItemDetail } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -32,7 +32,10 @@ export function DocumentLinkDialog({
   onOpenChange: (open: boolean) => void;
   onUpload: () => void;
 }) {
-  const invalidate = useInvalidateInventory();
+  const invalidate = useInvalidateInventory([
+    "overview", "documents", "document", "items", "item", "purchases",
+    "purchase", "financial", "warranties", "inventory-review",
+  ]);
   const canWrite = useCanWrite();
   const documentsQuery = useDocuments({}, 100, open);
   const [query, setQuery] = React.useState("");
@@ -48,7 +51,7 @@ export function DocumentLinkDialog({
   }, [open]);
 
   const link = useMutation({
-    mutationFn: (document: DocumentRecord) =>
+    mutationFn: (document: DocumentSummary) =>
       api.post<DocumentRecord>(`/documents/${document.id}/items`, {
         item_ids: [item.id],
       }),
@@ -155,9 +158,7 @@ export function DocumentLinkDialog({
             ) : (
               <ul className="divide-y divide-border/60">
                 {available.map((document) => {
-                  const pageCount = document.extracted_metadata.ocr_page_count as
-                    | number
-                    | undefined;
+                  const pageCount = document.page_count;
                   return (
                     <li
                       key={document.id}

@@ -150,9 +150,12 @@ const populatedFinancial: FinancialOverview = {
   missing_purchase_items: [],
 };
 
-const state = vi.hoisted(() => ({
-  overview: null as unknown,
-  financial: null as unknown,
+const state = vi.hoisted<{
+  overview: Overview | null;
+  financial: FinancialOverview | null;
+}>(() => ({
+  overview: null,
+  financial: null,
 }));
 
 vi.mock("@/lib/queries", async (importOriginal) => {
@@ -162,15 +165,10 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     useSession: () => ({ data: sessionState }),
     useCanWrite: () => true,
     useOverview: () => ({
-      data: state.overview,
+      data: { ...state.overview, financial: state.financial },
       isPending: false,
       isError: false,
       refetch: vi.fn(),
-    }),
-    useFinancialOverview: () => ({
-      data: state.financial,
-      isPending: false,
-      isError: false,
     }),
     useRooms: () => ({ data: { items: [] } }),
   };

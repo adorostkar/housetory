@@ -5,11 +5,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ...db import get_db
-from ...models import Document, Item, ItemPhoto, Room, StorageLocation
+from ...models import Document, Item, ItemPhoto, Loan, Room, StorageLocation
 from ...schemas.overview import CurrencyTotal, OverviewOut
 from ...services import lending
 from ...services.ownership import financial_overview
-from ...services.serializers import item_load_options, item_summary
+from ...services.serializers import item_summary, item_summary_load_options
 from ...services.warranty_dashboard import build_dashboard, load_warranties
 from ..deps import AuthContext, require_auth
 
@@ -18,6 +18,7 @@ router = APIRouter(tags=["overview"])
 
 @router.get("/overview", response_model=OverviewOut)
 def overview(
+    include_financial: bool = False,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> OverviewOut:
@@ -36,13 +37,14 @@ def overview(
         )
         or 0
     )
-    item_count = int(db.scalar(select(func.count(Item.id)).where(*active_items)) or 0)
-    total_quantity = int(
-        db.scalar(select(func.coalesce(func.sum(Item.quantity), 0)).where(*active_items)) or 0
-    )
-    document_count = int(
-        db.scalar(select(func.count(Document.id)).where(Document.household_id == household_id)) or 0
-    )
+    item_count, total_quantity = db.execute(
+        select(func.count(Item.id), func.coalesce(func.sum(Item.quantity), 0)).where(*active_items)
+    ).one()
+    document_count, document_bytes = db.execute(
+        select(func.count(Document.id), func.coalesce(func.sum(Document.byte_size), 0)).where(
+            Document.household_id == household_id
+        )
+    ).one()
     photo_bytes = int(
         db.scalar(
             select(func.coalesce(func.sum(ItemPhoto.byte_size), 0))
@@ -51,19 +53,11 @@ def overview(
         )
         or 0
     )
-    document_bytes = int(
-        db.scalar(
-            select(func.coalesce(func.sum(Document.byte_size), 0)).where(
-                Document.household_id == household_id
-            )
-        )
-        or 0
-    )
     recent_items = db.scalars(
         select(Item)
-        .options(*item_load_options())
+        .options(*item_summary_load_options())
         .where(*active_items)
-        .order_by(Item.created_at.desc())
+        .order_by(Item.created_at.desc(), Item.id.asc())
         .limit(6)
     ).all()
 
@@ -71,8 +65,8 @@ def overview(
         db,
         household_id,
         household_reminder_days=auth.household.warranty_reminder_days,
-        valuable_limit=4,
-        missing_limit=5,
+        valuable_limit=8 if include_financial else 4,
+        missing_limit=20 if include_financial else 5,
     )
     warranties = build_dashboard(
         load_warranties(db, household_id),
@@ -82,14 +76,16 @@ def overview(
     loan_quantities = lending.loan_quantities_for_items(
         db, household_id, [item.id for item in recent_items]
     )
-    loans = lending.list_loans(
-        db,
-        household_id,
-        status="open",
-        on_date=date.today(),
-        limit=1,
-        offset=0,
-    )
+    outstanding_count, overdue_count, on_loan_quantity = db.execute(
+        select(
+            func.count(Loan.id),
+            func.count(Loan.id).filter(Loan.due_on < date.today()),
+            func.coalesce(func.sum(Loan.quantity - Loan.returned_quantity), 0),
+        ).where(
+            Loan.household_id == household_id,
+            Loan.status.in_(lending.OPEN_STATUSES),
+        )
+    ).one()
 
     return OverviewOut(
         room_count=room_count,
@@ -112,9 +108,9 @@ def overview(
         items_missing_purchase_count=financial.items_missing_purchase_count,
         photo_bytes=photo_bytes,
         document_bytes=document_bytes,
-        outstanding_loan_count=loans.outstanding_count,
-        overdue_loan_count=loans.overdue_count,
-        on_loan_quantity=loans.on_loan_quantity,
+        outstanding_loan_count=outstanding_count,
+        overdue_loan_count=overdue_count,
+        on_loan_quantity=on_loan_quantity,
         recent_items=[
             item_summary(
                 item,
@@ -123,4 +119,5 @@ def overview(
             )
             for item in recent_items
         ],
+        financial=financial if include_financial else None,
     )

@@ -1,3 +1,9 @@
+import uuid
+
+from housetory_api.db import SessionLocal
+from housetory_api.models import Item
+
+
 def setup_taxonomy(client):
     room = client.post("/api/v1/rooms", json={"name": "Kitchen"}).json()
     location = client.post(
@@ -7,6 +13,51 @@ def setup_taxonomy(client):
     category = client.post("/api/v1/categories", json={"name": "Pantry", "color": "#8B7355"}).json()
     tag = client.post("/api/v1/tags", json={"name": "staples"}).json()
     return room, location, category, tag
+
+
+def test_item_summary_keeps_shared_purchase_without_members_or_document_scans(
+    owner_client, sql_statements
+):
+    first = owner_client.post("/api/v1/items", json={"name": "First"}).json()["item"]
+    second = owner_client.post("/api/v1/items", json={"name": "Second"}).json()["item"]
+    purchase = owner_client.post("/api/v1/purchases", json={
+        "item_ids": [first["id"], second["id"]], "price_cents": 2000, "currency": "SEK",
+    })
+    assert purchase.status_code == 201, purchase.text
+    sql_statements.clear()
+    response = owner_client.get("/api/v1/items", params={"representation": "summary"})
+    assert response.status_code == 200, response.text
+    assert not any("document_scan_pages" in statement for statement in sql_statements)
+    for item in response.json()["items"]:
+        assert item["purchase"]["is_shared"] is True
+        assert item["purchase"]["item_count"] == 2
+        assert item["purchase"]["price_cents"] == 2000
+        assert "items" not in item["purchase"]
+        assert "allocations" not in item["purchase"]
+    full = owner_client.get("/api/v1/items").json()["items"][0]
+    assert len(full["purchase"]["items"]) == 2
+    detail = owner_client.get(f"/api/v1/items/{first['id']}").json()["item"]
+    assert "allocations" in detail["purchase"]
+
+
+def test_item_pagination_breaks_equal_sort_values_by_id(owner_client):
+    ids = [
+        owner_client.post("/api/v1/items", json={"name": "Same name"}).json()["item"]["id"]
+        for _ in range(3)
+    ]
+    with SessionLocal() as db:
+        items = [db.get(Item, uuid.UUID(item_id)) for item_id in ids]
+        for item in items:
+            item.created_at = items[0].created_at
+        db.commit()
+    for sort in ["name_asc", "name_desc", "created_asc", "created_desc"]:
+        pages = [
+            owner_client.get(
+                "/api/v1/items", params={"sort": sort, "limit": 1, "offset": offset}
+            ).json()["items"][0]["id"]
+            for offset in range(3)
+        ]
+        assert pages == sorted(ids)
 
 
 def test_search_and_filters_understand_room_location_hierarchy(owner_client):

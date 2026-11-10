@@ -4,7 +4,7 @@ import type {
   ExtractionLine,
   ExtractionLineAction,
   ExtractionReview,
-  ItemSummary,
+  ItemListEntry,
 } from "@/lib/types";
 
 export type WarrantyDraft = {
@@ -110,7 +110,7 @@ export function lineDraft(
   };
 }
 
-export function candidateFromItem(item: ItemSummary): CandidateItem {
+export function candidateFromItem(item: ItemListEntry): CandidateItem {
   return {
     id: item.id,
     name: item.name,

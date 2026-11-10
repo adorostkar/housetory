@@ -35,6 +35,37 @@ def create_item(client, name="Camera", **extra) -> dict:
     return response.json()["item"]
 
 
+def test_document_summary_preserves_ocr_search_and_page_count_without_ocr_body(
+    owner_client, pdf_bytes, sql_statements
+):
+    response = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("receipt.pdf", pdf_bytes, "application/pdf")},
+        data={"title": "Searchable receipt", "document_type": "receipt"},
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+    with SessionLocal() as db:
+        document = db.scalar(select(Document).where(Document.title == "Searchable receipt"))
+        document.extracted_text = "Unique equipment OCR evidence " * 1000
+        document.extracted_metadata = {"ocr_page_count": 7, "private_detail": "Long extraction"}
+        db.commit()
+    sql_statements.clear()
+    listing = owner_client.get(
+        "/api/v1/documents", params={"representation": "summary", "q": "Unique equipment"}
+    )
+    assert listing.status_code == 200, listing.text
+    summary = listing.json()["items"][0]
+    assert summary["id"] == document_id
+    assert summary["page_count"] == 7
+    assert "extracted_text" not in summary
+    assert "extracted_metadata" not in summary
+    assert "pages" not in summary
+    detail = owner_client.get(f"/api/v1/documents/{document_id}").json()
+    assert detail["extracted_text"].startswith("Unique equipment")
+    assert detail["extracted_metadata"]["ocr_page_count"] == 7
+
+
 def upload_document(client, *, item_ids=None, title="Receipt", data=None):
     payload = {
         "title": title,

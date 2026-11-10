@@ -22,7 +22,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
-import type { ItemImageBatchJob, ItemImageBatchPreview, ItemSummary } from "@/lib/types";
+import type { ItemImageBatchJob, ItemImageBatchPreview, ItemListEntry } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
 
 function newRequestId() {
@@ -40,7 +40,7 @@ export function BulkImagesDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: ItemSummary[];
+  items: ItemListEntry[];
 }) {
   const queryClient = useQueryClient();
   const invalidate = useInvalidateInventory();

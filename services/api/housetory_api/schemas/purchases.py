@@ -83,7 +83,7 @@ class PurchaseAllocationOut(ORMModel):
     created_at: datetime
 
 
-class PurchaseOut(ORMModel):
+class PurchaseBrief(ORMModel):
     id: uuid.UUID
     merchant: str | None
     vendor: str | None
@@ -94,14 +94,17 @@ class PurchaseOut(ORMModel):
     notes: str | None
     receipt_document_id: uuid.UUID | None
     receipt: DocumentBrief | None
-    items: list[ItemReference]
-    allocations: list[PurchaseAllocationOut] = Field(default_factory=list)
-    allocated_total_cents: int = 0
-    unallocated_cents: int | None = None
     item_count: int
     is_shared: bool
     created_at: datetime
     updated_at: datetime
+
+
+class PurchaseOut(PurchaseBrief):
+    items: list[ItemReference]
+    allocations: list[PurchaseAllocationOut] = Field(default_factory=list)
+    allocated_total_cents: int = 0
+    unallocated_cents: int | None = None
 
 
 class PurchaseList(BaseModel):

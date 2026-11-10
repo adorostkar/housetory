@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getActiveHouseholdId,
@@ -40,6 +40,20 @@ beforeEach(() => {
 });
 
 describe("household query isolation", () => {
+  it("reuses the session fetched before the household is known", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { queryKeyHashFn: householdScopedQueryHash, staleTime: 30_000 },
+      },
+    });
+    const queryFn = vi.fn(async () => previous);
+    await client.fetchQuery({ queryKey: queryKeys.session, queryFn });
+    setActiveHouseholdId("home-1");
+    expect(await client.fetchQuery({ queryKey: queryKeys.session, queryFn })).toEqual(previous);
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    client.clear();
+  });
+
   it("hashes the same logical query differently per household", () => {
     setActiveHouseholdId("home-1");
     const first = householdScopedQueryHash(["items", { q: "drill" }]);

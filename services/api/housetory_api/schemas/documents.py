@@ -130,7 +130,7 @@ class DocumentBrief(ORMModel):
     url: str
 
 
-class DocumentOut(ORMModel):
+class DocumentSummary(ORMModel):
     id: uuid.UUID
     title: str
     document_type: str
@@ -142,8 +142,6 @@ class DocumentOut(ORMModel):
     document_date: date | None
     merchant: str | None
     notes: str | None
-    extracted_text: str | None
-    extracted_metadata: dict[str, Any]
     ocr_status: str
     ocr_error: str | None
     ocr_confidence: int | None
@@ -152,14 +150,26 @@ class DocumentOut(ORMModel):
     updated_at: datetime
     items: list[ItemReference]
     item_count: int
-    pages: list[DocumentPageOut] = Field(default_factory=list)
     page_count: int = 0
     url: str
     original_url: str
 
 
+class DocumentOut(DocumentSummary):
+    extracted_text: str | None
+    extracted_metadata: dict[str, Any]
+    pages: list[DocumentPageOut] = Field(default_factory=list)
+
+
 class DocumentList(BaseModel):
     items: list[DocumentOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class DocumentSummaryList(BaseModel):
+    items: list[DocumentSummary]
     total: int
     limit: int
     offset: int

@@ -20,7 +20,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { useCanWrite } from "@/lib/queries";
 import { DOCUMENT_TYPE_OPTIONS } from "@/lib/labels";
 import { useDocuments, useInvalidateInventory } from "@/lib/queries";
-import type { DocumentRecord } from "@/lib/types";
+import type { DocumentSummary } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
 
 export function DocumentsPage() {
@@ -32,7 +32,7 @@ export function DocumentsPage() {
   const canWrite = useCanWrite();
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [scanOpen, setScanOpen] = React.useState(false);
-  const [documentToDelete, setDocumentToDelete] = React.useState<DocumentRecord | null>(null);
+  const [documentToDelete, setDocumentToDelete] = React.useState<DocumentSummary | null>(null);
 
   const typeFilter = searchParams.get("type") ?? "";
   const merchantFilter = searchParams.get("merchant") ?? "";

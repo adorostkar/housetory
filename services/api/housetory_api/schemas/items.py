@@ -11,7 +11,7 @@ from ..schemas.households import HouseholdBrief
 from ..schemas.imports import ImportSourceBrief
 from ..schemas.item_images import ItemImageOut
 from ..schemas.properties import PropertyBrief
-from ..schemas.purchases import PurchaseIn, PurchaseOut
+from ..schemas.purchases import PurchaseBrief, PurchaseIn, PurchaseOut
 from ..schemas.valuation import ItemValueEstimateOut
 from ..schemas.warranties import WarrantyIn, WarrantyOut
 
@@ -158,7 +158,7 @@ class LastVerifiedOut(BaseModel):
     stale_reason: str | None = None
 
 
-class ItemSummary(ORMModel):
+class ItemSummaryBase(ORMModel):
     id: uuid.UUID
     name: str
     description: str | None
@@ -180,7 +180,6 @@ class ItemSummary(ORMModel):
     tags: list[TagBrief]
     primary_photo: PhotoOut | None
     representative_image: ItemImageOut | None = None
-    purchase: PurchaseOut | None
     purchase_info_status: Literal["recorded", "unrecorded", "unknown", "not_applicable"] = (
         "unrecorded"
     )
@@ -197,6 +196,14 @@ class ItemSummary(ORMModel):
     last_verified: LastVerifiedOut | None = None
 
 
+class ItemSummary(ItemSummaryBase):
+    purchase: PurchaseOut | None
+
+
+class ItemListEntry(ItemSummaryBase):
+    purchase: PurchaseBrief | None
+
+
 class ItemDetail(ItemSummary):
     serial_number: str | None
     valuation_fingerprint: str
@@ -208,6 +215,13 @@ class ItemDetail(ItemSummary):
 
 class ItemList(BaseModel):
     items: list[ItemSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class ItemSummaryList(BaseModel):
+    items: list[ItemListEntry]
     total: int
     limit: int
     offset: int
