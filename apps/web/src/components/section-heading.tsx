@@ -8,12 +8,14 @@ export function SectionHeading({
   description,
   actionLabel,
   actionTo,
+  extra,
   className,
 }: {
   title: string;
   description?: string;
   actionLabel?: string;
   actionTo?: string;
+  extra?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -26,6 +28,7 @@ export function SectionHeading({
           </p>
         )}
       </div>
+      {extra}
       {actionLabel && actionTo && (
         <Link
           to={actionTo}

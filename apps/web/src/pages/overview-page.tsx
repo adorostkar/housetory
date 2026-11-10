@@ -17,7 +17,8 @@ import { FirstRunChecklist } from "@/components/first-run-checklist";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
-import { ItemCard } from "@/components/item-card";
+import { ItemCard, ItemRow } from "@/components/item-card";
+import { useItemsView, ViewToggle } from "@/components/view-toggle";
 import { RoomCard } from "@/components/room-card";
 import { RoomDialog } from "@/components/room-dialog";
 import { SectionHeading } from "@/components/section-heading";
@@ -52,6 +53,11 @@ export function OverviewPage() {
   const overview = useOverview();
   const financialQuery = useFinancialOverview();
   const roomsQuery = useRooms();
+  const [recentView, setRecentView] = useItemsView(() =>
+    typeof window !== "undefined" && window.matchMedia?.("(max-width: 639px)").matches
+      ? "list"
+      : "grid",
+  );
   const [roomDialogOpen, setRoomDialogOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const { openAddItems } = useAddItems();
@@ -255,13 +261,22 @@ export function OverviewPage() {
               description="The latest additions to your collection."
               actionLabel="All items"
               actionTo="/items"
+              extra={<ViewToggle view={recentView} onChange={setRecentView} />}
             />
             {data.recent_items.length > 0 ? (
-              <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
-                {data.recent_items.slice(0, 6).map((item) => (
-                  <ItemCard key={item.id} item={item} />
-                ))}
-              </div>
+              recentView === "list" ? (
+                <div className="surface divide-y divide-border/60 overflow-hidden p-1.5">
+                  {data.recent_items.slice(0, 5).map((item) => (
+                    <ItemRow key={item.id} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
+                  {data.recent_items.slice(0, 6).map((item) => (
+                    <ItemCard key={item.id} item={item} />
+                  ))}
+                </div>
+              )
             ) : (
               <div className="surface px-5 py-10 text-center text-sm text-muted-foreground">
                 Nothing added yet.

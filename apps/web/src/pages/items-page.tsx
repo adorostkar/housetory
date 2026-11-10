@@ -1,7 +1,5 @@
 import {
   ChevronDown,
-  LayoutGrid,
-  List,
   Search,
   SlidersHorizontal,
   X,
@@ -21,6 +19,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { ItemCard, ItemRow } from "@/components/item-card";
+import { useItemsView, ViewToggle } from "@/components/view-toggle";
 import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,6 @@ import {
 } from "@/lib/queries";
 import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
 import {
-  cn,
   flattenLocations,
   flattenRoomTree,
   locationLabel,
@@ -75,25 +73,11 @@ export function ItemsPage() {
   const sortParam = searchParams.get("sort");
   const sort: SortKey = isSortKey(sortParam) ? sortParam : "created_desc";
 
-  const [view, setView] = useState<"grid" | "list">(() => {
-    try {
-      return localStorage.getItem("housetory.items.view") === "list" ? "list" : "grid";
-    } catch {
-      return "grid";
-    }
-  });
+  const [view, setView] = useItemsView();
   const roomsQuery = useRooms(propertyId || undefined);
   const locationsQuery = useLocations(roomFilter || undefined);
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("housetory.items.view", view);
-    } catch {
-      // Browsing-private storage failures should not break the list.
-    }
-  }, [view]);
 
   const filters = {
     q: qParam || undefined,
@@ -517,40 +501,7 @@ export function ItemsPage() {
             showing={items.length}
             total={total}
           />
-          <div
-            className="flex items-center gap-1 rounded-lg border border-border/70 bg-card/55 p-1"
-            role="group"
-            aria-label="Item view"
-          >
-            <button
-              type="button"
-              className={cn(
-                "flex size-7 items-center justify-center rounded-md transition-colors",
-                view === "grid"
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              aria-label="Card view"
-              aria-pressed={view === "grid"}
-              onClick={() => setView("grid")}
-            >
-              <LayoutGrid className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "flex size-7 items-center justify-center rounded-md transition-colors",
-                view === "list"
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              aria-label="Compact list view"
-              aria-pressed={view === "list"}
-              onClick={() => setView("list")}
-            >
-              <List className="size-3.5" />
-            </button>
-          </div>
+          <ViewToggle view={view} onChange={setView} />
         </div>
       )}
 
