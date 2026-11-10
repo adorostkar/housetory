@@ -194,3 +194,43 @@ def test_read_bounded_truncates_only_when_requested():
     assert len(read(True)) == 100
     with pytest.raises(ManualFetchError):
         read(False)
+
+
+def test_fetch_falls_back_to_next_address_when_first_is_unreachable(monkeypatch):
+    from housetory_api.services import manual_web
+
+    monkeypatch.setattr(
+        manual_web, "_resolve_public", lambda host, port: ["3.173.190.67", "2600:9000::1"]
+    )
+    attempts: list[str] = []
+
+    class FakeConnection:
+        def __init__(self, host, port, connect_host, **kwargs):
+            self.connect_host = connect_host
+
+        def request(self, *args, **kwargs):
+            attempts.append(self.connect_host)
+            if self.connect_host.startswith("3."):
+                raise OSError(101, "Network unreachable")
+
+        def getresponse(self):
+            class Response:
+                status = 200
+
+                def getheaders(self):
+                    return [("content-type", "text/html")]
+
+                def read(self, n=-1):
+                    return b""
+
+            return Response()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(manual_web, "_PinnedHTTPSConnection", FakeConnection)
+    status, _, _ = manual_web._request_once(
+        "https://shop.example/p", timeout=5, max_bytes=1000, accept="text/html"
+    )
+    assert status == 200
+    assert attempts == ["3.173.190.67", "2600:9000::1"]
