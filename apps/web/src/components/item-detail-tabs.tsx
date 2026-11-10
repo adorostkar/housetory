@@ -46,7 +46,7 @@ export function ItemDetailTabList({
       role="tablist"
       aria-label="Item sections"
       onKeyDown={onKeyDown}
-      className="-mx-1 mb-4 flex gap-1 overflow-x-auto border-b border-border/60 px-1"
+      className="-mx-1 mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border/60 px-1 pb-px"
     >
       {ITEM_DETAIL_TABS.map((tab) => {
         const selected = tab.id === value;
