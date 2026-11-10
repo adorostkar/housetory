@@ -55,26 +55,28 @@ export function RoomCard({
     >
       <Link
         to={`/rooms/${room.id}`}
-        className="flex flex-col p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:p-6"
+        className="flex items-center gap-3.5 p-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 sm:flex-col sm:items-stretch sm:gap-0 sm:p-6"
       >
-        <div className="flex items-start justify-between gap-4">
-          <span className="flex size-11 items-center justify-center rounded-2xl bg-secondary/85 text-foreground/65">
+        <div className="contents sm:flex sm:items-start sm:justify-between sm:gap-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-secondary/85 text-foreground/65 sm:size-11">
             <Icon className="size-[1.2rem]" strokeWidth={1.6} />
           </span>
-          <ChevronRight className="mt-1 size-4 text-muted-foreground transition-transform duration-300 group-hover:translate-x-0.5" />
+          <ChevronRight className="order-last ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-300 group-hover:translate-x-0.5 sm:order-none sm:ml-0 sm:mt-1" />
         </div>
-        <h3 className="mt-5 font-display text-[1.5rem] font-normal leading-tight tracking-[-0.02em]">
-          {room.name}
-        </h3>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          {pluralize(room.total_item_count, "item")}
-          {room.total_location_count > 0 && ` · ${pluralize(room.total_location_count, "place")}`}
-        </p>
-        {room.description && (
-          <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-            {room.description}
+        <div className="min-w-0 flex-1 sm:flex-none">
+          <h3 className="truncate font-display text-[1.25rem] font-normal leading-tight tracking-[-0.02em] sm:mt-5 sm:text-[1.5rem]">
+            {room.name}
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground sm:mt-1.5">
+            {pluralize(room.total_item_count, "item")}
+            {room.total_location_count > 0 && ` · ${pluralize(room.total_location_count, "place")}`}
           </p>
-        )}
+          {room.description && (
+            <p className="mt-3 hidden line-clamp-2 text-xs leading-relaxed text-muted-foreground sm:block">
+              {room.description}
+            </p>
+          )}
+        </div>
       </Link>
 
       {nestedRooms.length > 0 && (
