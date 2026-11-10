@@ -301,7 +301,7 @@ export function PhotoGallery({
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+      <div className="mt-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 no-scrollbar">
         {item.photos.map((photo, index) => (
           <button
             key={photo.id}

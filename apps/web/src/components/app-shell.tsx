@@ -267,14 +267,6 @@ function AppShellLayout() {
             </Link>
             <div className="flex items-center gap-0.5">
               <ThemeToggle />
-              {location.pathname !== "/" && (
-                <AddItemsButton
-                  iconOnly
-                  variant="ghost"
-                  size="icon"
-                  label="Add items"
-                />
-              )}
               <AccountMenu compact />
             </div>
           </div>

@@ -280,4 +280,14 @@ describe("ItemsPage bulk organisation", () => {
     expect(screen.getByText("Selection cleared because the view changed.")).toBeVisible();
     expect(screen.getByTestId("location")).not.toHaveTextContent("purchase_info=");
   });
+
+  it("toggles the filter panel and shows the active filter count", async () => {
+    renderPage("/items?room_id=room-1");
+    await screen.findByText("Camera");
+    const toggle = screen.getByRole("button", { name: /^Filters/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("1");
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
 });

@@ -400,7 +400,7 @@ export function AssistantPage() {
         <div className="mx-auto w-full max-w-5xl">
           {messages.length === 0 && !ask.isPending && (
             <div
-              className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1"
+              className="-mx-1 mb-2 flex gap-2 overflow-x-auto overflow-y-hidden px-1 pb-1"
               aria-label="Suggested questions"
             >
               {SUGGESTIONS.map((suggestion) => (

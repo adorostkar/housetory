@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   LayoutGrid,
   List,
   Search,
@@ -127,6 +128,7 @@ export function ItemsPage() {
   });
   const origin = itemOrigin(`${location.pathname}${location.search}`, "Items");
   useRestoreListScroll(items.length > 0, origin);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const hasFilters = Boolean(
     qParam ||
       propertyId ||
@@ -295,6 +297,7 @@ export function ItemsPage() {
         description: itemsQuery.data
           ? `${pluralize(total, "item")} recorded${hasFilters ? " matching your filters" : " across your home"}.`
           : "Everything in your home, in one considered place.",
+        actionsClassName: "hidden lg:flex",
         actions: (
           <AddItemsButton
             context={propertyId ? { propertyId } : undefined}
@@ -303,12 +306,27 @@ export function ItemsPage() {
       }}
     >
       <div className="surface mb-8 p-3.5 sm:p-4">
-        <div className="flex items-center gap-2 text-2xs text-muted-foreground">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 text-2xs text-muted-foreground sm:pointer-events-none sm:w-auto"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
           <SlidersHorizontal className="size-3.5" />
           <span>Filters</span>
-        </div>
+          {activeFilterChips.length > 0 && (
+            <Badge variant="secondary" className="px-1.5 py-0 text-2xs sm:hidden">
+              {activeFilterChips.length}
+            </Badge>
+          )}
+          <ChevronDown
+            className={`ml-auto size-4 transition-transform sm:hidden ${filtersOpen ? "rotate-180" : ""}`}
+          />
+        </button>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-7">
+        <div
+          className={`mt-3 grid-cols-2 gap-2 sm:grid sm:grid-cols-3 lg:grid-cols-7 ${filtersOpen ? "grid" : "hidden"}`}
+        >
           <div className="min-w-[150px] shrink-0 sm:min-w-0">
             <Select
               aria-label="Filter by property"

@@ -297,7 +297,7 @@ export function StocktakePage() {
             aria-label="Search this stocktake"
           />
         </div>
-        <div className="flex max-w-full gap-1.5 overflow-x-auto pb-1 sm:flex-wrap sm:justify-end sm:overflow-visible">
+        <div className="flex max-w-full gap-1.5 overflow-x-auto overflow-y-hidden pb-1 sm:flex-wrap sm:justify-end sm:overflow-visible">
           {FILTERS.map((entry) => {
             const count = statusCounts[entry.value] ?? 0;
             return (

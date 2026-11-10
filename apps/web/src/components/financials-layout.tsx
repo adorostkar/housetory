@@ -22,7 +22,7 @@ export function FinancialsLayout() {
     <div>
       <nav
         aria-label="Financials"
-        className="no-scrollbar mb-5 flex gap-1 overflow-x-auto border-b border-border/60"
+        className="no-scrollbar mb-5 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border/60"
       >
         {FINANCIALS_TABS.map((tab) => (
           <NavLink

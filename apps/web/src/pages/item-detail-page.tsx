@@ -319,9 +319,7 @@ export function ItemDetailPage() {
                     <span className="font-medium text-foreground/80">
                       {item.household.name}
                     </span>
-                    {(item.property ?? item.room) && (
-                      <ChevronRight className="size-3 text-muted-foreground" />
-                    )}
+                    <ChevronRight className="size-3 text-muted-foreground" />
                   </>
                 )}
                 {item.property && (

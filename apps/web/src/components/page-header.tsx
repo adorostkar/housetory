@@ -13,6 +13,7 @@ export function PageHeader({
   backLabel,
   className,
   actionsPlacement = "bottom",
+  actionsClassName,
   size = "compact",
 }: {
   eyebrow?: string;
@@ -24,10 +25,12 @@ export function PageHeader({
   backLabel?: string;
   className?: string;
   actionsPlacement?: "bottom" | "title";
+  /** Extra classes for the actions wrapper, e.g. to hide it on phones. */
+  actionsClassName?: string;
   size?: "compact" | "large";
 }) {
   return (
-    <header className={cn(size === "large" ? "mb-9" : "mb-6", className)}>
+    <header className={cn(size === "large" ? "mb-9" : "mb-4 sm:mb-6", className)}>
       {backTo && (
         <Link
           to={backTo}
@@ -39,12 +42,12 @@ export function PageHeader({
       )}
       <div
         className={cn(
-          "flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:justify-between",
+          "flex flex-col gap-3 sm:gap-5 sm:flex-row sm:flex-wrap sm:justify-between",
           actionsPlacement === "title" ? "sm:items-start" : "sm:items-end",
         )}
       >
         <div className="min-w-0 sm:min-w-[14rem] sm:flex-1">
-          {eyebrow && <p className="eyebrow mb-2.5">{eyebrow}</p>}
+          {eyebrow && <p className="eyebrow mb-2.5 hidden sm:block">{eyebrow}</p>}
           <h1
             className={
               size === "large" ? "display-title" : "display-title-compact"
@@ -64,6 +67,7 @@ export function PageHeader({
             className={cn(
               "flex min-w-0 max-w-full flex-wrap items-center gap-2.5 sm:justify-end sm:max-w-[70%]",
               actionsPlacement === "title" && "sm:mt-6",
+              actionsClassName,
             )}
           >
             {actions}

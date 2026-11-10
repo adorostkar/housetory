@@ -557,7 +557,7 @@ export function DocumentScanDialog({
           </div>
         ) : (
           <>
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="flex gap-2 overflow-x-auto overflow-y-hidden pb-1">
               {pages.map((page, index) => {
                 const active = activePage?.id === page.id;
                 return (

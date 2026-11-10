@@ -53,7 +53,7 @@ export function SectionNav({
       aria-label="Page sections"
       data-testid="section-nav"
       className={cn(
-        "-mx-5 mb-5 overflow-x-auto px-5 sm:-mx-8 sm:px-8 lg:sticky lg:top-16 lg:z-20 lg:mx-0 lg:overflow-visible lg:border-b lg:border-border/50 lg:bg-background/80 lg:px-0 lg:py-2 lg:backdrop-blur-xl",
+        "-mx-5 mb-5 overflow-x-auto overflow-y-hidden px-5 sm:-mx-8 sm:px-8 lg:sticky lg:top-16 lg:z-20 lg:mx-0 lg:overflow-visible lg:border-b lg:border-border/50 lg:bg-background/80 lg:px-0 lg:py-2 lg:backdrop-blur-xl",
         className,
       )}
     >
