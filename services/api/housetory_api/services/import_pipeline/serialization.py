@@ -33,7 +33,7 @@ def _safe_error(exc: Exception) -> str:
     message = str(exc)
     if message in known or message.startswith("Vault archives are limited"):
         return message[:2000]
-    if message.startswith("Could not read this file:"):
+    if message.startswith("Could not read this file:") or type(exc).__name__ == "ProductPageError":
         return message[:2000]
     if message.startswith(
         (

@@ -85,6 +85,7 @@ def fetch_product_page(url: str) -> ProductPage:
             timeout=settings.manual_search_timeout_seconds,
             max_bytes=MAX_LANDING_PAGE_BYTES,
             accept="text/html,application/xhtml+xml",
+            truncate=True,
         )
     except ManualFetchError as exc:
         raise ProductPageError(

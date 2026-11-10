@@ -170,5 +170,27 @@ def test_product_url_failure_and_validation_preserve_source(owner_client, monkey
     process_import_batch(batch["id"])
     detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
     assert detail["status"] == "failed"
+    assert detail["error"] == "The product page could not be fetched safely."
     assert detail["metadata"]["product_url"] == "https://shop.example/unavailable"
     assert detail["metadata"]["purchase_date"] == "2026-10-15"
+
+
+def test_read_bounded_truncates_only_when_requested():
+    import io
+
+    import pytest
+
+    from housetory_api.services.manual_web import ManualFetchError, _read_bounded
+
+    def read(truncate: bool) -> bytes:
+        return _read_bounded(
+            io.BytesIO(b"x" * 1000),
+            max_bytes=100,
+            timeout=5,
+            error_type=ManualFetchError,
+            truncate=truncate,
+        )
+
+    assert len(read(True)) == 100
+    with pytest.raises(ManualFetchError):
+        read(False)

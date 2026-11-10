@@ -118,6 +118,7 @@ def _read_bounded(
     max_bytes: int,
     timeout: int,
     error_type: type[ManualWebError],
+    truncate: bool = False,
 ) -> bytes:
     """Read a response with both a byte cap and a total wall-clock deadline.
 
@@ -137,6 +138,8 @@ def _read_bounded(
         total += len(chunk)
     body = b"".join(chunks)
     if len(body) > max_bytes:
+        if truncate:
+            return body[:max_bytes]
         raise error_type("The response was too large.")
     return body
 
@@ -1152,6 +1155,7 @@ def _request_once(
     timeout: int,
     max_bytes: int,
     accept: str = "application/pdf",
+    truncate: bool = False,
 ) -> tuple[int, dict[str, str], bytes]:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -1191,13 +1195,14 @@ def _request_once(
         response = connection.getresponse()
         response_headers = {key.lower(): value for key, value in response.getheaders()}
         length = response_headers.get("content-length")
-        if length and length.isdigit() and int(length) > max_bytes:
+        if not truncate and length and length.isdigit() and int(length) > max_bytes:
             raise ManualFetchError("The manual file is larger than the configured upload limit.")
         body = _read_bounded(
             response,
             max_bytes=max_bytes,
             timeout=timeout,
             error_type=ManualFetchError,
+            truncate=truncate,
         )
         return response.status, response_headers, body
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
@@ -1212,6 +1217,7 @@ def _request_following_redirects(
     timeout: int,
     max_bytes: int,
     accept: str,
+    truncate: bool = False,
 ) -> tuple[int, dict[str, str], bytes, str]:
     current = url.strip()
     for _ in range(MAX_REDIRECTS + 1):
@@ -1220,6 +1226,7 @@ def _request_following_redirects(
             timeout=timeout,
             max_bytes=max_bytes,
             accept=accept,
+            truncate=truncate,
         )
         if 300 <= status < 400:
             location = headers.get("location")
