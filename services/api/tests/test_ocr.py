@@ -249,3 +249,41 @@ def test_empty_ocr_text_is_a_failed_read_not_a_silent_success(owner_client):
     assert stored["ocr_status"] == "failed"
     assert "No readable text" in stored["ocr_error"]
     assert stored["ocr_processed_at"] is not None
+
+
+NORDIC_RECEIPT_TEXT = """Clas Ohlson
+Solna Centrum
+BUTIK KA. ANV. KVITTO DATUM
+b 10-1-272 Strykbrada vikbar 249.00
+b 44-5375 STRYKJARN BRAUN S 499 00
+(Du sparar 300.00)
+Antal artiklar: 2
+MOMS BRUTTO MOMS NETTO
+b 25.0% 748.00 149.60 598.40
+Total 748.00 149.60 598.40
+2026-11-10 11:41
+KOP
+SEK 748,00
+"""
+
+
+def test_nordic_receipt_uses_gross_total_and_real_lines():
+    from types import SimpleNamespace
+
+    from housetory_api.services.document_extraction import build_extraction
+
+    document = SimpleNamespace(id="d", document_type="receipt", title="t", document_date=None)
+    result = build_extraction(
+        document,
+        NORDIC_RECEIPT_TEXT,
+        parse_receipt(NORDIC_RECEIPT_TEXT),
+        source_artifact="x",
+    )
+    assert result["fields"]["total_cents"] == 74800
+    assert result["fields"]["currency"] == "SEK"
+    products = [line for line in result["lines"] if line["kind"] == "product"]
+    assert [(line["description"], line["line_total_cents"]) for line in products] == [
+        ("Strykbrada vikbar", 24900),
+        ("STRYKJARN BRAUN S", 49900),
+    ]
+    assert not any("does not match" in warning for warning in result["warnings"])

@@ -55,6 +55,13 @@ CURRENCY_SYMBOLS = {
     "CA$": "CAD",
     "A$": "AUD",
     "AU$": "AUD",
+    "SEK": "SEK",
+    "NOK": "NOK",
+    "DKK": "DKK",
+    "EUR": "EUR",
+    "USD": "USD",
+    "GBP": "GBP",
+    "CHF": "CHF",
 }
 
 ISO_CURRENCIES = (
@@ -75,7 +82,7 @@ ISO_CURRENCIES = (
 )
 
 MONEY_RE = re.compile(
-    r"(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹])?\s*"
+    r"(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹]|(?<![A-Za-z])(?:SEK|NOK|DKK|EUR|USD|GBP|CHF)(?![A-Za-z]))?\s*"
     r"(?P<amount>\d{1,3}(?:[ ,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})"
 )
 
@@ -166,7 +173,46 @@ def _require_binary(name: str) -> str:
     return path
 
 
+def _prepare_for_ocr(path: Path, target: Path) -> bool:
+    """Flatten shadows and boost thin print so photographed receipts read cleanly.
+
+    Photos of thermal paper carry uneven lighting and low contrast. Dividing out a
+    blurred copy of the page removes the shadow; upscaling helps small print.
+    Returns False when the file is not a decodable image so OCR can use the original.
+    """
+    try:
+        from PIL import Image, ImageChops, ImageFilter, ImageOps
+
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source).convert("L")
+        longest = max(image.size)
+        if longest > 3600:
+            image = image.resize(
+                (round(image.width * 3600 / longest), round(image.height * 3600 / longest))
+            )
+        radius = max(15, min(image.size) // 40)
+        background = image.filter(ImageFilter.GaussianBlur(radius))
+        ink = ImageChops.subtract(background, image)
+        cleaned = ImageOps.invert(ImageOps.autocontrast(ink, cutoff=0.5))
+        cleaned = cleaned.point(lambda value: 255 if value > 170 else 0)
+        if max(cleaned.size) < 2400:
+            cleaned = cleaned.resize((cleaned.width * 2, cleaned.height * 2), Image.LANCZOS)
+        cleaned.save(target, format="PNG")
+        return True
+    except Exception:  # noqa: BLE001 - any decode problem falls back to the raw file
+        return False
+
+
 def _tesseract_tsv(path: Path) -> ExtractedText:
+    """Read an image with a cleaned copy, trying two page layouts and keeping the better."""
+    with tempfile.TemporaryDirectory(prefix="housetory-prep-") as temp_dir:
+        prepared = Path(temp_dir) / "prepared.png"
+        source = prepared if _prepare_for_ocr(path, prepared) else path
+        candidates = [_run_tesseract_tsv(source, psm) for psm in ("6", "4")]
+    return max(candidates, key=lambda result: result.confidence or 0)
+
+
+def _run_tesseract_tsv(path: Path, psm: str = "6") -> ExtractedText:
     binary = _require_binary("tesseract")
     settings = get_settings()
     try:
@@ -178,7 +224,7 @@ def _tesseract_tsv(path: Path) -> ExtractedText:
                 "-l",
                 settings.ocr_language,
                 "--psm",
-                "6",
+                psm,
                 "tsv",
             ],
             capture_output=True,
@@ -385,22 +431,48 @@ def _parse_amount(raw: str) -> int | None:
     return cents if cents >= 0 else None
 
 
+TOTAL_KEYWORDS = (
+    "grand total",
+    "amount due",
+    "total due",
+    "balance due",
+    "att betala",
+    "totalt",
+    "summa",
+    "total",
+)
+
+
+def _line_total_amount(line: str) -> tuple[int | None, str | None]:
+    """Amount a labelled total line refers to.
+
+    A VAT table row such as `Total 748.00 149.60 598.40` lists gross, VAT and net;
+    the gross amount comes first, so use it. A plain `TOTAL 748.00` uses its last.
+    """
+    matches = list(MONEY_RE.finditer(line))
+    if not matches:
+        return None, None
+    match = matches[0] if len(matches) >= 3 else matches[-1]
+    return (
+        _parse_amount(match.group("amount")),
+        CURRENCY_SYMBOLS.get(match.group("currency") or ""),
+    )
+
+
 def _parse_total(lines: list[str]) -> tuple[int | None, str | None]:
-    priorities = ("grand total", "amount due", "total due", "balance due", "total")
-    for keyword in priorities:
-        for line in reversed(lines):
-            lowered = line.lower()
-            if keyword not in lowered:
-                continue
-            if keyword == "total" and "subtotal" in lowered:
-                continue
-            matches = list(MONEY_RE.finditer(line))
-            if matches:
-                match = matches[-1]
-                amount = _parse_amount(match.group("amount"))
-                currency = CURRENCY_SYMBOLS.get(match.group("currency") or "")
-                if amount is not None:
-                    return amount, currency
+    for keyword in TOTAL_KEYWORDS:
+        labelled = [
+            line
+            for line in reversed(lines)
+            if keyword in line.lower()
+            and not (keyword == "total" and "subtotal" in line.lower())
+        ]
+        # Lines with a single amount are the real total; multi-column VAT rows come last.
+        labelled.sort(key=lambda line: len(list(MONEY_RE.finditer(line))) > 2)
+        for line in labelled:
+            amount, currency = _line_total_amount(line)
+            if amount is not None:
+                return amount, currency
     # Fallback: a currency-marked amount, preferring the largest value. This
     # catches receipts whose total line was split across OCR lines.
     marked: list[tuple[int, str]] = []

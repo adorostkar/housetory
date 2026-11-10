@@ -44,7 +44,7 @@ from .ocr import (
     _parse_warranty_fields,
 )
 
-EXTRACTION_VERSION = "2026-11-05.1"
+EXTRACTION_VERSION = "2026-11-10.1"
 MAX_LINES = 50
 
 NON_PRODUCT_WORDS = {
@@ -91,6 +91,26 @@ NON_PRODUCT_WORDS = {
     "address",
     "www.",
     "http",
+    "kvitto",
+    "datum",
+    "butik",
+    "moms",
+    "brutto",
+    "netto",
+    "antal artiklar",
+    "du sparar",
+    "you saved",
+    "kund registrerad",
+    "köp",
+    "kop ",
+    "godkänt",
+    "godkant",
+    "contactless",
+    "swedbank",
+    "terminal",
+    "period",
+    "ref:",
+    "resp:",
 }
 
 PAYMENT_WORDS = {
@@ -104,8 +124,8 @@ PAYMENT_WORDS = {
     "debit",
     "credit",
 }
-TAX_WORDS = {"tax", "sales tax", "gst", "vat", "hst"}
-DISCOUNT_WORDS = {"discount", "promo", "coupon", "savings", "markdown"}
+TAX_WORDS = {"tax", "sales tax", "gst", "vat", "hst", "moms"}
+DISCOUNT_WORDS = {"discount", "promo", "coupon", "savings", "markdown", "rabatt"}
 SHIPPING_WORDS = {"shipping", "delivery", "freight", "handling"}
 QTY_RE = re.compile(r"\b(?P<qty>\d{1,4})\s*(?:x|×|@)\s*", re.IGNORECASE)
 QTY_PREFIX_RE = re.compile(r"^\s*(?:qty|quantity)\s*[:#-]?\s*(?P<qty>\d{1,4})\b", re.IGNORECASE)
@@ -141,6 +161,8 @@ def _line_kind(line: str) -> str:
         return "other"
     if "change" in lowered or "cash back" in lowered:
         return "change"
+    if re.fullmatch(r"(sek|nok|dkk|eur|usd|gbp|kr)\s*[\d.,\s]+", lowered.strip()):
+        return "payment"
     if any(word in lowered for word in DISCOUNT_WORDS):
         return "discount"
     if any(word in lowered for word in TAX_WORDS):
@@ -172,6 +194,8 @@ def _line_description(line: str, matches: list[tuple[int, str | None, int, bool]
         flags=re.I,
     )
     description = re.sub(r"\b(?:qty|quantity)\s*[:#-]?\s*\d+\b", " ", description, flags=re.I)
+    # Retail receipts lead each line with a VAT flag and article number: `b 10-1-272 Name`.
+    description = re.sub(r"^\s*[A-Za-z]?\s+\d[\d-]{3,}\s+", "", description)
     description = re.sub(r"\s+", " ", description).strip(" -:•·|*")
     return description[:300]
 
@@ -249,14 +273,26 @@ def _parse_line(line: str, line_number: int, product_index: int, document_id, ve
 
 
 def _named_amount(lines: list[tuple[int, str]], names: tuple[str, ...]) -> tuple[int | None, str]:
+    candidates: list[tuple[int, str]] = []
     for _line_number, line in reversed(lines):
         lowered = _normalized(line)
         if not any(name in lowered for name in names):
             continue
+        if "total" in names and "subtotal" in lowered.replace("sub total", "subtotal"):
+            continue
         amounts = _money_matches(line)
-        if amounts:
-            return abs(amounts[-1][0]), line
-    return None, ""
+        if not amounts:
+            continue
+        # A VAT table row (gross, VAT, net) is a last resort and uses its gross amount.
+        if len(amounts) >= 3:
+            candidates.append((1, f"{abs(amounts[0][0])}\0{line}"))
+        else:
+            candidates.append((0, f"{abs(amounts[-1][0])}\0{line}"))
+    if not candidates:
+        return None, ""
+    _rank, packed = min(candidates, key=lambda candidate: candidate[0])
+    value, line = packed.split("\0", 1)
+    return int(value), line
 
 
 def _all_dates(text: str) -> list[date]:
@@ -302,7 +338,7 @@ def build_extraction(
         f"{EXTRACTION_VERSION}\0{document.document_type}\0{text}".encode()
     ).hexdigest()[:24]
     raw_lines = [
-        (index, line.strip())
+        (index, re.sub(r"(\d{2,})[ ,](\d{2})$", r"\1.\2", line.strip()))
         for index, line in enumerate(text.splitlines(), start=1)
         if line.strip()
     ]
@@ -335,7 +371,8 @@ def build_extraction(
 
     total_line = ""
     total_cents, total_line = _named_amount(
-        raw_lines, ("grand total", "amount due", "total due", "total")
+        raw_lines,
+        ("grand total", "amount due", "total due", "att betala", "totalt", "summa", "total"),
     )
     if total_cents is None and metadata.get("total_cents") is not None:
         total_cents = int(metadata["total_cents"])

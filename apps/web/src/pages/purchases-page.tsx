@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
 import { ItemMultiSelect } from "@/components/item-multi-select";
+import { ReceiptPicker } from "@/components/receipt-picker";
 import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,9 +38,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useCanWrite, useDefaultCurrency } from "@/lib/queries";
-import { CURRENCIES, DOCUMENT_TYPE_LABELS } from "@/lib/labels";
+import { CURRENCIES } from "@/lib/labels";
 import {
-  useDocuments,
   useInvalidateInventory,
   usePurchases,
 } from "@/lib/queries";
@@ -426,7 +426,6 @@ function PurchaseDialog({
 }) {
   const invalidate = useInvalidateInventory();
   const defaultCurrency = useDefaultCurrency();
-  const documentsQuery = useDocuments({}, 100);
   const [merchant, setMerchant] = React.useState("");
   const [purchaseDate, setPurchaseDate] = React.useState("");
   const [price, setPrice] = React.useState("");
@@ -563,20 +562,11 @@ function PurchaseDialog({
                 placeholder="Order or receipt reference"
               />
             </Field>
-            <Field label="Receipt document" htmlFor="purchase-receipt" optional>
-              <Select
-                id="purchase-receipt"
-                value={receiptDocumentId}
-                onChange={(event) => setReceiptDocumentId(event.target.value)}
-              >
-                <option value="">No receipt linked</option>
-                {(documentsQuery.data?.items ?? []).map((document) => (
-                  <option key={document.id} value={document.id}>
-                    {document.title} · {DOCUMENT_TYPE_LABELS[document.document_type]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <ReceiptPicker
+              id="purchase-receipt"
+              value={receiptDocumentId}
+              onChange={setReceiptDocumentId}
+            />
           </div>
 
           <p className="text-2xs leading-relaxed text-muted-foreground">

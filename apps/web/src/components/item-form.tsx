@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { CategoryDialog } from "@/components/category-dialog";
+import { ReceiptPicker } from "@/components/receipt-picker";
 import { RoomDialog } from "@/components/room-dialog";
 import { Field, FormError } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
@@ -962,20 +963,11 @@ export function ItemForm({
                     placeholder="Order or receipt reference"
                   />
                 </Field>
-                <Field label="Receipt document" htmlFor="purchase-receipt" optional>
-                  <Select
-                    id="purchase-receipt"
-                    value={receiptDocumentId}
-                    onChange={(event) => setReceiptDocumentId(event.target.value)}
-                  >
-                    <option value="">No receipt linked</option>
-                    {(documentsQuery.data?.items ?? []).map((document) => (
-                      <option key={document.id} value={document.id}>
-                        {document.title} · {DOCUMENT_TYPE_LABELS[document.document_type]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <ReceiptPicker
+                  id="purchase-receipt"
+                  value={receiptDocumentId}
+                  onChange={setReceiptDocumentId}
+                />
               </div>
               <Field label="Purchase notes" htmlFor="purchase-notes" optional>
                 <Textarea
