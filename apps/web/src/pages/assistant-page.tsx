@@ -10,6 +10,7 @@ import {
   Info,
   Loader2,
   MapPin,
+  Mic,
   RotateCcw,
   Send,
   Sparkles,
@@ -30,6 +31,7 @@ import { withHousehold } from "@/lib/household-links";
 import { useAiStatus } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
+import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
 import { itemContainer, locationLabel } from "@/lib/utils";
@@ -133,6 +135,11 @@ export function AssistantPage() {
   const paneRef = React.useRef<HTMLDivElement>(null);
   const lastAnswerRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const dictation = useSpeechDictation((text) =>
+    setQuestion((current) =>
+      current.trim() ? `${current.trimEnd()} ${text}` : text,
+    ),
+  );
   const [nearBottom, setNearBottom] = React.useState(true);
   const [infoOpen, setInfoOpen] = React.useState(false);
 
@@ -173,6 +180,7 @@ export function AssistantPage() {
     event?.preventDefault();
     const value = question.trim();
     if (value.length < 2 || ask.isPending) return;
+    dictation.stop();
     ask.mutate({ value });
   };
 
@@ -314,7 +322,7 @@ export function AssistantPage() {
           aria-label="Conversation"
           className="h-full overflow-y-auto overscroll-contain pb-2"
         >
-          <div className="mx-auto w-full max-w-3xl space-y-4">
+          <div className="mx-auto w-full max-w-5xl space-y-4">
             {messages.length === 0 && !ask.isPending && (
               <div className="flex flex-col items-center px-2 py-10 text-center">
                 <Bot className="size-6 text-brass" strokeWidth={1.6} />
@@ -389,7 +397,7 @@ export function AssistantPage() {
       </div>
 
       <div className="shrink-0 pt-2">
-        <div className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto w-full max-w-5xl">
           {messages.length === 0 && !ask.isPending && (
             <div
               className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1"
@@ -426,6 +434,21 @@ export function AssistantPage() {
                   maxLength={2000}
                   className="max-h-40 min-h-11 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
                 />
+                {dictation.supported && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={dictation.listening ? "default" : "ghost"}
+                    aria-label={
+                      dictation.listening ? "Stop dictation" : "Dictate question"
+                    }
+                    aria-pressed={dictation.listening}
+                    onClick={dictation.toggle}
+                    className={dictation.listening ? "animate-pulse" : undefined}
+                  >
+                    <Mic />
+                  </Button>
+                )}
                 <Button
                   type="submit"
                   size="icon"
