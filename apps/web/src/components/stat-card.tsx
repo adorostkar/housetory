@@ -36,7 +36,7 @@ export function StatCard({
           <Icon className="size-[0.95rem]" strokeWidth={1.7} />
         </span>
       </div>
-      <div className="mt-6 font-display text-[2.35rem] font-normal leading-none tracking-[-0.035em] tabular-nums">
+      <div className="mt-3 font-display text-[2rem] sm:mt-6 sm:text-[2.35rem] font-normal leading-none tracking-[-0.035em] tabular-nums">
         {value}
       </div>
       {detail && (
@@ -51,7 +51,7 @@ export function StatCard({
   );
 
   const classes = cn(
-    "surface group block p-5 transition-[border-color,box-shadow,transform] duration-300",
+    "surface group block p-4 sm:p-5 transition-[border-color,box-shadow,transform] duration-300",
     to && "hover:-translate-y-0.5 hover:border-border hover:shadow-lift",
     className,
   );

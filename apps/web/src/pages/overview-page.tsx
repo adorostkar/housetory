@@ -19,7 +19,6 @@ import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
 import { ItemCard } from "@/components/item-card";
 import { RoomCard } from "@/components/room-card";
-import { QuickSearch } from "@/components/quick-search";
 import { RoomDialog } from "@/components/room-dialog";
 import { SectionHeading } from "@/components/section-heading";
 import { StatCard } from "@/components/stat-card";
@@ -102,19 +101,19 @@ export function OverviewPage() {
 
   return (
     <div className="animate-fade-up">
-      <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+      <header className="mb-6 flex flex-col gap-4 sm:mb-10 sm:gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="eyebrow mb-3">{today}</p>
+          <p className="eyebrow mb-3 hidden sm:block">{today}</p>
           <h1 className="display-title">
             {greetingForHour(new Date().getHours())}, {firstName}.
           </h1>
-          <p className="mt-3 max-w-2xl text-pretty text-[0.94rem] leading-relaxed text-muted-foreground">
+          <p className="mt-2 max-w-2xl text-pretty text-[0.94rem] sm:mt-3 leading-relaxed text-muted-foreground">
             {data.item_count === 0
               ? "A calm record of everything you own — where it lives, what it cost, and the paperwork that proves it."
               : `${pluralize(data.item_count, "item")} across ${pluralize(data.room_count, "room")}, with ${pluralize(data.document_count, "document")} in the library. Everything has a place.`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {data.item_count > 0 && (
             <>
               <Button variant="outline" asChild>
@@ -133,13 +132,9 @@ export function OverviewPage() {
             <DoorOpen />
             New room
           </Button>
-          <AddItemsButton />
+          <AddItemsButton className="hidden lg:inline-flex" />
         </div>
       </header>
-
-      <div className="mb-6 lg:hidden">
-        <QuickSearch variant="mobile" />
-      </div>
 
       <div
         className={`grid grid-cols-2 gap-3.5 sm:gap-4 ${statGridClass}`}
