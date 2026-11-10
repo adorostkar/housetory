@@ -89,7 +89,7 @@ def fetch_product_page(url: str) -> ProductPage:
         )
     except ManualFetchError as exc:
         raise ProductPageError(
-            "The product page could not be fetched safely. Check the URL and try again."
+            f"The product page could not be fetched safely: {exc} Check the URL and try again."
         ) from exc
     if status != 200:
         raise ProductPageError(f"The product page returned HTTP {status}.")

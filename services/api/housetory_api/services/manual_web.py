@@ -1110,7 +1110,7 @@ def _resolve_public(hostname: str, port: int) -> list[str]:
         records = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
     except (OSError, UnicodeError) as exc:
         raise ManualFetchError("The manual source host could not be resolved.") from exc
-    addresses = sorted({record[4][0] for record in records})
+    addresses = sorted({record[4][0] for record in records}, key=lambda a: (":" in a, a))
     if not addresses or any(not _public_ip(address) for address in addresses):
         raise ManualFetchError(
             "The manual source resolves to a private, loopback or internal address."
@@ -1168,18 +1168,6 @@ def _request_once(
         raise ManualFetchError("The manual URL contains an invalid port.") from exc
     addresses = _resolve_public(parsed.hostname, port)
     host = parsed.hostname
-    connect_host = addresses[0]
-    if parsed.scheme == "https":
-        context = ssl.create_default_context()
-        connection: http.client.HTTPConnection = _PinnedHTTPSConnection(
-            host,
-            port,
-            connect_host,
-            timeout=timeout,
-            context=context,
-        )
-    else:
-        connection = _PinnedHTTPConnection(host, port, connect_host, timeout=timeout)
     path = parsed.path or "/"
     if parsed.query:
         path += f"?{parsed.query}"
@@ -1190,25 +1178,44 @@ def _request_once(
         "User-Agent": "HousetoryManualFetch/1.0",
         "Connection": "close",
     }
-    try:
-        connection.request("GET", path, headers=headers)
-        response = connection.getresponse()
-        response_headers = {key.lower(): value for key, value in response.getheaders()}
-        length = response_headers.get("content-length")
-        if not truncate and length and length.isdigit() and int(length) > max_bytes:
-            raise ManualFetchError("The manual file is larger than the configured upload limit.")
-        body = _read_bounded(
-            response,
-            max_bytes=max_bytes,
-            timeout=timeout,
-            error_type=ManualFetchError,
-            truncate=truncate,
-        )
-        return response.status, response_headers, body
-    except (OSError, TimeoutError, http.client.HTTPException) as exc:
-        raise ManualFetchError("The manual source could not be downloaded safely.") from exc
-    finally:
-        connection.close()
+    last_error: Exception | None = None
+    # Try each resolved public address so one unreachable (e.g. IPv6) host does not fail the fetch.
+    for connect_host in addresses[:4]:
+        if parsed.scheme == "https":
+            context = ssl.create_default_context()
+            connection: http.client.HTTPConnection = _PinnedHTTPSConnection(
+                host,
+                port,
+                connect_host,
+                timeout=timeout,
+                context=context,
+            )
+        else:
+            connection = _PinnedHTTPConnection(host, port, connect_host, timeout=timeout)
+        try:
+            connection.request("GET", path, headers=headers)
+            response = connection.getresponse()
+            response_headers = {key.lower(): value for key, value in response.getheaders()}
+            length = response_headers.get("content-length")
+            if not truncate and length and length.isdigit() and int(length) > max_bytes:
+                raise ManualFetchError(
+                    "The manual file is larger than the configured upload limit."
+                )
+            body = _read_bounded(
+                response,
+                max_bytes=max_bytes,
+                timeout=timeout,
+                error_type=ManualFetchError,
+                truncate=truncate,
+            )
+            return response.status, response_headers, body
+        except (OSError, TimeoutError, http.client.HTTPException) as exc:
+            last_error = exc
+        finally:
+            connection.close()
+    raise ManualFetchError(
+        f"The manual source could not be downloaded safely ({type(last_error).__name__})."
+    ) from last_error
 
 
 def _request_following_redirects(

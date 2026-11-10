@@ -325,7 +325,13 @@ def process_import_batch(
         except Exception as exc:  # noqa: BLE001 - persisted for recovery
             db.rollback()
             batch = db.get(ImportBatch, batch_id)
-            logger.error("Import batch %s failed (%s)", batch_id, type(exc).__name__)
+            logger.error(
+                "Import batch %s failed (%s): %s",
+                batch_id,
+                type(exc).__name__,
+                exc if type(exc).__name__ == "ProductPageError" else "see exception cause",
+                exc_info=exc.__cause__,
+            )
             if batch is not None:
                 batch.status = ImportStatus.FAILED.value
                 batch.error = _safe_error(exc)
