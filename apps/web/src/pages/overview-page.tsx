@@ -113,11 +113,22 @@ export function OverviewPage() {
           <h1 className="display-title">
             {greetingForHour(new Date().getHours())}, {firstName}.
           </h1>
-          <p className="mt-2 max-w-2xl text-pretty text-[0.94rem] sm:mt-3 leading-relaxed text-muted-foreground">
-            {data.item_count === 0
-              ? "A calm record of everything you own — where it lives, what it cost, and the paperwork that proves it."
-              : `${pluralize(data.item_count, "item")} across ${pluralize(data.room_count, "room")}, with ${pluralize(data.document_count, "document")} in the library. Everything has a place.`}
-          </p>
+          {data.item_count === 0 ? (
+            <p className="mt-2 max-w-2xl text-pretty text-[0.94rem] leading-relaxed text-muted-foreground sm:mt-3">
+              A calm record of everything you own — where it lives, what it cost, and the paperwork that proves it.
+            </p>
+          ) : (
+            warrantyCounts.expiring_count > 0 && (
+              <p className="mt-2 text-[0.94rem] text-muted-foreground sm:mt-3">
+                <Link
+                  to="/warranties"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  {pluralize(warrantyCounts.expiring_count, "warranty")} expiring soon
+                </Link>
+              </p>
+            )
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           {data.item_count > 0 && (
