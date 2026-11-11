@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import type { DocumentSummary, DocumentSummaryList, ItemSummary, Overview } from "../src/lib/types";
+import type { DocumentSummary, DocumentSummaryList, FinancialOverview, ItemSummary, Overview } from "../src/lib/types";
 
 async function seedDenseFixtures(request: APIRequestContext) {
   const sessionResponse = await request.get("/api/v1/auth/session");
@@ -548,6 +548,84 @@ test.describe("mobile responsive", () => {
     }
     expect(commits).toBe(2);
     expect(cancellations).toBe(2);
+  });
+
+  test("Home purchase panels wrap without horizontal scrolling", async ({ page }) => {
+    const rows: FinancialOverview["value_by_category"] = [
+      {
+        name: "Equipment and supplies for the workshop and home",
+        currency: "SEK", purchase_total_cents: 98765432100,
+        current_value_total_cents: 0, item_count: 12,
+      },
+      {
+        name: "ROOM_CATEGORY_ABCDEFGHIJKLMNOPQRSTUVWXYZ_012345678901234567890123456789",
+        currency: "USD", purchase_total_cents: 123456789,
+        current_value_total_cents: 0, item_count: 2,
+      },
+      {
+        name: "Kitchen",
+        currency: "JPY", purchase_total_cents: 99999999900,
+        current_value_total_cents: 0, item_count: 1,
+      },
+    ];
+    await page.route("**/api/v1/overview?**", async route => {
+      const response = await route.fetch();
+      const data: Overview = await response.json();
+      if (!data.financial) throw new Error("Expected embedded Home financial data");
+      await route.fulfill({
+        response,
+        json: {
+          ...data,
+          financial: {
+            ...data.financial,
+            currency_totals: rows.map(row => ({
+              currency: row.currency, purchase_total_cents: row.purchase_total_cents,
+              current_value_total_cents: 0, purchase_item_count: row.item_count,
+              current_value_item_count: 0,
+            })),
+            value_by_category: rows,
+            value_by_room: rows,
+          },
+        },
+      });
+    });
+    for (const width of [360, 390, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto("/");
+      for (const title of ["Purchases by category", "Purchases by room"]) {
+        const panel = page.getByRole("heading", { name: title, exact: true }).locator("../..");
+        const table = panel.getByRole("table");
+        await expect(table).toBeVisible();
+        const bounds = await table.evaluate(element => {
+          const parent = element.parentElement;
+          if (!parent) throw new Error("Missing purchase table container");
+          return {
+            width: element.getBoundingClientRect().width,
+            available: parent.clientWidth,
+            scrollWidth: parent.scrollWidth,
+          };
+        });
+        expect(bounds.width, `${title} table at ${width}px`).toBeLessThanOrEqual(bounds.available + 1);
+        expect(bounds.scrollWidth, `${title} scroll at ${width}px`).toBeLessThanOrEqual(bounds.available + 1);
+        await expect(table.locator("tbody tr")).toHaveCount(rows.length);
+        for (const [index, row] of rows.entries()) {
+          const cells = table.locator("tbody tr").nth(index).getByRole("cell");
+          await expect(cells.nth(0)).toContainText(row.name);
+          await expect(cells.nth(1)).toHaveText(row.currency);
+          await expect(cells.nth(2)).not.toBeEmpty();
+          for (const cell of await cells.all()) {
+            expect(await cell.evaluate(element => element.scrollWidth - element.clientWidth),
+              `${title} cell at ${width}px`).toBeLessThanOrEqual(1);
+          }
+          if (width < 1280) {
+            const name = table.getByText(row.name, { exact: true });
+            expect(await name.evaluate(element => element.scrollWidth - element.clientWidth),
+              `${title} wrapped name at ${width}px`).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    }
   });
 
   test("Home and document cards stay bounded with long item names", async ({ page }) => {

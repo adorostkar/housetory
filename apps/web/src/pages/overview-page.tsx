@@ -565,25 +565,25 @@ function BreakdownTable({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[420px] text-left text-xs">
+          <table className="w-full table-fixed text-left text-xs xl:table-auto">
             <thead>
               <tr className="border-b border-border/60 text-2xs uppercase tracking-[0.1em] text-muted-foreground">
-                <th className="px-5 py-2.5 font-medium">Name</th>
+                <th className="px-3 py-2.5 font-medium xl:px-5">Name</th>
                 <th className="px-3 py-2.5 font-medium">Currency</th>
-                <th className="px-5 py-2.5 text-right font-medium">Purchase</th>
+                <th className="px-3 py-2.5 text-right font-medium xl:px-5">Purchase</th>
               </tr>
             </thead>
             <tbody>
               {rows.slice(0, 8).map((row) => (
                 <tr key={`${row.name}-${row.currency}`} className="border-b border-border/40 last:border-0">
-                  <td className="px-5 py-2.5">
-                    <span className="block max-w-40 truncate">{row.name}</span>
+                  <td className="px-3 py-2.5 xl:px-5">
+                    <span className="block [overflow-wrap:anywhere] xl:max-w-40 xl:truncate">{row.name}</span>
                     <span className="text-2xs text-muted-foreground">
                       {pluralize(row.item_count, "item")}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">{row.currency}</td>
-                  <td className="px-5 py-2.5 text-right tabular-nums">
+                  <td className="px-3 py-2.5 text-right tabular-nums xl:px-5">
                     {formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
                   </td>
                 </tr>
