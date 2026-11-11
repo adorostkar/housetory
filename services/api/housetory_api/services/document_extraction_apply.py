@@ -44,6 +44,7 @@ def _items_by_id(db: Session, household_id: uuid.UUID, item_ids: set[uuid.UUID])
             .where(Item.household_id == household_id, Item.id.in_(item_ids))
             .order_by(Item.id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         ).all()
     )
     if len(items) != len(item_ids):
@@ -191,6 +192,7 @@ def apply_extraction(
         select(Document)
         .where(Document.id == document.id, Document.household_id == household_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if document is None:
         raise ApiError(404, "document_not_found", "Document not found.")
@@ -229,6 +231,18 @@ def apply_extraction(
                 409,
                 "extraction_stale",
                 "The extracted document changed. Refresh and review the proposal again.",
+            )
+        from .enrichment import source_version
+
+        if refinement.get("source_version") and refinement["source_version"] != source_version(
+            db,
+            document,
+        ):
+            raise ApiError(
+                409,
+                "extraction_stale",
+                "The document changed after these AI suggestions. Keep your current edits "
+                "and request a new refinement.",
             )
         extraction = refinement
 

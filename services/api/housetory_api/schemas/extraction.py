@@ -8,6 +8,7 @@ from ..schemas.ai import AiStatus
 from ..schemas.common import Description, ItemReference, trimmed
 from ..schemas.documents import DocumentBrief, DocumentOut
 from ..schemas.purchases import PurchaseIn
+from .enrichment import EnhancementState
 
 LineKind = Literal[
     "product",
@@ -130,6 +131,8 @@ class ExtractionReviewOut(BaseModel):
     duplicate_documents: list[DuplicateDocumentBrief] = Field(default_factory=list)
     applied: list[ExtractionApplySummary] = Field(default_factory=list)
     ai_status: AiStatus
+    enhancement: EnhancementState | None = None
+    suggested_refinement: "ExtractionRefinementOut | None" = None
 
 
 class LineMatchInput(BaseModel):

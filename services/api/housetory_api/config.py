@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     voice_max_active_notes: int = Field(default=10, ge=1, le=100)
     voice_max_suggestions: int = Field(default=50, ge=1, le=100)
     voice_max_transcript_chars: int = Field(default=12000, ge=500, le=50000)
+    worker_queue: Literal["all", "default", "ai"] = "all"
 
     smtp_host: str = ""
     smtp_port: int = Field(default=587, ge=1, le=65535)

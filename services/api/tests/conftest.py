@@ -41,6 +41,39 @@ from housetory_api.main import app  # noqa: E402
 from housetory_api.services.email import reset_captured_email  # noqa: E402
 
 
+@pytest.fixture
+def configured_ai(monkeypatch):
+    from housetory_api.schemas.ai import AiStatus
+    from housetory_api.services import ai
+    from housetory_api.services.ai_runtime import AiRuntimeConfig
+
+    config = AiRuntimeConfig(
+        provider="ollama",
+        base_url="http://127.0.0.1:11434",
+        api_key=None,
+        model="extract-test",
+        task="imports",
+        provider_id=None,
+        display_name="Test model",
+        mode="local",
+        source="environment",
+        enabled=True,
+        cloud_consent=False,
+        configured=True,
+    )
+    status = AiStatus(
+        provider="ollama",
+        mode="local",
+        model=config.model,
+        configured=True,
+        available=True,
+        privacy_note="Synthetic test model",
+    )
+    monkeypatch.setattr(ai, "config_for", lambda *a, **k: config)
+    monkeypatch.setattr(ai, "status_for", lambda *a, **k: status)
+    return config
+
+
 def _admin_connection() -> psycopg.Connection:
     url = make_url(TEST_DATABASE_URL)
     return psycopg.connect(

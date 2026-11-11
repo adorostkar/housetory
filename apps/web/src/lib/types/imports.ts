@@ -1,4 +1,5 @@
 import type { UUID } from "@/lib/types/core";
+import type { EnhancementState } from "@/lib/types/enrichment";
 
 export type ImportStatus =
   | "queued"
@@ -157,6 +158,15 @@ export interface ImportBatch {
 }
 
 export interface ImportBatchDetail extends ImportBatch {
+  enhancement?: EnhancementState & {
+    proposals: Array<{
+      entry_id: UUID | null;
+      proposed: ProposedItem;
+      entity_type: "item" | "room" | "container" | "location";
+      legacy_identifier: string | null;
+      source_excerpt: string | null;
+    }>;
+  } | null;
   entries: ImportEntry[];
   files: ImportSourceFile[];
   vault_tree: Array<{

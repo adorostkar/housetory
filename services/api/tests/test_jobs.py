@@ -11,8 +11,9 @@ from housetory_api.jobs import (
     mark_failed,
     mark_succeeded,
     requeue_stale_jobs,
+    route_legacy_ai_jobs,
 )
-from housetory_api.models import Job
+from housetory_api.models import Job, WorkerHeartbeat
 
 
 def test_enqueue_claim_and_succeed():
@@ -87,3 +88,31 @@ def test_stale_running_jobs_are_requeued():
         assert requeued.status == JobStatus.QUEUED.value
         assert requeued.locked_by is None
         assert "requeued" in requeued.last_error
+
+
+def test_ai_lane_and_legacy_jobs_do_not_block_local_queue():
+    with SessionLocal() as db:
+        legacy = enqueue(db, "ai.enrich", queue="default")
+        rules = enqueue(db, "inventory.review.scheduled", {"ai_enabled": False}, queue="default")
+        route_legacy_ai_jobs(db)
+        local = enqueue(db, "maintenance.ping", priority=100)
+        assert claim_job(db, worker_id="ai", queue="ai").id == legacy.id
+        assert claim_job(db, worker_id="local", queue="default").id == local.id
+        assert claim_job(db, worker_id="local", queue="default").id == rules.id
+
+
+def test_live_worker_long_inference_is_not_recovered_as_a_crash():
+    with SessionLocal() as db:
+        job = enqueue(db, "ai.enrich")
+        claimed = claim_job(db, worker_id="live-ai", queue="ai")
+        claimed.locked_at = datetime.now(UTC) - timedelta(hours=1)
+        db.add(
+            WorkerHeartbeat(
+                worker_id="live-ai",
+                version="test",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+        assert requeue_stale_jobs(db) == 0
+        assert db.get(Job, job.id).status == "running"

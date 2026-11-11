@@ -1,6 +1,5 @@
 """Import batch serialisation and user-safe error messages."""
 
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -91,6 +90,8 @@ def serialize_source_file(source: ImportSourceFile) -> ImportSourceFileOut:
 
 
 def serialize_batch(db: Session, batch: ImportBatch) -> ImportBatchDetail:
+    from ..enrichment import enhancement_state
+
     entries = list(
         db.scalars(
             select(ImportEntry)
@@ -135,7 +136,8 @@ def serialize_batch(db: Session, batch: ImportBatch) -> ImportBatchDetail:
         vault_tree=metadata.get("vault_tree") or [],
         ignored_notes=metadata.get("ignored_notes") or [],
         broken_links=metadata.get("broken_links") or [],
-        metadata=metadata,
+        metadata={key: value for key, value in metadata.items() if not key.startswith("_")},
+        enhancement=enhancement_state(db, batch),
     )
 
 

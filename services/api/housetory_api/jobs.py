@@ -9,11 +9,25 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, or_, select, update
 from sqlalchemy.orm import Session
 
 from .domain import JobStatus
-from .models import Job
+from .models import ImportBatch, Job, WorkerHeartbeat
+
+AI_TASKS = frozenset(
+    {
+        "ai.enrich",
+        "ai.recognize",
+        "voice.transcribe",
+        "voice.interpret",
+        "inventory.review.scheduled",
+        "insurance.estimate",
+        "insurance.list",
+        "item_images.new_item",
+        "item_images.batch",
+    }
+)
 
 
 def enqueue(
@@ -24,11 +38,11 @@ def enqueue(
     run_at: datetime | None = None,
     priority: int = 0,
     max_attempts: int = 5,
-    queue: str = "default",
+    queue: str | None = None,
     commit: bool = True,
 ) -> Job:
     job = Job(
-        queue=queue,
+        queue=queue or ("ai" if task in AI_TASKS else "default"),
         task=task,
         payload=payload or {},
         status=JobStatus.QUEUED.value,
@@ -42,6 +56,32 @@ def enqueue(
     else:
         db.flush()
     return job
+
+
+def route_legacy_ai_jobs(db: Session) -> None:
+    db.execute(
+        update(Job)
+        .where(
+            Job.queue == "default",
+            or_(
+                (
+                    Job.task.in_(AI_TASKS)
+                    & Job.payload["ai_enabled"].astext.is_distinct_from("false")
+                ),
+                (
+                    (Job.task == "imports.process")
+                    & Job.payload["batch_id"].astext.in_(
+                        select(cast(ImportBatch.id, String)).where(
+                            ImportBatch.metadata_json["product_url"].astext.is_not(None),
+                        )
+                    )
+                ),
+            ),
+            Job.status == JobStatus.QUEUED.value,
+        )
+        .values(queue="ai")
+    )
+    db.commit()
 
 
 def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | None:
@@ -116,6 +156,12 @@ def requeue_stale_jobs(db: Session, *, older_than_minutes: int = 15) -> int:
             Job.status == JobStatus.RUNNING.value,
             Job.locked_at.is_not(None),
             Job.locked_at < cutoff,
+            ~select(WorkerHeartbeat.worker_id)
+            .where(
+                WorkerHeartbeat.worker_id == Job.locked_by,
+                WorkerHeartbeat.updated_at > datetime.now(UTC) - timedelta(minutes=2),
+            )
+            .exists(),
         )
     ).all()
     for job in jobs:

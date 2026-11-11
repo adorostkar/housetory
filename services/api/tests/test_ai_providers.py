@@ -1255,8 +1255,7 @@ def test_all_text_overrides_keep_saved_default_visible_and_change_isolated(owner
     assert changed.status_code == 200, changed.text
     tasks = {entry["task"]: entry for entry in changed.json()["tasks"]}
     assert all(
-        tasks[task]["model"] == "gpt-4o-mini"
-        and tasks[task]["inherits_text_default"] is False
+        tasks[task]["model"] == "gpt-4o-mini" and tasks[task]["inherits_text_default"] is False
         for task in ("assistant", "documents", "imports", "search")
     )
     assert changed.json()["default_text"]["model"] == "o3-mini"
@@ -1292,9 +1291,7 @@ def test_inherited_disabled_state_survives_default_change(owner_client):
     assert tasks["assistant"]["enabled"] is False
 
 
-def test_default_text_rejects_missing_disabled_and_incompatible_routes(
-    owner_client, monkeypatch
-):
+def test_default_text_rejects_missing_disabled_and_incompatible_routes(owner_client, monkeypatch):
     no_provider = owner_client.get("/api/v1/ai/settings").json()
     assert no_provider["default_text"]["derived_from"] == "none"
     missing = owner_client.put(
@@ -1304,9 +1301,12 @@ def test_default_text_rejects_missing_disabled_and_incompatible_routes(
     assert missing.status_code == 404
 
     provider = owner_client.post("/api/v1/ai/providers", json=provider_payload()).json()
-    assert owner_client.patch(
-        f"/api/v1/ai/providers/{provider['id']}", json={"enabled": False}
-    ).status_code == 200
+    assert (
+        owner_client.patch(
+            f"/api/v1/ai/providers/{provider['id']}", json={"enabled": False}
+        ).status_code
+        == 200
+    )
     disabled = owner_client.put(
         "/api/v1/ai/default-text",
         json={"provider_id": provider["id"], "model": "gpt-4o"},
@@ -1329,12 +1329,13 @@ def test_default_text_rejects_missing_disabled_and_incompatible_routes(
             )
         ],
     )
-    assert owner_client.patch(
-        f"/api/v1/ai/providers/{provider['id']}", json={"enabled": True}
-    ).status_code == 200
-    assert owner_client.get(
-        f"/api/v1/ai/providers/{provider['id']}/models"
-    ).status_code == 200
+    assert (
+        owner_client.patch(
+            f"/api/v1/ai/providers/{provider['id']}", json={"enabled": True}
+        ).status_code
+        == 200
+    )
+    assert owner_client.get(f"/api/v1/ai/providers/{provider['id']}/models").status_code == 200
     incompatible = owner_client.put(
         "/api/v1/ai/default-text",
         json={"provider_id": provider["id"], "model": "text-embedding-3-small"},
@@ -1494,16 +1495,20 @@ def test_unreachable_provider_fails_fast_and_trips_breaker(monkeypatch):
 def test_slow_reachable_provider_does_not_trip_breaker():
     import threading
     import time
+    from contextlib import suppress
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     ai.reset_ai_breaker()
+    requests = []
 
     class SlowHandler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
+            requests.append(1)
             time.sleep(2)
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"{}")
+            with suppress(BrokenPipeError):
+                self.wfile.write(b"{}")
 
         def log_message(self, *args):  # noqa: ANN002
             return
@@ -1512,10 +1517,37 @@ def test_slow_reachable_provider_does_not_trip_breaker():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/v1"
     try:
-        with pytest.raises(ai.AiUnavailable):
+        with pytest.raises(ai.AiUnavailable) as failure:
             ai._request_json(url, {}, timeout=1)
+        assert failure.value.code == "read_timeout"
+        assert len(requests) == 1
         assert ai._request_json(url, {}, timeout=10) == {}
+        assert len(requests) == 2
     finally:
         server.shutdown()
         server.server_close()
         ai.reset_ai_breaker()
+
+
+def test_http_connection_and_tls_use_connect_budget_then_restore_long_read(monkeypatch):
+    observed = []
+
+    class Socket:
+        def settimeout(self, value):
+            observed.append(("read", value))
+
+    def connect(connection):
+        observed.append(("connect", connection.timeout))
+        connection.sock = Socket()
+
+    monkeypatch.setattr(ai.http.client.HTTPConnection, "connect", connect)
+    monkeypatch.setattr(ai.http.client.HTTPSConnection, "connect", connect)
+    for connection_type in (ai._HTTPConnection, ai._HTTPSConnection):
+        connection = connection_type("localhost", timeout=90)
+        connection.connect()
+    assert observed == [
+        ("connect", ai.CONNECT_TIMEOUT_SECONDS),
+        ("read", 90),
+        ("connect", ai.CONNECT_TIMEOUT_SECONDS),
+        ("read", 90),
+    ]

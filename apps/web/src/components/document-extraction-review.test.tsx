@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/queries";
 import type {
   AiStatus,
   DocumentRecord,
@@ -217,10 +218,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-function renderReview() {
-  const client = new QueryClient({
+function renderReview(client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-  });
+  })) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -250,6 +250,57 @@ beforeEach(() => {
 });
 
 describe("DocumentExtractionReview", () => {
+  it.each([
+    ["off", null, "AI off"],
+    ["failed", "read_timeout", "AI timed out · local results kept"],
+    ["skipped", "cancelled", "AI suggestions cancelled"],
+  ] as const)("keeps local review usable when enhancement is %s", async (status, reason, label) => {
+    vi.mocked(api.get).mockResolvedValue({
+      ...review,
+      enhancement: {
+        status, reason, job_id: "job-1", version: review.version, error: null,
+        provider: "ollama", model: "test", ai_attempted: status !== "off", ai_succeeded: false,
+      },
+    } satisfies ExtractionReview);
+    renderReview();
+    expect(await screen.findByText(label)).toBeVisible();
+    expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("announces a delayed suggestion without replacing or applying manual edits", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderReview(client);
+    await screen.findByText("Product lines");
+    const merchant = screen.getByLabelText(/^Merchant/);
+    await userEvent.clear(merchant);
+    await userEvent.type(merchant, "Manual shop");
+    const refinement: ExtractionRefinement = {
+      document_id: document.id, base_version: review.version, version: "automatic-refinement",
+      source_artifact: "original", generated_at: review.generated_at,
+      fields: { ...review.fields, merchant: "AI shop" }, lines: review.lines,
+      warnings: [], matches: review.matches, ai_status: aiStatus, ai_used: true,
+    };
+    act(() => client.setQueryData([...queryKeys.document(document.id), "extraction"], {
+      ...review,
+      enhancement: {
+        status: "ready", job_id: "job-1", version: review.version, reason: null,
+        error: null, provider: "ollama", model: "test", ai_attempted: true, ai_succeeded: true,
+      },
+      suggested_refinement: refinement,
+    } satisfies ExtractionReview));
+    expect(await screen.findByText("AI suggestions available")).toBeVisible();
+    expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review AI suggestions" }));
+    expect(screen.getByRole("button", { name: "Accept AI refinement" })).toBeVisible();
+    expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Reject AI suggestion" }));
+    expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
+    expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument();
+  });
+
   it("shows line items, matches, charges and applies edited values and choices", async () => {
     renderReview();
     expect(await screen.findByText("Product lines")).toBeVisible();

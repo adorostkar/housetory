@@ -123,13 +123,20 @@ def _processing_path(recognition: AiRecognition) -> str:
 def enqueue_recognition(db, recognition: AiRecognition) -> Any:
     recognition.status = RecognitionStatus.QUEUED.value
     recognition.error = None
+    use_ai = ai.status_for(
+        db,
+        recognition.household_id,
+        AiTask.VISION.value,
+        probe=False,
+    ).configured
     job = enqueue(
         db,
         RECOGNITION_TASK,
-        {"recognition_id": str(recognition.id)},
+        {"recognition_id": str(recognition.id), "ai_enabled": use_ai},
         commit=False,
         max_attempts=3,
         priority=4,
+        queue="ai" if use_ai else "default",
     )
     db.commit()
     return job
@@ -270,7 +277,11 @@ def _fallback_from_ocr(path, content_type: str) -> tuple[AiRecognitionResult, in
     ), extracted.confidence
 
 
-def run_recognition(recognition_id: uuid.UUID | str) -> dict[str, Any] | None:
+def run_recognition(
+    recognition_id: uuid.UUID | str,
+    *,
+    use_ai: bool = True,
+) -> dict[str, Any] | None:
     with SessionLocal() as db:
         recognition = db.get(AiRecognition, recognition_id)
         if recognition is None:
@@ -290,14 +301,14 @@ def run_recognition(recognition_id: uuid.UUID | str) -> dict[str, Any] | None:
                 recognition.original_storage_key or recognition.storage_key
             )
             status = ai.status_for(db, recognition.household_id, AiTask.VISION.value, probe=False)
-            if status.configured:
+            if status.configured and use_ai:
                 recognition.model_provider = status.provider
                 recognition.model_name = status.model
             result = None
             confidence = None
             vision_error = None
             vision_succeeded = False
-            if status.configured:
+            if status.configured and use_ai:
                 try:
                     user_prompt = (
                         "Identify clearly visible, movable household possessions in this "
@@ -586,4 +597,4 @@ def run_job(payload: dict[str, Any]) -> dict[str, Any] | None:
     recognition_id = payload.get("recognition_id")
     if not recognition_id:
         raise ValueError("Recognition job payload is missing recognition_id.")
-    return run_recognition(recognition_id)
+    return run_recognition(recognition_id, use_ai=payload.get("ai_enabled", True))

@@ -339,7 +339,11 @@ def _enable_import_ai(monkeypatch, payload):
     monkeypatch.setattr(import_pipeline.ai, "complete_json", lambda *a, **k: payload)
 
 
-def test_product_page_ai_refines_the_single_draft_and_cannot_add_items(owner_client, monkeypatch):
+def test_product_page_ai_refines_the_single_draft_and_cannot_add_items(
+    owner_client,
+    monkeypatch,
+    configured_ai,
+):
     from housetory_api.services import product_import
 
     monkeypatch.setattr(
@@ -365,9 +369,31 @@ def test_product_page_ai_refines_the_single_draft_and_cannot_add_items(owner_cli
     process_import_batch(created.json()["id"])
     detail = owner_client.get(f"/api/v1/imports/{created.json()['id']}").json()
     assert len(detail["entries"]) == 1
+    entry_id = detail["entries"][0]["id"]
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "refinements": [{"key": entry_id, "brand": "Velleman"}],
+            "items": [{"name": "Duplicate soldering station"}],
+        },
+    )
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services.enrichment import run_enhancement
+
+    with SessionLocal() as db:
+        payload = db.get(Job, detail["enhancement"]["job_id"]).payload
+    assert run_enhancement(payload)["status"] == "ready"
+    detail = owner_client.get(f"/api/v1/imports/{created.json()['id']}").json()
+    assert len(detail["enhancement"]["proposals"]) == 1
 
 
-def test_list_source_ai_refines_by_key_and_adds_missing_items(owner_client, monkeypatch):
+def test_list_source_ai_refines_by_key_and_adds_missing_items(
+    owner_client,
+    monkeypatch,
+    configured_ai,
+):
     from tests.test_imports import process_import, upload_text_import
 
     _enable_import_ai(
@@ -383,6 +409,29 @@ def test_list_source_ai_refines_by_key_and_adds_missing_items(owner_client, monk
     )
     batch = upload_text_import(owner_client, "Camera in the attic.")
     detail = process_import(owner_client, batch["id"])
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services.enrichment import run_enhancement
+
+    entry_id = detail["entries"][0]["id"]
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "refinements": [
+                {"key": entry_id, "brand": "Canon"},
+                {"key": "unknown", "brand": "Bad"},
+            ],
+            "items": [{"name": "Tripod"}],
+            "warnings": [],
+        },
+    )
+    with SessionLocal() as db:
+        payload = db.get(Job, detail["enhancement"]["job_id"]).payload
+    assert run_enhancement(payload)["status"] == "ready"
+    accepted = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    detail = accepted.json()
     by_name = {entry["proposed"]["name"]: entry["proposed"] for entry in detail["entries"]}
     # The user's own wording is explicit and kept; missing fields are filled by key.
     assert sorted(by_name) == ["Camera", "Tripod"]

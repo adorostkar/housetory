@@ -307,6 +307,8 @@ export interface ExtractionApplySummary {
 }
 
 export interface ExtractionReview {
+  enhancement?: import("@/lib/types/enrichment").EnhancementState | null;
+  suggested_refinement?: ExtractionRefinement | null;
   document_id: UUID;
   version: string;
   source_artifact: string;

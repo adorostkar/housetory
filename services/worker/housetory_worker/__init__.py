@@ -6,14 +6,14 @@ is intentionally able to run on CPU-only hosts.
 
 import json
 import logging
+import multiprocessing
 import os
 import socket
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-
-from sqlalchemy import delete, func, select
 
 from housetory_api import __version__
 from housetory_api.config import get_settings
@@ -26,10 +26,13 @@ from housetory_api.jobs import (
     mark_failed,
     mark_succeeded,
     requeue_stale_jobs,
+    route_legacy_ai_jobs,
 )
 from housetory_api.models import AuthSession, Job, WorkerHeartbeat
 from housetory_api.services.document_ocr import OCR_TASK
 from housetory_api.services.document_ocr import run_job as run_document_ocr
+from housetory_api.services.enrichment import TASK as ENRICHMENT_TASK
+from housetory_api.services.enrichment import run_enhancement
 from housetory_api.services.evidence_export import (
     EVIDENCE_EXPORT_TASK,
     EVIDENCE_PRUNE_TASK,
@@ -87,6 +90,7 @@ from housetory_api.services.voice import (
 from housetory_api.services.voice import (
     process_transcription as run_voice_transcription,
 )
+from sqlalchemy import delete, func, select
 
 logging.basicConfig(
     level=logging.INFO,
@@ -97,7 +101,9 @@ logger = logging.getLogger("housetory.worker")
 PRUNE_TASK = "maintenance.prune_expired_sessions"
 PRUNE_FINISHED_TASK = "maintenance.prune_finished_jobs"
 PRUNE_ITEM_IMAGES_TASK = "maintenance.prune_item_images"
-HEARTBEAT_FILE = Path(os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat"))
+HEARTBEAT_FILE = Path(
+    os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
+)
 POLL_SECONDS = float(os.environ.get("WORKER_POLL_SECONDS", "2"))
 MAINTENANCE_INTERVAL_HOURS = 6
 
@@ -125,7 +131,9 @@ def _record_worker_heartbeat(worker_id: str) -> None:
 def prune_expired_sessions(payload: dict) -> dict:
     del payload
     with SessionLocal() as db:
-        result = db.execute(delete(AuthSession).where(AuthSession.expires_at < func.now()))
+        result = db.execute(
+            delete(AuthSession).where(AuthSession.expires_at < func.now())
+        )
         db.commit()
         return {"deleted": int(result.rowcount or 0)}
 
@@ -138,7 +146,8 @@ def prune_finished_jobs(payload: dict) -> dict:
             delete(Job).where(
                 Job.status.in_([JobStatus.SUCCEEDED.value, JobStatus.FAILED.value]),
                 Job.finished_at.is_not(None),
-                Job.finished_at < func.now() - func.make_interval(0, 0, 0, interval_days),
+                Job.finished_at
+                < func.now() - func.make_interval(0, 0, 0, interval_days),
             )
         )
         db.commit()
@@ -150,6 +159,7 @@ def ping(payload: dict) -> dict:
 
 
 HANDLERS = {
+    ENRICHMENT_TASK: run_enhancement,
     PRUNE_TASK: prune_expired_sessions,
     PRUNE_FINISHED_TASK: prune_finished_jobs,
     EVIDENCE_PRUNE_TASK: lambda payload: {"expired": prune_expired_exports()},
@@ -160,8 +170,12 @@ HANDLERS = {
     OCR_TASK: run_document_ocr,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
-    VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(payload.get("voice_note_id")),
-    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(payload.get("voice_note_id")),
+    VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(
+        payload.get("voice_note_id")
+    ),
+    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(
+        payload.get("voice_note_id")
+    ),
     ITEM_IMAGE_NEW_ITEM_TASK: run_item_image_new_item,
     ITEM_IMAGE_BATCH_TASK: lambda payload: run_item_image_batch(
         payload, uuid.UUID(str(payload["job_id"]))
@@ -207,7 +221,10 @@ def schedule_maintenance() -> None:
         if has_active_job(db, PRUNE_TASK):
             return
         last = db.scalar(
-            select(Job).where(Job.task == PRUNE_TASK).order_by(Job.created_at.desc()).limit(1)
+            select(Job)
+            .where(Job.task == PRUNE_TASK)
+            .order_by(Job.created_at.desc())
+            .limit(1)
         )
         if last is not None:
             reference = last.finished_at or last.created_at
@@ -240,35 +257,51 @@ def dispatch_scheduled_reviews() -> None:
         logger.info("Dispatched %s scheduled inventory review(s)", count)
 
 
-def run() -> None:
+def _keep_heartbeat(worker_id: str) -> None:
+    while True:
+        try:
+            _heartbeat()
+            _record_worker_heartbeat(worker_id)
+        except Exception:
+            logger.exception("Worker heartbeat could not be updated")
+        time.sleep(15)
+
+
+def _run_queue(queue: str, peer=None) -> None:
     settings = get_settings()
     logger.info(
-        "Housetory worker starting (environment=%s, heartbeat=%s)",
+        "Housetory worker starting (environment=%s, heartbeat=%s, queue=%s)",
         settings.environment,
         HEARTBEAT_FILE,
+        queue,
     )
-    worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+    worker_id = f"{socket.gethostname()}:{queue}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
     with SessionLocal() as db:
+        route_legacy_ai_jobs(db)
         requeued = requeue_stale_jobs(db)
         if requeued:
             logger.warning("Requeued %s stale job(s)", requeued)
-    schedule_maintenance()
-    dispatch_scheduled_reviews()
+    if queue == "default":
+        schedule_maintenance()
+        dispatch_scheduled_reviews()
     _heartbeat()
     _record_worker_heartbeat(worker_id)
+    threading.Thread(target=_keep_heartbeat, args=(worker_id,), daemon=True).start()
 
     last_maintenance_check = time.monotonic()
     last_db_heartbeat = time.monotonic()
     while True:
+        if peer is not None and not peer.is_alive():
+            raise RuntimeError("The AI worker exited; restart both execution lanes.")
         try:
             job = None
             with SessionLocal() as db:
-                job = claim_job(db, worker_id=worker_id)
+                job = claim_job(db, worker_id=worker_id, queue=queue)
             if job is not None:
                 process_job(job)
             else:
                 time.sleep(POLL_SECONDS)
-            if time.monotonic() - last_maintenance_check > 60:
+            if queue == "default" and time.monotonic() - last_maintenance_check > 60:
                 schedule_maintenance()
                 dispatch_scheduled_reviews()
                 last_maintenance_check = time.monotonic()
@@ -282,6 +315,28 @@ def run() -> None:
         except Exception:
             logger.exception("Worker loop error")
             time.sleep(min(POLL_SECONDS * 2, 30))
+
+
+def _run_ai_child() -> None:
+    global HEARTBEAT_FILE
+    HEARTBEAT_FILE = HEARTBEAT_FILE.with_name(HEARTBEAT_FILE.name + "-ai")
+    _run_queue("ai")
+
+
+def run() -> None:
+    queue = get_settings().worker_queue
+    if queue != "all":
+        _run_queue(queue)
+        return
+    child = multiprocessing.get_context("spawn").Process(
+        target=_run_ai_child, daemon=True
+    )
+    child.start()
+    try:
+        _run_queue("default", peer=child)
+    finally:
+        child.terminate()
+        child.join(timeout=10)
 
 
 if __name__ == "__main__":

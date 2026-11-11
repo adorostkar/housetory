@@ -617,7 +617,7 @@ def _refinement_payload():
 
 
 def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
-    owner_client, monkeypatch
+    owner_client, monkeypatch, configured_ai
 ):
     from housetory_api.services import document_refinement
 
@@ -627,7 +627,6 @@ def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
     base = ocr_document(owner_client, document["id"]).json()
     fake_status = _ai_status()
     monkeypatch.setattr(document_refinement.ai, "status_for", lambda *args, **kwargs: fake_status)
-    monkeypatch.setattr(document_refinement.ai, "config_for", lambda *args, **kwargs: None)
     calls = []
 
     def complete_json(*args, **kwargs):
@@ -676,7 +675,7 @@ def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
 
 
 def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
-    owner_client, monkeypatch
+    owner_client, monkeypatch, configured_ai
 ):
     from housetory_api.services import document_refinement
 
@@ -684,7 +683,6 @@ def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
     ocr_document(owner_client, document["id"])
     fake_status = _ai_status()
     monkeypatch.setattr(document_refinement.ai, "status_for", lambda *args, **kwargs: fake_status)
-    monkeypatch.setattr(document_refinement.ai, "config_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         document_refinement.ai,
         "complete_json",
@@ -727,7 +725,7 @@ def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
     assert consent.json()["detail"]["code"] == "ai_refinement_consent_required"
 
 
-def test_ai_refinement_rejects_malformed_schema(owner_client, monkeypatch):
+def test_ai_refinement_rejects_malformed_schema(owner_client, monkeypatch, configured_ai):
     from housetory_api.services import document_refinement
 
     document = upload_document(owner_client)
@@ -737,7 +735,6 @@ def test_ai_refinement_rejects_malformed_schema(owner_client, monkeypatch):
         "status_for",
         lambda *args, **kwargs: _ai_status(),
     )
-    monkeypatch.setattr(document_refinement.ai, "config_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         document_refinement.ai,
         "complete_json",

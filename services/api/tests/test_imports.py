@@ -501,7 +501,7 @@ def test_import_partial_approval_rejection_and_traceability(owner_client):
     assert item_detail["room"]["id"] == attic["id"]
 
 
-def test_ai_import_enhancement_is_review_only(owner_client, monkeypatch):
+def test_ai_import_enhancement_is_review_only(owner_client, monkeypatch, configured_ai):
     from housetory_api.schemas.ai import AiStatus
     from housetory_api.services import import_pipeline
 
@@ -534,17 +534,34 @@ def test_ai_import_enhancement_is_review_only(owner_client, monkeypatch):
     batch = upload_text_import(owner_client, "Some household notes without clear items.")
     detail = process_import(owner_client, batch["id"])
     assert detail["status"] == "review"
-    assert detail["metadata"]["ai_used"] is True
-    assert detail["metadata"]["ai_model"] == "extract-test"
-    assert detail["warnings"]
-    entry = detail["entries"][0]
+    assert detail["enhancement"]["status"] == "queued"
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services.enrichment import run_enhancement
+
+    with SessionLocal() as db:
+        job = db.get(Job, detail["enhancement"]["job_id"])
+        assert job.queue == "ai"
+        payload = job.payload
+    assert run_enhancement(payload)["status"] == "ready"
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert detail["enhancement"]["ai_succeeded"] is True
+    assert detail["entries"] == []
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+    accepted = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    entry = accepted.json()["entries"][0]
     assert entry["proposed"]["name"] == "Vintage Camera"
     assert entry["proposed"]["field_sources"]["name"] == "inferred"
     assert entry["proposed"]["room"]["status"] == "missing"
     assert owner_client.get("/api/v1/items").json()["total"] == 0
 
 
-def test_ai_import_invalid_output_falls_back_without_failing(owner_client, monkeypatch):
+def test_ai_import_invalid_output_falls_back_without_failing(
+    owner_client,
+    monkeypatch,
+    configured_ai,
+):
     from housetory_api.schemas.ai import AiStatus
     from housetory_api.services import import_pipeline
 
@@ -567,7 +584,16 @@ def test_ai_import_invalid_output_falls_back_without_failing(owner_client, monke
     detail = process_import(owner_client, batch["id"])
     assert detail["status"] == "review"
     assert detail["metadata"]["ai_used"] is False
-    assert any(warning.get("type") == "ai_fallback" for warning in detail["warnings"])
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services.enrichment import run_enhancement
+
+    with SessionLocal() as db:
+        payload = db.get(Job, detail["enhancement"]["job_id"]).payload
+    assert run_enhancement(payload)["status"] == "failed"
+    current = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert current["enhancement"]["reason"] == "invalid_output"
+    assert current["entries"] == detail["entries"]
     assert detail["entries"][0]["proposed"]["room"]["matched_id"] == attic["id"]
 
 

@@ -146,7 +146,11 @@ def dispatch(now=None):
 
 def claim_schedule_job(worker_id="schedule-test-worker"):
     with SessionLocal() as db:
-        job = claim_job(db, worker_id=worker_id)
+        job = claim_job(db, worker_id=worker_id) or claim_job(
+            db,
+            worker_id=worker_id,
+            queue="ai",
+        )
         if job is None:
             return None, None
         assert job.task == inventory_review_schedule.SCHEDULED_REVIEW_TASK

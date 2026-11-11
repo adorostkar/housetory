@@ -382,6 +382,45 @@ def apply_import_route(
         raise ApiError(422, "import_apply_failed", str(exc)) from None
 
 
+@router.post("/{batch_id}/enhancement/retry", response_model=ImportBatchDetail)
+def retry_import_enhancement(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    from ...services.enrichment import retry_enhancement
+
+    batch = _get_batch(db, auth.household.id, batch_id)
+    retry_enhancement(db, batch)
+    return serialize_batch(db, batch)
+
+
+@router.post("/{batch_id}/enhancement/accept", response_model=ImportBatchDetail)
+def accept_import_suggestions(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    from ...services.enrichment import accept_import_enhancement
+
+    batch = _get_batch(db, auth.household.id, batch_id)
+    accept_import_enhancement(db, batch)
+    return serialize_batch(db, batch)
+
+
+@router.post("/{batch_id}/enhancement/cancel", response_model=ImportBatchDetail)
+def cancel_import_suggestions(
+    batch_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    from ...services.enrichment import cancel_enhancement
+
+    batch = _get_batch(db, auth.household.id, batch_id)
+    cancel_enhancement(db, batch)
+    return serialize_batch(db, batch)
+
+
 @router.delete("/{batch_id}", status_code=204)
 def delete_import(
     batch_id: uuid.UUID,

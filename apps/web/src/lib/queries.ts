@@ -555,8 +555,10 @@ export function useImportBatch(batchId: string | undefined) {
     queryFn: () => api.get<ImportBatchDetail>(`/imports/${batchId}`),
     enabled: Boolean(batchId),
     refetchInterval: (query) => {
-      const status = (query.state.data as ImportBatchDetail | undefined)?.status;
-      return status === "queued" || status === "processing" ? 2000 : false;
+      const status = query.state.data?.status;
+      const enhancement = query.state.data?.enhancement?.status;
+      return status === "queued" || status === "processing" ||
+        enhancement === "queued" || enhancement === "running" ? 2000 : false;
     },
   });
 }

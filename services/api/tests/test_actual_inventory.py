@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from housetory_api.db import SessionLocal
 from housetory_api.services.import_hierarchy import parse_hierarchy
 from housetory_api.services.import_pipeline import process_import_batch
+from housetory_api.services.import_pipeline.ai_enrichment import _apply_ai_hierarchy
 from housetory_api.services.import_types import ParsedDocument, SourceBundle
 
 FIXTURE = Path(__file__).parent / "fixtures" / "home_inventory_actual.md"
@@ -287,7 +289,6 @@ def test_actual_inventory_ai_normalizer_rejects_unsupported_edits(owner_client, 
         privacy_note="Local test",
     )
     monkeypatch.setattr(import_pipeline.ai, "status_for", lambda *args, **kwargs: status)
-    monkeypatch.setattr(import_pipeline.ai, "config_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         import_pipeline.ai,
         "complete_json",
@@ -312,12 +313,18 @@ def test_actual_inventory_ai_normalizer_rejects_unsupported_edits(owner_client, 
         },
     )
 
+    with SessionLocal() as db:
+        validation = _apply_ai_hierarchy(
+            db,
+            owner_client.get("/api/v1/auth/session").json()["household"]["id"],
+            parsed,
+        )
     batch = upload_text(owner_client, text)
     detail = process(owner_client, batch["id"])
     assert detail["metadata"]["hierarchy"] is True
-    assert detail["metadata"]["ai_consulted"] is True
+    assert validation["ai_consulted"] is True
     assert detail["metadata"]["ai_used"] is False
-    assert detail["metadata"]["ai_validation_warnings"]
+    assert validation["ai_validation_warnings"]
     entry_by_name = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
     keyboard = next(
         entry for entry in detail["entries"] if entry["proposed"]["name"].startswith("Keyboards (")
@@ -330,8 +337,7 @@ def test_actual_inventory_ai_normalizer_rejects_unsupported_edits(owner_client, 
     assert container["proposed"]["name"] == "STO-03"
     assert "Invented room" not in entry_by_name
     warnings = " ".join(
-        str(warning.get("reason", warning))
-        for warning in detail["metadata"]["ai_validation_warnings"]
+        str(warning.get("reason", warning)) for warning in validation["ai_validation_warnings"]
     ).lower()
     assert "name" in warnings
     assert "quantity" in warnings
@@ -375,7 +381,6 @@ def test_ai_normalizer_rejects_age_dimension_model_token_and_similar_name_fabric
         privacy_note="Local test",
     )
     monkeypatch.setattr(import_pipeline.ai, "status_for", lambda *args, **kwargs: status)
-    monkeypatch.setattr(import_pipeline.ai, "config_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         import_pipeline.ai,
         "complete_json",
@@ -390,18 +395,24 @@ def test_ai_normalizer_rejects_age_dimension_model_token_and_similar_name_fabric
             "warnings": [],
         },
     )
+    with SessionLocal() as db:
+        validation = _apply_ai_hierarchy(
+            db,
+            owner_client.get("/api/v1/auth/session").json()["household"]["id"],
+            parsed,
+        )
     batch = upload_text(owner_client, text)
     detail = process(owner_client, batch["id"])
-    assert detail["metadata"]["ai_consulted"] is True
+    assert validation["ai_consulted"] is True
     assert detail["metadata"]["ai_used"] is False
-    assert detail["metadata"]["ai_validation_warnings"]
+    assert validation["ai_validation_warnings"]
     entries = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
     assert entries["Child car seat (up to 4 years)"]["proposed"]["quantity"] == 1
     assert entries["Long wood pieces (~1m)"]["proposed"]["quantity"] == 10
     assert entries["MagSafe 2 cable"]["proposed"]["quantity"] == 1
     assert entries["Laser printer toner"]["proposed"]["quantity"] == 3
     assert "Laser printer tower" not in entries
-    fields = {warning["field"] for warning in detail["metadata"]["ai_validation_warnings"]}
+    fields = {warning["field"] for warning in validation["ai_validation_warnings"]}
     assert {"name", "quantity"}.issubset(fields)
 
 
@@ -420,7 +431,6 @@ def test_ai_normalizer_rejects_truncated_identifiers_at_token_boundaries(owner_c
         privacy_note="Local test",
     )
     monkeypatch.setattr(import_pipeline.ai, "status_for", lambda *args, **kwargs: status)
-    monkeypatch.setattr(import_pipeline.ai, "config_for", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         import_pipeline.ai,
         "complete_json",
@@ -438,12 +448,17 @@ def test_ai_normalizer_rejects_truncated_identifiers_at_token_boundaries(owner_c
             "warnings": [],
         },
     )
+    with SessionLocal() as db:
+        validation = _apply_ai_hierarchy(
+            db,
+            owner_client.get("/api/v1/auth/session").json()["household"]["id"],
+            parsed,
+        )
     batch = upload_text(owner_client, text)
     detail = process(owner_client, batch["id"])
     container = next(entry for entry in detail["entries"] if entry["legacy_identifier"] == "STO-03")
     assert container["legacy_identifier"] == "STO-03"
     assert detail["metadata"]["ai_used"] is False
     assert any(
-        warning["field"] == "legacy_identifier"
-        for warning in detail["metadata"]["ai_validation_warnings"]
+        warning["field"] == "legacy_identifier" for warning in validation["ai_validation_warnings"]
     )

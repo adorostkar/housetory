@@ -178,12 +178,13 @@ services:
       retries: 3
     logging: *default-logging
 
-  worker:
+  worker: &worker
     build:
       context: .
       dockerfile: infrastructure/docker/worker.Dockerfile
     restart: unless-stopped
-    environment:
+    environment: &worker-environment
+      WORKER_QUEUE: default
       DATABASE_URL: *app-database-url
       ENVIRONMENT: production
       DATA_DIR: /data
@@ -267,6 +268,12 @@ services:
       start_period: 20s
       retries: 3
     logging: *default-logging
+
+  ai-worker:
+    <<: *worker
+    environment:
+      <<: *worker-environment
+      WORKER_QUEUE: ai
 
   web:
     build:

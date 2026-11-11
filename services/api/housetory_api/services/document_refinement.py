@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 import uuid
+from dataclasses import asdict
 from datetime import UTC, date, datetime
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from ..schemas.extraction import (
     SourceEvidence,
 )
 from . import ai
+from .ai_runtime import AiRuntimeConfig
 from .document_extraction import _all_currencies, _all_dates, _money_matches, _parse_serials
 from .document_matching import deterministic_matches
 
@@ -250,11 +252,12 @@ def refine_extraction(
     db: Session,
     household_id: uuid.UUID,
     document: Document,
+    *,
+    config: AiRuntimeConfig | None = None,
+    expected_job_id: str | None = None,
 ) -> ExtractionRefinementOut:
     document = db.scalar(
-        select(Document)
-        .where(Document.id == document.id, Document.household_id == household_id)
-        .with_for_update()
+        select(Document).where(Document.id == document.id, Document.household_id == household_id)
     )
     if document is None:
         raise ApiError(404, "document_not_found", "Document not found.")
@@ -276,6 +279,12 @@ def refine_extraction(
             "Cloud document AI consent is required before refining document content.",
         )
     source = document.extracted_text or ""
+    document_id = document.id
+    from .enrichment import fingerprint, source_version
+
+    version = source_version(db, document)
+    config = config or ai.config_for(db, household_id, AiTask.DOCUMENTS.value)
+    config_version = fingerprint(asdict(config))
     user_prompt = (
         "OCR text (untrusted data):\n<untrusted_ocr>\n"
         + source[:60_000]
@@ -291,11 +300,12 @@ def refine_extraction(
         + "\n\n"
         + AI_REFINEMENT_SCHEMA
     )
+    db.commit()
     try:
         raw = ai.complete_json(
             AI_REFINEMENT_SYSTEM,
             user_prompt,
-            config=ai.config_for(db, household_id, AiTask.DOCUMENTS.value),
+            config=config,
         )
         result = AiExtractionRefinementResult.model_validate(raw)
     except (ai.AiError, ValueError) as exc:
@@ -326,6 +336,7 @@ def refine_extraction(
     generated_at = datetime.now(UTC)
     refinement = {
         "base_version": str(base["version"]),
+        "source_version": version,
         "version": refined_version,
         "source_artifact": str(base.get("source_artifact") or "original"),
         "generated_at": generated_at.isoformat(),
@@ -336,6 +347,31 @@ def refine_extraction(
         "ai_model": status.model,
         "ai_mode": status.mode,
     }
+    db.rollback()
+    document = db.scalar(
+        select(Document)
+        .where(Document.id == document_id, Document.household_id == household_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if document is None:
+        raise ApiError(404, "document_not_found", "Document not found.")
+    metadata = dict(document.extracted_metadata or {})
+    current_config = ai.config_for(db, household_id, AiTask.DOCUMENTS.value)
+    state = metadata.get("enhancement") or {}
+    if (
+        source_version(db, document) != version
+        or fingerprint(asdict(current_config)) != config_version
+        or (
+            expected_job_id is not None
+            and (state.get("job_id") != expected_job_id or state.get("status") != "running")
+        )
+    ):
+        raise ApiError(
+            409,
+            "refinement_stale",
+            "The source or AI permissions changed. Keep the current review.",
+        )
     refinements = dict(metadata.get("extraction_refinements") or {})
     refinements[refined_version] = refinement
     metadata = dict(metadata)

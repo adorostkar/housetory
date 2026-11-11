@@ -52,6 +52,7 @@ import {
   qualityLabel,
 } from "@/components/document-extraction-helpers";
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
+import { enhancementLabel } from "@/lib/enrichment";
 
 export function DocumentExtractionReview({ document }: { document: DocumentRecord }) {
   const canWrite = useCanWrite();
@@ -62,6 +63,8 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     queryKey: [...queryKeys.document(document.id), "extraction"],
     queryFn: () => api.get<ExtractionReview>(`/documents/${document.id}/extraction`),
     enabled: document.ocr_status === "succeeded" && Boolean(document.extracted_text),
+    refetchInterval: (query) =>
+      ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 2000 : false,
   });
   const roomsQuery = useRooms();
   const locationsQuery = useLocations();
@@ -151,6 +154,19 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     // The proposal identity intentionally resets drafts only for a new OCR version.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
+
+  const retryEnhancement = useMutation({
+    mutationFn: (action: "retry" | "cancel") => api.post<ExtractionReview>(
+      `/documents/${document.id}/extraction/enhancement/${action}`,
+    ),
+    onSuccess: (result) => {
+      queryClient.setQueryData([...queryKeys.document(document.id), "extraction"], result);
+      toast.success(result.enhancement?.status === "queued"
+        ? "AI suggestions queued; local review stays available"
+        : "AI suggestions cancelled; local review is unchanged");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
 
   const matchMutation = useMutation({
     mutationFn: (useAi: boolean) =>
@@ -432,6 +448,33 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 
   return (
     <div className="mt-5 space-y-5">
+      {data.enhancement && (
+        <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
+          <Badge variant="outline">Local results</Badge>
+          <Badge variant={data.enhancement.status === "ready" ? "brass" : "outline"}>
+            {enhancementLabel(data.enhancement)}
+          </Badge>
+          {data.suggested_refinement && !refinement && !refinementActive && (
+            <Button size="sm" variant="outline"
+              onClick={() => setRefinement(data.suggested_refinement ?? null)}>
+              <Sparkles /> Review AI suggestions
+            </Button>
+          )}
+          {data.enhancement.error && <span>{data.enhancement.error}</span>}
+          {["off", "failed", "skipped"].includes(data.enhancement.status) && aiAvailable && (
+            <Button size="sm" variant="outline" onClick={() => retryEnhancement.mutate("retry")}
+              disabled={retryEnhancement.isPending}>
+              {retryEnhancement.isPending ? <Spinner /> : <Sparkles />} Retry AI only
+            </Button>
+          )}
+          {["queued", "running"].includes(data.enhancement.status) && (
+            <Button size="sm" variant="ghost" onClick={() => retryEnhancement.mutate("cancel")}
+              disabled={retryEnhancement.isPending}>
+              Skip AI suggestions
+            </Button>
+          )}
+        </div>
+      )}
       {applyResult && (
         <div className="rounded-xl border border-sage/25 bg-sage-soft/60 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-accent-foreground">

@@ -5,6 +5,7 @@ import uuid
 from datetime import date
 from typing import Any
 
+from pydantic import TypeAdapter
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -26,7 +27,6 @@ from ..import_hierarchy import parse_hierarchy
 from ..import_matching import build_index, find_duplicates, to_proposed_item
 from ..import_parse import ProposalDraft, parse_documents
 from ..import_readers import read_source_bundle
-from .ai_enrichment import _apply_ai_enhancement, _apply_ai_hierarchy
 from .apply import _apply_context_destination, _context_property
 from .apply import _item_create_from_proposal as _item_create_from_proposal
 from .apply import apply_import as apply_import
@@ -48,6 +48,7 @@ def enqueue_import(db: Session, batch: ImportBatch) -> Any:
         commit=False,
         max_attempts=3,
         priority=4,
+        queue="ai" if (batch.metadata_json or {}).get("product_url") else "default",
     )
     db.commit()
     return job
@@ -216,34 +217,18 @@ def process_import_batch(
             property_record = _context_property(db, batch)
             index = build_index(db, batch.household_id, property_record.id)
             hierarchy = parse_hierarchy(bundle)
-            ai_metadata: dict[str, Any] = {"ai_used": False, "ai_error": None}
+            ai_metadata: dict[str, Any] = {
+                "ai_used": False,
+                "ai_consulted": False,
+                "ai_error": None,
+            }
             hierarchy_mode = hierarchy.active and bool(hierarchy.items)
             if hierarchy_mode:
-                hierarchy_ai = _apply_ai_hierarchy(db, batch.household_id, hierarchy)
-                ai_metadata = {
-                    "ai_used": hierarchy_ai.get("ai_used", False),
-                    "ai_consulted": hierarchy_ai.get("ai_consulted", False),
-                    "ai_error": hierarchy_ai.get("ai_error"),
-                    "ai_provider": None,
-                    "ai_model": None,
-                    "ai_warnings": hierarchy_ai.get("ai_warnings", []),
-                    "ai_validation_warnings": hierarchy_ai.get("ai_validation_warnings", []),
-                }
                 entry_count = _create_hierarchy_entries(
                     db, batch, hierarchy, bundle, file_mapping, index
                 )
                 drafts = [item.draft for item in hierarchy.items]
                 warnings = [*hierarchy.warnings]
-                for rejected in hierarchy_ai.get("ai_validation_warnings", []):
-                    warnings.append(
-                        {
-                            "type": "ai_rejected_edit",
-                            "message": (
-                                f"AI {rejected.get('field', 'edit')} was rejected: "
-                                f"{rejected.get('reason', 'unsupported by source evidence.')}"
-                            ),
-                        }
-                    )
                 ignored_notes = [*parsed.ignored_notes, *hierarchy.ignored]
                 hierarchy_metadata = {
                     "hierarchy": True,
@@ -251,13 +236,7 @@ def process_import_batch(
                     "hierarchy_items": len(hierarchy.items),
                 }
             else:
-                drafts, ai_metadata = _apply_ai_enhancement(
-                    db,
-                    batch.household_id,
-                    bundle,
-                    parsed.drafts,
-                    single_subject=bool((batch.metadata_json or {}).get("product_url")),
-                )
+                drafts = parsed.drafts
                 for position, draft in enumerate(drafts):
                     proposed = to_proposed_item(draft, index)
                     proposed = _apply_context_destination(db, batch, proposed)
@@ -324,6 +303,45 @@ def process_import_batch(
             batch.failed_entries = 0
             batch.status = ImportStatus.REVIEW.value
             batch.completed_at = None
+            db.flush()
+            from ..enrichment import schedule_enhancement
+            from .ai_enrichment import _ai_chunks
+
+            entries = db.scalars(
+                select(ImportEntry)
+                .where(ImportEntry.batch_id == batch.id)
+                .order_by(ImportEntry.position)
+            ).all()
+            settings = ai._settings()
+            source_documents = [
+                {
+                    "relative_path": label,
+                    "title": label,
+                    "text": chunk,
+                    "content_type": "text/plain",
+                    "source_format": "text",
+                }
+                for label, chunk in _ai_chunks(
+                    bundle,
+                    settings.ai_max_context_chars,
+                    settings.ai_import_max_chunks,
+                )
+            ]
+            schedule_enhancement(
+                db,
+                batch,
+                kind="import",
+                inputs={
+                    "documents": source_documents,
+                    "drafts": TypeAdapter(list[ProposalDraft]).dump_python(drafts, mode="json"),
+                    "hierarchy": (
+                        TypeAdapter(type(hierarchy)).dump_python(hierarchy, mode="json")
+                        if hierarchy_mode
+                        else None
+                    ),
+                    "entry_ids": [str(entry.id) for entry in entries],
+                },
+            )
             db.commit()
             return {"batch_id": str(batch.id), "entries": entry_count}
         except Exception as exc:  # noqa: BLE001 - persisted for recovery

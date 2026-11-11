@@ -174,37 +174,20 @@ def test_ocr_apply_requires_confirmed_item_for_purchase(owner_client):
     assert response.status_code == 422
 
 
-def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_client, monkeypatch):
-    from housetory_api.schemas.ai import AiStatus
+def test_document_ocr_publishes_local_results_without_calling_ai(
+    owner_client,
+    monkeypatch,
+    configured_ai,
+):
     from housetory_api.services import document_ocr
 
     item = create_item(owner_client)
     document = upload_text_document(owner_client, item["id"]).json()
-    fake_status = AiStatus(
-        provider="ollama",
-        mode="local",
-        model="document-model",
-        configured=True,
-        available=True,
-        privacy_note="Local",
-    )
-    monkeypatch.setattr(document_ocr.ai, "status_for", lambda *args, **kwargs: fake_status)
-    monkeypatch.setattr(document_ocr.ai, "config_for", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        document_ocr.ai,
-        "complete_json",
-        lambda *args, **kwargs: {
-            "merchant": "La Marzocco Boutique",
-            "purchase_date": "2030-01-01",
-            "total_cents": 999,
-            "currency": "EUR",
-            "product_names": ["Espresso Machine", "Invented Rocket"],
-            "invoice_number": "INV-900",
-            "serial_numbers": ["LM-2026-004"],
-            "brand": "La Marzocco",
-            "model": None,
-        },
-    )
+
+    def no_inference(*args, **kwargs):
+        raise AssertionError("Local OCR must not call a model.")
+
+    monkeypatch.setattr(document_ocr.ai, "complete_json", no_inference)
     run_document_ocr(
         document["id"],
         extractor=lambda path, content_type: ExtractedText(
@@ -215,24 +198,15 @@ def test_document_ai_normalization_only_accepts_ocr_supported_fields(owner_clien
         stored = db.get(Document, document["id"])
         assert stored is not None
         metadata = stored.extracted_metadata
-        assert metadata["processing_mode"] == "local"
-        assert metadata["ai_used"] is True
+        assert stored.ocr_status == "succeeded"
+        assert metadata["processing_mode"] == "deterministic"
+        assert metadata["ai_used"] is False
+        assert metadata["enhancement"]["status"] == "queued"
         assert metadata["total_cents"] == 625000
         assert metadata["purchase_date"] == "2026-02-14"
         assert metadata["currency"] == "USD"
-        assert "Invented Rocket" not in metadata["product_names"]
-        assert "Espresso Machine" in metadata["product_names"]
         assert metadata["serial_numbers"] == ["LM-2026-0042"]
         assert metadata["invoice_number"] == "INV-9001"
-        assert any("Rejected AI total" in warning for warning in metadata["ai_warnings"])
-        assert any(
-            "invoice_number" in warning and "not present" in warning
-            for warning in metadata["ai_warnings"]
-        )
-        assert any(
-            "serial number" in warning and "not present" in warning
-            for warning in metadata["ai_warnings"]
-        )
 
 
 def test_empty_ocr_text_is_a_failed_read_not_a_silent_success(owner_client):

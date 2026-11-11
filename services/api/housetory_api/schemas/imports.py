@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from ..schemas.common import Description, ORMModel, trimmed
+from .enrichment import EnhancementState
 
 
 class LocationCandidate(BaseModel):
@@ -171,7 +172,22 @@ class ImportBatchList(BaseModel):
     offset: int
 
 
+class ImportEnhancementEntry(BaseModel):
+    entry_id: uuid.UUID | None = None
+    proposed: ProposedItem
+    entity_type: Literal["item", "room", "container", "location"] = "item"
+    legacy_identifier: str | None = None
+    source_path: str | None = None
+    source_excerpt: str | None = None
+    source_file_id: uuid.UUID | None = None
+
+
+class ImportEnhancement(EnhancementState):
+    proposals: list[ImportEnhancementEntry] = Field(default_factory=list)
+
+
 class ImportBatchDetail(ImportBatchOut):
+    enhancement: ImportEnhancement | None = None
     entries: list[ImportEntryOut]
     files: list[ImportSourceFileOut]
     vault_tree: list[dict[str, Any]]

@@ -108,6 +108,32 @@ def refine_extraction(
     return document_refinement.refine_extraction(db, auth.household.id, document)
 
 
+@router.post("/{document_id}/extraction/enhancement/retry", response_model=ExtractionReviewOut)
+def retry_document_enhancement(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionReviewOut:
+    from ...services.enrichment import retry_enhancement
+
+    document = _review_document(db, auth.household.id, document_id)
+    retry_enhancement(db, document)
+    return document_extraction.extraction_review(db, document)
+
+
+@router.post("/{document_id}/extraction/enhancement/cancel", response_model=ExtractionReviewOut)
+def cancel_document_enhancement(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionReviewOut:
+    from ...services.enrichment import cancel_enhancement
+
+    document = _review_document(db, auth.household.id, document_id)
+    cancel_enhancement(db, document)
+    return document_extraction.extraction_review(db, document)
+
+
 @router.post("/{document_id}/extraction/matches", response_model=ExtractionMatchOut)
 def match_extraction(
     document_id: uuid.UUID,

@@ -41,6 +41,7 @@ import {
 } from "@/lib/queries";
 import type {
   ImportApplyResult,
+  ImportBatchDetail,
   ImportDecision,
   ImportEntry,
   ProposedItem,
@@ -48,6 +49,7 @@ import type {
   StorageLocation,
 } from "@/lib/types";
 import { formatDate, pluralize } from "@/lib/utils";
+import { enhancementLabel, keepManualEdits, proposalValue } from "@/lib/enrichment";
 
 export function ImportDetailPage() {
   const { batchId = "" } = useParams();
@@ -123,6 +125,42 @@ export function ImportDetailPage() {
       setInitialized(false);
       void queryClient.invalidateQueries({ queryKey: queryKeys.importBatch(batchId) });
       toast.success("Import queued again");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const retryEnhancement = useMutation({
+    mutationFn: (action: "retry" | "cancel") =>
+      api.post<ImportBatchDetail>(`/imports/${batchId}/enhancement/${action}`),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.importBatch(batchId), result);
+      if (result.enhancement?.status === "off") {
+        toast.info("AI is off. Configure a model and consent in Settings; local review is ready.");
+      } else {
+        toast.success(result.enhancement?.status === "queued"
+          ? "Local review is ready; AI suggestions will run separately"
+          : "AI suggestions cancelled; local review is unchanged");
+      }
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  const acceptEnhancement = useMutation({
+    mutationFn: async () => ({
+      before: batch,
+      after: await api.post<ImportBatchDetail>(`/imports/${batchId}/enhancement/accept`),
+    }),
+    onSuccess: ({ before, after }) => {
+      setEdits((current) => Object.fromEntries(after.entries.map((entry) => {
+        const base = before?.entries.find((item) => item.id === entry.id);
+        const edited = current[entry.id];
+        return [entry.id, base && edited
+          ? keepManualEdits(base.proposed, edited, entry.proposed)
+          : entry.proposed];
+      })));
+      queryClient.setQueryData(queryKeys.importBatch(batchId), after);
+      setInitialized(false);
+      toast.success("Suggestions loaded into review. Manual edits were kept; apply is still separate.");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -354,7 +392,84 @@ export function ImportDetailPage() {
             {pluralize(batch.total_entries, "proposal")} · {batch.imported_entries} imported ·{" "}
             {batch.skipped_entries} skipped · {batch.failed_entries} failed
           </span>
+          {batch.enhancement && (
+            <Badge variant={batch.enhancement.status === "ready" ? "brass" : "outline"}>
+              {enhancementLabel(batch.enhancement)}
+            </Badge>
+          )}
         </div>
+        {batch.enhancement && batch.status === "review" && (
+          <div className="mt-3 space-y-2 text-xs">
+            <p className="text-muted-foreground">
+              Local results are ready to review. Optional AI never applies inventory changes.
+              {batch.enhancement.error && ` ${batch.enhancement.error}`}
+            </p>
+            {batch.enhancement.status === "ready" && batch.enhancement.proposals.length > 0 && (
+              <details className="rounded-xl border border-brass/30 p-3">
+                <summary className="cursor-pointer font-medium">Review AI suggestions</summary>
+                <ul className="my-3 max-h-72 space-y-3 overflow-y-auto">
+                  {batch.enhancement.proposals.map((proposal, index) => {
+                    const base = batch.entries.find((entry) => entry.id === proposal.entry_id);
+                    const baseFields = new Map<string, unknown>(Object.entries(base?.proposed ?? {}));
+                    const changes = Object.entries(proposal.proposed).filter(
+                      ([key, value]) => key !== "field_sources" && key !== "confidence" &&
+                        JSON.stringify(value) !== JSON.stringify(baseFields.get(key)),
+                    );
+                    if (base && changes.length === 0 && base.entity_type === proposal.entity_type &&
+                        base.legacy_identifier === proposal.legacy_identifier) return null;
+                    return (
+                      <li key={proposal.entry_id ?? `new-${index}`} className="space-y-1">
+                        <p className="font-medium">{proposal.proposed.name}
+                          {!base && " · new draft"}
+                        </p>
+                        {changes.map(([key, value]) => (
+                          <p key={key} className="break-words text-2xs text-muted-foreground">
+                            {key.replaceAll("_", " ")}: {proposalValue(baseFields.get(key))}
+                            {" → "}{proposalValue(value)}
+                          </p>
+                        ))}
+                        {base && base.entity_type !== proposal.entity_type && (
+                          <p>Type: {base.entity_type} → {proposal.entity_type}</p>
+                        )}
+                        {base && base.legacy_identifier !== proposal.legacy_identifier && (
+                          <p>Source identifier: {base.legacy_identifier || "Not set"}
+                            {" → "}{proposal.legacy_identifier || "Not set"}
+                          </p>
+                        )}
+                        {(base?.source_excerpt || proposal.source_excerpt) && (
+                          <p className="line-clamp-3 text-2xs text-muted-foreground">
+                            Source: {base?.source_excerpt || proposal.source_excerpt}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <Button size="sm" onClick={() => acceptEnhancement.mutate()}
+                  disabled={acceptEnhancement.isPending || apply.isPending}>
+                  {acceptEnhancement.isPending ? <Spinner /> : <Check />}
+                  Load suggestions into review
+                </Button>
+                <p className="mt-2 text-2xs text-muted-foreground">
+                  Your manual edits are kept. Nothing is added to inventory until you apply the review.
+                </p>
+              </details>
+            )}
+            {["off", "failed", "skipped"].includes(batch.enhancement.status) && (
+              <Button size="sm" variant="outline" onClick={() => retryEnhancement.mutate("retry")}
+                disabled={retryEnhancement.isPending || apply.isPending}>
+                {retryEnhancement.isPending ? <Spinner /> : <Sparkles />}
+                {batch.enhancement.status === "off" ? "Check AI settings and try" : "Retry AI only"}
+              </Button>
+            )}
+            {["queued", "running"].includes(batch.enhancement.status) && (
+              <Button size="sm" variant="ghost" onClick={() => retryEnhancement.mutate("cancel")}
+                disabled={retryEnhancement.isPending}>
+                Skip AI suggestions
+              </Button>
+            )}
+          </div>
+        )}
         {batch.status === "queued" || batch.status === "processing" ? (
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/30 px-4 py-5 text-xs text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -537,7 +652,7 @@ export function ImportDetailPage() {
               </p>
               <Button
                 size="sm"
-                disabled={apply.isPending || selectedCount === 0}
+                disabled={apply.isPending || acceptEnhancement.isPending || selectedCount === 0}
                 onClick={() => apply.mutate()}
               >
                 {apply.isPending ? <Spinner /> : <Check />}
@@ -599,7 +714,7 @@ export function ImportDetailPage() {
               <Button
                 size="lg"
                 className="shadow-lift"
-                disabled={apply.isPending || selectedCount === 0}
+                disabled={apply.isPending || acceptEnhancement.isPending || selectedCount === 0}
                 onClick={() => apply.mutate()}
               >
                 {apply.isPending ? <Spinner /> : <Check />}

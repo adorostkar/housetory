@@ -664,6 +664,9 @@ def extraction_review(db: Session, document: Document) -> ExtractionReviewOut:
         AiTask.DOCUMENTS.value,
         probe=False,
     )
+    from .enrichment import enhancement_state
+
+    enhancement = enhancement_state(db, document) or {}
     return ExtractionReviewOut(
         document_id=document.id,
         version=str(extraction["version"]),
@@ -678,4 +681,8 @@ def extraction_review(db: Session, document: Document) -> ExtractionReviewOut:
         duplicate_documents=_duplicate_documents(db, document),
         applied=_applied_summaries(db, document),
         ai_status=status,
+        enhancement=enhancement or None,
+        suggested_refinement=(
+            enhancement.get("proposal") if enhancement.get("status") == "ready" else None
+        ),
     )

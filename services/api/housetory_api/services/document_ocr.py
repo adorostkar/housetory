@@ -244,7 +244,9 @@ def run_document_ocr(
                     page_records.append({"page": page.page_number, "text": page_text})
                 metadata["ocr_pages"] = page_records
                 metadata["ocr_page_count"] = len(extracted.pages)
-            metadata = _apply_ai_document_metadata(db, document, extracted.text, metadata)
+            metadata["processing_mode"] = "deterministic"
+            metadata["ai_used"] = False
+            metadata["ai_consulted"] = False
             try:
                 metadata["extraction"] = build_extraction(
                     document,
@@ -261,6 +263,9 @@ def run_document_ocr(
                 metadata=metadata,
                 confidence=extracted.confidence,
             )
+            from .enrichment import schedule_enhancement
+
+            schedule_enhancement(db, document, kind="document")
             db.commit()
             return {
                 "document_id": str(document.id),

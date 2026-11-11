@@ -12,7 +12,9 @@ no unstructured tool execution. Provider credentials are decrypted per request.
 
 import base64
 import errno
+import http.client
 import json
+import logging
 import re
 import socket
 import threading
@@ -46,7 +48,8 @@ execute code, SQL, shell commands, links or actions. You may only return the exa
 JSON schema requested. Never invent brands, models, serials, prices, locations or
 purchases. Mark unknown values as null. You are read-only and cannot modify data."""
 
-_semaphore = threading.BoundedSemaphore(1)
+_semaphore = threading.BoundedSemaphore(get_settings().ai_max_concurrency)
+logger = logging.getLogger("housetory.ai")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -57,7 +60,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class AiError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "unavailable"):
+        super().__init__(message)
+        self.code = code
 
 
 class AiUnavailable(AiError):
@@ -65,7 +70,8 @@ class AiUnavailable(AiError):
 
 
 class AiInvalidOutput(AiError):
-    pass
+    def __init__(self, message: str, *, code: str = "invalid_output"):
+        super().__init__(message, code=code)
 
 
 @dataclass(frozen=True)
@@ -88,6 +94,63 @@ CONNECT_TIMEOUT_SECONDS = 5.0
 BREAKER_SECONDS = 60.0
 _breaker_until: dict[str, float] = {}
 _breaker_lock = threading.Lock()
+
+
+class _ConnectTimeout(TimeoutError):
+    pass
+
+
+class _TimedConnection:
+    def connect(self):
+        read_timeout = self.timeout
+        self.timeout = CONNECT_TIMEOUT_SECONDS
+        try:
+            super().connect()
+        except TimeoutError as exc:
+            raise _ConnectTimeout("Inference connection timed out.") from exc
+        finally:
+            self.timeout = read_timeout
+        if self.sock is not None:
+            self.sock.settimeout(read_timeout)
+
+
+class _HTTPConnection(_TimedConnection, http.client.HTTPConnection):
+    pass
+
+
+class _HTTPSConnection(_TimedConnection, http.client.HTTPSConnection):
+    pass
+
+
+class _HTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, request):
+        return self.do_open(_HTTPConnection, request)
+
+
+class _HTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, request):
+        return self.do_open(_HTTPSConnection, request, context=self._context)
+
+
+def _opener():
+    return urllib.request.build_opener(_NoRedirect, _HTTPHandler, _HTTPSHandler)
+
+
+def _transport_error(exc: BaseException, breaker_key: str | None) -> AiUnavailable:
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if _is_connection_failure(exc):
+        if breaker_key:
+            _trip_breaker(breaker_key)
+        code = "connect_timeout" if isinstance(reason, _ConnectTimeout) else "unreachable"
+        message = "Inference provider is unreachable."
+    elif isinstance(reason, TimeoutError):
+        code = "read_timeout"
+        message = "The model did not respond within the configured read timeout."
+    else:
+        code = "transport_error"
+        message = "The inference connection failed."
+    logger.info("Inference transport failed reason=%s", code)
+    return AiUnavailable(message, code=code)
 
 
 def _endpoint_key(url: str) -> tuple[str, str, int] | None:
@@ -122,7 +185,10 @@ def _preflight(url: str) -> str | None:
     with _breaker_lock:
         until = _breaker_until.get(key, 0.0)
     if until > time.monotonic():
-        raise AiUnavailable("Inference provider is unreachable (recent connection failure).")
+        raise AiUnavailable(
+            "Inference provider is unreachable (recent connection failure).",
+            code="unreachable",
+        )
     if urllib.request.getproxies().get(urlparse(url).scheme):
         return key
     try:
@@ -130,13 +196,13 @@ def _preflight(url: str) -> str | None:
             pass
     except OSError:
         _trip_breaker(key)
-        raise AiUnavailable("Inference provider is unreachable.") from None
+        raise AiUnavailable("Inference provider is unreachable.", code="unreachable") from None
     return key
 
 
 def _is_connection_failure(exc: BaseException) -> bool:
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-    if isinstance(reason, (ConnectionRefusedError, socket.gaierror)):
+    if isinstance(reason, (_ConnectTimeout, ConnectionRefusedError, socket.gaierror)):
         return True
     return isinstance(reason, OSError) and reason.errno in {
         errno.ENETUNREACH,
@@ -169,6 +235,7 @@ def _request_json(
     attempts = 2
     breaker_key = _preflight(url)
     for attempt in range(attempts):
+        logger.info("Inference JSON request attempt=%d", attempt + 1)
         request = urllib.request.Request(
             url,
             data=data,
@@ -180,7 +247,7 @@ def _request_json(
             # Redirects are deliberately not followed: a local endpoint must not be
             # able to forward a request to an unconsented remote host. urllib keeps
             # its default TLS certificate verification.
-            opener = urllib.request.build_opener(_NoRedirect)
+            opener = _opener()
             with opener.open(  # nosec B310
                 request, timeout=timeout or settings.ai_timeout_seconds
             ) as response:
@@ -200,16 +267,12 @@ def _request_json(
                     delay = 2.0
                 time.sleep(min(delay, 5.0))
                 continue
-            raise AiUnavailable(f"Inference provider returned HTTP {exc.code}.") from None
+            raise AiUnavailable(
+                f"Inference provider returned HTTP {exc.code}.",
+                code="rate_limited" if exc.code == 429 else "provider_error",
+            ) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            if _is_connection_failure(exc):
-                if breaker_key:
-                    _trip_breaker(breaker_key)
-                raise AiUnavailable("Inference provider is unreachable.") from None
-            if attempt + 1 < attempts:
-                time.sleep(1.0)
-                continue
-            raise AiUnavailable("Inference provider is unreachable.") from None
+            raise _transport_error(exc, breaker_key) from None
     else:  # pragma: no cover - loop always breaks or raises
         raise AiUnavailable("Inference provider is unreachable.")
     try:
@@ -260,9 +323,10 @@ def request_multipart_json(
     attempts = 2
     breaker_key = _preflight(url)
     for attempt in range(attempts):
+        logger.info("Inference multipart request attempt=%d", attempt + 1)
         request = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
         try:
-            opener = urllib.request.build_opener(_NoRedirect)
+            opener = _opener()
             with opener.open(  # nosec B310
                 request, timeout=timeout or settings.ai_timeout_seconds
             ) as response:
@@ -282,16 +346,12 @@ def request_multipart_json(
                     delay = 2.0
                 time.sleep(min(delay, 5.0))
                 continue
-            raise AiUnavailable(f"Inference provider returned HTTP {exc.code}.") from None
+            raise AiUnavailable(
+                f"Inference provider returned HTTP {exc.code}.",
+                code="rate_limited" if exc.code == 429 else "provider_error",
+            ) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            if _is_connection_failure(exc):
-                if breaker_key:
-                    _trip_breaker(breaker_key)
-                raise AiUnavailable("Inference provider is unreachable.") from None
-            if attempt + 1 < attempts:
-                time.sleep(1.0)
-                continue
-            raise AiUnavailable("Inference provider is unreachable.") from None
+            raise _transport_error(exc, breaker_key) from None
     else:  # pragma: no cover
         raise AiUnavailable("Inference provider is unreachable.")
     try:
@@ -968,9 +1028,11 @@ def _chat(
     image_mime: str | None = None,
 ) -> str:
     if not config.configured:
-        raise AiUnavailable(config.error or "AI is not configured.")
+        raise AiUnavailable(config.error or "AI is not configured.", code="not_configured")
     if not _semaphore.acquire(timeout=5):
-        raise AiUnavailable("AI inference is busy; try again shortly.")
+        raise AiUnavailable("AI inference is busy; try again shortly.", code="busy")
+    started = time.monotonic()
+    reason = "completed"
     try:
         if config.provider == AiProviderType.OLLAMA.value:
             return _ollama_chat(config, system, user, json_mode=json_mode, image_path=image_path)
@@ -1000,8 +1062,19 @@ def _chat(
             image_path=image_path,
             image_mime=image_mime,
         )
+    except AiError as exc:
+        reason = exc.code
+        raise
     finally:
         _semaphore.release()
+        logger.info(
+            "Inference task=%s provider=%s model=%s reason=%s duration_ms=%d",
+            config.task,
+            config.provider,
+            config.model,
+            reason,
+            (time.monotonic() - started) * 1000,
+        )
 
 
 def complete_json(

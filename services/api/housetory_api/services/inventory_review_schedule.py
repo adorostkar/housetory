@@ -478,9 +478,11 @@ def dispatch_due_reviews(db: Session, *, now: datetime | None = None, limit: int
                 "household_id": str(schedule.household_id),
                 "schedule_id": str(schedule.id),
                 "request_id": str(request_id),
+                "ai_enabled": schedule.include_ai,
             },
             max_attempts=3,
             priority=5,
+            queue="ai" if schedule.include_ai else "default",
             commit=False,
         )
         db.flush()
@@ -604,7 +606,7 @@ def execute_scheduled_review(db: Session, payload: dict) -> dict:
     status, fingerprint = _assistant_route(db, household_id)
     matches = _consent_matches(schedule, fingerprint)
     ai_skip_note = None
-    effective_ai = schedule.include_ai
+    effective_ai = schedule.include_ai and payload.get("ai_enabled", True)
     if effective_ai and not status.configured:
         effective_ai = False
         ai_skip_note = (
