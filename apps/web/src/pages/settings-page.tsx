@@ -1,15 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Check,
-  LogOut,
-  Monitor,
-  Moon,
-  RefreshCw,
-  Smartphone,
-  Sparkles,
-  Sun,
-  Users,
-} from "lucide-react";
+import { LogOut, RefreshCw, Smartphone, Sparkles, Users } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -19,7 +9,6 @@ import { HouseholdSwitcher } from "@/components/household-switcher";
 import { OnlineSearchSettingsCard } from "@/components/online-search-settings";
 import { PropertiesSettings } from "@/components/properties-settings";
 import { SystemHealthSummary } from "@/components/system-health-summary";
-import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FormError } from "@/components/form-field";
@@ -37,13 +26,7 @@ import {
   useSession,
 } from "@/lib/queries";
 import type { AiStatus, Household, SessionState } from "@/lib/types";
-import { cn, formatFileSize } from "@/lib/utils";
-
-const THEME_OPTIONS = [
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
-] as const;
+import { formatFileSize } from "@/lib/utils";
 
 type AiStatusBadge = {
   label: string;
@@ -97,7 +80,6 @@ export function SettingsPage() {
   const logout = useLogout();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { theme, setTheme } = useTheme();
   const [householdName, setHouseholdName] = React.useState(session.data?.household?.name ?? "");
   const [defaultCurrency, setDefaultCurrency] = React.useState(
     session.data?.household?.default_currency ?? "USD",
@@ -353,40 +335,6 @@ export function SettingsPage() {
           <Button variant="outline" size="sm" className="mt-4" asChild>
             <Link to="/settings/account">Account settings</Link>
           </Button>
-        </section>
-
-        <section className="surface p-5 sm:p-6">
-          <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-            Appearance
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Follow your device, or choose a look for this browser.
-          </p>
-          <div className="mt-5 grid max-w-md grid-cols-3 gap-2" role="group" aria-label="Theme">
-            {THEME_OPTIONS.map((option) => {
-              const active = theme === option.value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setTheme(option.value)}
-                  aria-pressed={active}
-                  className={cn(
-                    "flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-xs transition-colors",
-                    active
-                      ? "border-foreground/30 bg-secondary text-foreground"
-                      : "border-border bg-card/50 text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-                  )}
-                >
-                  <option.icon className="size-4" strokeWidth={1.7} />
-                  <span className="flex items-center gap-1.5">
-                    {option.label}
-                    {active && <Check className="size-3 text-sage" />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
         </section>
 
         <section className="surface p-5 sm:p-6">

@@ -237,6 +237,39 @@ async function pageMetrics(page: import("@playwright/test").Page) {
 test.describe("mobile responsive", () => {
   test.use({ viewport: { width: 320, height: 568 }, hasTouch: true, deviceScaleFactor: 3 });
 
+  test("appearance cycles in the header and replaces the Settings control", async ({ page }) => {
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.goto("/items");
+      await page.evaluate(() => localStorage.setItem("housetory-theme", "light"));
+      await page.reload();
+      const button = page.getByRole("button", { name: /^Appearance:/ });
+      await expect(button).toHaveAccessibleName("Appearance: Light. Switch to dark mode");
+      await button.click();
+      await expect(button).toHaveAccessibleName("Appearance: Dark. Switch to system mode");
+      await expect(page.locator("html")).toHaveClass(/dark/);
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
+      await expect(button.locator("svg")).toHaveClass(/lucide-monitor/);
+      await expect(page.locator("html")).not.toHaveClass(/dark/);
+      await page.emulateMedia({ colorScheme: "dark" });
+      await expect(page.locator("html")).toHaveClass(/dark/);
+      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
+      await page.reload();
+      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
+      await expect(page.locator("html")).toHaveClass(/dark/);
+      await button.click();
+      await expect(button).toHaveAccessibleName("Appearance: Light. Switch to dark mode");
+      await expect(page.locator("html")).not.toHaveClass(/dark/);
+      await page.goto("/settings");
+      await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Appearance", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("group", { name: "Theme", exact: true })).toHaveCount(0);
+    }
+  });
+
   test("Add sheet waits for explicit text focus and retains desktop autofocus", async ({ page }) => {
     for (const width of [390, 768, 1023, 1024, 1440]) {
       await page.setViewportSize({ width, height: 844 });
