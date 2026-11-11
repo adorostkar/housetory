@@ -153,7 +153,7 @@ export function BulkSelectionControls({
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-2xs text-muted-foreground">
       {selection.selectableItems.length > 0 && (
-        <label className="flex min-w-0 items-center gap-2">
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 sm:min-h-0">
           <input
             ref={selection.selectAllRef}
             type="checkbox"
@@ -184,7 +184,7 @@ export function BulkSelectionNotice({ selection }: { selection: BulkSelection })
       <span>{selection.notice}</span>
       <button
         type="button"
-        className="shrink-0 rounded-full p-1 hover:bg-secondary hover:text-foreground"
+        className="flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-secondary hover:text-foreground sm:size-auto sm:p-1"
         onClick={selection.dismissNotice}
         aria-label="Dismiss selection notice"
       >
@@ -228,7 +228,7 @@ export function BulkItemActionBar({
               : "Bulk actions apply to the selected loaded records only."}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 [&>a]:h-11 [&>button]:h-11 sm:[&>a]:h-8 sm:[&>button]:h-8">
           <Button
             size="sm"
             variant="outline"

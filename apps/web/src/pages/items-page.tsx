@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { usePropertyFilter } from "@/hooks/use-property-filter";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import {
@@ -74,10 +75,16 @@ export function ItemsPage() {
   const sort: SortKey = isSortKey(sortParam) ? sortParam : "created_desc";
 
   const [view, setView] = useItemsView();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const desktopFilters = useMediaQuery("(min-width: 640px)");
+  const filterOptionsVisible = desktopFilters || filtersOpen;
   const roomsQuery = useRooms(propertyId || undefined);
-  const locationsQuery = useLocations(roomFilter || undefined);
-  const categoriesQuery = useCategories();
-  const tagsQuery = useTags();
+  const locationsQuery = useLocations(
+    roomFilter || undefined,
+    Boolean(roomFilter) && (filterOptionsVisible || Boolean(locationFilter)),
+  );
+  const categoriesQuery = useCategories(filterOptionsVisible || Boolean(categoryFilter));
+  const tagsQuery = useTags(filterOptionsVisible || Boolean(tagFilter));
 
   const filters = {
     q: qParam || undefined,
@@ -112,7 +119,6 @@ export function ItemsPage() {
   });
   const origin = itemOrigin(`${location.pathname}${location.search}`, "Items");
   useRestoreListScroll(items.length > 0, origin);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const hasFilters = Boolean(
     qParam ||
       propertyId ||
@@ -289,10 +295,10 @@ export function ItemsPage() {
         ),
       }}
     >
-      <div className="surface mb-8 p-3.5 sm:p-4">
+      <div className="surface mb-4 px-3.5 py-1.5 sm:mb-8 sm:p-4">
         <button
           type="button"
-          className="flex w-full items-center gap-2 text-2xs text-muted-foreground sm:pointer-events-none sm:w-auto"
+          className="flex min-h-11 w-full items-center gap-2 text-2xs text-muted-foreground sm:pointer-events-none sm:min-h-0 sm:w-auto"
           aria-expanded={filtersOpen}
           onClick={() => setFiltersOpen((open) => !open)}
         >

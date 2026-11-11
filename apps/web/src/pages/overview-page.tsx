@@ -3,6 +3,7 @@ import {
   Download,
   FileText,
   HandCoins,
+  MoreHorizontal,
   Package,
   Plus,
   ReceiptText,
@@ -25,6 +26,12 @@ import { SectionHeading } from "@/components/section-heading";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   WARRANTY_STATUS_LABELS,
@@ -105,10 +112,10 @@ export function OverviewPage() {
 
   return (
     <div className="animate-fade-up">
-      <header className="mb-6 flex flex-col gap-4 sm:mb-10 sm:gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <header className="mb-6 flex items-start justify-between gap-3 sm:mb-10 sm:gap-6 sm:items-end">
+        <div className="min-w-0">
           <p className="eyebrow mb-3 hidden sm:block">{today}</p>
-          <h1 className="display-title">
+          <h1 className="display-title text-[1.75rem] sm:text-[2.75rem]">
             {greetingForHour(new Date().getHours())}, {firstName}.
           </h1>
           {data.item_count === 0 ? (
@@ -128,7 +135,31 @@ export function OverviewPage() {
             )
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+        <div className="shrink-0 sm:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="size-11" aria-label="Home actions">
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {data.item_count > 0 && (
+                <>
+                  <DropdownMenuItem asChild className="min-h-11">
+                    <Link to="/insurance"><ShieldCheck /> Create insurance list</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="min-h-11" onSelect={() => setEvidenceOpen(true)}>
+                    <Download /> Export evidence
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuItem className="min-h-11" onSelect={() => setRoomDialogOpen(true)}>
+                <DoorOpen /> New room
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="hidden flex-wrap items-center gap-2 sm:flex sm:gap-2.5">
           {data.item_count > 0 && (
             <>
               <Button variant="outline" asChild>
@@ -263,10 +294,11 @@ export function OverviewPage() {
           )}
         </div>
       ) : (
-        <div className="mt-10 grid items-start gap-9 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="mt-10 grid grid-cols-1 items-start gap-9 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           <section>
             <SectionHeading
               title="Recently added"
+              className="gap-2 sm:gap-4 [&_h2]:text-2xl sm:[&_h2]:text-[1.6rem] [&_p]:hidden sm:[&_p]:block"
               description="The latest additions to your collection."
               actionLabel="All items"
               actionTo="/items"

@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QuickSearch } from "@/components/quick-search";
@@ -35,20 +36,38 @@ function response(query: string, results: QuickSearchResult[]): QuickSearchRespo
   };
 }
 
-function LocationProbe() {
+function LocationProbe({ maxChanges = Infinity }: { maxChanges?: number }) {
   const location = useLocation();
+  const changes = useRef(0);
+  useEffect(() => {
+    changes.current += 1;
+    if (changes.current > maxChanges) {
+      throw new Error("Responsive search repeatedly rewrote the URL");
+    }
+  }, [location.search, maxChanges]);
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderSearch(initialEntry = "/") {
+function BookmarkedSearchButton() {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate("/items?q=Bookmarked&sort=name_asc")}>
+      Open bookmarked search
+    </button>
+  );
+}
+
+function renderSearch(initialEntry = "/", responsive = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <QuickSearch />
-        <LocationProbe />
+        <div hidden={responsive}><QuickSearch /></div>
+        {responsive && <QuickSearch variant="mobile" />}
+        {responsive && <BookmarkedSearchButton />}
+        <LocationProbe maxChanges={responsive ? 10 : Infinity} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -329,5 +348,52 @@ describe("QuickSearch", () => {
       ),
     );
     expect(screen.getByTestId("location")).not.toHaveTextContent("/search");
+  });
+
+  it("settles and clears Items filtering with both responsive inputs mounted", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), []),
+    );
+    renderSearch("/items?sort=name_asc", true);
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "Headphones");
+    await userEvent.click(document.body);
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/items?sort=name_asc&q=Headphones",
+      ),
+    );
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+    for (const field of screen.getAllByRole("combobox", { hidden: true })) {
+      expect(field).toHaveValue("Headphones");
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("/items?sort=name_asc"),
+    );
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+    for (const field of screen.getAllByRole("combobox", { hidden: true })) {
+      expect(field).toHaveValue("");
+    }
+  });
+
+  it("does not overwrite navigation with pending responsive edits", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), []),
+    );
+    renderSearch("/items?q=Old", true);
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Draft");
+    await userEvent.click(screen.getByRole("button", { name: "Open bookmarked search" }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+    expect(screen.getByTestId("location").textContent).toBe("/items?q=Bookmarked&sort=name_asc");
+    for (const field of screen.getAllByRole("combobox", { hidden: true })) {
+      expect(field).toHaveValue("Bookmarked");
+    }
   });
 });

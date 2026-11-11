@@ -70,6 +70,7 @@ export function QuickSearch({
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const pendingEditRef = React.useRef<string | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [query, setQuery] = React.useState(() =>
@@ -118,12 +119,15 @@ export function QuickSearch({
     ? (searchParams.get("q") ?? "")
     : null;
   React.useEffect(() => {
+    pendingEditRef.current = null;
     if (urlQuery === null) return;
     setQuery((current) => (current === urlQuery ? current : urlQuery));
-  }, [urlQuery]);
+  }, [urlQuery, location.pathname]);
 
   React.useEffect(() => {
-    if (!isItemsPage || query !== debounced) return;
+    // Responsive peers consume URL changes; only user edits may publish them.
+    if (!isItemsPage || query !== debounced || pendingEditRef.current !== query) return;
+    pendingEditRef.current = null;
     const trimmed = debounced.trim();
     const current = searchParams.get("q") ?? "";
     if (trimmed === current) return;
@@ -478,6 +482,7 @@ export function QuickSearch({
         }
         onFocus={() => setFocused(true)}
         onChange={(event) => {
+          pendingEditRef.current = event.target.value;
           setQuery(event.target.value);
           setFocused(true);
           setActiveIndex(-1);
@@ -497,6 +502,7 @@ export function QuickSearch({
         <button
           type="button"
           onClick={() => {
+            pendingEditRef.current = "";
             setQuery("");
             setActiveIndex(-1);
             inputRef.current?.focus();

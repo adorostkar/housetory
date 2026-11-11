@@ -10,7 +10,7 @@ from ...schemas.overview import CurrencyTotal, OverviewOut
 from ...services import lending
 from ...services.ownership import financial_overview
 from ...services.serializers import item_summary, item_summary_load_options
-from ...services.warranty_dashboard import build_dashboard, load_warranties
+from ...services.warranty_dashboard import load_dashboard
 from ..deps import AuthContext, require_auth
 
 router = APIRouter(tags=["overview"])
@@ -68,8 +68,9 @@ def overview(
         valuable_limit=8 if include_financial else 4,
         missing_limit=20 if include_financial else 5,
     )
-    warranties = build_dashboard(
-        load_warranties(db, household_id),
+    warranties = load_dashboard(
+        db,
+        household_id,
         auth.household.warranty_reminder_days,
         limit=5,
     )

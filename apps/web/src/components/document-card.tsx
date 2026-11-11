@@ -85,9 +85,14 @@ export function DocumentCard({
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <Badge variant={ocrTone}>OCR: {OCR_STATUS_LABELS[document.ocr_status]}</Badge>
             {document.items.slice(0, 2).map((item) => (
-              <Link key={item.id} to={`/items/${item.id}`}>
-                <Badge variant="secondary" className="hover:bg-secondary/70">
-                  {item.name}
+              <Link
+                key={item.id}
+                to={`/items/${item.id}`}
+                className="min-w-0 max-w-full"
+                title={item.name}
+              >
+                <Badge variant="secondary" className="max-w-full hover:bg-secondary/70">
+                  <span className="truncate">{item.name}</span>
                 </Badge>
               </Link>
             ))}

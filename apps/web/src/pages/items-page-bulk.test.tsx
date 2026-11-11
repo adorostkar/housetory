@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
 import { api } from "@/lib/api";
+import { useCategories, useLocations, useTags } from "@/lib/queries";
 import type {
   BulkCategoryResult,
   BulkMoveResult,
@@ -62,6 +63,11 @@ const room = { id: "room-1", name: "Office", description: null, parent_id: null,
 const location = { id: "box-1", room_id: "room-1", parent_id: null, name: "Camera gear", description: null, kind: "box", is_container: true, container_type: "box", identifier: "BOX-001", label_generated_at: null, sort_order: 0, item_count: 2, total_item_count: 2, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 const category = { id: "category-1", name: "Electronics", parent_id: null, color: null, description: null, sort_order: 0, item_count: 0, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 const tag = { id: "tag-1", name: "Fragile", created_at: "2026-01-01T00:00:00Z", item_count: 0 };
+const viewport = vi.hoisted(() => ({ desktop: true }));
+
+vi.mock("@/hooks/use-media-query", () => ({
+  useMediaQuery: () => viewport.desktop,
+}));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -71,9 +77,9 @@ vi.mock("@/lib/queries", async (importOriginal) => {
     ...actual,
     useCanWrite: () => true,
     useRooms: () => ({ data: { items: [room] }, isSuccess: true }),
-    useLocations: () => ({ data: { items: [location] }, isSuccess: true }),
-    useCategories: () => ({ data: { items: [category] }, isSuccess: true }),
-    useTags: () => ({ data: { items: [tag] }, isSuccess: true }),
+    useLocations: vi.fn(() => ({ data: { items: [location] }, isSuccess: true })),
+    useCategories: vi.fn(() => ({ data: { items: [category] }, isSuccess: true })),
+    useTags: vi.fn(() => ({ data: { items: [tag] }, isSuccess: true })),
     useInvalidateInventory: () => vi.fn(),
     useItems: () => ({
       data: {
@@ -175,6 +181,8 @@ function renderPage(initialEntry = "/items") {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  viewport.desktop = true;
   localStorage.clear();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.post).mockImplementation(async (path) => {
@@ -185,6 +193,28 @@ beforeEach(() => {
 });
 
 describe("ItemsPage bulk organisation", () => {
+  it("defers collapsed mobile options and never requests unscoped locations", async () => {
+    viewport.desktop = false;
+    renderPage();
+    expect(useLocations).toHaveBeenNthCalledWith(1, undefined, false);
+    expect(useCategories).toHaveBeenNthCalledWith(1, false);
+    expect(useTags).toHaveBeenNthCalledWith(1, false);
+
+    await userEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    expect(useCategories).toHaveBeenCalledWith(true);
+    expect(useTags).toHaveBeenCalledWith(true);
+    expect(useLocations).not.toHaveBeenCalledWith(undefined, true);
+  });
+
+  it("loads selected mobile filter labels without opening the filters", () => {
+    viewport.desktop = false;
+    renderPage("/items?room_id=room-1&location_id=box-1&category_id=category-1&tag_id=tag-1");
+    expect(useLocations).toHaveBeenNthCalledWith(1, "room-1", true);
+    expect(useCategories).toHaveBeenNthCalledWith(1, true);
+    expect(useTags).toHaveBeenNthCalledWith(1, true);
+    expect(screen.getByLabelText("Filter by storage location")).toHaveValue("box-1");
+  });
+
   it("selects only loaded items, moves them and clears selection", async () => {
     renderPage();
     expect(await screen.findByText("Camera")).toBeVisible();

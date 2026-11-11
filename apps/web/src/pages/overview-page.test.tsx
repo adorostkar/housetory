@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -195,6 +196,15 @@ beforeEach(() => {
 });
 
 describe("OverviewPage sparse and populated states", () => {
+  it("keeps all secondary actions available through the mobile menu", async () => {
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Home actions" }));
+    expect(screen.getByRole("menuitem", { name: "Create insurance list" })).toHaveAttribute("href", "/insurance");
+    expect(screen.getByRole("menuitem", { name: "Export evidence" })).toBeVisible();
+    await userEvent.click(screen.getByRole("menuitem", { name: "New room" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
   it("keeps sparse value and warranty panels compact while surfacing loans and rooms", () => {
     renderPage();
     expect(screen.getByText("1 unit")).toBeVisible();

@@ -227,21 +227,24 @@ export function AssistantPage() {
       <div className="shrink-0 pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="eyebrow mb-1">Intelligence</p>
+            <p className="eyebrow mb-1 hidden sm:block">Intelligence</p>
             <h1 className="display-title !text-[1.6rem] sm:!text-[2rem]">
               Assistant
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <AddItemsButton variant="outline" />
+            <AddItemsButton variant="outline" className="hidden lg:inline-flex" />
             <Button
               type="button"
               variant="ghost"
+              className="h-11 px-3 sm:h-10 sm:px-5"
               onClick={newConversation}
+              aria-label="New conversation"
               disabled={ask.isPending || messages.length === 0}
             >
               <RotateCcw />
-              New conversation
+              <span className="sm:hidden">New chat</span>
+              <span className="hidden sm:inline">New conversation</span>
             </Button>
           </div>
         </div>
@@ -263,6 +266,7 @@ export function AssistantPage() {
             type="button"
             variant="ghost"
             size="sm"
+            className="h-11 sm:h-8"
             aria-expanded={infoOpen}
             aria-controls="assistant-info"
             onClick={() => setInfoOpen((open) => !open)}

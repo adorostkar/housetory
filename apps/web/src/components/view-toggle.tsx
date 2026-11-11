@@ -43,7 +43,7 @@ export function ViewToggle({
     <button
       type="button"
       className={cn(
-        "flex size-7 items-center justify-center rounded-md transition-colors",
+        "flex size-11 items-center justify-center rounded-md transition-colors sm:size-7",
         view === value
           ? "bg-secondary text-foreground"
           : "text-muted-foreground hover:text-foreground",
@@ -57,7 +57,7 @@ export function ViewToggle({
   );
   return (
     <div
-      className="flex items-center gap-1 rounded-lg border border-border/70 bg-card/55 p-1"
+      className="flex items-center gap-0 rounded-lg border border-border/70 bg-card/55 p-0.5 sm:gap-1 sm:p-1"
       role="group"
       aria-label="Item view"
     >

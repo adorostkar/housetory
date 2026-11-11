@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import type { DocumentSummary, DocumentSummaryList, ItemSummary, Overview } from "../src/lib/types";
 
 async function seedDenseFixtures(request: APIRequestContext) {
   const sessionResponse = await request.get("/api/v1/auth/session");
@@ -235,6 +236,56 @@ async function pageMetrics(page: import("@playwright/test").Page) {
 
 test.describe("mobile responsive", () => {
   test.use({ viewport: { width: 320, height: 568 }, hasTouch: true, deviceScaleFactor: 3 });
+
+  test("Home and document cards stay bounded with long item names", async ({ page }) => {
+    const item: ItemSummary = {
+      id: "00000000-0000-0000-0000-000000000001",
+      name: "Long equipment name SERIAL_ABCDEFGHIJKLMNOPQRSTUVWXYZ_012345678901234567890123456789",
+      description: null, brand: null, model: null, quantity: 1, on_loan_quantity: 0,
+      condition: "good", is_archived: false, room: null, location: null,
+      location_path: [], category: null, tags: [], primary_photo: null,
+      purchase: null, purchase_info_status: "unrecorded", purchase_info_missing_fields: [],
+      warranty: null, current_value_cents: null, current_value_currency: "USD",
+      current_value_basis: null, current_value_total_cents: null,
+      current_value_estimated_at: null,
+      created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+    };
+    await page.addInitScript(() => localStorage.setItem("housetory.items.view", "list"));
+    await page.route("**/api/v1/overview?**", async route => {
+      const response = await route.fetch();
+      const data: Overview = await response.json();
+      await route.fulfill({
+        response,
+        json: { ...data, item_count: 1, total_quantity: 1, recent_items: [item] },
+      });
+    });
+    const receipt: DocumentSummary = {
+      id: "00000000-0000-0000-0000-000000000003",
+      title: "Long-name receipt", document_type: "receipt",
+      original_filename: "receipt.txt", content_type: "text/plain",
+      original_content_type: "text/plain", byte_size: 100, original_byte_size: 100,
+      document_date: null, merchant: null, notes: null,
+      ocr_status: "not_requested", ocr_error: null, ocr_confidence: null, ocr_processed_at: null,
+      created_at: item.created_at, updated_at: item.updated_at,
+      items: [{ id: item.id, name: item.name }], item_count: 1, page_count: 0,
+      url: "/api/v1/documents/00000000-0000-0000-0000-000000000003/file",
+      original_url: "/api/v1/documents/00000000-0000-0000-0000-000000000003/original",
+    };
+    await page.route("**/api/v1/documents?**", async route => {
+      const response = await route.fetch();
+      const data: DocumentSummaryList = await response.json();
+      await route.fulfill({ response, json: { ...data, total: 1, items: [receipt] } });
+    });
+    for (const width of [360, 390, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto("/");
+      await expect(page.getByText(item.name, { exact: true })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+      await page.goto("/documents");
+      await expect(page.getByRole("link", { name: item.name, exact: true })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    }
+  });
 
   test("pages and text controls stay within phone, landscape and tablet viewports", async ({
     page,
