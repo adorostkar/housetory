@@ -237,6 +237,47 @@ async function pageMetrics(page: import("@playwright/test").Page) {
 test.describe("mobile responsive", () => {
   test.use({ viewport: { width: 320, height: 568 }, hasTouch: true, deviceScaleFactor: 3 });
 
+  test("Add sheet waits for explicit text focus and retains desktop autofocus", async ({ page }) => {
+    for (const width of [390, 768, 1023, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/items");
+      const mobile = width < 1024;
+      const trigger = mobile
+        ? page.getByTestId("mobile-bottom-nav").getByRole("button", { name: "Add items", exact: true })
+        : page.getByRole("main").getByRole("button", { name: "Add items", exact: true });
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: "Add items", exact: true });
+      const heading = dialog.getByRole("heading", { name: "Add items", exact: true });
+      const input = dialog.getByRole("textbox", { name: "Describe items or paste a product link" });
+      if (mobile) {
+        await expect(heading).toBeFocused();
+        await expect(input).not.toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(dialog.getByRole("button", { name: /^Place:/ })).toBeFocused();
+        await input.tap();
+      }
+      await expect(input).toBeFocused();
+      await input.pressSequentially("Two chairs");
+      await expect(input).toHaveValue("Two chairs");
+      await expect(dialog.getByRole("button", { name: "Review items", exact: true })).toBeEnabled();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      await trigger.click();
+      await expect(mobile ? heading : input).toBeFocused();
+      await dialog.getByRole("button", { name: "Close", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await expect(dialog).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      if (width === 390) {
+        await trigger.click();
+        await dialog.getByRole("link", { name: "or fill in the form yourself" }).click();
+        await expect(page).toHaveURL(/\/items\/new(?:\?|$)/);
+        await expect(page.getByRole("textbox", { name: "Item name", exact: true })).toBeFocused();
+      }
+    }
+  });
+
   test("Home and document cards stay bounded with long item names", async ({ page }) => {
     const item: ItemSummary = {
       id: "00000000-0000-0000-0000-000000000001",

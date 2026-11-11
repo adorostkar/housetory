@@ -189,6 +189,7 @@ function AddItemsOverlay({
   context: AddItemsContext | undefined;
 }) {
   const desktop = useMediaQuery("(min-width: 1024px)");
+  const titleRef = React.useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = React.useState(false);
   const escapeRef = React.useRef<(() => boolean) | null>(null);
   React.useEffect(() => {
@@ -235,9 +236,18 @@ function AddItemsOverlay({
   }
   return (
     <Sheet open={open} onOpenChange={changeOpen}>
-      <SheetContent hideClose={busy} {...guard}>
+      <SheetContent
+        hideClose={busy}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          titleRef.current?.focus({ preventScroll: true });
+        }}
+        {...guard}
+      >
         <SheetHeader className="pr-12">
-          <SheetTitle>Add items</SheetTitle>
+          <SheetTitle ref={titleRef} tabIndex={-1} className="focus:outline-none">
+            Add items
+          </SheetTitle>
           <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
         {body}

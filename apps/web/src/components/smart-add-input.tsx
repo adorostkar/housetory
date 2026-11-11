@@ -544,7 +544,7 @@ export function SmartAddInput({
             <textarea
               ref={textareaRef}
               id={`${ids}-text`}
-              autoFocus
+              autoFocus={layout === "dialog"}
               rows={4}
               maxLength={2_000_000}
               value={text}

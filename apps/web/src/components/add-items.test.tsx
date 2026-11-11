@@ -160,11 +160,14 @@ beforeEach(() => {
 });
 
 describe("AddItems smart input", () => {
-  it("focuses the box and live-detects text, link and photo input", async () => {
+  it("waits for a tap to focus the mobile box and live-detects text, link and photo input", async () => {
     await open();
-    expect(textbox()).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Add items" })).toHaveFocus();
+    expect(textbox()).not.toHaveFocus();
     expect(review()).toBeDisabled();
 
+    await userEvent.click(textbox());
+    expect(textbox()).toHaveFocus();
     await userEvent.type(textbox(), "Two camping chairs");
     expect(screen.getByText("Text")).toBeVisible();
     expect(review()).toBeEnabled();
@@ -379,6 +382,7 @@ describe("AddItems smart input", () => {
     })) as typeof window.matchMedia;
     try {
       await open(officeBox);
+      expect(textbox()).toHaveFocus();
       await userEvent.type(textbox(), "Chairs");
       await userEvent.click(screen.getByRole("button", { name: /Place: Office/ }));
       expect(screen.getByRole("group", { name: "Where are these items?" })).toBeVisible();
@@ -429,6 +433,9 @@ describe("AddItems smart input", () => {
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
+    await userEvent.click(trigger);
+    expect(screen.getByRole("heading", { name: "Add items" })).toHaveFocus();
+    expect(textbox()).not.toHaveFocus();
   });
 
   it("opens the overlay from an /add-items deep link with its context", async () => {
