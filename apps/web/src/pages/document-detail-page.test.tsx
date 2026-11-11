@@ -10,6 +10,7 @@ import type { DocumentRecord, DocumentType } from "@/lib/types";
 const state = vi.hoisted(() => ({
   document: null as unknown,
   relations: vi.fn(),
+  canWrite: true,
 }));
 
 vi.mock("sonner", () => ({
@@ -20,7 +21,7 @@ vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
   return {
     ...actual,
-    useCanWrite: () => true,
+    useCanWrite: () => state.canWrite,
     useInvalidateInventory: () => vi.fn(),
     useDocument: () => ({
       data: state.document as DocumentRecord,
@@ -36,9 +37,19 @@ vi.mock("@/lib/queries", async (importOriginal) => {
 });
 
 vi.mock("@/components/document-extraction-review", () => ({
-  DocumentExtractionReview: ({ document }: { document: DocumentRecord }) => (
-    <div>Extraction review loaded for {document.title}</div>
+  DocumentExtractionReview: ({ document, onOpenChange }: {
+    document: DocumentRecord; onOpenChange?: (open: boolean) => void;
+  }) => (
+    <div>
+      Extraction review loaded for {document.title}
+      <button onClick={() => onOpenChange?.(true)}>Review extraction</button>
+    </div>
   ),
+}));
+
+vi.mock("@/components/document-scan-dialog", () => ({
+  DocumentScanDialog: ({ open, targetDocumentId }: { open: boolean; targetDocumentId?: string }) =>
+    open ? <div>Cleanup draft for {targetDocumentId}</div> : null,
 }));
 
 function makeDocument(documentType: DocumentType): DocumentRecord {
@@ -72,8 +83,8 @@ function makeDocument(documentType: DocumentType): DocumentRecord {
   };
 }
 
-function renderPage(documentType: DocumentType) {
-  state.document = makeDocument(documentType);
+function renderPage(documentType: DocumentType, overrides: Partial<DocumentRecord> = {}) {
+  state.document = { ...makeDocument(documentType), ...overrides };
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
@@ -90,41 +101,43 @@ function renderPage(documentType: DocumentType) {
 
 beforeEach(() => {
   state.relations.mockClear();
+  state.canWrite = true;
 });
 
 describe("DocumentDetailPage extraction review", () => {
-  it("keeps manual extraction review collapsed and defers related-item lookup", async () => {
-    renderPage("manual");
-
-    const advanced = screen.getByTestId("manual-extraction-review");
-    expect(advanced).not.toHaveAttribute("open");
-    expect(
-      screen.queryByRole("heading", { name: "Review extracted items" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Extraction review loaded for Drill manual"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText("Extracted text")).toBeVisible();
-    expect(state.relations).toHaveBeenLastCalledWith(undefined);
-
-    await userEvent.click(screen.getByText(/Advanced · Extraction review/));
-
-    expect(
-      await screen.findByRole("heading", { name: "Review extracted items" }),
-    ).toBeVisible();
-    expect(screen.getByText("Extraction review loaded for Drill manual")).toBeVisible();
-    await waitFor(() => expect(state.relations).toHaveBeenLastCalledWith("document-1"));
-    expect(screen.getByText("Extracted text")).toBeVisible();
+  it("offers image cleanup in place and labels the actual original type, not page count", async () => {
+    renderPage("receipt", {
+      original_content_type: "image/png",
+      page_count: 1,
+    });
+    expect(screen.queryByRole("link", { name: "Original PDF" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Original" })).toHaveAttribute(
+      "href", "/api/v1/documents/document-1/original",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Clean up scan" }));
+    expect(screen.getByText("Cleanup draft for document-1")).toBeVisible();
   });
 
-  it("keeps the existing extraction review open by default for receipts", () => {
-    renderPage("receipt");
+  it("does not offer cleanup for an arbitrary PDF or a read-only viewer", () => {
+    renderPage("manual");
+    expect(screen.queryByRole("button", { name: "Clean up scan" })).not.toBeInTheDocument();
+  });
 
-    expect(
-      screen.getByRole("heading", { name: "Review extracted items" }),
-    ).toBeVisible();
-    expect(screen.getByText("Extraction review loaded for Hardware receipt")).toBeVisible();
+  it("keeps image cleanup unavailable to read-only viewers", () => {
+    state.canWrite = false;
+    renderPage("receipt", { content_type: "image/png", original_content_type: "image/png" });
+    expect(screen.queryByRole("button", { name: "Clean up scan" })).not.toBeInTheDocument();
+  });
+
+  it.each(["manual", "receipt", "invoice", "warranty_certificate", "specification", "other"] as const)(
+    "shares compact extraction review and defers related-item lookup for %s", async (kind) => {
+    renderPage(kind);
+    expect(screen.getByText(/^Extraction review loaded for/)).toBeVisible();
     expect(screen.queryByTestId("manual-extraction-review")).not.toBeInTheDocument();
-    expect(state.relations).toHaveBeenLastCalledWith("document-1");
+    expect(screen.getByText("Extracted text")).toBeVisible();
+    expect(state.relations).toHaveBeenLastCalledWith(undefined);
+    await userEvent.click(screen.getByRole("button", { name: "Review extraction" }));
+    await waitFor(() => expect(state.relations).toHaveBeenLastCalledWith("document-1"));
+    expect(screen.getByText("Extracted text")).toBeVisible();
   });
 });

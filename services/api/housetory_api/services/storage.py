@@ -555,7 +555,7 @@ def save_scan_cleaned(
 ) -> tuple[str, str, int, int, int]:
     cleaned_dir = _scan_dir(household_id, scan_id) / "cleaned"
     _mkdir_private(cleaned_dir)
-    destination = cleaned_dir / f"{page_id}.jpg"
+    destination = cleaned_dir / f"{page_id}-{uuid.uuid4()}.jpg"
     fd, temp_name = tempfile.mkstemp(prefix="cleaned-", suffix=".jpg", dir=cleaned_dir)
     temp_path = Path(temp_name)
     try:
@@ -588,11 +588,13 @@ def write_document_pdf(
     data: bytes,
     *,
     original: bool = False,
+    staged: bool = False,
 ) -> tuple[str, int]:
     documents_dir = _root() / "households" / str(household_id) / "documents"
     destination_dir = documents_dir / "originals" if original else documents_dir
     _mkdir_private(destination_dir)
-    destination = destination_dir / f"{document_id}.pdf"
+    name = f"{document_id}-{uuid.uuid4()}" if staged else str(document_id)
+    destination = destination_dir / f"{name}.pdf"
     fd, temp_name = tempfile.mkstemp(prefix="pdf-", suffix=".pdf", dir=destination_dir)
     temp_path = Path(temp_name)
     try:

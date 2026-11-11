@@ -40,12 +40,16 @@ from ..errors import ApiError
 router = APIRouter(tags=["documents"])
 
 
-def _file_headers(document: Document) -> dict[str, str]:
+def _file_headers(document: Document, *, original: bool = False) -> dict[str, str]:
+    filename = document.original_filename
+    if not original and document.content_type != document.original_content_type:
+        extension = storage.DOCUMENT_TYPES.get(document.content_type, ".pdf").lstrip(".")
+        filename = storage.safe_document_filename(filename.rsplit(".", 1)[0], extension)
     return {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "same-origin",
-        "Content-Disposition": f'attachment; filename="{document.original_filename}"',
+        "Content-Disposition": f'attachment; filename="{filename}"',
     }
 
 
@@ -304,7 +308,7 @@ def get_document_original(
 ) -> FileResponse:
     document = get_document(db, auth.household.id, document_id)
     path = storage.resolve_key(document.original_storage_key)
-    headers = _file_headers(document)
+    headers = _file_headers(document, original=True)
     headers["X-Housetory-Original"] = "true"
     return FileResponse(
         path,

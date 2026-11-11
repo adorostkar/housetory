@@ -17,6 +17,7 @@ from ..db import SessionLocal
 from ..domain import AiTask
 from ..jobs import enqueue
 from ..models import Document, ImportBatch, ImportEntry, ImportSourceFile, Job
+from ..schemas.extraction import LineMatch
 from ..schemas.imports import ImportEnhancementEntry
 from . import ai
 from .ai_runtime import AiRuntimeConfig
@@ -36,6 +37,10 @@ def source_version(db: Session, source: Document | ImportBatch) -> str:
         metadata = source.extracted_metadata or {}
         return fingerprint(
             {
+                # Generation one retains the fingerprint of pre-generation proposals.
+                **(
+                    {"generation": source.source_generation} if source.source_generation > 1 else {}
+                ),
                 "text": source.extracted_text,
                 "base": metadata.get("extraction"),
                 "applied": metadata.get("extraction_applied"),
@@ -88,7 +93,12 @@ def _task(source: Document | ImportBatch) -> str:
     return AiTask.DOCUMENTS.value if isinstance(source, Document) else AiTask.IMPORTS.value
 
 
-def enhancement_state(db: Session, source: Document | ImportBatch) -> dict | None:
+def enhancement_state(
+    db: Session,
+    source: Document | ImportBatch,
+    *,
+    document_matches: list[LineMatch] | None = None,
+) -> dict | None:
     state = _metadata(source).get("enhancement")
     if (
         state
@@ -96,6 +106,16 @@ def enhancement_state(db: Session, source: Document | ImportBatch) -> dict | Non
         and state.get("version") != source_version(db, source)
     ):
         return {**state, "status": "skipped", "reason": "source_changed"}
+    if (
+        isinstance(source, Document)
+        and state
+        and state.get("status") == "ready"
+        and state.get("proposal")
+    ):
+        from .document_refinement import refinement_has_changes
+
+        if not refinement_has_changes(db, source, state["proposal"], matches=document_matches):
+            return {**state, "status": "skipped", "reason": "no_changes", "proposal": None}
     if not state or state.get("status") not in {"queued", "running"}:
         return state
     job = db.get(Job, uuid.UUID(state["job_id"]))
@@ -415,9 +435,18 @@ def run_enhancement(payload: dict) -> dict:
                 else None
             ),
         }
-        if not reason and result == []:
+        if not reason and (
+            result == []
+            or (isinstance(source, Document) and result is not None and not result.get("ai_used"))
+        ):
+            if isinstance(source, Document):
+                state["status"] = "skipped"
             state["reason"] = "no_changes"
-        if not reason and result is not None:
+        if (
+            not reason
+            and result is not None
+            and (not isinstance(source, Document) or state["reason"] != "no_changes")
+        ):
             state["proposal" if isinstance(source, Document) else "proposals"] = result
         _write(source, state)
         db.commit()

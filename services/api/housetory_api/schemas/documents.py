@@ -77,15 +77,21 @@ class DocumentPageOut(BaseModel):
     original_url: str
     cleaned_url: str
     adjustments: ScanAdjustments
+    detection_status: Literal["detected", "manual_required", "manual"] = "manual_required"
     updated_at: datetime
 
 
 class DocumentScanOut(BaseModel):
     id: uuid.UUID
     status: Literal["draft", "committed"]
+    target_document_id: uuid.UUID | None = None
     pages: list[DocumentPageOut]
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentScanCreate(BaseModel):
+    target_document_id: uuid.UUID | None = None
 
 
 class DocumentScanReorder(BaseModel):

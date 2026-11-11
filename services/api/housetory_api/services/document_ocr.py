@@ -156,7 +156,7 @@ def enqueue_ocr(db: Session, document: Document, *, commit: bool = True) -> Any:
     job = enqueue(
         db,
         OCR_TASK,
-        {"document_id": str(document.id)},
+        {"document_id": str(document.id), "source_generation": document.source_generation},
         commit=False,
         max_attempts=3,
         priority=5,
@@ -196,28 +196,43 @@ def run_document_ocr(
     extractor=None,
     parser=None,
     force: bool = False,
+    source_generation: int | None = None,
 ) -> dict[str, Any] | None:
+    def stale() -> dict[str, Any]:
+        return {"document_id": str(document_id), "skipped": True, "reason": "stale_source"}
+
+    def current(db: Session) -> Document | None:
+        return db.scalar(
+            select(Document)
+            .where(Document.id == document_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
     with SessionLocal() as db:
-        document = db.get(Document, document_id)
+        document = current(db)
         if document is None:
             return None
+        generation = document.source_generation
+        if source_generation is not None and source_generation != generation:
+            return stale()
         if document.ocr_status == OcrStatus.SUCCEEDED.value and not force:
             return {"document_id": str(document.id), "skipped": True}
 
+        scan = db.scalar(select(DocumentScan.id).where(DocumentScan.document_id == document.id))
+        if scan is not None:
+            key = document.storage_key
+            content_type = document.content_type
+            artifact = "cleaned_pdf"
+        else:
+            key = document.original_storage_key or document.storage_key
+            content_type = document.original_content_type or document.content_type
+            artifact = "original"
         document.ocr_status = OcrStatus.PROCESSING.value
         document.ocr_error = None
         db.commit()
 
         try:
-            scan = db.scalar(select(DocumentScan).where(DocumentScan.document_id == document.id))
-            if scan is not None:
-                key = document.storage_key
-                content_type = document.content_type
-                artifact = "cleaned_pdf"
-            else:
-                key = document.original_storage_key or document.storage_key
-                content_type = document.original_content_type or document.content_type
-                artifact = "original"
             path = storage.resolve_key(key)
             extracted = (extractor or extract_text)(path, content_type)
             if not extracted.text.strip():
@@ -225,10 +240,7 @@ def run_document_ocr(
                     "No readable text was found. Adjust the scan crop, rotation or "
                     "contrast, or upload a clearer page and retry OCR."
                 )
-            metadata = {
-                **(document.extracted_metadata or {}),
-                **(parser or parse_receipt)(extracted.text),
-            }
+            metadata = dict((parser or parse_receipt)(extracted.text))
             metadata["source"] = extracted.source
             metadata["confidence"] = extracted.confidence
             metadata["ocr_artifact"] = artifact
@@ -247,6 +259,11 @@ def run_document_ocr(
             metadata["processing_mode"] = "deterministic"
             metadata["ai_used"] = False
             metadata["ai_consulted"] = False
+            document = current(db)
+            if document is None or document.source_generation != generation:
+                db.rollback()
+                return stale()
+            metadata = {**(document.extracted_metadata or {}), **metadata}
             try:
                 metadata["extraction"] = build_extraction(
                     document,
@@ -275,7 +292,10 @@ def run_document_ocr(
         except Exception as exc:  # noqa: BLE001 - persisted for the review screen
             logger.exception("OCR failed for document %s", document_id)
             db.rollback()
-            document = db.get(Document, document_id)
+            document = current(db)
+            if document is None or document.source_generation != generation:
+                db.rollback()
+                return stale()
             if document is not None:
                 document.ocr_status = OcrStatus.FAILED.value
                 document.ocr_error = f"{type(exc).__name__}: {exc}"[:2000]
@@ -288,4 +308,8 @@ def run_job(payload: dict[str, Any]) -> dict[str, Any] | None:
     document_id = payload.get("document_id")
     if not document_id:
         raise ValueError("OCR job payload is missing document_id.")
-    return run_document_ocr(document_id)
+    # Legacy jobs can only refer to the first content generation.
+    generation = payload.get("source_generation", 1)
+    if type(generation) is not int or generation < 1:
+        raise ValueError("OCR job payload has an invalid source_generation.")
+    return run_document_ocr(document_id, source_generation=generation)

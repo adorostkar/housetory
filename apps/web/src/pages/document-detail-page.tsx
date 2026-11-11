@@ -1,13 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ChevronDown,
   Download,
   FileText,
   Images,
   Link2,
   Pencil,
   RefreshCw,
+  ScanLine,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
+import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
 import { ItemMultiSelect } from "@/components/item-multi-select";
@@ -51,22 +52,23 @@ import {
   useInvalidateInventory,
 } from "@/lib/queries";
 import type { DocumentRecord, DocumentType } from "@/lib/types";
-import { formatDate, formatFileSize } from "@/lib/utils";
+import { formatDate, formatFileSize, versionedUrl } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function DocumentDetailPage() {
   const { documentId = "" } = useParams();
   const documentQuery = useDocument(documentId);
-  const isManual = documentQuery.data?.document_type === "manual";
-  const [manualExtractionOpen, setManualExtractionOpen] = React.useState(false);
+  const [extractionOpened, setExtractionOpened] = React.useState(false);
   const relationsQuery = useDocumentRelations(
-    documentQuery.data && (!isManual || manualExtractionOpen) ? documentId : undefined,
+    documentQuery.data && extractionOpened ? documentId : undefined,
   );
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
   const [editOpen, setEditOpen] = React.useState(false);
+  const [cleanupOpen, setCleanupOpen] = React.useState(false);
+  const [cleanupRevision, setCleanupRevision] = React.useState(0);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [suggestedToLink, setSuggestedToLink] = React.useState<string[]>([]);
 
@@ -159,11 +161,19 @@ export function DocumentDetailPage() {
             <Button variant="outline" asChild>
               <a href={document.original_url}>
                 <FileText />
-                {document.page_count > 0 ? "Original PDF" : "Original"}
+                {document.original_content_type === "application/pdf" ? "Original PDF" : "Original"}
               </a>
             </Button>
             {canWrite && (
               <>
+                {(document.pages.length > 0 ||
+                  isImageContentType(document.original_content_type) ||
+                  isImageContentType(document.content_type)) && (
+                  <Button variant="outline" onClick={() => setCleanupOpen(true)}>
+                    <ScanLine />
+                    Clean up scan
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setEditOpen(true)}>
                   <Pencil />
                   Edit
@@ -188,7 +198,7 @@ export function DocumentDetailPage() {
             {isImageContentType(document.content_type) ? (
               <div className="flex max-h-[70vh] items-center justify-center bg-secondary/30 p-4">
                 <img
-                  src={document.url}
+                  src={versionedUrl(document.url, document.updated_at)}
                   alt={document.title}
                   className="max-h-[65vh] max-w-full rounded-lg object-contain shadow-sm"
                 />
@@ -196,7 +206,7 @@ export function DocumentDetailPage() {
             ) : firstPage ? (
               <div className="relative flex max-h-[70vh] items-center justify-center bg-secondary/30 p-4">
                 <img
-                  src={firstPage.cleaned_url}
+                  src={versionedUrl(firstPage.cleaned_url, firstPage.updated_at)}
                   alt={`${document.title} · page 1`}
                   className="max-h-[65vh] max-w-full rounded-lg object-contain shadow-sm"
                 />
@@ -251,7 +261,7 @@ export function DocumentDetailPage() {
                   >
                     <a href={page.cleaned_url} target="_blank" rel="noreferrer">
                       <img
-                        src={page.cleaned_url}
+                        src={versionedUrl(page.cleaned_url, page.updated_at)}
                         alt={`Cleaned page ${page.page_number}`}
                         className="h-36 w-full object-contain p-2"
                       />
@@ -272,45 +282,11 @@ export function DocumentDetailPage() {
             </section>
           )}
 
-          {isManual ? (
-            <details
-              className="group surface p-5 sm:p-6"
-              data-testid="manual-extraction-review"
-              onToggle={(event) => setManualExtractionOpen(event.currentTarget.open)}
-            >
-              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-xs font-medium">
-                <span className="flex flex-wrap items-center gap-2">
-                  Advanced · Extraction review
-                  <Badge variant="outline">Optional</Badge>
-                </span>
-                <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-              </summary>
-              <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
-                Purchase and line-item tools are available when needed. Stored manual text
-                remains available below.
-              </p>
-              {manualExtractionOpen && (
-                <div className="mt-5 border-t border-border/60 pt-5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
-                    <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-                      Review extracted items
-                    </h2>
-                  </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    Review document fields, line items and household matches before anything
-                    changes.
-                  </p>
-                  <DocumentExtractionReview document={document} />
-                </div>
-              )}
-            </details>
-          ) : (
             <section className="surface p-5 sm:p-6">
               <div className="flex items-center gap-2">
                 <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
-                <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-                  Review extracted items
+                <h2 className="text-sm font-medium">
+                  Extraction review
                 </h2>
               </div>
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
@@ -318,9 +294,9 @@ export function DocumentDetailPage() {
                   ? "OCR reads the cleaned PDF; original page files remain available above. Review document fields, line items and household matches before anything changes."
                   : "Review document fields, line items and household matches before anything changes."}
               </p>
-              <DocumentExtractionReview document={document} />
+              <DocumentExtractionReview key={`${document.id}:${cleanupRevision}`} document={document}
+                onOpenChange={(open) => { if (open) setExtractionOpened(true); }} />
             </section>
-          )}
 
           {document.extracted_text && (
             <details className="surface p-5 sm:p-6">
@@ -555,6 +531,21 @@ export function DocumentDetailPage() {
           </section>
         </aside>
       </div>
+
+      <DocumentScanDialog
+        open={cleanupOpen}
+        onOpenChange={setCleanupOpen}
+        targetDocumentId={document.id}
+        onSaved={(updated) => {
+          queryClient.removeQueries({
+            queryKey: [...queryKeys.document(document.id), "extraction"],
+            exact: true,
+          });
+          queryClient.setQueryData(queryKeys.document(document.id), updated);
+          setCleanupRevision(value => value + 1);
+          setExtractionOpened(false);
+        }}
+      />
 
       <EditDocumentDialog
         open={editOpen}

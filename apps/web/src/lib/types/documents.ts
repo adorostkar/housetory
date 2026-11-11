@@ -42,6 +42,7 @@ export interface DocumentPage {
   cleaned_byte_size: number;
   original_url: string;
   cleaned_url: string;
+  detection_status?: "detected" | "manual_required" | "manual";
   adjustments: {
     rotation: 0 | 90 | 180 | 270;
     corners: Array<{ x: number; y: number }>;
@@ -54,6 +55,7 @@ export interface DocumentPage {
 export interface DocumentScan {
   id: UUID;
   status: "draft" | "committed";
+  target_document_id?: UUID | null;
   pages: DocumentPage[];
   created_at: string;
   updated_at: string;

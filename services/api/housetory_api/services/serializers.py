@@ -84,12 +84,12 @@ def item_summary_load_options(*, compact_purchase: bool = False) -> list:
         .joinedload(StorageLocation.room)
         .joinedload(Room.property),
         joinedload(Item.category),
-        joinedload(Item.purchase).joinedload(Purchase.receipt_document).load_only(
-            Document.id, Document.title, Document.document_type, Document.content_type
-        ),
-        joinedload(Item.warranty).joinedload(Warranty.document).load_only(
-            Document.id, Document.title, Document.document_type, Document.content_type
-        ),
+        joinedload(Item.purchase)
+        .joinedload(Purchase.receipt_document)
+        .load_only(Document.id, Document.title, Document.document_type, Document.content_type),
+        joinedload(Item.warranty)
+        .joinedload(Warranty.document)
+        .load_only(Document.id, Document.title, Document.document_type, Document.content_type),
         joinedload(Item.last_verification),
         selectinload(Item.tags),
         selectinload(Item.photos),
@@ -189,6 +189,7 @@ def document_page_out(page: DocumentScanPage) -> DocumentPageOut:
         original_url=f"{prefix}/original",
         cleaned_url=f"{prefix}/file",
         adjustments=adjustments,
+        detection_status=page.detection_status,
         updated_at=page.updated_at,
     )
 

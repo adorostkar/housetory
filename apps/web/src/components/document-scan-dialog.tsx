@@ -38,7 +38,7 @@ import type {
   DocumentScan,
   DocumentType,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, versionedUrl } from "@/lib/utils";
 
 type Corner = { x: number; y: number };
 type CornerIndex = 0 | 1 | 2 | 3;
@@ -53,10 +53,6 @@ const FULL_CORNERS: Corner[] = [
 
 const CORNER_LABELS = ["Top left", "Top right", "Bottom right", "Bottom left"];
 
-function versioned(url: string, updatedAt: string): string {
-  return `${url}?v=${encodeURIComponent(updatedAt)}`;
-}
-
 function clamp(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
@@ -65,17 +61,28 @@ function nextRotation(current: number, delta: number): 0 | 90 | 180 | 270 {
   return (((current + delta + 360) % 360) as 0 | 90 | 180 | 270);
 }
 
+function rotatedPoint(point: Corner, rotation: number): Corner {
+  switch ((rotation + 360) % 360) {
+    case 90: return { x: 1 - point.y, y: point.x };
+    case 180: return { x: 1 - point.x, y: 1 - point.y };
+    case 270: return { x: point.y, y: 1 - point.x };
+    default: return point;
+  }
+}
+
 export function DocumentScanDialog({
   open,
   onOpenChange,
   defaultItemIds = [],
   defaultType = "other",
+  targetDocumentId,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultItemIds?: string[];
   defaultType?: DocumentType;
+  targetDocumentId?: string;
   onSaved?: (document: DocumentRecord) => void;
 }) {
   const invalidate = useInvalidateInventory();
@@ -97,6 +104,9 @@ export function DocumentScanDialog({
   const [uploadProgress, setUploadProgress] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [savingPages, setSavingPages] = React.useState(0);
+  const [previewFailed, setPreviewFailed] = React.useState(false);
+  const failedPagesRef = React.useRef(new Set<string>());
+  const [loadAttempt, setLoadAttempt] = React.useState(0);
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [drag, setDrag] = React.useState<{ pageId: string; index: CornerIndex } | null>(
     null,
@@ -128,15 +138,41 @@ export function DocumentScanDialog({
     setMerchant("");
     setItemIds(defaultItemIds);
     setError(null);
-    setUploading(false);
+    setUploading(Boolean(targetDocumentId));
     setUploadProgress("");
     setSaving(false);
     setSavingPages(0);
+    failedPagesRef.current.clear();
+    setPreviewFailed(false);
     setRequestId(crypto.randomUUID());
+    let active = true;
+    if (targetDocumentId) {
+      void api.post<DocumentScan>("/documents/scans", {
+        target_document_id: targetDocumentId,
+      }).then(async (scan) => {
+        if (!active) {
+          try {
+            await api.delete<void>(`/documents/scans/${scan.id}`);
+          } catch (caught) {
+            toast.error(`Could not discard cleanup draft: ${getApiErrorMessage(caught)}`);
+          }
+          return;
+        }
+        scanIdRef.current = scan.id;
+        setScanId(scan.id);
+        setPages(scan.pages);
+        setActivePageId(scan.pages[0]?.id ?? null);
+      }).catch((caught: unknown) => {
+        if (active) setError(getApiErrorMessage(caught));
+      }).finally(() => {
+        if (active) setUploading(false);
+      });
+    }
     // The key intentionally captures the default selection without re-running on
     // every parent render where the array has a new identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultItemKey, defaultType, open]);
+    return () => { active = false; };
+  }, [defaultItemKey, defaultType, open, targetDocumentId, loadAttempt]);
 
   React.useEffect(() => {
     if (!drag) return;
@@ -147,8 +183,9 @@ export function DocumentScanDialog({
       const y = clamp((event.clientY - rect.top) / rect.height);
       const page = pagesRef.current.find((entry) => entry.id === drag.pageId);
       if (!page) return;
+      const position = rotatedPoint({ x, y }, page.adjustments.rotation);
       const corners = page.adjustments.corners.map((corner, index) =>
-        index === drag.index ? { x, y } : corner,
+        index === drag.index ? position : corner,
       );
       dragCornersRef.current = { pageId: page.id, corners };
       setPages((current) =>
@@ -185,17 +222,24 @@ export function DocumentScanDialog({
   ) => {
     if (!scanIdRef.current) return;
     setSavingPages((current) => current + 1);
-    const task = api
-      .patch<DocumentPage>(
+    const task = (inflightRef.current ?? Promise.resolve())
+      .then(() => api.patch<DocumentPage>(
         `/documents/scans/${scanIdRef.current}/pages/${pageId}`,
         adjustments,
-      )
+      ))
       .then((updated) => {
+        failedPagesRef.current.delete(pageId);
+        setPreviewFailed(failedPagesRef.current.size > 0);
         setPages((current) =>
           current.map((page) =>
             page.id === pageId &&
             new Date(updated.updated_at).getTime() >= new Date(page.updated_at).getTime()
-              ? updated
+              ? {
+                  ...updated,
+                  adjustments: JSON.stringify(page.adjustments) === JSON.stringify(adjustments)
+                    ? updated.adjustments
+                    : page.adjustments,
+                }
               : page,
           ),
         );
@@ -207,6 +251,8 @@ export function DocumentScanDialog({
     try {
       await task;
     } catch (caught) {
+      failedPagesRef.current.add(pageId);
+      setPreviewFailed(true);
       setError(getApiErrorMessage(caught));
       throw caught;
     } finally {
@@ -244,6 +290,9 @@ export function DocumentScanDialog({
     }
     if (inflightRef.current) {
       await inflightRef.current;
+    }
+    if (failedPagesRef.current.size > 0) {
+      throw new Error("Some page adjustments could not be saved. Retry the preview before saving.");
     }
   };
 
@@ -366,9 +415,12 @@ export function DocumentScanDialog({
 
   const rotate = (delta: number) => {
     if (!activePage) return;
+    const corners = activePage.adjustments.corners.map(point => rotatedPoint(point, delta));
+    const offset = delta > 0 ? 3 : 1;
     applyAdjustments(activePage.id, {
       ...activePage.adjustments,
       rotation: nextRotation(activePage.adjustments.rotation, delta),
+      corners: [...corners.slice(offset), ...corners.slice(0, offset)],
     });
   };
 
@@ -388,11 +440,13 @@ export function DocumentScanDialog({
     deltaY: number,
   ) => {
     if (!activePage) return;
+    const origin = rotatedPoint({ x: 0, y: 0 }, activePage.adjustments.rotation);
+    const shifted = rotatedPoint({ x: deltaX, y: deltaY }, activePage.adjustments.rotation);
     const corners = activePage.adjustments.corners.map((corner, cornerIndex) =>
       cornerIndex === index
         ? {
-            x: clamp(corner.x + deltaX),
-            y: clamp(corner.y + deltaY),
+            x: clamp(corner.x + shifted.x - origin.x),
+            y: clamp(corner.y + shifted.y - origin.y),
           }
         : corner,
     );
@@ -412,8 +466,8 @@ export function DocumentScanDialog({
     if (scanIdRef.current && !committedRef.current) {
       try {
         await api.delete<void>(`/documents/scans/${scanIdRef.current}`);
-      } catch {
-        // A stale draft is cleaned up later; closing must not be blocked.
+      } catch (caught) {
+        toast.error(`Could not discard draft; it will expire automatically. ${getApiErrorMessage(caught)}`);
       }
     }
     scanIdRef.current = null;
@@ -428,7 +482,7 @@ export function DocumentScanDialog({
       await flushPending();
       const document = await api.post<DocumentRecord>(
         `/documents/scans/${scanIdRef.current}/commit`,
-        {
+        targetDocumentId ? { request_id: requestId } : {
           request_id: requestId,
           title: title.trim() || null,
           document_type: documentType,
@@ -440,7 +494,9 @@ export function DocumentScanDialog({
       committedRef.current = true;
       invalidate();
       toast.success(
-        `Saved ${pages.length === 1 ? "1 scanned page" : `${pages.length} scanned pages`}`,
+        targetDocumentId
+          ? "Saved cleaned document"
+          : `Saved ${pages.length === 1 ? "1 scanned page" : `${pages.length} scanned pages`}`,
       );
       onSaved?.(document);
       onOpenChange(false);
@@ -462,22 +518,33 @@ export function DocumentScanDialog({
         else onOpenChange(true);
       }}
     >
-      <DialogContent className="max-w-6xl overflow-hidden p-0">
+      <DialogContent hideClose className="max-w-6xl overflow-hidden p-0">
         <div className="flex max-h-[calc(100dvh-4rem)] min-h-0 flex-col max-sm:max-h-[90dvh]">
-          <div className="shrink-0 border-b border-border/60 px-5 pb-3 pt-5 sm:px-7">
+          <div className="relative shrink-0 border-b border-border/60 px-5 pb-3 pt-5 sm:px-7">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-3 top-3 size-10"
+              aria-label="Close"
+              disabled={busy}
+              onClick={() => void close()}
+            >
+              <X />
+            </Button>
             <DialogHeader className="pr-10 max-sm:static max-sm:z-auto max-sm:mx-0 max-sm:p-0">
               <DialogTitle className="flex items-center gap-2">
                 <ScanLine className="size-5 text-brass" />
-                Scan document
+                {targetDocumentId ? "Clean up document" : "Scan document"}
               </DialogTitle>
               <DialogDescription>
-                Capture or choose image pages, straighten and clean them, then save one
-                multi-page document. Pages stay private draft copies until you save;
-                Cancel discards them.
+                {targetDocumentId
+                  ? "Preview and adjust cleanup before replacing the current view. Original files, document details and item links stay unchanged. Cancel leaves the document as it is."
+                  : "Capture or choose image pages, review automatic cleanup, then save one multi-page document. Exact originals are preserved; Cancel discards the draft."}
               </DialogDescription>
             </DialogHeader>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
-              <span className="rounded-full bg-secondary px-2.5 py-1">1 · Add pages</span>
+              <span className="rounded-full bg-secondary px-2.5 py-1">{targetDocumentId ? "1 · Prepare preview" : "1 · Add pages"}</span>
               <span className="rounded-full bg-secondary px-2.5 py-1">2 · Adjust</span>
               <span className="rounded-full bg-secondary px-2.5 py-1">
                 3 · Review and save
@@ -487,8 +554,26 @@ export function DocumentScanDialog({
 
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-7">
             {error && <FormError message={error} />}
+            {targetDocumentId && !scanId && error && (
+              <Button type="button" variant="outline" onClick={() => setLoadAttempt(value => value + 1)}>
+                Retry cleanup
+              </Button>
+            )}
+            {previewFailed && (
+              <Button type="button" variant="outline" disabled={busy || pageBusy} onClick={() => {
+                setError(null);
+                void (async () => {
+                  for (const id of [...failedPagesRef.current]) {
+                    const page = pagesRef.current.find(entry => entry.id === id);
+                    if (page) await persistPage(id, page.adjustments);
+                  }
+                })().catch(() => undefined);
+              }}>
+                Retry preview
+              </Button>
+            )}
 
-            <div className="flex flex-wrap items-center gap-2">
+            {!targetDocumentId && <div className="flex flex-wrap items-center gap-2">
           <input
             ref={cameraRef}
             id="scan-page-camera"
@@ -540,9 +625,13 @@ export function DocumentScanDialog({
               {uploadProgress || "Adding pages…"}
             </span>
           )}
-        </div>
+        </div>}
 
-        {pages.length === 0 ? (
+        {targetDocumentId && uploading ? (
+          <p className="flex items-center gap-2 py-8 text-sm text-muted-foreground" role="status">
+            <Spinner /> Preparing private cleanup preview…
+          </p>
+        ) : pages.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-secondary/20 px-5 py-10 text-center">
             <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-card text-muted-foreground">
               <ScanLine className="size-5" strokeWidth={1.5} />
@@ -571,19 +660,20 @@ export function DocumentScanDialog({
                     <button
                       type="button"
                       onClick={() => selectPage(page.id)}
+                      disabled={busy}
                       aria-label={`Edit page ${index + 1}`}
                       aria-current={active ? "true" : undefined}
                       className="block w-full overflow-hidden rounded-lg bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     >
                       <img
-                        src={versioned(page.cleaned_url, page.updated_at)}
+                        src={versionedUrl(page.cleaned_url, page.updated_at)}
                         alt=""
                         className="h-24 w-full object-cover"
                       />
                     </button>
                     <div className="mt-1.5 flex items-center justify-between gap-1">
                       <span className="text-2xs font-medium">Page {index + 1}</span>
-                      <div className="flex items-center">
+                      {!targetDocumentId && <div className="flex items-center">
                         <button
                           type="button"
                           aria-label={`Move page ${index + 1} earlier`}
@@ -611,12 +701,22 @@ export function DocumentScanDialog({
                         >
                           <Trash2 className="size-3" />
                         </button>
-                      </div>
+                      </div>}
                     </div>
                   </div>
                 );
               })}
             </div>
+
+            {activePage && (
+              <p role="status" className="rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+                {activePage.detection_status === "detected"
+                  ? "Page edges detected and straightened. Check the preview and adjust the corners if needed."
+                  : activePage.detection_status === "manual_required"
+                    ? "Could not confidently find the page edges. The full image is kept; adjust the corners manually and check the preview."
+                    : "Check the cleaned preview before saving. Corners, colour and contrast are adjustable."}
+              </p>
+            )}
 
             {activePage && (
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
@@ -634,7 +734,7 @@ export function DocumentScanDialog({
                   {originalUnavailable ? (
                     <div className="space-y-2">
                       <img
-                        src={versioned(activePage.cleaned_url, activePage.updated_at)}
+                        src={versionedUrl(activePage.cleaned_url, activePage.updated_at)}
                         alt={`Cleaned page ${activePage.page_number}`}
                         className="mx-auto max-h-[52vh] max-w-full rounded-lg object-contain"
                       />
@@ -651,7 +751,7 @@ export function DocumentScanDialog({
                         className="relative inline-block max-w-full touch-none"
                       >
                         <img
-                          src={versioned(activePage.original_url, activePage.updated_at)}
+                          src={versionedUrl(activePage.original_url, activePage.updated_at)}
                           alt={`Original page ${activePage.page_number}`}
                           draggable={false}
                           onError={() => setOriginalUnavailable(true)}
@@ -665,6 +765,7 @@ export function DocumentScanDialog({
                         >
                           <polygon
                             points={activePage.adjustments.corners
+                              .map(corner => rotatedPoint(corner, -activePage.adjustments.rotation))
                               .map((corner) => `${corner.x},${corner.y}`)
                               .join(" ")}
                             fill="none"
@@ -673,16 +774,19 @@ export function DocumentScanDialog({
                             vectorEffect="non-scaling-stroke"
                           />
                         </svg>
-                        {activePage.adjustments.corners.map((corner, index) => (
+                        {activePage.adjustments.corners.map((corner, index) => {
+                          const visible = rotatedPoint(corner, -activePage.adjustments.rotation);
+                          return (
                           <button
                             key={index}
                             type="button"
                             aria-label={`Adjust ${CORNER_LABELS[index]} corner`}
                             title="Drag or use arrow keys"
-                            className="absolute z-10 size-7 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-2 border-background bg-brass shadow-sm ring-2 ring-brass/30 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                            disabled={busy}
+                            className="absolute z-10 size-11 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-2 border-background bg-brass shadow-sm ring-2 ring-brass/30 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
                             style={{
-                              left: `${corner.x * 100}%`,
-                              top: `${corner.y * 100}%`,
+                              left: `${visible.x * 100}%`,
+                              top: `${visible.y * 100}%`,
                             }}
                             onPointerDown={(event) => {
                               event.preventDefault();
@@ -710,7 +814,8 @@ export function DocumentScanDialog({
                               }
                             }}
                           />
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -727,7 +832,7 @@ export function DocumentScanDialog({
                   </div>
                   <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-background/35 p-2">
                     <img
-                      src={versioned(activePage.cleaned_url, activePage.updated_at)}
+                      src={versionedUrl(activePage.cleaned_url, activePage.updated_at)}
                       alt={`Cleaned page ${activePage.page_number}`}
                       className="max-h-[52vh] max-w-full rounded-lg object-contain"
                     />
@@ -821,7 +926,7 @@ export function DocumentScanDialog({
               this editor combines image pages.
             </p>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            {!targetDocumentId && <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Title" htmlFor="scan-title" optional>
                 <Input
                   id="scan-title"
@@ -865,15 +970,15 @@ export function DocumentScanDialog({
                   disabled={busy}
                 />
               </Field>
-            </div>
+            </div>}
 
-            <ItemMultiSelect
+            {!targetDocumentId && <ItemMultiSelect
               selected={itemIds}
               onChange={setItemIds}
               label="Attach to items"
               hint="Review the selected items before saving. Scanning does not create items or purchases."
               disabled={busy}
-            />
+            />}
 
           </>
         )}
@@ -884,15 +989,15 @@ export function DocumentScanDialog({
             <DialogFooter className="max-sm:static max-sm:mx-0 max-sm:border-0 max-sm:p-0">
               <Button type="button" variant="ghost" onClick={() => void close()} disabled={busy}>
                 <X />
-                Cancel scan
+                {targetDocumentId ? "Cancel cleanup" : "Cancel scan"}
               </Button>
               <Button
                 type="button"
                 onClick={() => void save()}
-                disabled={!scanId || pages.length === 0 || busy || pageBusy}
+                disabled={!scanId || pages.length === 0 || busy || pageBusy || previewFailed}
               >
                 {saving ? <Spinner /> : <Check />}
-                Save scanned document
+                {targetDocumentId ? "Save cleaned document" : "Save scanned document"}
               </Button>
             </DialogFooter>
           </div>

@@ -26,12 +26,19 @@ from ..schemas.extraction import (
     ExtractionFields,
     ExtractionLine,
     ExtractionRefinementOut,
+    LineMatch,
     LineMatchInput,
     SourceEvidence,
 )
 from . import ai
 from .ai_runtime import AiRuntimeConfig
-from .document_extraction import _all_currencies, _all_dates, _money_matches, _parse_serials
+from .document_extraction import (
+    _all_currencies,
+    _all_dates,
+    _money_matches,
+    _parse_brand_model,
+    _parse_serials,
+)
 from .document_matching import deterministic_matches
 
 AI_REFINEMENT_SYSTEM = """You extract structured receipt/document facts from OCR text.
@@ -234,18 +241,69 @@ def _match_inputs(fields: ExtractionFields, lines: list[ExtractionLine]) -> list
     inputs: list[LineMatchInput] = []
     for line in product_lines:
         serials = _parse_serials(line.evidence.text)
+        brand, model = _parse_brand_model(line.evidence.text)
         inputs.append(
             LineMatchInput(
                 line_id=line.id,
                 description=line.description,
                 quantity=line.quantity,
-                brand=fields.brand if len(product_lines) == 1 else None,
-                model=fields.model if len(product_lines) == 1 else None,
+                brand=brand or (fields.brand if len(product_lines) == 1 else None),
+                model=model or (fields.model if len(product_lines) == 1 else None),
                 serial_numbers=serials
                 or (fields.serial_numbers if len(product_lines) == 1 else []),
             )
         )
     return inputs
+
+
+def _actionable_proposal(proposal: dict) -> dict:
+    fields = ExtractionFields.model_validate(proposal.get("fields") or {}).model_dump(mode="json")
+    fields.pop("field_sources")
+    fields.pop("uncertain_fields")
+    matches = {
+        match["line_id"]: [
+            (
+                str(candidate["id"]),
+                bool(candidate.get("exact_identifier", False)),
+                candidate.get("match_quality", "possible"),
+            )
+            for candidate in match.get("candidates", [])
+        ]
+        for match in proposal.get("matches", [])
+    }
+    lines = []
+    for raw in proposal.get("lines", []):
+        line = ExtractionLine.model_validate(raw)
+        lines.append(
+            {
+                "kind": line.kind,
+                "description": line.description,
+                "quantity": line.quantity,
+                "unit_price_cents": line.unit_price_cents,
+                "line_total_cents": line.line_total_cents,
+                "purchase_eligible": line.purchase_eligible,
+                "choices": matches.get(line.id, []),
+            }
+        )
+    return {"fields": fields, "lines": lines}
+
+
+def refinement_has_changes(
+    db: Session,
+    document: Document,
+    proposal: dict,
+    *,
+    matches: list[LineMatch] | None = None,
+) -> bool:
+    """Compare review decisions, never generated identity or evidence/provenance."""
+    base = (document.extracted_metadata or {}).get("extraction") or {}
+    fields = ExtractionFields.model_validate(base.get("fields") or {})
+    lines = [ExtractionLine.model_validate(line) for line in base.get("lines", [])]
+    if matches is None:
+        matches = deterministic_matches(db, document.household_id, _match_inputs(fields, lines))
+    return _actionable_proposal(
+        {**base, "matches": [match.model_dump(mode="json") for match in matches]}
+    ) != _actionable_proposal(proposal)
 
 
 def refine_extraction(
@@ -283,6 +341,7 @@ def refine_extraction(
     from .enrichment import fingerprint, source_version
 
     version = source_version(db, document)
+    enhancement_version = fingerprint(metadata.get("enhancement") or {})
     config = config or ai.config_for(db, household_id, AiTask.DOCUMENTS.value)
     config_version = fingerprint(asdict(config))
     user_prompt = (
@@ -366,21 +425,16 @@ def refine_extraction(
             expected_job_id is not None
             and (state.get("job_id") != expected_job_id or state.get("status") != "running")
         )
+        or (expected_job_id is None and fingerprint(state) != enhancement_version)
     ):
         raise ApiError(
             409,
             "refinement_stale",
-            "The source or AI permissions changed. Keep the current review.",
+            "The source, AI permissions or review status changed. Keep the current review.",
         )
-    refinements = dict(metadata.get("extraction_refinements") or {})
-    refinements[refined_version] = refinement
-    metadata = dict(metadata)
-    metadata["extraction_refinements"] = dict(list(refinements.items())[-5:])
-    document.extracted_metadata = metadata
-    db.commit()
     inputs = _match_inputs(fields, lines)
     matches = deterministic_matches(db, household_id, inputs)
-    return ExtractionRefinementOut(
+    proposal = ExtractionRefinementOut(
         document_id=document.id,
         base_version=str(base["version"]),
         version=refined_version,
@@ -393,3 +447,38 @@ def refine_extraction(
         ai_status=status,
         ai_used=True,
     )
+    changed = refinement_has_changes(db, document, proposal.model_dump(mode="json"))
+    if changed:
+        refinements = dict(metadata.get("extraction_refinements") or {})
+        refinements[refined_version] = refinement
+        metadata["extraction_refinements"] = dict(list(refinements.items())[-5:])
+    else:
+        base_lines = [ExtractionLine.model_validate(line) for line in base.get("lines", [])]
+        proposal = proposal.model_copy(
+            update={
+                "version": str(base["version"]),
+                "fields": base_fields,
+                "lines": base_lines,
+                "matches": deterministic_matches(
+                    db,
+                    household_id,
+                    _match_inputs(base_fields, base_lines),
+                ),
+                "warnings": ["AI review complete; no changes to the local extraction."],
+                "ai_used": False,
+            }
+        )
+    if expected_job_id is None:
+        metadata["enhancement"] = {
+            "status": "ready" if changed else "skipped",
+            "reason": None if changed else "no_changes",
+            "version": version,
+            "provider": status.provider,
+            "model": status.model,
+            "ai_attempted": True,
+            "ai_succeeded": True,
+            **({"proposal": proposal.model_dump(mode="json")} if changed else {}),
+        }
+    document.extracted_metadata = metadata
+    db.commit()
+    return proposal

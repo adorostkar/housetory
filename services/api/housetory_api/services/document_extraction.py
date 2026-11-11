@@ -666,7 +666,7 @@ def extraction_review(db: Session, document: Document) -> ExtractionReviewOut:
     )
     from .enrichment import enhancement_state
 
-    enhancement = enhancement_state(db, document) or {}
+    enhancement = enhancement_state(db, document, document_matches=matches) or {}
     return ExtractionReviewOut(
         document_id=document.id,
         version=str(extraction["version"]),

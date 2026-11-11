@@ -158,6 +158,121 @@ beforeEach(() => {
 });
 
 describe("DocumentScanDialog", () => {
+  it("opens an existing document as an isolated cleanup draft and preserves its details", async () => {
+    vi.mocked(api.post).mockResolvedValue({ ...scan, pages: [pageOne] });
+    const onOpenChange = vi.fn();
+    render(
+      <DocumentScanDialog
+        open
+        targetDocumentId={committed.id}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(await screen.findByAltText("Original page 1")).toBeVisible();
+    expect(api.post).toHaveBeenCalledWith("/documents/scans", {
+      target_document_id: committed.id,
+    });
+    expect(screen.queryByRole("button", { name: "Take photo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove page/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Title/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Attach to items")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel cleanup" }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith("/documents/scans/scan-1"));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("saves cleanup without sending replacement metadata or item links", async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ ...scan, pages: [pageOne] })
+      .mockResolvedValueOnce(committed);
+    const onSaved = vi.fn();
+    render(
+      <DocumentScanDialog
+        open
+        targetDocumentId={committed.id}
+        onOpenChange={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Save cleaned document" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(committed));
+    expect(api.post).toHaveBeenLastCalledWith("/documents/scans/scan-1/commit", {
+      request_id: expect.any(String),
+    });
+  });
+
+  it("reports uncertain detection instead of claiming automatic cropping succeeded", async () => {
+    vi.mocked(api.postForm).mockReset().mockResolvedValue({
+      ...pageOne,
+      detection_status: "manual_required",
+    });
+    renderDialog();
+    await userEvent.upload(
+      uploadInput(document.body) as HTMLInputElement,
+      new File(["page"], "page.png", { type: "image/png" }),
+    );
+    expect(await screen.findByText(/could not confidently find the page edges/i)).toBeVisible();
+  });
+
+  it("blocks saving after a failed preview update until retry succeeds", async () => {
+    renderDialog();
+    await userEvent.upload(
+      uploadInput(document.body) as HTMLInputElement,
+      new File(["page"], "page.png", { type: "image/png" }),
+    );
+    await screen.findByAltText("Original page 1");
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("Preview failed"));
+    await userEvent.click(screen.getByRole("button", { name: "Rotate page right" }));
+    expect(await screen.findByText("Preview failed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save scanned document" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save scanned document" })).toBeEnabled(),
+    );
+    expect(api.patch).toHaveBeenLastCalledWith(
+      "/documents/scans/scan-1/pages/page-1",
+      expect.objectContaining({ rotation: 90 }),
+    );
+  });
+
+  it("keeps the detected crop on the same paper when rotating and nudging its visible corners", async () => {
+    vi.mocked(api.postForm).mockReset().mockResolvedValue({
+      ...pageOne,
+      adjustments: {
+        ...pageOne.adjustments,
+        corners: [{ x: 0.1, y: 0.15 }, { x: 0.9, y: 0.1 }, { x: 0.8, y: 0.9 }, { x: 0.2, y: 0.95 }],
+      },
+    });
+    renderDialog();
+    await userEvent.upload(
+      uploadInput(document.body) as HTMLInputElement,
+      new File(["page"], "page.png", { type: "image/png" }),
+    );
+    await screen.findByAltText("Original page 1");
+    await userEvent.click(screen.getByRole("button", { name: "Rotate page right" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith(
+      "/documents/scans/scan-1/pages/page-1",
+      expect.objectContaining({
+        rotation: 90,
+        corners: [
+          { x: expect.closeTo(0.05), y: 0.2 },
+          { x: 0.85, y: 0.1 },
+          { x: 0.9, y: 0.9 },
+          { x: expect.closeTo(0.1), y: 0.8 },
+        ],
+      }),
+    ));
+    const corner = screen.getByRole("button", { name: "Adjust Top left corner" });
+    corner.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith(
+      "/documents/scans/scan-1/pages/page-1",
+      expect.objectContaining({
+        corners: expect.arrayContaining([{ x: expect.closeTo(0.05), y: expect.closeTo(0.21) }]),
+      }),
+    ));
+  });
+
   it("uploads pages, previews original and cleaned copies, rotates and saves", async () => {
     const { onSaved, onOpenChange } = renderDialog();
     const container = document.body;

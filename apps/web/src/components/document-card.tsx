@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  ChevronRight,
   Download,
   FileText,
   Image as ImageIcon,
@@ -46,7 +47,7 @@ export function DocumentCard({
           : "outline";
 
   return (
-    <article className={compact ? "flex items-center gap-3 py-3" : "surface group p-4 sm:p-5"}>
+    <article className={`relative group rounded-xl transition-colors focus-within:ring-2 focus-within:ring-ring/40 ${compact ? "flex items-center gap-3 py-3 hover:bg-secondary/25" : "surface p-4 hover:border-brass/40 sm:p-5"}`}>
       <span
         className={
           compact
@@ -60,7 +61,7 @@ export function DocumentCard({
         <div className="flex flex-wrap items-center gap-1.5">
           <Link
             to={`/documents/${document.id}`}
-            className="min-w-0 truncate text-sm font-medium underline-offset-4 hover:underline"
+            className="min-w-0 truncate text-sm font-medium underline-offset-4 after:absolute after:inset-0 after:rounded-xl hover:underline focus-visible:outline-none"
           >
             {document.title}
           </Link>
@@ -74,6 +75,7 @@ export function DocumentCard({
               {pluralize(document.page_count, "page")}
             </Badge>
           )}
+          <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" aria-hidden />
         </div>
         <p className="mt-1 truncate text-2xs text-muted-foreground">
           {document.merchant ? `${document.merchant} · ` : ""}
@@ -88,7 +90,7 @@ export function DocumentCard({
               <Link
                 key={item.id}
                 to={`/items/${item.id}`}
-                className="min-w-0 max-w-full"
+                className="relative z-10 min-w-0 max-w-full"
                 title={item.name}
               >
                 <Badge variant="secondary" className="max-w-full hover:bg-secondary/70">
@@ -104,7 +106,7 @@ export function DocumentCard({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="relative z-10 flex w-fit shrink-0 items-center gap-0.5">
         <a
           href={document.url}
           className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"

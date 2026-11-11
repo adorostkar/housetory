@@ -2,6 +2,7 @@ import io
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from PIL import Image, ImageDraw
 from pillow_heif import register_heif_opener
 from pypdf import PdfReader
@@ -14,6 +15,7 @@ from housetory_api.models import (
     DocumentScan,
     Household,
     HouseholdMember,
+    Job,
     User,
 )
 from housetory_api.security import hash_password
@@ -207,6 +209,405 @@ def test_scan_editor_crop_rotation_contrast_and_original_bytes(owner_client):
     assert reset["height"] == 900
 
 
+def test_scan_detects_inset_page_but_keeps_uncertain_full_frame(owner_client):
+    scan = create_scan(owner_client)
+    uncertain = upload_page(owner_client, scan["id"], scan_png())
+    assert uncertain["detection_status"] == "manual_required"
+    assert (uncertain["width"], uncertain["height"]) == (600, 900)
+    image = Image.new("RGB", (800, 1000), (40, 50, 60))
+    draw = ImageDraw.Draw(image)
+    draw.polygon([(160, 100), (700, 160), (650, 900), (100, 800)], fill="white")
+    for y in range(250, 750, 60):
+        draw.line([(220, y), (550, y)], fill="black", width=3)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    original = buffer.getvalue()
+    detected = upload_page(owner_client, scan["id"], original)
+    assert detected["detection_status"] == "detected"
+    assert detected["width"] < 650
+    assert detected["height"] < 850
+    assert owner_client.get(detected["original_url"]).content == original
+
+
+def test_cleanup_existing_scan_preserves_identity_originals_and_metadata(owner_client):
+    item = create_item(owner_client)
+    scan = create_scan(owner_client)
+    original = scan_png()
+    page = upload_page(owner_client, scan["id"], original)
+    document = commit_scan(
+        owner_client,
+        scan["id"],
+        item_ids=[item["id"]],
+        merchant="Reviewed shop",
+        notes="Keep this note",
+    ).json()
+    original_pdf = owner_client.get(document["original_url"]).content
+    before_pdf = owner_client.get(document["url"]).content
+    with SessionLocal() as db:
+        current = db.get(Document, document["id"])
+        current.extracted_text = "Old OCR"
+        current.extracted_metadata = {
+            "extraction": {"version": "old"},
+            "extraction_refinements": {"old": "proposal"},
+            "enhancement": {"status": "succeeded"},
+            "extraction_applied": {"purchase_id": "reviewed-history"},
+            "applied_at": "2026-01-02T00:00:00Z",
+            "applied_item_ids": [item["id"]],
+        }
+        db.commit()
+    draft_response = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    )
+    assert draft_response.status_code == 201, draft_response.text
+    draft = draft_response.json()
+    assert draft["target_document_id"] == document["id"]
+    assert len(draft["pages"]) == 1
+    draft_page = draft["pages"][0]
+    assert draft_page["id"] != page["id"]
+    patch_page(owner_client, draft["id"], draft_page["id"], {"rotation": 90})
+    assert owner_client.get(document["url"]).content == before_pdf
+    assert (
+        owner_client.post(
+            f"/api/v1/documents/scans/{draft['id']}/pages",
+            files={"file": ("extra.png", original, "image/png")},
+        ).status_code
+        == 409
+    )
+    assert (
+        owner_client.delete(
+            f"/api/v1/documents/scans/{draft['id']}/pages/{draft_page['id']}",
+        ).status_code
+        == 409
+    )
+    assert (
+        owner_client.post(
+            f"/api/v1/documents/scans/{draft['id']}/pages/reorder",
+            json={"page_ids": [draft_page["id"]]},
+        ).status_code
+        == 409
+    )
+    request_id = str(uuid.uuid4())
+    saved = commit_scan(
+        owner_client,
+        draft["id"],
+        request_id=request_id,
+        title="Ignored",
+        merchant="Untrusted",
+        item_ids=[],
+    )
+    assert saved.status_code == 200, saved.text
+    updated = saved.json()
+    assert updated["id"] == document["id"]
+    assert updated["title"] == document["title"]
+    assert updated["merchant"] == "Reviewed shop"
+    assert updated["notes"] == "Keep this note"
+    assert [entry["id"] for entry in updated["items"]] == [item["id"]]
+    assert [entry["id"] for entry in updated["pages"]] == [page["id"]]
+    assert owner_client.get(document["original_url"]).content == original_pdf
+    assert owner_client.get(page["original_url"]).content == original
+    assert owner_client.get(document["url"]).content != before_pdf
+    assert updated["extracted_text"] is None
+    assert updated["ocr_status"] == "queued"
+    assert updated["extracted_metadata"]["extraction_applied"] == {
+        "purchase_id": "reviewed-history",
+    }
+    assert updated["extracted_metadata"]["applied_item_ids"] == [item["id"]]
+    assert not (
+        {"extraction", "extraction_refinements", "enhancement"}
+        & updated["extracted_metadata"].keys()
+    )
+    replay = commit_scan(owner_client, draft["id"], request_id=request_id)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["id"] == document["id"]
+    assert owner_client.get("/api/v1/documents").json()["total"] == 1
+    with SessionLocal() as db:
+        assert db.get(Document, document["id"]).source_generation == 2
+        assert (
+            db.scalar(
+                select(func.count(DocumentScan.id)).where(
+                    DocumentScan.document_id == uuid.UUID(document["id"]),
+                )
+            )
+            == 1
+        )
+        jobs = db.scalars(select(Job).where(Job.task == "documents.ocr")).all()
+        assert sorted(job.payload["source_generation"] for job in jobs) == [1, 2]
+
+
+def test_manual_perspective_rectifies_projected_internal_grid_and_preserves_rgb(owner_client):
+    # Known projective camera mapping, independent of the scanner's warp implementation.
+    def projected(u, v):
+        denominator = 0.8 * u + 0.2 * v + 1
+        return ((600 * u + 80 * v + 100) / denominator, (30 * u + 800 * v + 80) / denominator)
+
+    image = Image.new("RGB", (550, 850), (40, 50, 60))
+    draw = ImageDraw.Draw(image)
+    corners = [projected(0, 0), projected(1, 0), projected(1, 1), projected(0, 1)]
+    draw.polygon(corners, fill="white")
+    for fraction in (0.25, 0.5, 0.75):
+        draw.line([projected(fraction, 0), projected(fraction, 1)], fill="red", width=5)
+        draw.line([projected(0, fraction), projected(1, fraction)], fill="blue", width=5)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    scan = create_scan(owner_client)
+    page = upload_page(owner_client, scan["id"], buffer.getvalue())
+    corrected = patch_page(
+        owner_client,
+        scan["id"],
+        page["id"],
+        {
+            "corners": [{"x": x / 550, "y": y / 850} for x, y in corners],
+        },
+    )
+    assert corrected["detection_status"] == "manual"
+    output = Image.open(io.BytesIO(owner_client.get(corrected["cleaned_url"]).content))
+    for fraction in (0.25, 0.5, 0.75):
+        red = output.getpixel(
+            (round((output.width - 1) * fraction), round((output.height - 1) * 0.125))
+        )
+        blue = output.getpixel(
+            (round((output.width - 1) * 0.125), round((output.height - 1) * fraction))
+        )
+        assert red[0] > 170 and red[1] < 100 and red[2] < 100
+        assert blue[2] > 170 and blue[0] < 100 and blue[1] < 100
+
+
+def test_standalone_image_cleanup_keeps_exact_original_and_normalizes_pdf_download(owner_client):
+    original = scan_png()
+    response = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("camera.png", original, "image/png")},
+        data={"title": "Camera receipt", "document_type": "receipt"},
+    )
+    assert response.status_code == 201, response.text
+    document = response.json()
+    draft = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    ).json()
+    saved = commit_scan(owner_client, draft["id"])
+    assert saved.status_code == 200, saved.text
+    updated = saved.json()
+    assert updated["id"] == document["id"]
+    assert updated["original_filename"] == document["original_filename"]
+    assert updated["original_content_type"] == "image/png"
+    assert updated["content_type"] == "application/pdf"
+    normalized = owner_client.get(updated["url"])
+    assert normalized.headers["content-type"] == "application/pdf"
+    assert normalized.headers["content-disposition"].endswith('.pdf"')
+    source = owner_client.get(updated["original_url"])
+    assert source.content == original
+    assert source.headers["content-type"] == "image/png"
+    assert source.headers["content-disposition"].endswith('.png"')
+    again = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    )
+    assert again.status_code == 201, again.text
+    assert len(again.json()["pages"]) == 1
+
+
+@pytest.mark.parametrize("expire", [False, True])
+def test_abandoned_cleanup_removes_only_draft_owned_files(owner_client, upload_root, expire):
+    scan = create_scan(owner_client)
+    page = upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    retained = {path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()}
+    draft = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    ).json()
+    patch_page(owner_client, draft["id"], draft["pages"][0]["id"], {"rotation": 90})
+    if expire:
+        with SessionLocal() as db:
+            current = db.get(DocumentScan, draft["id"])
+            current.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+            db.commit()
+            scan_service.prune_expired_scans(db)
+    else:
+        assert owner_client.delete(f"/api/v1/documents/scans/{draft['id']}").status_code == 204
+    assert {
+        path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()
+    } == retained
+    assert owner_client.get(page["original_url"]).status_code == 200
+
+
+def test_concurrent_cleanup_conflicts_without_overwriting_or_duplicate_document(owner_client):
+    scan = create_scan(owner_client)
+    upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    drafts = [
+        owner_client.post(
+            "/api/v1/documents/scans",
+            json={"target_document_id": document["id"]},
+        ).json()
+        for _ in range(2)
+    ]
+    assert commit_scan(owner_client, drafts[0]["id"]).status_code == 200
+    current = owner_client.get(document["url"]).content
+    stale = commit_scan(owner_client, drafts[1]["id"])
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "cleanup_stale"
+    assert owner_client.get(document["url"]).content == current
+    assert owner_client.get("/api/v1/documents").json()["total"] == 1
+    assert owner_client.delete(f"/api/v1/documents/scans/{drafts[1]['id']}").status_code == 204
+
+
+def test_failed_cleanup_publication_preserves_document_draft_and_all_originals(
+    owner_client,
+    upload_root,
+    monkeypatch,
+):
+    scan = create_scan(owner_client)
+    page = upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    draft = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    ).json()
+    patch_page(owner_client, draft["id"], draft["pages"][0]["id"], {"rotation": 90})
+    before = {path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()}
+    enqueue = scan_service.enqueue_ocr
+
+    def failed_enqueue(*args, **kwargs):
+        raise RuntimeError("Simulated publication failure")
+
+    monkeypatch.setattr(scan_service, "enqueue_ocr", failed_enqueue)
+    with pytest.raises(RuntimeError, match="Simulated publication failure"):
+        commit_scan(owner_client, draft["id"])
+    assert {path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()} == before
+    current = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert current["pages"][0]["id"] == page["id"]
+    assert current["pages"][0]["width"] == page["width"]
+    assert owner_client.get(f"/api/v1/documents/scans/{draft['id']}").json()["status"] == "draft"
+    monkeypatch.setattr(scan_service, "enqueue_ocr", enqueue)
+    assert commit_scan(owner_client, draft["id"]).status_code == 200
+
+
+def test_cleanup_rechecks_generation_after_staging_and_keeps_concurrent_edits(
+    owner_client,
+    upload_root,
+    monkeypatch,
+):
+    scan = create_scan(owner_client)
+    upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    draft = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    ).json()
+    before = {path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()}
+    write = scan_service.storage.write_document_pdf
+
+    def replace_before_publication(*args, **kwargs):
+        result = write(*args, **kwargs)
+        with SessionLocal() as db:
+            current = db.get(Document, document["id"])
+            current.source_generation += 1
+            current.notes = "Concurrent manual note"
+            db.commit()
+        return result
+
+    monkeypatch.setattr(scan_service.storage, "write_document_pdf", replace_before_publication)
+    response = commit_scan(owner_client, draft["id"])
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "cleanup_stale"
+    assert {path: path.read_bytes() for path in upload_root.rglob("*") if path.is_file()} == before
+    current = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert current["notes"] == "Concurrent manual note"
+
+
+def test_scan_honors_exif_without_network_and_bounds_automatic_analysis(owner_client, monkeypatch):
+    import cv2
+
+    scan = create_scan(owner_client)
+    image = Image.new("RGB", (1800, 900), (180, 20, 40))
+    exif = Image.Exif()
+    exif[274] = 6
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    original = buffer.getvalue()
+    analyzed = []
+    convert = cv2.cvtColor
+
+    def bounded_conversion(pixels, code, *args, **kwargs):
+        analyzed.append(pixels.shape[:2])
+        assert max(pixels.shape[:2]) <= 1200
+        return convert(pixels, code, *args, **kwargs)
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("Scan processing must not access the network")
+
+    monkeypatch.setattr(cv2, "cvtColor", bounded_conversion)
+    monkeypatch.setattr("socket.create_connection", no_network)
+    page = upload_page(owner_client, scan["id"], original, name="camera.jpg")
+    assert analyzed
+    assert cv2.getNumThreads() == 1
+    assert not cv2.ocl.useOpenCL()
+    assert (page["width"], page["height"]) == (900, 1800)
+    assert page["detection_status"] == "manual_required"
+    assert owner_client.get(page["original_url"]).content == original
+
+
+def test_cleanup_rejects_non_image_pdf_and_deleted_targets(owner_client, pdf_bytes):
+    pdf = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("paper.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert pdf.status_code == 201
+    response = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": pdf.json()["id"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "cleanup_unsupported"
+    scan = create_scan(owner_client)
+    upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    draft = owner_client.post(
+        "/api/v1/documents/scans",
+        json={"target_document_id": document["id"]},
+    ).json()
+    assert owner_client.delete(f"/api/v1/documents/{document['id']}").status_code == 204
+    stale = commit_scan(owner_client, draft["id"])
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "cleanup_stale"
+    assert owner_client.delete(f"/api/v1/documents/scans/{draft['id']}").status_code == 204
+
+
+def test_large_page_preview_and_perspective_keep_aspect_ratio_within_bounds(owner_client):
+    scan = create_scan(owner_client)
+    page = upload_page(owner_client, scan["id"], scan_png(size=(5000, 1000)))
+    assert (page["width"], page["height"]) == (3500, 700)
+    cropped = patch_page(
+        owner_client,
+        scan["id"],
+        page["id"],
+        {
+            "corners": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 0.5}, {"x": 0, "y": 0.5}],
+        },
+    )
+    assert (cropped["width"], cropped["height"]) == (3500, 350)
+
+
+def test_expiry_skips_draft_locked_for_publication(owner_client):
+    scan = create_scan(owner_client)
+    page = upload_page(owner_client, scan["id"], scan_png())
+    with SessionLocal() as db:
+        db.get(DocumentScan, scan["id"]).updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+        db.commit()
+    with SessionLocal() as saving, SessionLocal() as pruning:
+        scan_service.get_scan(
+            saving,
+            uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"]),
+            uuid.UUID(scan["id"]),
+            for_update=True,
+        )
+        assert scan_service.prune_expired_scans(pruning)["scans"] == 0
+    assert owner_client.get(page["original_url"]).status_code == 200
+
+
 def test_scan_commit_builds_ordered_pdf_idempotently_and_links_item(owner_client):
     item = create_item(owner_client)
     scan = create_scan(owner_client)
@@ -356,6 +757,15 @@ def test_scan_household_isolation_and_viewer_rules(owner_client, anon_client):
     viewer_token, _ = _add_member(owner_client, email="scan-viewer@example.com", role="viewer")
     viewer = _headers(viewer_token)
     assert anon_client.post("/api/v1/documents/scans", headers=viewer).status_code == 403
+    document = commit_scan(owner_client, scan["id"]).json()
+    assert (
+        anon_client.post(
+            "/api/v1/documents/scans",
+            headers=viewer,
+            json={"target_document_id": document["id"]},
+        ).status_code
+        == 403
+    )
     assert (
         anon_client.get(f"/api/v1/documents/scans/{scan['id']}", headers=viewer).status_code == 200
     )
@@ -381,6 +791,14 @@ def test_scan_household_isolation_and_viewer_rules(owner_client, anon_client):
         )
         db.commit()
     other_headers = _headers(token)
+    assert (
+        anon_client.post(
+            "/api/v1/documents/scans",
+            headers=other_headers,
+            json={"target_document_id": document["id"]},
+        ).status_code
+        == 404
+    )
     assert (
         anon_client.get(f"/api/v1/documents/scans/{scan['id']}", headers=other_headers).status_code
         == 404

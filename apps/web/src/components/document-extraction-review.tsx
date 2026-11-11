@@ -54,7 +54,10 @@ import {
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
 import { enhancementLabel } from "@/lib/enrichment";
 
-export function DocumentExtractionReview({ document }: { document: DocumentRecord }) {
+export function DocumentExtractionReview({ document, onOpenChange }: {
+  document: DocumentRecord;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const canWrite = useCanWrite();
   const defaultCurrency = useDefaultCurrency();
   const invalidate = useInvalidateInventory();
@@ -66,8 +69,11 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     refetchInterval: (query) =>
       ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 2000 : false,
   });
-  const roomsQuery = useRooms();
-  const locationsQuery = useLocations();
+  const [open, setOpen] = React.useState(false);
+  const [opened, setOpened] = React.useState(false);
+  const reviewId = React.useId();
+  const roomsQuery = useRooms(undefined, opened);
+  const locationsQuery = useLocations(undefined, opened);
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
   const [drafts, setDrafts] = React.useState<LineDraft[]>([]);
@@ -96,6 +102,11 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   const [refinementActive, setRefinementActive] = React.useState(false);
   const versionRef = React.useRef<string | null>(null);
   const data = extractionQuery.data;
+  const toggleReview = (next: boolean) => {
+    setOpen(next);
+    if (next) setOpened(true);
+    onOpenChange?.(next);
+  };
 
   const loadProposal = (
     fields: ExtractionReview["fields"],
@@ -161,6 +172,11 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
     ),
     onSuccess: (result) => {
       queryClient.setQueryData([...queryKeys.document(document.id), "extraction"], result);
+      if (result.enhancement?.reason === "cancelled") setRefinement(null);
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.document(document.id), "extraction"],
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.document(document.id), exact: true });
       toast.success(result.enhancement?.status === "queued"
         ? "AI suggestions queued; local review stays available"
         : "AI suggestions cancelled; local review is unchanged");
@@ -206,10 +222,15 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
         {},
       ),
     onSuccess: (result) => {
-      setRefinement(result);
+      setRefinement(result.ai_used ? result : null);
       setAiStatus(result.ai_status);
       setAiWarnings(result.warnings);
-      toast.success("AI proposed a field and line refinement; review before accepting");
+      void queryClient.invalidateQueries({
+        queryKey: [...queryKeys.document(document.id), "extraction"],
+      });
+      toast.success(result.ai_used
+        ? "AI proposed a field and line refinement; review before accepting"
+        : "AI review complete · no changes");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -241,7 +262,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
       </div>
     );
   }
-  if (extractionQuery.isPending) {
+  if (extractionQuery.isPending && document.ocr_status === "succeeded" && document.extracted_text) {
     return (
       <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-xs text-muted-foreground">
         <Spinner /> Preparing the line-item proposal…
@@ -402,8 +423,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
   };
 
   const rejectRefinement = () => {
-    setRefinement(null);
-    setRefinementActive(false);
+    retryEnhancement.mutate("cancel");
   };
 
   const revertRefinement = () => {
@@ -448,15 +468,42 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
 
   return (
     <div className="mt-5 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            {pluralize(data.lines.filter((line) => line.kind === "product").length, "product line")}
+            {" · "}Nothing changes until Apply
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.applied.length > 0 && <Badge variant="brass">Already applied</Badge>}
+            {data.duplicate_documents.length > 0 && <Badge variant="brass">Possible duplicate</Badge>}
+            {(data.warnings.length > 0 || data.fields.uncertain_fields.length > 0 ||
+              data.lines.some((line) => line.warnings.length > 0) || aiWarnings.length > 0 ||
+              validationErrors.length > 0 || (applyResult?.warnings.length ?? 0) > 0 ||
+              drafts.some((draft) => draft.line.warnings.length > 0) ||
+              (data.suggested_refinement?.warnings.length ?? 0) > 0) && (
+              <Badge variant="brass"><AlertTriangle className="mr-1 size-3" />Review warnings</Badge>
+            )}
+          </div>
+        </div>
+        <Button size="sm" variant="outline" aria-expanded={open} aria-controls={reviewId}
+          onClick={() => toggleReview(!open)}>
+          {open ? "Hide extraction" : "Review extraction"}
+        </Button>
+      </div>
       {data.enhancement && (
         <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
           <Badge variant="outline">Local results</Badge>
           <Badge variant={data.enhancement.status === "ready" ? "brass" : "outline"}>
-            {enhancementLabel(data.enhancement)}
+            {data.enhancement.reason === "no_changes"
+              ? "AI review complete · no changes" : enhancementLabel(data.enhancement)}
           </Badge>
           {data.suggested_refinement && !refinement && !refinementActive && (
             <Button size="sm" variant="outline"
-              onClick={() => setRefinement(data.suggested_refinement ?? null)}>
+              onClick={() => {
+                setRefinement(data.suggested_refinement ?? null);
+                toggleReview(true);
+              }}>
               <Sparkles /> Review AI suggestions
             </Button>
           )}
@@ -473,8 +520,16 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
               Skip AI suggestions
             </Button>
           )}
+          {data.enhancement.status === "ready" && data.suggested_refinement && (
+            <Button size="sm" variant="ghost" onClick={() => retryEnhancement.mutate("cancel")}
+              disabled={retryEnhancement.isPending}>
+              Dismiss AI suggestions
+            </Button>
+          )}
         </div>
       )}
+      {retryEnhancement.error && <FormError message={getApiErrorMessage(retryEnhancement.error)} />}
+      {opened && <div id={reviewId} hidden={!open} className="space-y-5">
       {applyResult && (
         <div className="rounded-xl border border-sage/25 bg-sage-soft/60 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-accent-foreground">
@@ -616,7 +671,8 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
                 <Button type="button" size="sm" onClick={acceptRefinement}>
                   <Check /> Accept AI refinement
                 </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={rejectRefinement}>
+                <Button type="button" size="sm" variant="ghost" onClick={rejectRefinement}
+                  disabled={retryEnhancement.isPending}>
                   Reject AI suggestion
                 </Button>
               </>
@@ -1655,6 +1711,7 @@ export function DocumentExtractionReview({ document }: { document: DocumentRecor
           </Button>
         </div>
       </div>
+      </div>}
     </div>
   );
 }

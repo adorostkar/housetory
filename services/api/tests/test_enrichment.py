@@ -272,10 +272,12 @@ def test_hierarchy_enrichment_preserves_entry_and_parent_identities(
     assert accepted.json()["total_entries"] == len(detail["entries"])
 
 
+@pytest.mark.parametrize("change", ["merchant", "generation"])
 def test_document_proposal_is_separate_and_publication_holds_no_inference_lock(
     owner_client,
     configured_ai,
     monkeypatch,
+    change,
 ):
     document = upload_document(owner_client)
     review = ocr_document(owner_client, document["id"]).json()
@@ -290,7 +292,10 @@ def test_document_proposal_is_separate_and_publication_holds_no_inference_lock(
                 )
                 .with_for_update(nowait=True)
             )
-            stored.merchant = "Manual merchant"
+            if change == "merchant":
+                stored.merchant = "Manual merchant"
+            else:
+                stored.source_generation += 1
             db.commit()
         return _refinement_payload()
 
@@ -299,9 +304,10 @@ def test_document_proposal_is_separate_and_publication_holds_no_inference_lock(
     after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
     assert after["version"] == review["version"]
     assert after["suggested_refinement"] is None
-    assert owner_client.get(f"/api/v1/documents/{document['id']}").json()["merchant"] == (
-        "Manual merchant"
-    )
+    if change == "merchant":
+        assert owner_client.get(f"/api/v1/documents/{document['id']}").json()["merchant"] == (
+            "Manual merchant"
+        )
 
 
 def test_document_ready_proposal_does_not_promote_ai_metadata(
@@ -354,3 +360,149 @@ def test_document_ready_proposal_does_not_promote_ai_metadata(
     )
     assert stale.status_code == 409, stale.text
     assert stale.json()["detail"]["code"] == "extraction_stale"
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_identical_document_refinement_completes_without_outstanding_suggestions(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+    automatic,
+):
+    document = upload_document(owner_client, "Hardware\nDrill 1 x 10.00 10.00\nTotal $10.00")
+    review = ocr_document(
+        owner_client,
+        document["id"],
+        "Hardware\nDrill 1 x 10.00 10.00\nTotal $10.00",
+    ).json()
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "fields": {},
+            "lines": [
+                {
+                    "description": line["description"],
+                    "kind": line["kind"],
+                    "quantity": line["quantity"],
+                    "unit_price_cents": line["unit_price_cents"],
+                    "line_total_cents": line["line_total_cents"],
+                    "evidence": line["evidence"]["text"],
+                    "uncertainty": ["Different provenance, not a new decision."],
+                }
+                for line in review["lines"]
+            ],
+            "warnings": ["Review completed."],
+        },
+    )
+    if automatic:
+        assert run_enhancement(job_payload(review)) == {
+            "status": "skipped",
+            "reason": "no_changes",
+        }
+    else:
+        result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+        assert result.status_code == 200, result.text
+        assert result.json()["ai_used"] is False
+        assert result.json()["version"] == review["version"]
+    after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    assert after["enhancement"]["reason"] == "no_changes"
+    assert after["suggested_refinement"] is None
+    assert after["fields"] == review["fields"]
+    assert after["lines"] == review["lines"]
+
+
+@pytest.mark.parametrize("change", [None, "amount", "quantity", "metadata", "match", "strength"])
+def test_persisted_document_suggestions_ignore_generated_identity_but_keep_real_changes(
+    owner_client,
+    configured_ai,
+    change,
+):
+    document = upload_document(owner_client)
+    review = ocr_document(owner_client, document["id"]).json()
+    created = owner_client.post("/api/v1/items", json={"name": review["lines"][0]["description"]})
+    assert created.status_code == 201, created.text
+    review = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    proposal = {
+        **review,
+        "base_version": review["version"],
+        "version": "generated-ai-version",
+        "ai_used": True,
+        "warnings": ["Different AI provenance."],
+        "fields": {**review["fields"], "field_sources": {}, "uncertain_fields": []},
+        "lines": [
+            {
+                **line,
+                "id": f"generated-{index}",
+                "line_number": index + 10,
+                "evidence": {"text": "Other source formatting"},
+                "warnings": [],
+            }
+            for index, line in enumerate(review["lines"])
+        ],
+        "matches": [
+            {**match, "line_id": f"generated-{index}"}
+            for index, match in enumerate(review["matches"])
+        ],
+    }
+    if change == "amount":
+        proposal["lines"][0]["line_total_cents"] += 1
+    elif change == "quantity":
+        proposal["lines"][0]["quantity"] = 3
+    elif change == "metadata":
+        proposal["fields"]["order_number"] = "INV-CHANGED"
+    elif change == "match":
+        proposal["matches"][0]["candidates"][0]["id"] = str(uuid.uuid4())
+    elif change == "strength":
+        proposal["matches"][0]["candidates"][0]["match_quality"] = "possible"
+    with SessionLocal() as db:
+        stored = db.get(Document, document["id"])
+        stored.extracted_metadata = {
+            **stored.extracted_metadata,
+            "enhancement": {
+                **stored.extracted_metadata["enhancement"],
+                "status": "ready",
+                "ai_attempted": True,
+                "ai_succeeded": True,
+                "proposal": proposal,
+            },
+        }
+        db.commit()
+    after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    assert after["enhancement"]["status"] == ("ready" if change else "skipped")
+    assert bool(after["suggested_refinement"]) is bool(change)
+    if change is None:
+        assert after["enhancement"]["reason"] == "no_changes"
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_cancelled_document_refinement_cannot_publish_late_suggestions(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+    automatic,
+):
+    document = upload_document(owner_client)
+    review = ocr_document(owner_client, document["id"]).json()
+
+    def complete(*args, **kwargs):
+        response = owner_client.post(
+            f"/api/v1/documents/{document['id']}/extraction/enhancement/cancel",
+        )
+        assert response.status_code == 200, response.text
+        return _refinement_payload()
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    if automatic:
+        assert run_enhancement(job_payload(review)) == {
+            "status": "skipped",
+            "reason": "superseded",
+        }
+    else:
+        result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+        assert result.status_code == 409, result.text
+        assert result.json()["detail"]["code"] == "refinement_stale"
+    after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    assert after["enhancement"]["reason"] == "cancelled"
+    assert after["suggested_refinement"] is None
+    assert after["fields"] == review["fields"]

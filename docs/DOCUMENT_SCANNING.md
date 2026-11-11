@@ -15,6 +15,8 @@ automatic item creation.
   PDFs, images and text. Multi-page PDFs from scanner apps are attached unchanged.
 - Existing item attachments, library search, OCR review, downloads, exports and
   deletion keep working.
+- **Document → Clean up scan** opens the same editor for saved image-backed
+  documents. Saving updates that document, not a second library entry.
 
 The scanner is not a replacement for the existing photo/recognition workflow:
 document scanning organises paper pages, while recognition suggests inventory
@@ -37,9 +39,14 @@ items from a photograph.
 - Existing PDFs and text files are not edited, recombined or flattened by this
   editor. They are still attached as-is through **Add document**. This limitation
   is deliberate: it avoids losing embedded text layers or annotations.
-- Automatic document-edge detection and text restoration are not implemented.
-  Crop corners are manual because an unreliable auto-edge suggestion would be
-  worse than no suggestion. No letters, numbers or details are invented.
+- Local OpenCV-headless page detection analyses at most a 1200-pixel long edge,
+  with native parallelism/OpenCL disabled. Only clearly inset, bright paper with
+  plausible convex geometry is proposed. Border-only, coloured or uncertain
+  images retain the full frame and explicitly request manual adjustment.
+- Detected corners receive genuine homographic perspective correction and a
+  mild 1.05× contrast adjustment, retaining colour. Processing arrays and output
+  are bounded to 3500 pixels on the long edge. No text is reconstructed, no
+  model is downloaded and no network/provider call occurs.
 
 ## Page workflow
 
@@ -119,10 +126,42 @@ commit and stores the request id and resulting document id:
 - PDF generation and preview regeneration happen from bounded page counts, and any
   failed save leaves the draft available for correction or cancellation.
 
-The scanner does not provide a batch undo. OCR has its existing retry action, and
-editing a saved document uses the ordinary document edit/delete flows. Deleting a
-document or deleting an item that owns the only copy removes the cleaned PDF,
-assembled source PDF and all retained page files.
+### Cleaning up an existing document
+
+The optional `POST /documents/scans` body is
+`{"target_document_id":"<document UUID>"}`; an empty body still starts a new scan.
+Responses include nullable `target_document_id`; each page reports
+`detection_status` (`detected`, `manual_required` or `manual`).
+
+Cleanup supports ordinary image uploads and saved scans with retained image
+pages, not arbitrary PDFs or text. The draft owns copies of the original page
+images. While editing, the existing document and downloads remain unchanged.
+Rotation, crop, colour, contrast and reset remain available; page count/order
+and document metadata cannot be edited in this mode.
+
+Saving uses the existing commit endpoint and `request_id`. It preserves the
+document ID, existing page IDs, exact original files, trusted metadata, item
+links and reviewed financial history. Commit metadata fields are ignored for
+cleanup. A raw image original remains an image download even when its cleaned
+derivative becomes a PDF. New derivative files are staged under unique keys,
+then published only if the document's content generation still matches. A
+changed/deleted source returns `409 cleanup_stale`; failed saves, cancellation
+and draft expiry cannot remove committed originals.
+
+Publication advances the content generation, invalidates previous OCR and
+unapplied extraction/AI proposals, and enqueues generation-bound local OCR.
+Optional configured enhancement follows successful local OCR. Both OCR success
+and failure re-fetch and lock the current record before publishing; stale work
+is skipped, including legacy jobs after the first generation. Concurrent manual
+metadata edits are retained. Nothing automatically changes reviewed purchases
+or applies a new proposal.
+
+The scanner does not provide batch undo. Deleting a document or deleting an item
+that owns the only copy removes its cleaned PDF and retained original/page files.
+API and worker images use matching glibc-compatible Python slim builds; the worker
+retains Poppler and English/Swedish Tesseract language data. Both retain the
+legacy non-root UID 100/GID 101 and `/home/housetory` so existing mode-700 data
+volumes remain accessible without changing their ownership.
 
 ## Security and privacy
 
@@ -142,14 +181,18 @@ assembled source PDF and all retained page files.
 
 ## Verification
 
-The current suite contains 251 PostgreSQL tests, 90 frontend tests and 22
-disposable-stack browser workflows. Document-scanning PostgreSQL tests cover
+Document-scanning PostgreSQL tests cover
 crop/perspective/rotation/contrast geometry, HEIC input and exact original-byte
 preservation, ordered multi-page PDF generation, page count/order and
 landscape/portrait page sizes, idempotent commit replay, request-id reuse,
 cancel/prune cleanup, private file headers, viewer rejection, household isolation,
 item attachment, no automatic item/purchase writes, item/document deletion cleanup,
-and OCR artifact selection. Frontend tests cover page upload, original/cleaned
+and OCR artifact selection. Additional regressions cover inset/no-edge detection,
+projected internal-grid geometry and RGB preservation, EXIF orientation, bounded
+offline processing, in-place identity/history preservation, cancellation/expiry,
+failed publication, concurrent cleanup and stale OCR success/failure. Synthetic
+fixtures cannot guarantee detection for every real receipt, shadow or camera;
+physical camera testing remains necessary. Frontend tests cover page upload, original/cleaned
 previews, keyboard corner adjustment, rotation, reorder, removal, cancel, save
 metadata and request-id stability on retry. The browser workflow covers desktop and
 mobile capture, edit, reorder, save, document pages and cancel.

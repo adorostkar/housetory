@@ -10,6 +10,7 @@ from ...schemas.documents import (
     DocumentOut,
     DocumentPageOut,
     DocumentScanCommit,
+    DocumentScanCreate,
     DocumentScanOut,
     DocumentScanPageUpdate,
     DocumentScanReorder,
@@ -35,6 +36,7 @@ def _file_headers(page, *, original: bool) -> dict[str, str]:  # noqa: ANN001
 
 @router.post("", response_model=DocumentScanOut, status_code=201)
 def create_scan(
+    payload: DocumentScanCreate | None = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> DocumentScanOut:
@@ -42,6 +44,7 @@ def create_scan(
         db,
         auth.household.id,
         actor_user_id=auth.user.id,
+        target_document_id=payload.target_document_id if payload else None,
     )
     return scan_service.scan_out(scan)
 

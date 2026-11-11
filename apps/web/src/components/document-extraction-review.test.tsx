@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
 import { api } from "@/lib/api";
@@ -218,16 +219,18 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-function renderReview(client = new QueryClient({
+async function renderReview(client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-  })) {
-  return render(
+  }), open = true) {
+  const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <DocumentExtractionReview document={document} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  if (open) await userEvent.click(await screen.findByRole("button", { name: "Review extraction" }));
+  return result;
 }
 
 beforeEach(() => {
@@ -250,6 +253,70 @@ beforeEach(() => {
 });
 
 describe("DocumentExtractionReview", () => {
+  it("starts compact with warning indicators and preserves edits when hidden", async () => {
+    await renderReview(undefined, false);
+    expect(await screen.findByText("Review warnings")).toBeVisible();
+    expect(screen.queryByLabelText(/^Merchant/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review extraction" }));
+    await userEvent.clear(screen.getByLabelText(/^Merchant/));
+    await userEvent.type(screen.getByLabelText(/^Merchant/), "Manual shop");
+    await userEvent.click(screen.getByRole("button", { name: "Hide extraction" }));
+    expect(screen.getByDisplayValue("Manual shop")).not.toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Review extraction" }));
+    expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed dismissal visible and allows retry without changing the draft", async () => {
+    const suggested: ExtractionRefinement = {
+      document_id: document.id, base_version: review.version, version: "suggested",
+      source_artifact: "original", generated_at: review.generated_at,
+      fields: { ...review.fields, merchant: "AI shop" }, lines: review.lines,
+      warnings: [], matches: review.matches, ai_status: aiStatus, ai_used: true,
+    };
+    vi.mocked(api.get).mockResolvedValue({
+      ...review,
+      enhancement: { status: "ready", reason: null, error: null },
+      suggested_refinement: suggested,
+    });
+    vi.mocked(api.post).mockRejectedValue(new Error("Dismissal failed"));
+    await renderReview();
+    await userEvent.clear(screen.getByLabelText(/^Merchant/));
+    await userEvent.type(screen.getByLabelText(/^Merchant/), "Manual shop");
+    await userEvent.click(screen.getByRole("button", { name: "Review AI suggestions" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reject AI suggestion" }));
+    expect(await screen.findByText("Dismissal failed")).toBeVisible();
+    expect(toast.error).toHaveBeenCalledWith("Dismissal failed");
+    expect(screen.getByText("AI refinement proposal")).toBeVisible();
+    expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reject AI suggestion" })).toBeEnabled();
+  });
+
+  it("reports an explicit identical result as complete without proposing or applying it", async () => {
+    const completed = {
+      ...review,
+      enhancement: { status: "skipped" as const, reason: "no_changes", error: null },
+    };
+    vi.mocked(api.post).mockImplementation(async () => {
+      vi.mocked(api.get).mockResolvedValue(completed);
+      return {
+        document_id: document.id, base_version: review.version, version: review.version,
+        source_artifact: "original", generated_at: review.generated_at,
+        fields: review.fields, lines: review.lines, warnings: [],
+        matches: review.matches, ai_status: aiStatus, ai_used: false,
+      };
+    });
+    await renderReview();
+    await userEvent.click(screen.getAllByRole("button", { name: "Refine fields & lines" })[0]!);
+    expect(await screen.findByText("AI review complete · no changes")).toBeVisible();
+    expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review AI suggestions" })).not.toBeInTheDocument();
+    expect(api.post).toHaveBeenCalledExactlyOnceWith(
+      "/documents/document-1/extraction/refine", {},
+    );
+    expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
+  });
+
   it.each([
     ["off", null, "AI off"],
     ["failed", "read_timeout", "AI timed out · local results kept"],
@@ -262,7 +329,7 @@ describe("DocumentExtractionReview", () => {
         provider: "ollama", model: "test", ai_attempted: status !== "off", ai_succeeded: false,
       },
     } satisfies ExtractionReview);
-    renderReview();
+    await renderReview();
     expect(await screen.findByText(label)).toBeVisible();
     expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
     expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeVisible();
@@ -271,7 +338,7 @@ describe("DocumentExtractionReview", () => {
 
   it("announces a delayed suggestion without replacing or applying manual edits", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderReview(client);
+    await renderReview(client);
     await screen.findByText("Product lines");
     const merchant = screen.getByLabelText(/^Merchant/);
     await userEvent.clear(merchant);
@@ -296,13 +363,27 @@ describe("DocumentExtractionReview", () => {
     expect(screen.getByRole("button", { name: "Accept AI refinement" })).toBeVisible();
     expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
     expect(api.post).not.toHaveBeenCalled();
+    const dismissed = { ...review, enhancement: {
+      status: "skipped" as const, reason: "cancelled", job_id: "job-1", version: review.version,
+      error: null, provider: "ollama", model: "test", ai_attempted: true, ai_succeeded: true,
+    }, suggested_refinement: null };
+    vi.mocked(api.post).mockResolvedValue(dismissed);
+    vi.mocked(api.get).mockResolvedValue(dismissed);
     await userEvent.click(screen.getByRole("button", { name: "Reject AI suggestion" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/documents/document-1/extraction/enhancement/cancel",
+    ));
     expect(screen.getByDisplayValue("Manual shop")).toBeVisible();
-    expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Review AI suggestions" })).not.toBeInTheDocument();
+    await act(async () => { await client.invalidateQueries({
+      queryKey: [...queryKeys.document(document.id), "extraction"],
+    }); });
+    expect(screen.queryByRole("button", { name: "Review AI suggestions" })).not.toBeInTheDocument();
   });
 
   it("shows line items, matches, charges and applies edited values and choices", async () => {
-    renderReview();
+    await renderReview();
     expect(await screen.findByText("Product lines")).toBeVisible();
     expect(screen.getByDisplayValue("Cordless Drill")).toBeVisible();
     expect(screen.getByText("Identifier verified")).toBeVisible();
@@ -343,7 +424,7 @@ describe("DocumentExtractionReview", () => {
   });
 
   it("creates a new item with an explicit room and optional warranty", async () => {
-    renderReview();
+    await renderReview();
     await screen.findByText("Product lines");
     await userEvent.click(screen.getByRole("button", { name: "Create new item" }));
     await userEvent.selectOptions(screen.getByLabelText("Destination room"), "room-1");
@@ -379,7 +460,7 @@ describe("DocumentExtractionReview", () => {
   });
 
   it("re-ranks supplied candidates through the optional AI action", async () => {
-    renderReview();
+    await renderReview();
     await screen.findByText("Product lines");
     await userEvent.click(
       screen.getAllByRole("button", { name: "Re-rank matches" })[0]!,
@@ -429,7 +510,7 @@ describe("DocumentExtractionReview", () => {
       if (path.endsWith("/extraction/refine")) return refinement;
       return applied;
     });
-    renderReview();
+    await renderReview();
     await screen.findByText("Product lines");
     await userEvent.click(
       screen.getAllByRole("button", { name: "Refine fields & lines" })[0]!,

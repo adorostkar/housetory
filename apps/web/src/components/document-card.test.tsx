@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentCard } from "@/components/document-card";
 import type { DocumentRecord } from "@/lib/types";
@@ -53,5 +54,18 @@ describe("DocumentCard", () => {
       "href",
       "/api/v1/documents/doc-1/file",
     );
+  });
+
+  it("keeps item links and deletion independent and permission controlled", async () => {
+    const onDelete = vi.fn();
+    const { rerender } = render(
+      <MemoryRouter><DocumentCard document={document} onDelete={onDelete} /></MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Espresso Machine" })).toHaveAttribute("href", "/items/item-1");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Espresso receipt" }));
+    expect(onDelete).toHaveBeenCalledExactlyOnceWith(document);
+    rerender(<MemoryRouter><DocumentCard document={document} compact /></MemoryRouter>);
+    expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Espresso receipt" })).toHaveAttribute("href", "/documents/doc-1");
   });
 });

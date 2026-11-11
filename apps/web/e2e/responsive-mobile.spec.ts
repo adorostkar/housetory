@@ -311,6 +311,245 @@ test.describe("mobile responsive", () => {
     }
   });
 
+  test("document card surfaces open details without hijacking secondary actions", async ({ page }) => {
+    const id = "00000000-0000-0000-0000-000000000003";
+    const receipt: DocumentSummary = {
+      id, title: "Surface receipt", document_type: "receipt",
+      original_filename: "receipt.pdf", content_type: "application/pdf",
+      original_content_type: "application/pdf", byte_size: 100, original_byte_size: 100,
+      document_date: null, merchant: "Surface fixture merchant", notes: null,
+      ocr_status: "not_requested", ocr_error: null, ocr_confidence: null, ocr_processed_at: null,
+      created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+      items: [{ id: "00000000-0000-0000-0000-000000000001", name: "Linked fixture item" }],
+      item_count: 1, page_count: 0,
+      url: `/api/v1/documents/${id}/file`, original_url: `/api/v1/documents/${id}/original`,
+    };
+    await page.route("**/api/v1/documents?**", route =>
+      route.fulfill({ json: { items: [receipt], total: 1, limit: 24, offset: 0 } }),
+    );
+    await page.route(`**/api/v1/documents/${id}**`, route => {
+      expect(route.request().method()).toBe("GET");
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/file")) {
+        return route.fulfill({
+          contentType: "application/pdf",
+          headers: { "Content-Disposition": 'attachment; filename="receipt.pdf"' },
+          body: "%PDF-1.4\n%%EOF",
+        });
+      }
+      if (path.endsWith("/related-items")) {
+        return route.fulfill({ json: { items: [], suggested_item_ids: [] } });
+      }
+      if (path.endsWith("/extraction")) {
+        return route.fulfill({ status: 409, json: { error: { code: "not_ready", message: "Not extracted" } } });
+      }
+      return route.fulfill({ json: { ...receipt, pages: [], extracted_text: null, extracted_metadata: {} } });
+    });
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const surface of ["metadata", "icon", "padding"]) {
+        await page.goto("/documents");
+        const card = page.getByRole("article").filter({ has: page.getByText(receipt.title, { exact: true }) });
+        await expect(card).toBeVisible();
+        const target = surface === "metadata"
+          ? card.getByText(/Surface fixture merchant/)
+          : surface === "icon" ? card.locator("svg").first() : card;
+        const box = await target.boundingBox();
+        if (!box) throw new Error(`Missing card ${surface} hit region`);
+        await page.mouse.click(
+          box.x + (surface === "padding" ? box.width - 6 : box.width / 2),
+          box.y + box.height / 2,
+        );
+        await expect(page, `${surface} surface at ${width}px`).toHaveURL(new RegExp(`/documents/${id}$`));
+      }
+      await page.goto("/documents");
+      const title = page.getByRole("link", { name: receipt.title, exact: true });
+      await title.focus();
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(new RegExp(`/documents/${id}$`));
+      await page.goto("/documents");
+      if (width === 1440) {
+        const newTab = page.context().waitForEvent("page", { timeout: 10_000 });
+        await page.getByRole("link", { name: receipt.title, exact: true }).click({ button: "middle" });
+        const tab = await newTab;
+        await expect(tab).toHaveURL(new RegExp(`/documents/${id}$`));
+        await tab.close();
+        await expect(page).toHaveURL(/\/documents$/);
+      }
+      await page.getByRole("link", { name: "Linked fixture item", exact: true }).click();
+      await expect(page).toHaveURL(/\/items\/00000000-0000-0000-0000-000000000001$/);
+      await page.goto("/documents");
+      const download = page.waitForEvent("download");
+      await page.getByRole("link", { name: "Download Surface receipt", exact: true }).click();
+      await download;
+      await expect(page).toHaveURL(/\/documents$/);
+      await page.getByRole("button", { name: "Delete Surface receipt" }).click();
+      await expect(page.getByRole("dialog", { name: "Delete this document?" })).toBeVisible();
+      await expect(page).toHaveURL(/\/documents$/);
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+  });
+
+  test("automatic scan previews remain adjustable and cancellable without real uploads", async ({ page }) => {
+    const timestamp = "2026-01-01T00:00:00Z";
+    const scannedPage = {
+      id: "fixture-page", page_number: 1, width: 600, height: 900,
+      original_filename: "fixture.png", original_content_type: "image/png",
+      original_byte_size: 100, cleaned_content_type: "image/jpeg", cleaned_byte_size: 80,
+      original_url: "/api/v1/documents/scans/fixture-scan/pages/fixture-page/original",
+      cleaned_url: "/api/v1/documents/scans/fixture-scan/pages/fixture-page/file",
+      adjustments: {
+        rotation: 0, corners: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }],
+        color_mode: "document", contrast: 1,
+      },
+      detection_status: "detected", updated_at: timestamp,
+    };
+    const patches: Array<{ rotation: number }> = [];
+    let cancellations = 0;
+    await page.route("**/api/v1/documents/scans**", async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "DELETE" && path.endsWith("/fixture-scan")) {
+        cancellations += 1;
+        return route.fulfill({ status: 204 });
+      }
+      if (request.method() === "POST" && path.endsWith("/scans")) {
+        return route.fulfill({ json: { id: "fixture-scan", status: "draft", pages: [], created_at: timestamp, updated_at: timestamp } });
+      }
+      if (request.method() === "POST" && path.endsWith("/pages")) {
+        return route.fulfill({ json: scannedPage });
+      }
+      if (request.method() === "PATCH") {
+        const adjustments = request.postDataJSON();
+        patches.push(adjustments);
+        return route.fulfill({ json: { ...scannedPage, adjustments, detection_status: "manual", updated_at: "2026-01-01T00:01:00Z" } });
+      }
+      expect(request.method()).toBe("GET");
+      return route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900"><rect width="600" height="900" fill="#ddd"/><rect x="60" y="90" width="480" height="720" fill="white"/><text x="100" y="170" font-size="32">Synthetic receipt</text></svg>',
+      });
+    });
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto("/documents");
+      await page.getByRole("button", { name: "Scan pages", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Scan document", exact: true });
+      await dialog.locator('input[capture="environment"]').setInputFiles({
+        name: "fixture.png", mimeType: "image/png", buffer: Buffer.from("synthetic image fixture"),
+      });
+      await expect(dialog.getByText(/Page edges detected and straightened/)).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Save scanned document" })).toBeVisible();
+      const corner = dialog.getByRole("button", { name: "Adjust Top left corner" });
+      await corner.scrollIntoViewIfNeeded();
+      const box = await corner.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      await corner.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect.poll(() => patches.length).toBeGreaterThan(0);
+      patches.length = 0;
+      await dialog.getByRole("button", { name: "Rotate page right" }).click();
+      await expect.poll(() => patches.at(-1)?.rotation).toBe(90);
+      const overflow = await dialog.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          extra: element.scrollWidth - element.clientWidth,
+          offenders: Array.from(element.querySelectorAll("*")).filter(child =>
+            child.getBoundingClientRect().right > bounds.right + 1,
+          ).map(child => ({ tag: child.tagName, className: child.getAttribute("class") })).slice(0, 5),
+        };
+      });
+      expect(overflow.extra, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+      await dialog.getByRole("button", { name: "Cancel scan", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      patches.length = 0;
+    }
+    expect(cancellations).toBe(3);
+  });
+
+  test("existing scan cleanup preserves its route and refreshes the same-page preview", async ({ page }) => {
+    const id = "00000000-0000-0000-0000-000000000003";
+    const timestamp = "2026-01-01T00:00:00Z";
+    const changedAt = "2026-01-01T00:01:00Z";
+    const canonicalPage = {
+      id: "canonical-page", page_number: 1, width: 600, height: 900,
+      original_filename: "original.png", original_content_type: "image/png",
+      original_byte_size: 100, cleaned_content_type: "image/jpeg", cleaned_byte_size: 80,
+      original_url: "/api/v1/documents/scans/canonical-scan/pages/canonical-page/original",
+      cleaned_url: "/api/v1/documents/scans/canonical-scan/pages/canonical-page/file",
+      adjustments: { rotation: 0, corners: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }], color_mode: "color", contrast: 1 },
+      detection_status: "manual_required", updated_at: timestamp,
+    };
+    const initialDocument = {
+      id, title: "Existing fixture scan", document_type: "receipt",
+      original_filename: "original.png", content_type: "application/pdf", original_content_type: "image/png",
+      byte_size: 100, original_byte_size: 100, document_date: null,
+      merchant: "Preserved fixture merchant", notes: "Preserved fixture notes",
+      ocr_status: "queued", ocr_error: null, ocr_confidence: null, ocr_processed_at: null,
+      created_at: timestamp, updated_at: timestamp, items: [], item_count: 0, page_count: 1,
+      url: `/api/v1/documents/${id}/file`, original_url: `/api/v1/documents/${id}/original`,
+      pages: [canonicalPage], extracted_text: null, extracted_metadata: {},
+    };
+    const draftPage = {
+      ...canonicalPage, id: "draft-page", detection_status: "detected",
+      original_url: "/api/v1/documents/scans/cleanup-draft/pages/draft-page/original",
+      cleaned_url: "/api/v1/documents/scans/cleanup-draft/pages/draft-page/file",
+    };
+    let currentDocument = initialDocument;
+    let commits = 0;
+    let cancellations = 0;
+    await page.route("**/api/v1/documents/**", async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "POST" && path.endsWith("/scans")) {
+        expect(request.postDataJSON()).toEqual({ target_document_id: id });
+        return route.fulfill({ json: { id: "cleanup-draft", status: "draft", target_document_id: id, pages: [draftPage], created_at: timestamp, updated_at: timestamp } });
+      }
+      if (request.method() === "POST" && path.endsWith("/cleanup-draft/commit")) {
+        expect(Object.keys(request.postDataJSON())).toEqual(["request_id"]);
+        commits += 1;
+        currentDocument = { ...initialDocument, updated_at: changedAt, pages: [{ ...canonicalPage, updated_at: changedAt }] };
+        return route.fulfill({ json: currentDocument });
+      }
+      if (request.method() === "DELETE" && path.endsWith("/cleanup-draft")) {
+        cancellations += 1;
+        return route.fulfill({ status: 204 });
+      }
+      expect(request.method()).toBe("GET");
+      if (path === `/api/v1/documents/${id}`) return route.fulfill({ json: currentDocument });
+      if (path.endsWith("/related-items")) return route.fulfill({ json: { items: [], suggested_item_ids: [] } });
+      return route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="900"><rect width="600" height="900" fill="white"/><text x="60" y="100" font-size="32">Existing synthetic scan</text></svg>',
+      });
+    });
+    for (const width of [390, 1440]) {
+      currentDocument = initialDocument;
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(`/documents/${id}`);
+      const preview = page.getByAltText("Existing fixture scan · page 1", { exact: true });
+      await expect(preview).toBeVisible();
+      const oldSource = await preview.getAttribute("src");
+      await page.getByRole("button", { name: "Clean up scan", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Clean up document", exact: true });
+      await expect(dialog.getByAltText("Original page 1")).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+      await expect(dialog.getByLabel("Title", { exact: true })).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Save cleaned document" }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page).toHaveURL(new RegExp(`/documents/${id}$`));
+      await expect(preview).not.toHaveAttribute("src", oldSource ?? "");
+      await expect(page.getByText("Preserved fixture notes", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Clean up scan", exact: true }).click();
+      await expect(dialog.getByAltText("Original page 1")).toBeVisible();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(preview).toHaveAttribute("src", /00%3A01%3A00Z$/);
+    }
+    expect(commits).toBe(2);
+    expect(cancellations).toBe(2);
+  });
+
   test("Home and document cards stay bounded with long item names", async ({ page }) => {
     const item: ItemSummary = {
       id: "00000000-0000-0000-0000-000000000001",

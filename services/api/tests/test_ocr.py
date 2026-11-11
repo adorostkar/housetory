@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 
 from housetory_api.db import SessionLocal
 from housetory_api.models import Document, Job, Purchase
-from housetory_api.services.document_ocr import run_document_ocr
+from housetory_api.services.document_ocr import run_document_ocr, run_job
 from housetory_api.services.ocr import ExtractedText, OcrError, parse_receipt
 
 RECEIPT_TEXT = """LA MARZOCCO BOUTIQUE
@@ -154,6 +154,74 @@ def test_failed_ocr_is_recorded_and_can_be_retried(owner_client):
             )
         ).all()
         assert len(jobs) >= 2
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_ocr_discards_both_success_and_failure_after_source_replacement(owner_client, fails):
+    item = create_item(owner_client)
+    document = upload_text_document(owner_client, item["id"]).json()
+
+    def replace_during_extraction(path, content_type):
+        with SessionLocal() as db:
+            current = db.get(Document, document["id"])
+            current.source_generation += 1
+            current.ocr_status = "queued"
+            current.extracted_metadata = {"manual_note": "New content"}
+            current.merchant = "Reviewed merchant"
+            db.commit()
+        if fails:
+            raise OcrError("Old source unreadable")
+        return ExtractedText(text=RECEIPT_TEXT, confidence=91, source="ocr")
+
+    result = run_document_ocr(document["id"], extractor=replace_during_extraction)
+    assert result["skipped"] is True
+    assert result["reason"] == "stale_source"
+    current = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert current["ocr_status"] == "queued"
+    assert current["ocr_error"] is None
+    assert current["merchant"] == "Reviewed merchant"
+    assert current["extracted_metadata"] == {"manual_note": "New content"}
+
+
+def test_legacy_and_generation_bound_ocr_jobs_skip_replaced_content(owner_client):
+    item = create_item(owner_client)
+    document = upload_text_document(owner_client, item["id"]).json()
+    with SessionLocal() as db:
+        jobs = db.scalars(select(Job).where(Job.task == "documents.ocr")).all()
+        assert jobs[0].payload["source_generation"] == 1
+        current = db.get(Document, document["id"])
+        current.source_generation = 2
+        db.commit()
+    for payload in [
+        {"document_id": document["id"]},
+        {"document_id": document["id"], "source_generation": 1},
+    ]:
+        assert run_job(payload)["reason"] == "stale_source"
+    current = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert current["ocr_status"] == "queued"
+
+
+def test_ocr_refetches_concurrent_manual_metadata_before_publishing(owner_client):
+    item = create_item(owner_client)
+    document = upload_text_document(owner_client, item["id"]).json()
+
+    def edit_during_extraction(path, content_type):
+        response = owner_client.patch(
+            f"/api/v1/documents/{document['id']}",
+            json={"merchant": "Human reviewed", "document_date": "2025-01-02"},
+        )
+        assert response.status_code == 200
+        with SessionLocal() as db:
+            current = db.get(Document, document["id"])
+            current.extracted_metadata = {"review_note": "Keep me"}
+            db.commit()
+        return ExtractedText(text=RECEIPT_TEXT, confidence=91, source="ocr")
+
+    run_document_ocr(document["id"], extractor=edit_during_extraction)
+    current = owner_client.get(f"/api/v1/documents/{document['id']}").json()
+    assert current["merchant"] == "Human reviewed"
+    assert current["document_date"] == "2025-01-02"
+    assert current["extracted_metadata"]["review_note"] == "Keep me"
 
 
 def test_ocr_retry_rejects_an_active_job(owner_client):

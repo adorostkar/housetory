@@ -780,6 +780,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     original_storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     content_sha256: Mapped[str | None] = mapped_column(String(64))
+    source_generation: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     original_content_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -832,6 +833,8 @@ class DocumentScan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="draft")
+    target_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    base_generation: Mapped[int | None] = mapped_column(Integer)
     request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
@@ -875,6 +878,10 @@ class DocumentScanPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     width: Mapped[int] = mapped_column(Integer, nullable=False)
     height: Mapped[int] = mapped_column(Integer, nullable=False)
     adjustments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    detection_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="manual_required"
+    )
+    source_page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     scan: Mapped[DocumentScan] = relationship(back_populates="pages")
 
