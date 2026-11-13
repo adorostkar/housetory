@@ -5,6 +5,7 @@ from .routes import (
     accounts,
     ai,
     ai_settings,
+    assistant_actions,
     auth,
     borrowed,
     bulk,
@@ -81,6 +82,7 @@ api_router.include_router(stocktake.router, dependencies=write_guard)
 api_router.include_router(imports.router, dependencies=write_guard)
 api_router.include_router(voice.router, dependencies=write_guard)
 api_router.include_router(ai.router, dependencies=write_guard)
+api_router.include_router(assistant_actions.router)
 api_router.include_router(borrowed.router, dependencies=write_guard)
 api_router.include_router(ai_settings.router, dependencies=write_guard)
 api_router.include_router(system.router, dependencies=write_guard)

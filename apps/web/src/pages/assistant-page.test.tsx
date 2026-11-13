@@ -27,6 +27,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/assistant-intent", () => ({
+  classifyAssistantIntent: vi.fn().mockResolvedValue({ intent: "unavailable", form: null }),
+}));
+
 const aiStatus: AiStatus = {
   provider: "ollama",
   mode: "local",
@@ -663,9 +667,9 @@ describe("AssistantPage", () => {
     expect(
       screen.getByRole("button", { name: "Where is my heavy drill?" }),
     ).toBeVisible();
-    expect(screen.queryByText(/never creates, edits or deletes/)).toBeNull();
+    expect(screen.queryByText(/Changes require your review and explicit Apply/)).toBeNull();
     await user.click(screen.getByRole("button", { name: /Privacy & model/ }));
-    expect(screen.getByText(/never creates, edits or deletes/)).toBeVisible();
+    expect(screen.getByText(/Changes require your review and explicit Apply/)).toBeVisible();
   });
 
   it("copies an answer to the clipboard", async () => {

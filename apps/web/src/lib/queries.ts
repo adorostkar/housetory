@@ -627,7 +627,7 @@ const inventoryResources = [
   "financial", "imports", "recognitions", "containers", "stocktake", "inventory-review",
 ] as const;
 
-export type InventoryResource = typeof inventoryResources[number] | "loans";
+export type InventoryResource = typeof inventoryResources[number] | "loans" | "borrowed";
 
 export function useInvalidateInventory(
   resources: readonly InventoryResource[] = inventoryResources,

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { AddItemsButton } from "@/components/add-items";
 import { AnswerText } from "@/components/answer-text";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
+import { CONDITIONS } from "@/components/item-form-sections";
 import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,7 @@ import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useCanWrite } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
-import { useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
+import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
@@ -61,8 +62,9 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
-  const { messages, question, setQuestion, pending, ask, reset } =
+  const { messages, question, setQuestion, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
+  const actionPending = messages.some((message) => message.action?.pending);
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -138,7 +140,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   };
 
   const newConversation = () => {
-    if (pending) return;
+    if (pending || actionPending) return;
     reset();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     autoAskedRef.current = null;
@@ -199,7 +201,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
               className="h-11 px-3 sm:h-10 sm:px-5"
               onClick={newConversation}
               aria-label="New conversation"
-              disabled={pending || messages.length === 0}
+              disabled={pending || actionPending || messages.length === 0}
             >
               <RotateCcw />
               <span className="sm:hidden">New chat</span>
@@ -276,7 +278,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                 {allPlacesScope
                   ? "All-my-places answers are interpreted one household at a time using only that household's configured provider and consent. Read-only deterministic retrieval remains available when a household has no provider; no household's records are sent through another household's provider."
                   : (displayStatus?.privacy_note ??
-                    "The assistant executes read-only household tools and answers from real records.")}
+                    "Answers use authorised household records.")}
               </p>
               {status?.model && (
                 <p>
@@ -286,8 +288,8 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
               )}
               {status?.error && <p className="text-brass">{status.error}</p>}
               <p>
-                The assistant never creates, edits or deletes inventory from
-                this conversation.{" "}
+                Changes require your review and explicit Apply. The assistant
+                cannot delete items.{" "}
                 <Link
                   to="/settings/ai"
                   className="underline underline-offset-4 hover:text-foreground"
@@ -345,15 +347,263 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                   }
                   className="scroll-mt-2"
                 >
-                  <AssistantAnswer
-                    response={message.response}
-                    text={message.text}
-                    onRegenerate={
-                      index === messages.length - 1 ? regenerateLatest : undefined
-                    }
-                    regenerateDisabled={pending}
-                  />
-                  {index === messages.length - 1 && !pending && (
+                  {message.action ? (
+                    <div className="surface space-y-3 p-5" aria-label="Action review">
+                      <p dir="auto" className="text-sm">{message.text}</p>
+                      <p className="break-words text-xs text-muted-foreground">
+                        Scope: {message.action.proposal.scope_label}
+                      </p>
+                      {message.action.clarificationLabel && (
+                        <p className="break-words text-xs text-muted-foreground">
+                          Selected: {message.action.clarificationLabel}
+                        </p>
+                      )}
+                      <div className="space-y-1">
+                        {message.action.proposal.targets.map((target) => (
+                          <p key={target.id} className="break-words text-sm font-medium">{target.name}</p>
+                        ))}
+                        {message.action.proposal.destination && (
+                          <p className="break-words text-sm">{message.action.proposal.destination.name}</p>
+                        )}
+                        {message.action.proposal.kind === "edit_item" && (
+                          <>
+                            <dl className="space-y-1 text-sm">
+                              {ITEM_EDIT_FIELDS.filter(({ key }) => Object.hasOwn(message.action!.proposal.changes, key)).map(({ key, label }) => (
+                                <div key={key} className="break-words">
+                                  <dt className="font-medium">{label}</dt>
+                                  <dd>From: {String(message.action!.proposal.before[key] ?? "Not set")}</dd>
+                                  <dd>To: <span>{String(message.action!.proposal.changes[key] ?? "Not set")}</span></dd>
+                                </div>
+                              ))}
+                            </dl>
+                            {message.action.proposal.targets[0] && (
+                              <p className="text-xs text-muted-foreground">
+                                For other fields, use the{" "}
+                                <Link
+                                  className="underline"
+                                  to={withHousehold(`/items/${message.action.proposal.targets[0].id}/edit`, selection.householdId || undefined)}
+                                >
+                                  Open full item editor
+                                </Link>. This proposal is separate.
+                              </p>
+                            )}
+                          </>
+                        )}
+                        {message.action.proposal.kind === "lend" && (
+                          <dl className="grid grid-cols-2 gap-2 text-sm">
+                            <dt>Borrower</dt><dd className="break-words">{String(message.action.proposal.changes.borrower_name ?? "")}</dd>
+                            <dt>Quantity</dt><dd>{String(message.action.proposal.changes.quantity ?? "")}</dd>
+                            <dt>Lent on</dt><dd>{String(message.action.proposal.changes.lent_on ?? "")}</dd>
+                            <dt>Due on</dt><dd>{String(message.action.proposal.changes.due_on ?? "Not set")}</dd>
+                          </dl>
+                        )}
+                        {message.action.proposal.kind === "borrow" && (
+                          <dl className="grid grid-cols-2 gap-2 text-sm">
+                            <dt>Item</dt><dd className="break-words">{String(message.action.proposal.changes.item_name ?? "")}</dd>
+                            <dt>Owner</dt><dd className="break-words">{String(message.action.proposal.changes.owner_name ?? "")}</dd>
+                            <dt>Quantity</dt><dd>{String(message.action.proposal.changes.quantity ?? "")}</dd>
+                            <dt>Borrowed on</dt><dd>{String(message.action.proposal.changes.borrowed_on ?? "")}</dd>
+                            <dt>Due on</dt><dd>{String(message.action.proposal.changes.due_on ?? "Not set")}</dd>
+                          </dl>
+                        )}
+                        {(message.action.proposal.kind === "return_loan" || message.action.proposal.kind === "return_borrowed") && (
+                          <dl className="grid grid-cols-2 gap-2 text-sm">
+                            <dt>Direction</dt><dd>{message.action.proposal.kind === "return_loan" ? "Returned by borrower" : "Returned to owner"}</dd>
+                            <dt>Return quantity</dt><dd>{String(message.action.proposal.changes.quantity ?? "")}</dd>
+                            <dt>Outstanding</dt><dd>{String(message.action.proposal.before.outstanding_quantity ?? "")}</dd>
+                            <dt>Returned on</dt><dd>{String(message.action.proposal.changes.returned_on ?? "")}</dd>
+                          </dl>
+                        )}
+                      </div>
+                      {message.action.result ? (
+                        <p role="status" className="text-sm">{message.action.result}</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {message.action.conflict && (
+                            <>
+                              <p role="alert" className="w-full text-sm text-destructive">{message.action.conflict}</p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={message.action.pending}
+                                onClick={() => message.action && refreshAction(message.action.proposal.id)}
+                              >
+                                Refresh proposal
+                              </Button>
+                            </>
+                          )}
+                          {message.action.proposal.kind === "return_loan" || message.action.proposal.kind === "return_borrowed" ? (
+                            message.action.editing && message.action.returnDraft ? (
+                              <>
+                                <label className="w-full text-sm">Return quantity
+                                  <input type="number" min={1} max={1000000} className="mt-1 w-full rounded-md border border-border bg-background p-2" value={message.action.returnDraft.quantity} onChange={(event) => message.action && setReturnDraft(message.action.proposal.id, { quantity: event.target.value })} />
+                                </label>
+                                <label className="w-full text-sm">Returned on
+                                  <input type="date" className="mt-1 w-full rounded-md border border-border bg-background p-2" value={message.action.returnDraft.returned_on} onChange={(event) => message.action && setReturnDraft(message.action.proposal.id, { returned_on: event.target.value })} />
+                                </label>
+                                <Button type="button" disabled={message.action.pending} onClick={() => message.action && saveReturn(message.action.proposal.id)}>Save return</Button>
+                              </>
+                            ) : (
+                              <Button type="button" variant="outline" disabled={message.action.pending || Boolean(message.action.conflict)} onClick={() => message.action && editReturn(message.action.proposal.id)}>Edit return</Button>
+                            )
+                          ) : message.action.proposal.kind === "lend" || message.action.proposal.kind === "borrow" ? (
+                            message.action.editing && message.action.loanDraft ? (
+                              <>
+                                {message.action.proposal.kind === "borrow" && (
+                                  <label className="w-full text-sm">Item name
+                                    <input className="mt-1 w-full rounded-md border border-border bg-background p-2" maxLength={200} value={message.action.loanDraft.item_name ?? ""} onChange={(event) => message.action && setLoanDraft(message.action.proposal.id, { item_name: event.target.value })} />
+                                  </label>
+                                )}
+                                <label className="w-full text-sm">{message.action.proposal.kind === "borrow" ? "Owner" : "Borrower"}
+                                  <input className="mt-1 w-full rounded-md border border-border bg-background p-2" maxLength={120} value={message.action.loanDraft.borrower_name} onChange={(event) => message.action && setLoanDraft(message.action.proposal.id, { borrower_name: event.target.value })} />
+                                </label>
+                                <label className="w-full text-sm">Quantity
+                                  <input type="number" min={1} max={1000000} className="mt-1 w-full rounded-md border border-border bg-background p-2" value={message.action.loanDraft.quantity} onChange={(event) => message.action && setLoanDraft(message.action.proposal.id, { quantity: event.target.value })} />
+                                </label>
+                                <label className="w-full text-sm">{message.action.proposal.kind === "borrow" ? "Borrowed on" : "Lent on"}
+                                  <input type="date" className="mt-1 w-full rounded-md border border-border bg-background p-2" value={message.action.loanDraft.lent_on} onChange={(event) => message.action && setLoanDraft(message.action.proposal.id, { lent_on: event.target.value })} />
+                                </label>
+                                <label className="w-full text-sm">Due on
+                                  <input type="date" className="mt-1 w-full rounded-md border border-border bg-background p-2" value={message.action.loanDraft.due_on} onChange={(event) => message.action && setLoanDraft(message.action.proposal.id, { due_on: event.target.value })} />
+                                </label>
+                                <Button type="button" disabled={message.action.pending} onClick={() => message.action && saveLoan(message.action.proposal.id)}>{message.action.proposal.kind === "borrow" ? "Save borrowing" : "Save loan"}</Button>
+                              </>
+                            ) : (
+                              <Button type="button" variant="outline" disabled={message.action.pending || Boolean(message.action.conflict)} onClick={() => message.action && editLoan(message.action.proposal.id)}>{message.action.proposal.kind === "borrow" ? "Edit borrowing" : "Edit loan"}</Button>
+                            )
+                          ) : message.action.proposal.kind === "edit_item" ? (
+                            message.action.editing && message.action.itemDraft ? (
+                              <>
+                                {ITEM_EDIT_FIELDS.map((field) => (
+                                  <label key={field.key} className="w-full text-sm">
+                                    {field.label}
+                                    {field.key === "condition" ? (
+                                      <select
+                                        className="mt-1 w-full rounded-md border border-border bg-background p-2"
+                                        value={message.action!.itemDraft!.condition}
+                                        onChange={(event) => message.action && setItemField(message.action.proposal.id, "condition", event.target.value)}
+                                      >
+                                        <option value="" disabled>Choose condition</option>
+                                        {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type={field.key === "quantity" ? "number" : "text"}
+                                        min={field.key === "quantity" ? 0 : undefined}
+                                        max={field.key === "quantity" ? 1000000 : undefined}
+                                        maxLength={"maxLength" in field ? field.maxLength : undefined}
+                                        className="mt-1 w-full rounded-md border border-border bg-background p-2"
+                                        value={message.action!.itemDraft![field.key]}
+                                        onChange={(event) => message.action && setItemField(message.action.proposal.id, field.key, event.target.value)}
+                                      />
+                                    )}
+                                  </label>
+                                ))}
+                                <Button type="button" disabled={message.action.pending || !message.action.itemDraft.name.trim()} onClick={() => message.action && saveName(message.action.proposal.id)}>
+                                  Save change
+                                </Button>
+                              </>
+                            ) : (
+                              <Button type="button" variant="outline" disabled={message.action.pending || Boolean(message.action.conflict)} onClick={() => message.action && editName(message.action.proposal.id)}>
+                                Edit change
+                              </Button>
+                            )
+                          ) : message.action.editing ? (
+                            <>
+                              <label className="w-full text-sm">
+                                Destination
+                                <select
+                                  aria-label="Destination"
+                                  className="mt-1 w-full rounded-md border border-border bg-background p-2"
+                                  value={message.action.selectedDestination ?? ""}
+                                  onChange={(event) => message.action && selectDestination(message.action.proposal.id, event.target.value)}
+                                >
+                                  <option value="">Choose a destination</option>
+                                  {message.action.destinations?.map((destination) => (
+                                    <option
+                                      key={destination.storage_location_id ?? destination.room_id}
+                                      value={destination.storage_location_id ?? destination.room_id}
+                                    >
+                                      {destination.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <Button
+                                type="button"
+                                disabled={message.action.pending || !message.action.selectedDestination}
+                                onClick={() => message.action && saveMove(message.action.proposal.id)}
+                              >
+                                Save destination
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={message.action.pending || Boolean(message.action.conflict)}
+                              onClick={() => message.action && editMove(message.action.proposal.id)}
+                            >
+                              Edit destination
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            disabled={message.action.pending || message.action.editing || Boolean(message.action.conflict)}
+                            onClick={() => message.action && applyAction(message.action.proposal.id)}
+                          >
+                            Apply
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={message.action.pending}
+                            onClick={() => message.action && cancelAction(message.action.proposal.id)}
+                          >
+                            Cancel proposal
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <AssistantAnswer
+                        response={message.response}
+                        text={message.text}
+                        onRegenerate={
+                          index === messages.length - 1 ? regenerateLatest : undefined
+                        }
+                        regenerateDisabled={pending}
+                      />
+                      {message.response && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Read-only answer. No changes were made.
+                        </p>
+                      )}
+                      {message.clarification && (
+                        <div className="mt-2 flex flex-wrap gap-2" aria-label="Choose an item">
+                          {message.clarification.choices.map((choice) => (
+                            <Button
+                              key={choice.id}
+                              type="button"
+                              variant="outline"
+                              className="h-auto max-w-full whitespace-normal text-start"
+                              disabled={pending || message.clarification?.resolved}
+                              onClick={() => message.clarification && clarifyAction(message.clarification.id, choice.id, choice.name)}
+                            >
+                              {choice.name}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                      {message.fallback && (
+                        <Link className="mt-2 inline-flex text-sm underline" to={message.fallback.href}>
+                          {message.fallback.label}
+                        </Link>
+                      )}
+                    </>
+                  )}
+                  {!message.action && !message.clarification && index === messages.length - 1 && !pending && (
                     <FollowUps
                       suggestions={followUpSuggestions(
                         message.response,

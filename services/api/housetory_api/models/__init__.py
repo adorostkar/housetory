@@ -1,4 +1,5 @@
 from .activity import ActivityEvent, Loan, LoanReturn
+from .assistant_action import AssistantActionProposal
 from .auth import (
     AuthSession,
     Household,
@@ -66,6 +67,7 @@ from .voice import VoiceNote
 
 __all__ = [
     "ActivityEvent",
+    "AssistantActionProposal",
     "AuthSession",
     "Base",
     "BorrowedPhoto",
