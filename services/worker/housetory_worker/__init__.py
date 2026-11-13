@@ -485,9 +485,16 @@ def _serve_queue(queue: str, *, peer, lane_peer, lane_queue: str | None) -> None
             with SessionLocal() as db:
                 job = claim_job(db, worker_id=worker_id, queue=queue)
             if job is not None:
-                if queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE} or (
-                    job.task == OCR_TASK
-                    and (job.payload or {}).get("mode") == "background"
+                if (
+                    queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
+                    or (
+                        job.task == OCR_TASK
+                        and (job.payload or {}).get("mode") == "background"
+                    )
+                    or (
+                        job.task == ENRICHMENT_TASK
+                        and (job.payload or {}).get("kind") == "document"
+                    )
                 ):
                     process_interactive_job(job)
                 else:

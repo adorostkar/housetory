@@ -1,4 +1,5 @@
 import contextlib
+import io
 import json
 import multiprocessing
 import os
@@ -13,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from reportlab.pdfgen.canvas import Canvas
 from sqlalchemy import select
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "worker"))
@@ -53,7 +55,8 @@ def test_expired_interactive_job_fails_without_starting_a_handler():
         assert stored.last_error == "interactive_deadline_exceeded"
 
 
-def test_stalled_interactive_handler_is_terminated_at_deadline(owner_client):
+@pytest.mark.parametrize("mode,queue", [("interactive", "documents"), ("background", "ai")])
+def test_stalled_interactive_handler_is_terminated_at_deadline(owner_client, mode, queue):
     uploaded = owner_client.post(
         "/api/v1/documents",
         files={"file": ("receipt.txt", b"receipt", "text/plain")},
@@ -70,10 +73,17 @@ def test_stalled_interactive_handler_is_terminated_at_deadline(owner_client):
             )
         )
         payload = dict(job.payload)
-        payload["deadline_at"] = (datetime.now(UTC) + timedelta(seconds=0.25)).isoformat()
+        payload.update(
+            deadline_at=(datetime.now(UTC) + timedelta(seconds=0.25)).isoformat(),
+            mode=mode,
+        )
+        if mode == "background":
+            payload.update(kind="document", source_id=document_id)
+            job.task = "ai.enrich"
+        job.queue = queue
         job.payload = payload
         db.commit()
-        claimed = claim_job(db, worker_id="test-documents", queue="documents")
+        claimed = claim_job(db, worker_id="test-documents", queue=queue)
         assert claimed is not None
         job_id = claimed.id
 
@@ -209,24 +219,191 @@ def _run_supervised_job_until_shutdown(job_id, pid_file):
         )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX worker shutdown signals")
+def test_background_document_does_not_block_interactive_document_ai(
+    owner_client, tmp_path, configured_ai, monkeypatch
+):
+    background_started = threading.Event()
+    interactive_started = threading.Event()
+    retry_started = threading.Event()
+    release_background = threading.Event()
+    release_retry = threading.Event()
+
+    class BlockingProvider(BaseHTTPRequestHandler):
+        requests = 0
+        lock = threading.Lock()
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            with self.lock:
+                type(self).requests += 1
+                request_number = type(self).requests
+            if request_number == 1:
+                background_started.set()
+                release_background.wait(timeout=45)
+            elif request_number == 2:
+                interactive_started.set()
+            else:
+                retry_started.set()
+                release_retry.wait(timeout=45)
+            body = json.dumps({"message": {"content": "{}"}}).encode()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, format, *args):
+            pass
+
+    provider = ThreadingHTTPServer(("127.0.0.1", 0), BlockingProvider)
+    thread = threading.Thread(target=provider.serve_forever, daemon=True)
+    thread.start()
+    config = replace(
+        configured_ai,
+        base_url=f"http://127.0.0.1:{provider.server_port}",
+        model="synthetic-model",
+        task="documents",
+        display_name="ollama",
+    )
+    monkeypatch.setattr(ai, "config_for", lambda *args, **kwargs: config)
+    env = {
+        **os.environ,
+        "WORKER_QUEUE": "all",
+        "WORKER_POLL_SECONDS": "0.05",
+        "WORKER_HEARTBEAT_FILE": str(tmp_path / "isolation-heartbeat"),
+        "AI_PROVIDER": "ollama",
+        "AI_MODEL": "synthetic-model",
+        "AI_BASE_URL": f"http://127.0.0.1:{provider.server_port}",
+        "PYTHONPATH": os.pathsep.join(
+            [
+                str(Path(__file__).resolve().parents[2] / "worker"),
+                str(Path(__file__).resolve().parents[1]),
+                os.environ.get("PYTHONPATH", ""),
+            ]
+        ),
+    }
+    worker = None
+    log_path = tmp_path / "isolation-worker.log"
+    try:
+        pdf = io.BytesIO()
+        canvas = Canvas(pdf)
+        for page in range(4):
+            canvas.drawString(40, 750, f"SYNTHETIC HARDWARE page {page + 1}")
+            canvas.drawString(40, 720, "Drill 1 x 10.00 10.00")
+            canvas.drawString(40, 690, "Total USD 10.00")
+            canvas.showPage()
+        canvas.save()
+        background = owner_client.post(
+            "/api/v1/documents",
+            files={"file": ("background.pdf", pdf.getvalue(), "application/pdf")},
+            data={"document_type": "invoice"},
+        )
+        assert background.status_code == 201, background.text
+        background_id = background.json()["id"]
+        with log_path.open("w") as log:
+            worker = subprocess.Popen(
+                [sys.executable, "-m", "housetory_worker"],
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            assert background_started.wait(timeout=30), log_path.read_text()
+            with SessionLocal() as db:
+                background_job = db.scalar(
+                    select(Job).where(
+                        Job.task == "ai.enrich",
+                        Job.payload["source_id"].astext == background_id,
+                    )
+                )
+                assert background_job.payload["mode"] == "background"
+                assert background_job.status == "running"
+                assert background_job.queue == "ai"
+            status = owner_client.get(f"/api/v1/documents/{background_id}/processing").json()
+            assert status["mode"] == "background"
+            assert status["page_count"] == 4
+            assert status["worker_available"] is True
+            interactive = owner_client.post(
+                "/api/v1/documents",
+                files={
+                    "file": (
+                        "interactive.txt",
+                        b"SYNTHETIC HARDWARE\nDrill 1 x 10.00 10.00\nTotal USD 10.00",
+                        "text/plain",
+                    )
+                },
+                data={"document_type": "invoice"},
+            )
+            assert interactive.status_code == 201, interactive.text
+            assert interactive_started.wait(timeout=12), log_path.read_text()
+            with SessionLocal() as db:
+                assert db.get(Job, background_job.id).status == "running"
+                interactive_job = db.scalar(
+                    select(Job).where(
+                        Job.task == "ai.enrich",
+                        Job.payload["source_id"].astext == interactive.json()["id"],
+                    )
+                )
+                assert interactive_job.queue == "ai-documents"
+            cancelled = owner_client.post(f"/api/v1/documents/{background_id}/processing/cancel")
+            assert cancelled.status_code == 200, cancelled.text
+            assert cancelled.json()["stage"] == "cancelled"
+            for _ in range(2):
+                assert owner_client.post("/api/v1/items", json={"name": "Drill"}).status_code == 201
+            retried = owner_client.post(
+                f"/api/v1/documents/{background_id}/processing/retry",
+                json={"operation": "matches"},
+            )
+            assert retried.status_code == 200, retried.text
+            assert retry_started.wait(timeout=15), log_path.read_text()
+            with SessionLocal() as db:
+                assert db.get(Job, background_job.id).status == "cancelled"
+                retry_job = db.scalar(
+                    select(Job).where(
+                        Job.task == "ai.enrich",
+                        Job.payload["correlation_id"].astext == retried.json()["correlation_id"],
+                    )
+                )
+                assert retry_job.queue == "ai"
+                assert retry_job.payload["operation"] == "matches"
+                assert retry_job.status == "running"
+    finally:
+        release_background.set()
+        release_retry.set()
+        if worker is not None and worker.poll() is None:
+            worker.terminate()
+            try:
+                worker.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                worker.wait(timeout=5)
+        provider.shutdown()
+        provider.server_close()
+        thread.join(timeout=5)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 @pytest.mark.parametrize("termination", ["cancel", "deadline", "shutdown"])
-def test_interactive_supervision_terminates_ocr_descendants(tmp_path, termination):
+@pytest.mark.parametrize("mode,queue", [("interactive", "documents"), ("background", "ai")])
+def test_interactive_supervision_terminates_ocr_descendants(tmp_path, termination, mode, queue):
     marker = tmp_path / "ocr-descendant-pid"
     with SessionLocal() as db:
         job = enqueue(
             db,
             "documents.ocr",
             {
-                "mode": "interactive",
+                "mode": mode,
                 "deadline_at": (
                     datetime.now(UTC) + timedelta(seconds=20 if termination == "shutdown" else 3)
                 ).isoformat(),
             },
-            queue="documents",
+            queue=queue,
             max_attempts=1,
         )
-        claimed = claim_job(db, worker_id="descendant-test", queue="documents")
+        claimed = claim_job(db, worker_id="descendant-test", queue=queue)
         job_id = job.id
 
     def cancel_after_spawn():

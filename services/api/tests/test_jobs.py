@@ -6,6 +6,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from housetory_api.db import SessionLocal
 from housetory_api.domain import JobStatus
 from housetory_api.jobs import (
@@ -17,7 +19,7 @@ from housetory_api.jobs import (
     requeue_stale_jobs,
     route_legacy_ai_jobs,
 )
-from housetory_api.models import Job, WorkerHeartbeat
+from housetory_api.models import Document, Job, WorkerHeartbeat
 
 
 def test_enqueue_claim_and_succeed():
@@ -105,6 +107,51 @@ def test_ai_lane_and_legacy_jobs_do_not_block_local_queue():
         assert claim_job(db, worker_id="local", queue="default").id == rules.id
 
 
+@pytest.mark.parametrize("queue", ["default", "ai", "ai-documents"])
+@pytest.mark.parametrize("mode", ["background", "interactive"])
+@pytest.mark.parametrize("payload_shape", ["legacy", "correlation_only", "stale", "current"])
+def test_legacy_document_ai_routing_preserves_processing_mode(
+    owner_client, queue, mode, payload_shape
+):
+    uploaded = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("receipt.txt", b"receipt", "text/plain")},
+        data={"document_type": "invoice"},
+    )
+    document_id = uploaded.json()["id"]
+    with SessionLocal() as db:
+        document = db.get(Document, document_id)
+        metadata = dict(document.extracted_metadata)
+        processing = dict(metadata["processing"])
+        processing["mode"] = mode
+        metadata["processing"] = processing
+        document.extracted_metadata = metadata
+        payload = {"kind": "document", "source_id": document_id}
+        if payload_shape != "legacy":
+            payload["correlation_id"] = (
+                "stale-correlation" if payload_shape == "stale" else processing["correlation_id"]
+            )
+        if payload_shape == "current":
+            payload["mode"] = mode
+        queued = enqueue(db, "ai.enrich", payload, queue=queue)
+        running = enqueue(db, "ai.enrich", payload, queue=queue)
+        running.status = JobStatus.RUNNING.value
+        db.commit()
+        route_legacy_ai_jobs(db)
+        db.refresh(queued)
+        db.refresh(running)
+        assert queued.queue == ("ai" if mode == "background" else "ai-documents")
+        assert queued.payload["mode"] == mode
+        assert queued.payload["correlation_id"] == (
+            "stale-correlation" if payload_shape == "stale" else processing["correlation_id"]
+        )
+        if payload_shape == "stale":
+            db.refresh(document)
+            assert document.extracted_metadata["processing"]["stage"] == "waiting"
+        assert running.queue == queue
+        assert running.status == JobStatus.RUNNING.value
+
+
 def test_live_worker_long_inference_is_not_recovered_as_a_crash():
     with SessionLocal() as db:
         job = enqueue(db, "ai.enrich")
@@ -153,6 +200,17 @@ def test_document_lanes_are_reserved_and_round_robin_by_actor():
         assert claim_job(db, worker_id="local", queue="documents").id == other_user.id
         assert claim_job(db, worker_id="local", queue="documents").id == second.id
         assert claim_job(db, worker_id="document-ai", queue="ai-documents").id == document_ai.id
+
+
+def test_background_document_ai_retains_actor_fairness():
+    with SessionLocal() as db:
+        payload = {"kind": "document", "mode": "background", "household_id": "house"}
+        first = enqueue(db, "ai.enrich", {**payload, "actor_user_id": "a"}, queue="ai")
+        second = enqueue(db, "ai.enrich", {**payload, "actor_user_id": "a"}, queue="ai")
+        other = enqueue(db, "ai.enrich", {**payload, "actor_user_id": "b"}, queue="ai")
+        assert claim_job(db, worker_id="ai", queue="ai").id == first.id
+        assert claim_job(db, worker_id="ai", queue="ai").id == other.id
+        assert claim_job(db, worker_id="ai", queue="ai").id == second.id
 
 
 def test_reserved_document_ai_lane_dispatches_during_stalled_background_handler():

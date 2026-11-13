@@ -221,7 +221,13 @@ def processing_snapshot(db: Session, document: Document) -> DocumentProcessingSn
                 int((now - ai_job.created_at).total_seconds() * 1000),
             )
     queue = (
-        AI_QUEUE
+        (
+            ai_job.queue
+            if ai_job is not None
+            else "ai"
+            if state.get("mode") == "background"
+            else AI_QUEUE
+        )
         if stage == "interpreting"
         else state.get("local_queue", LOCAL_QUEUE)
         if stage in {"waiting", "reading"}

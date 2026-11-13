@@ -84,7 +84,9 @@ def route_legacy_ai_jobs(db: Session) -> None:
         .values(
             queue=case(
                 (
-                    (Job.task == "ai.enrich") & (Job.payload["kind"].astext == "document"),
+                    (Job.task == "ai.enrich")
+                    & (Job.payload["kind"].astext == "document")
+                    & Job.payload["mode"].astext.is_distinct_from("background"),
                     DOCUMENT_AI_QUEUE,
                 ),
                 else_="ai",
@@ -128,19 +130,21 @@ def route_legacy_ai_jobs(db: Session) -> None:
         if state.get("mode") != "background":
             job.max_attempts = 1
 
-    legacy_ai_documents = db.scalars(
+    queued_ai_documents = db.scalars(
         select(Job)
         .where(
-            Job.queue == DOCUMENT_AI_QUEUE,
+            Job.queue.in_(["ai", DOCUMENT_AI_QUEUE]),
             Job.task == "ai.enrich",
             Job.payload["kind"].astext == "document",
             Job.status == JobStatus.QUEUED.value,
-            Job.payload["correlation_id"].astext.is_(None),
         )
         .with_for_update(skip_locked=True)
     ).all()
-    for job in legacy_ai_documents:
+    for job in queued_ai_documents:
         payload = dict(job.payload or {})
+        if payload.get("correlation_id") and payload.get("mode") in {"interactive", "background"}:
+            job.queue = "ai" if payload.get("mode") == "background" else DOCUMENT_AI_QUEUE
+            continue
         try:
             document_id = uuid.UUID(str(payload["source_id"]))
         except (KeyError, ValueError):
@@ -151,7 +155,10 @@ def route_legacy_ai_jobs(db: Session) -> None:
         state = (document.extracted_metadata or {}).get("processing") or {}
         if not state or not state.get("correlation_id"):
             state = initialize_processing(document, page_count=1)
-        if state.get("stage") in {"waiting", "reading"}:
+        if state.get("stage") in {"waiting", "reading"} and (
+            not payload.get("correlation_id")
+            or payload["correlation_id"] == state["correlation_id"]
+        ):
             state.update(
                 stage="interpreting",
                 updated_at=datetime.now(UTC).isoformat(),
@@ -163,12 +170,13 @@ def route_legacy_ai_jobs(db: Session) -> None:
             **payload,
             "household_id": str(document.household_id),
             "actor_user_id": payload.get("actor_user_id"),
-            "correlation_id": state["correlation_id"],
-            "deadline_at": state.get("deadline_at"),
-            "mode": state.get("mode", "interactive"),
-            "source_generation": document.source_generation,
+            "correlation_id": payload.get("correlation_id") or state["correlation_id"],
+            "deadline_at": payload.get("deadline_at") or state.get("deadline_at"),
+            "mode": payload.get("mode") or state.get("mode", "interactive"),
+            "source_generation": payload.get("source_generation", document.source_generation),
         }
-        if state.get("mode") != "background":
+        job.queue = "ai" if job.payload["mode"] == "background" else DOCUMENT_AI_QUEUE
+        if job.payload["mode"] != "background":
             job.max_attempts = 1
     db.commit()
 
@@ -176,7 +184,7 @@ def route_legacy_ai_jobs(db: Session) -> None:
 def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | None:
     """Claim the highest-priority runnable job, skipping rows locked by peers."""
     now = datetime.now(UTC)
-    fair_queue = queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
+    fair_queue = queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE, "ai"}
     job = db.scalar(
         select(Job)
         .where(

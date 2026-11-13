@@ -233,7 +233,12 @@ def schedule_enhancement(
                 db,
                 TASK,
                 {},
-                queue=DOCUMENT_AI_QUEUE if isinstance(source, Document) else "ai",
+                queue=(
+                    DOCUMENT_AI_QUEUE
+                    if isinstance(source, Document)
+                    and (processing or {}).get("mode") != "background"
+                    else "ai"
+                ),
                 commit=False,
                 max_attempts=1,
             )

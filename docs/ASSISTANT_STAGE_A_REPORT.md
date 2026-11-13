@@ -106,6 +106,25 @@ including queue wait, beginning after server-side upload storage/preprocessing.
 One- to three-page work is interactive; larger PDFs are explicitly background
 work with the configured page limit. This is not a network-upload deadline.
 
+**Isolation correction:** previously, every document AI job, including a
+background document, entered the serial `ai-documents` lane. A running slow
+background call therefore blocked an interactive invoice despite the lane's
+priority. Background document interpretation and matching now use the general
+`ai` lane; only interactive document AI uses `ai-documents`. Background document
+jobs retain subprocess supervision, cancellation and their persisted deadline.
+The general `ai` lane also uses best-effort actor fairness at equal priority.
+Background documents can still wait behind other general AI work; this change
+does not promise separate background capacity or global provider concurrency.
+Processing diagnostics use the actual assigned AI queue for worker availability.
+
+On worker startup and periodic legacy routing, queued document AI jobs in the
+old `default`, `ai` or `ai-documents` lanes are assigned according to their
+persisted mode, with missing correlation metadata recovered from the document.
+Running jobs are not moved or interrupted by routing. During a later authorised
+rollout, coordinate compatible API and worker replacement; already-running old
+worker calls must finish or be deliberately stopped before the new isolation
+guarantee applies.
+
 Cancellation prevents publication and application of the cancelled proposal,
 including after a subsequent retry. It cannot guarantee that a remote model
 stops generating or charging after its connection is closed. Actor scheduling is
@@ -182,6 +201,17 @@ mobile keyboard.
 
 ### Queue isolation reference
 
+A retained real-worker regression uploads a synthetic four-page PDF and blocks
+its provider call, then uploads an interactive invoice. Before the correction,
+the interactive provider call did not start within 12 seconds while its local
+OCR had completed. After the correction, it starts while the background job is
+still running. The test then cancels that background job and starts an explicit
+background matching retry; it verifies both queue assignments and actual provider
+dispatch. Separate real-supervisor tests cover cancellation, deadline and shutdown
+for both interactive and background modes, including descendant cleanup.
+The provider is a local synthetic HTTP stub: this demonstrates worker isolation,
+not parallelism or quality of a real model.
+
 A final five-sample synthetic scheduling experiment used an 80 ms stalled handler:
 
 | Lane | Dispatch waits (ms) | Median |
@@ -191,7 +221,8 @@ A final five-sample synthetic scheduling experiment used an 80 ms stalled handle
 
 Five samples do not establish p95. This demonstrates the scheduling mechanism
 under that artificial workload, not deployed queue latency, real-model throughput
-or the proposed healthy-deployment queue p95 target.
+or the proposed healthy-deployment queue p95 target. It did not exercise a
+background *document* and therefore did not detect the routing defect above.
 
 ## Validation and acceptance
 
@@ -207,6 +238,7 @@ or the proposed healthy-deployment queue p95 target.
 | API/worker production-image builds | Passed again after final worker and queued-operation corrections; validation-only tags |
 | Installed worker imports and bundled OCR tools, WAN blocked | Passed |
 | Real reserved-lane worker-role regression | Passed in both focused and final full-suite validation |
+| Background-document isolation correction | 112 affected queue/OCR/enrichment/worker/apply tests passed. The retained real-worker test was red before the correction and green afterward. |
 
 Validation caught a nested-process topology error that direct worker-handler tests
 could not detect: a daemonic reserved-lane process cannot start its supervised job

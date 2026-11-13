@@ -34,6 +34,37 @@ def job_payload(detail):
         return job.payload
 
 
+@pytest.mark.parametrize("operation", ["interpret", "matches"])
+def test_background_review_retry_uses_background_ai_lane(owner_client, configured_ai, operation):
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    assert (
+        owner_client.post(f"/api/v1/documents/{document['id']}/processing/cancel").status_code
+        == 200
+    )
+    with SessionLocal() as db:
+        stored = db.get(Document, document["id"])
+        metadata = dict(stored.extracted_metadata)
+        metadata["processing"] = {**metadata["processing"], "page_count": 4}
+        stored.extracted_metadata = metadata
+        db.commit()
+    retry = owner_client.post(
+        f"/api/v1/documents/{document['id']}/processing/retry",
+        json={"operation": operation},
+    )
+    assert retry.status_code == 200, retry.text
+    with SessionLocal() as db:
+        job = db.scalar(
+            select(Job).where(
+                Job.task == "ai.enrich",
+                Job.payload["correlation_id"].astext == retry.json()["correlation_id"],
+            )
+        )
+        assert job.queue == "ai"
+        assert job.payload["mode"] == "background"
+        assert job.payload["operation"] == operation
+
+
 @pytest.mark.parametrize("outcome", ["ready", "cancel", "stale", "correlation"])
 def test_review_matching_is_queued_guarded_and_publishes_full_proposal(
     owner_client, configured_ai, monkeypatch, outcome
