@@ -24,6 +24,7 @@ from ...schemas.ai import (
     NaturalSearchFilters,
     SearchContextItemRef,
     SearchConversationContext,
+    SearchPageReference,
     SearchQueryResponse,
 )
 from .. import assistant as assistant_service
@@ -34,16 +35,21 @@ from ..query_text import (
     contains_non_latin,
     looks_like_question,
     normalize_text,
+    text_contains_term,
 )
 from .context import (
     _answer_metadata,
     _build_dialogue_memory,
     _context_for_household,
     _context_from_outcomes,
+    _explicit_other_target,
     _has_contextual_reference,
     _history_from_memory,
     _history_models,
+    _page_reference_requested,
+    _plural_page_reference_requested,
     _raw_history_allowed,
+    _resolve_page_references,
     _sanitise_context,
 )
 from .outcomes import (
@@ -68,6 +74,7 @@ def execute_search(
     explicit_ask: bool = False,
     history: list[Any] | None = None,
     context: SearchConversationContext | None = None,
+    page_context: list[SearchPageReference] | None = None,
     household_id: uuid.UUID | None = None,
     property_id: uuid.UUID | None = None,
     limit: int = 30,
@@ -80,22 +87,104 @@ def execute_search(
     )
     current_key = _scope_key(scope)
     history_reset = bool(
-        context is not None
-        and context.scope_key
-        and context.scope_key != current_key
+        context is not None and context.scope_key and context.scope_key != current_key
     )
     safe_history = [] if history_reset else _history_models(history or [])
     safe_context = _sanitise_context(db, scope, context)
+    page_refs = _resolve_page_references(db, scope, page_context or [])
     multi_household = len(scope.households) > 1
     notices = list(scope.notices)
 
     raw_query = normalize_text(query).strip() or query.strip()
+    prior_ids = {ref.id for ref in [*safe_context.resolved_items, *safe_context.candidate_items]}
+    current_ids = {ref.id for ref in page_refs} if page_refs else prior_ids
+    explicit_other = bool(current_ids and _explicit_other_target(db, scope, raw_query, current_ids))
+    if explicit_other and (
+        safe_context.resolved_items or safe_context.candidate_items or safe_context.loans
+    ):
+        if _page_reference_requested(raw_query):
+            status, _names = _aggregate_status(db, scope)
+            return SearchQueryResponse(
+                query=query,
+                mode="fallback",
+                ai_used=False,
+                ai_attempted=False,
+                direct_match=False,
+                ambiguous=True,
+                needs_clarification=True,
+                answer=(
+                    "منظورتان کدام مورد است؟ لطفاً نام آن را مشخص کنید."
+                    if contains_non_latin(query)
+                    else "Which item or page do you mean? Please name it."
+                ),
+                answer_kind="clarification",
+                ai_status=status,
+                context=safe_context,
+                scope_label=scope.label,
+                households=global_search.scope_households(scope),
+                property=global_search.scope_property(scope.property),
+            )
+        safe_context.resolved_items = []
+        safe_context.candidate_items = []
+        safe_context.loans = []
+    named_page_refs = [
+        ref
+        for ref in page_refs
+        if len(ref.name.strip()) >= 3 and text_contains_term(raw_query, ref.name)
+    ]
+    if (
+        page_refs
+        and (named_page_refs or _page_reference_requested(raw_query))
+        and not explicit_other
+    ):
+        selected_refs = named_page_refs if len(named_page_refs) == 1 else page_refs
+        page_items = [ref for ref in selected_refs if ref.kind == "item"]
+        previous_ids = {ref.id for ref in safe_context.resolved_items}
+        page_ids = {ref.id for ref in page_items}
+        plural = _plural_page_reference_requested(raw_query)
+        ambiguous = len(named_page_refs) > 1 or (
+            not named_page_refs
+            and (
+                (len(selected_refs) > 1 and not plural)
+                or bool(previous_ids and page_ids and not previous_ids.issubset(page_ids))
+            )
+        )
+        if ambiguous:
+            status, _names = _aggregate_status(db, scope)
+            return SearchQueryResponse(
+                query=query,
+                mode="fallback",
+                ai_used=False,
+                ai_attempted=False,
+                direct_match=False,
+                ambiguous=True,
+                needs_clarification=True,
+                answer=(
+                    "منظورتان کدام مورد است؟ لطفاً نام آن را مشخص کنید."
+                    if contains_non_latin(query)
+                    else "Which item or page do you mean? Please name it."
+                ),
+                answer_kind="clarification",
+                ai_status=status,
+                context=safe_context,
+                scope_label=scope.label,
+                households=global_search.scope_households(scope),
+                property=global_search.scope_property(scope.property),
+            )
+        safe_context.page_references = selected_refs
+        if page_items:
+            page_item_refs = [SearchContextItemRef(id=ref.id, name=ref.name) for ref in page_items]
+            safe_context.resolved_items = page_item_refs[:6]
+            safe_context.candidate_items = page_item_refs[:12]
+            if named_page_refs:
+                safe_context.loans = []
     question_like = looks_like_question(raw_query)
     non_latin = contains_non_latin(raw_query)
     has_context = bool(
         safe_context.resolved_items
         or safe_context.candidate_items
         or safe_context.loans
+        or safe_context.page_references
     )
     contextual_reference = _has_contextual_reference(raw_query)
     direct_term = clean_subject(raw_query) if question_like else raw_query
@@ -103,8 +192,8 @@ def execute_search(
         direct_term = raw_query
 
     quick_results = _quick_results(db, scope, direct_term, limit=limit)
-    direct_items, direct_borrowed, direct_total, direct_borrowed_total = (
-        _direct_items_for_term(db, scope, direct_term, limit=limit)
+    direct_items, direct_borrowed, direct_total, direct_borrowed_total = _direct_items_for_term(
+        db, scope, direct_term, limit=limit
     )
 
     aggregate_status, configured_household_names = _aggregate_status(db, scope)
@@ -113,25 +202,19 @@ def execute_search(
     # A simple named search with a confident direct match is answered without a
     # paid/model call. Populated context alone must not force AI: "Heavy drill"
     # remains a direct lookup even after an earlier question or a reload.
-    plain_direct_match = bool(
-        direct_items or direct_borrowed or quick_results
-    ) and not contextual_reference
+    plain_direct_match = (
+        bool(direct_items or direct_borrowed or quick_results) and not contextual_reference
+    )
     self_contained_question = (
-        question_like
-        and bool(direct_items or direct_borrowed)
-        and not contextual_reference
+        question_like and bool(direct_items or direct_borrowed) and not contextual_reference
     )
-    simple_direct = (
-        not explicit_ask
-        and not question_like
-        and plain_direct_match
-    )
+    simple_direct = not explicit_ask and not question_like and plain_direct_match
     if simple_direct:
         interpretation = f"direct inventory match: {direct_term}"
         direct_facts = {
-            "scope": "property" if scope.property is not None else (
-                "all_places" if multi_household else "household"
-            ),
+            "scope": "property"
+            if scope.property is not None
+            else ("all_places" if multi_household else "household"),
             "total": direct_total,
             "borrowed_total": direct_borrowed_total,
             "direct_query": direct_term,
@@ -186,12 +269,10 @@ def execute_search(
                 scope_key=current_key,
                 last_query=query[:2000],
                 resolved_items=[
-                    SearchContextItemRef(id=item.id, name=item.name)
-                    for item in direct_items[:4]
+                    SearchContextItemRef(id=item.id, name=item.name) for item in direct_items[:4]
                 ],
                 candidate_items=[
-                    SearchContextItemRef(id=item.id, name=item.name)
-                    for item in direct_items[:12]
+                    SearchContextItemRef(id=item.id, name=item.name) for item in direct_items[:12]
                 ],
                 loans=[],
                 dialogue_memory=_build_dialogue_memory(
@@ -208,11 +289,7 @@ def execute_search(
     # structured context, AI interpretation is attempted first instead.
     deterministic_outcomes: list[HouseholdOutcome] = []
     structured_exists = False
-    if (
-        not explicit_ask
-        and not non_latin
-        and (not has_context or self_contained_question)
-    ):
+    if not explicit_ask and not non_latin and (not has_context or self_contained_question):
         deterministic_outcomes, structured_exists = _structured_scope_outcomes(
             db,
             scope,
@@ -257,10 +334,7 @@ def execute_search(
             )
         )
         if reliable:
-            if (
-                len(deterministic_outcomes) == 1
-                and deterministic_outcomes[0].result is not None
-            ):
+            if len(deterministic_outcomes) == 1 and deterministic_outcomes[0].result is not None:
                 only_result = deterministic_outcomes[0].result
                 answer = assistant_service._deterministic_answer(only_result)
                 facts = dict(only_result.facts)
@@ -364,41 +438,45 @@ def execute_search(
             fallback_outcomes = deterministic_outcomes
         else:
             for household, role in scope.households:
+                if safe_context.page_references and not any(
+                    ref.household_id == household.id for ref in safe_context.page_references
+                ):
+                    continue
                 fallback_outcomes.append(
                     _deterministic_outcome(
                         db,
                         household,
                         role,
                         question=raw_query,
-                        property_id=(
-                            scope.property.id if scope.property is not None else None
-                        ),
-                        context=safe_context,
+                        property_id=(scope.property.id if scope.property is not None else None),
+                        context=_context_for_household(db, household, scope, safe_context),
                     )
                 )
-        fallback_items = dedupe_by_id(
-            [
-                item
-                for outcome in fallback_outcomes
-                if outcome.result
-                for item in outcome.result.items
-            ]
-        ) or direct_items
-        fallback_borrowed = dedupe_by_id(
-            [
-                record
-                for outcome in fallback_outcomes
-                if outcome.result
-                for record in outcome.result.borrowed
-            ]
-        ) or direct_borrowed
+        fallback_items = (
+            dedupe_by_id(
+                [
+                    item
+                    for outcome in fallback_outcomes
+                    if outcome.result
+                    for item in outcome.result.items
+                ]
+            )
+            or direct_items
+        )
+        fallback_borrowed = (
+            dedupe_by_id(
+                [
+                    record
+                    for outcome in fallback_outcomes
+                    if outcome.result
+                    for record in outcome.result.borrowed
+                ]
+            )
+            or direct_borrowed
+        )
         deterministic_answer = None
         fallback_tool = next(
-            (
-                outcome.result.tool
-                for outcome in fallback_outcomes
-                if outcome.result is not None
-            ),
+            (outcome.result.tool for outcome in fallback_outcomes if outcome.result is not None),
             None,
         )
         definitive_tools = {
@@ -412,10 +490,7 @@ def execute_search(
             "get_loan_history",
         }
         if fallback_outcomes and any(outcome.result for outcome in fallback_outcomes):
-            if (
-                len(fallback_outcomes) == 1
-                and fallback_outcomes[0].result is not None
-            ):
+            if len(fallback_outcomes) == 1 and fallback_outcomes[0].result is not None:
                 deterministic_answer = assistant_service._deterministic_answer(
                     fallback_outcomes[0].result
                 )
@@ -492,7 +567,13 @@ def execute_search(
             mode="fallback",
             ai_used=False,
             ai_attempted=False,
-            direct_match=bool(fallback_items or fallback_borrowed or quick_results),
+            direct_match=bool(
+                fallback_items
+                or fallback_borrowed
+                or quick_results
+                or fallback_documents
+                or fallback_locations
+            ),
             ambiguous=len(fallback_items) > 1,
             needs_clarification=len(fallback_items) > 1,
             answer=_fallback_answer(
@@ -512,6 +593,8 @@ def execute_search(
             quick_results=quick_results,
             borrowed=fallback_borrowed,
             borrowed_total=len(fallback_borrowed),
+            documents=fallback_documents,
+            locations=fallback_locations,
             total=len(fallback_items),
             references=dedupe_references(
                 [
@@ -537,6 +620,10 @@ def execute_search(
     ai_outcomes: list[HouseholdOutcome] = []
     allow_raw_history = _raw_history_allowed(scope)
     for household, role in scope.households:
+        if safe_context.page_references and not any(
+            ref.household_id == household.id for ref in safe_context.page_references
+        ):
+            continue
         scoped_context = _context_for_household(db, household, scope, safe_context)
         ai_outcomes.append(
             _ai_outcome(
@@ -546,9 +633,7 @@ def execute_search(
                 scope=scope,
                 question=raw_query,
                 history=(
-                    safe_history
-                    if allow_raw_history
-                    else _history_from_memory(scoped_context)
+                    safe_history if allow_raw_history else _history_from_memory(scoped_context)
                 ),
                 context=scoped_context,
                 explicit_ask=explicit_ask,
@@ -557,22 +642,23 @@ def execute_search(
 
     ai_used = any(outcome.ai_used for outcome in ai_outcomes)
     ai_attempted = any(outcome.ai_attempted for outcome in ai_outcomes)
-    result_items = dedupe_by_id(
-        [
-            item
-            for outcome in ai_outcomes
-            if outcome.result
-            for item in outcome.result.items
-        ]
-    ) or direct_items
-    result_borrowed = dedupe_by_id(
-        [
-            record
-            for outcome in ai_outcomes
-            if outcome.result
-            for record in outcome.result.borrowed
-        ]
-    ) or direct_borrowed
+    result_items = (
+        dedupe_by_id(
+            [item for outcome in ai_outcomes if outcome.result for item in outcome.result.items]
+        )
+        or direct_items
+    )
+    result_borrowed = (
+        dedupe_by_id(
+            [
+                record
+                for outcome in ai_outcomes
+                if outcome.result
+                for record in outcome.result.borrowed
+            ]
+        )
+        or direct_borrowed
+    )
     answers = [
         answer
         for outcome in ai_outcomes
@@ -580,14 +666,10 @@ def execute_search(
     ]
     answer = "\n\n".join(answers) if answers else None
     mode = "ai" if ai_used else "fallback"
-    combined = _merge_result_facts(
-        _combined_facts(scope, ai_outcomes, mode=mode), ai_outcomes
-    )
+    combined = _merge_result_facts(_combined_facts(scope, ai_outcomes, mode=mode), ai_outcomes)
     combined["total"] = len(result_items)
     combined["borrowed_total"] = len(result_borrowed)
-    combined["ambiguous"] = bool(
-        combined.get("ambiguous") or len(result_items) > 1
-    )
+    combined["ambiguous"] = bool(combined.get("ambiguous") or len(result_items) > 1)
     for outcome in ai_outcomes:
         for notice in outcome.notices:
             if notice not in notices:
@@ -606,11 +688,7 @@ def execute_search(
             ai_attempted=ai_attempted,
         )
     interpretations = list(
-        dict.fromkeys(
-            outcome.interpretation
-            for outcome in ai_outcomes
-            if outcome.interpretation
-        )
+        dict.fromkeys(outcome.interpretation for outcome in ai_outcomes if outcome.interpretation)
     )
     context_out = _context_from_outcomes(
         db, scope, ai_outcomes, safe_context, query, direct_items=result_items

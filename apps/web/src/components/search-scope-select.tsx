@@ -29,7 +29,24 @@ export function SearchScopeSelect({
   className?: string;
   compact?: boolean;
 }) {
-  const { selection, setSelection, scopes, label } = useSearchScope(true);
+  const scope = useSearchScope(true);
+  return <SearchScopeControl scope={scope} className={className} compact={compact} />;
+}
+
+export function SearchScopeControl({
+  scope: { selection, setSelection, scopes, label },
+  className,
+  compact = false,
+}: {
+  scope: ReturnType<typeof useSearchScope>;
+  className?: string;
+  compact?: boolean;
+}) {
+  const knownHousehold = scopes.find((household) => household.id === selection.householdId);
+  const knownSelection = knownHousehold && (
+    !selection.propertyId ||
+    knownHousehold.properties.some((property) => property.id === selection.propertyId)
+  );
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <Globe2 className="size-3.5 shrink-0 text-muted-foreground" />
@@ -43,6 +60,9 @@ export function SearchScopeSelect({
         )}
       >
         <option value="all">All my places</option>
+        {selection.householdId && !knownSelection && (
+          <option value={encode(selection.householdId, selection.propertyId)}>{label}</option>
+        )}
         {scopes.map((household) => (
           <optgroup key={household.id} label={household.name}>
             <option value={encode(household.id, "")}>

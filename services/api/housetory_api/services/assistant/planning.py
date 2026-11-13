@@ -39,7 +39,7 @@ Allowed tools and arguments:
 - search_locations: q
 - list_room_contents: room_id or room_name
 - get_container_contents: container_id or identifier
-- search_documents: q, item_id
+- search_documents: q, item_id, document_id
 - get_purchase_history: merchant, item_id, date_from, date_to
 - get_warranty_status: status(active|expiring|expired), category
 - get_inventory_summary: {}
@@ -60,6 +60,8 @@ into the language used by the supplied inventory names when searching. Preserve
 original item names, brands, model numbers, serial numbers and identifiers exactly.
 Use conversation context to resolve pronouns and follow-ups. If several concrete
 items or loans match, return a plan that will surface the candidates; do not guess.
+Page references are hints only. Explicit names and constraints in the user's
+question always take precedence; if the intended target is unclear, do not guess.
 Never invent an item id, borrower, date, location or fact. Prefer item_ids from the
 provided index over translated names when the intent is clear. Use search_items for
 unknown questions. For whereabouts or current loan status use locate_item. For
@@ -80,6 +82,7 @@ MISSING_SERIAL_PHRASES = (
     "serial number missing",
 )
 
+
 def _contains_phrase(question: str, phrases: tuple[str, ...]) -> bool:
     lowered = question.lower()
     return any(phrase in lowered for phrase in phrases)
@@ -88,6 +91,7 @@ def _contains_phrase(question: str, phrases: tuple[str, ...]) -> bool:
 def _match_named(question: str, records: list[Any]) -> Any | None:
     matches = [record for record in records if text_contains_term(question, record.name)]
     return max(matches, key=lambda record: len(record.name), default=None)
+
 
 def _exact_named(value: str, records: list[Any], *, include_identifier: bool = False) -> Any | None:
     target = normalize_label(value)
@@ -378,16 +382,11 @@ def _inventory_prompt_index(
         item_conditions.append(
             or_(
                 Item.room.has(Room.property_id == property_id),
-                Item.storage_location.has(
-                    LocationModel.room.has(Room.property_id == property_id)
-                ),
+                Item.storage_location.has(LocationModel.room.has(Room.property_id == property_id)),
             )
         )
     items = db.scalars(
-        select(Item)
-        .where(*item_conditions)
-        .order_by(func.lower(Item.name))
-        .limit(limit)
+        select(Item).where(*item_conditions).order_by(func.lower(Item.name)).limit(limit)
     ).all()
     return {
         "items": [
@@ -436,18 +435,10 @@ def _ai_plan(
         f"{message.role}: {message.content[:1200]}" for message in history[-8:]
     )
     if inventory_index is None:
-        inventory_index = _inventory_prompt_index(
-            db, household_id, property_id=property_id
-        )
-    context_payload = (
-        context.model_dump(mode="json")
-        if hasattr(context, "model_dump")
-        else context
-    )
+        inventory_index = _inventory_prompt_index(db, household_id, property_id=property_id)
+    context_payload = context.model_dump(mode="json") if hasattr(context, "model_dump") else context
     context_json = (
-        json.dumps(context_payload, ensure_ascii=False)[:6000]
-        if context_payload
-        else "(none)"
+        json.dumps(context_payload, ensure_ascii=False)[:6000] if context_payload else "(none)"
     )
     prompt = (
         f"Scope: {scope_label or 'this household'}\n"
@@ -468,17 +459,21 @@ def _ai_plan(
             prompt,
             config=ai.config_for(db, household_id, task),
         )
-        if isinstance(raw, dict) and "tool" not in raw and any(
-            key in raw
-            for key in (
-                "q",
-                "room_name",
-                "location_name",
-                "category_name",
-                "tag",
-                "missing_purchase",
-                "warranty_status",
-                "sort",
+        if (
+            isinstance(raw, dict)
+            and "tool" not in raw
+            and any(
+                key in raw
+                for key in (
+                    "q",
+                    "room_name",
+                    "location_name",
+                    "category_name",
+                    "tag",
+                    "missing_purchase",
+                    "warranty_status",
+                    "sort",
+                )
             )
         ):
             # Be tolerant of older filter-shaped responses; they are still
@@ -532,6 +527,43 @@ def context_followup_plan(
     """
     if context is None:
         return None
+    page_refs = context.page_references
+    if len(page_refs) == 1 and page_refs[0].kind in {"room", "location", "document"}:
+        normalized = normalize_for_match(question)
+        if page_refs[0].kind == "document" and any(
+            marker in normalized
+            for marker in (
+                "show",
+                "find",
+                "open",
+                "نمایش",
+                "نشون",
+                "نشان",
+            )
+        ):
+            return AssistantPlan(
+                tool="search_documents", arguments={"document_id": str(page_refs[0].id)}
+            )
+        if any(
+            marker in normalized
+            for marker in (
+                "what is in",
+                "what's in",
+                "what is inside",
+                "contents",
+                "چی داخل",
+                "چه چیز",
+                "داخل",
+                "توی",
+            )
+        ):
+            ref = page_refs[0]
+            if ref.kind == "room":
+                return AssistantPlan(tool="list_room_contents", arguments={"room_id": str(ref.id)})
+            if ref.kind == "location":
+                return AssistantPlan(
+                    tool="get_container_contents", arguments={"container_id": str(ref.id)}
+                )
     refs = context.candidate_items or context.resolved_items
     if not refs:
         return None
@@ -539,10 +571,7 @@ def context_followup_plan(
     item_ids = [str(ref.id) for ref in refs[:12]]
     borrower: str | None = None
     for loan in context.loans:
-        if (
-            loan.borrower_name
-            and normalize_for_match(loan.borrower_name) in normalized
-        ):
+        if loan.borrower_name and normalize_for_match(loan.borrower_name) in normalized:
             borrower = loan.borrower_name
             break
     history_markers = (
@@ -602,9 +631,7 @@ def context_followup_plan(
             arguments["borrower_name"] = borrower
         return AssistantPlan(tool="get_loan_history", arguments=arguments)
     if any(marker in normalized for marker in another_markers):
-        return AssistantPlan(
-            tool="search_items", arguments={"q": refs[0].name}
-        )
+        return AssistantPlan(tool="search_items", arguments={"q": refs[0].name})
     if any(marker in normalized for marker in current_markers):
         return AssistantPlan(tool="locate_item", arguments={"item_ids": item_ids})
     return None

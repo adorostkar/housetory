@@ -1,4 +1,3 @@
-import { useMutation } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUpRight,
@@ -11,6 +10,7 @@ import {
   Loader2,
   MapPin,
   Mic,
+  Paperclip,
   RotateCcw,
   Send,
   Sparkles,
@@ -21,16 +21,19 @@ import { toast } from "sonner";
 
 import { AddItemsButton } from "@/components/add-items";
 import { AnswerText } from "@/components/answer-text";
-import { SearchScopeSelect } from "@/components/search-scope-select";
+import { DocumentUploadDialog } from "@/components/document-upload-dialog";
+import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useSearchScope } from "@/hooks/use-search-scope";
-import { api, getApiErrorMessage } from "@/lib/api";
 import { withHousehold } from "@/lib/household-links";
-import { useAiStatus } from "@/lib/queries";
+import { useAiStatus, useCanWrite } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
+import { useAssistantConversation } from "@/lib/assistant-conversation";
+import { useAssistantPageContext } from "@/lib/assistant-page-context";
+import { AssistantDocumentSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
@@ -47,78 +50,29 @@ const SUGGESTIONS = [
   "How many suitcases do I own?",
 ];
 
-interface Message {
-  role: "user" | "assistant";
-  text: string;
-  response?: SearchQueryResponse;
-}
-
-export function AssistantPage() {
+export function AssistantPage({ embedded = false }: { embedded?: boolean } = {}) {
   const aiStatus = useAiStatus();
-  const { selection, scopesQuery } = useSearchScope(true);
+  const canWrite = useCanWrite();
+  const [uploadOpen, setUploadOpen] = React.useState(false);
+  const { select: selectDocument } = useAssistantDocuments();
+  const { references: pageReferences, setReferences: setPageReferences } = useAssistantPageContext();
+  const tooManyReferences = pageReferences.length > 12;
+  const scope = useSearchScope(!embedded, true);
+  const { selection, scopesQuery } = scope;
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const [question, setQuestion] = React.useState("");
+  const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
+  const { messages, question, setQuestion, pending, ask, reset } =
+    useAssistantConversation(scopeSignature);
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
-  const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
-  const lastScopeRef = React.useRef(scopeSignature);
-
   React.useEffect(() => {
-    if (lastScopeRef.current === scopeSignature) return;
-    lastScopeRef.current = scopeSignature;
-    setMessages([]);
-    setQuestion("");
-  }, [scopeSignature]);
-
-  const ask = useMutation({
-    mutationFn: ({
-      value,
-      regenerate,
-    }: {
-      value: string;
-      regenerate?: boolean;
-    }) =>
-      api.post<SearchQueryResponse>("/search/query", {
-        query: value,
-        explicit_ask: true,
-        // Regenerating must not show the model the answer being replaced.
-        history: regenerate
-          ? searchSession.turns.slice(0, -2)
-          : searchSession.turns,
-        ...(searchSession.context ? { context: searchSession.context } : {}),
-        ...(selection.householdId
-          ? { household_id: selection.householdId }
-          : {}),
-        ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
-        limit: 40,
-      }),
-    onSuccess: (response, { value, regenerate }) => {
-      setMessages((current) => [
-        ...(regenerate ? current.slice(0, -2) : current),
-        { role: "user", text: value },
-        {
-          role: "assistant",
-          text:
-            response.answer ?? "No matching inventory records were returned.",
-          response,
-        },
-      ]);
-      // record() collapses a repeated last question into the same turn pair,
-      // so regenerating only refreshes the stored context.
-      searchSession.record(value, response);
-      if (!regenerate) setQuestion("");
-    },
-    onError: (error) => toast.error(getApiErrorMessage(error)),
-  });
-
-  React.useEffect(() => {
+    if (embedded) return;
     const value = searchParams.get("q")?.trim() ?? "";
     if (scopesQuery.isPending) return;
     if (value.length < 2 || autoAskedRef.current === value) return;
     autoAskedRef.current = value;
-    ask.mutate({ value });
+    ask(selection, value, false, searchSession);
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -127,10 +81,10 @@ export function AssistantPage() {
       },
       { replace: true },
     );
-    // The URL is the handoff trigger; ask.mutate uses the current messages at
+    // The URL is the handoff trigger; ask uses the current messages at
     // the moment the handoff occurs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams, scopesQuery.isPending]);
+  }, [searchParams, setSearchParams, scopesQuery.isPending, embedded]);
 
   const paneRef = React.useRef<HTMLDivElement>(null);
   const lastAnswerRef = React.useRef<HTMLDivElement>(null);
@@ -158,7 +112,7 @@ export function AssistantPage() {
   React.useEffect(() => {
     const last = messages[messages.length - 1];
     const target =
-      last?.role === "assistant" && !ask.isPending
+      last?.role === "assistant" && !pending
         ? lastAnswerRef.current
         : endRef.current;
     if (typeof target?.scrollIntoView === "function") {
@@ -167,7 +121,7 @@ export function AssistantPage() {
         block: target === endRef.current ? "end" : "start",
       });
     }
-  }, [messages, ask.isPending]);
+  }, [messages, pending]);
 
   React.useEffect(() => {
     const el = textareaRef.current;
@@ -179,30 +133,30 @@ export function AssistantPage() {
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
     const value = question.trim();
-    if (value.length < 2 || ask.isPending) return;
+    if (value.length < 2 || pending || tooManyReferences) return;
     dictation.stop();
-    ask.mutate({ value });
+    ask(selection, value, false, searchSession);
   };
 
   const newConversation = () => {
-    if (ask.isPending) return;
-    setMessages([]);
-    setQuestion("");
+    if (pending) return;
+    reset();
     searchSession.reset();
     autoAskedRef.current = null;
   };
 
   const askSuggestion = (value: string) => {
+    if (tooManyReferences) return;
     setQuestion("");
-    ask.mutate({ value });
+    ask(selection, value, false, searchSession);
   };
 
   const regenerateLatest = () => {
-    if (ask.isPending) return;
+    if (pending) return;
     const last = messages[messages.length - 1];
     const previous = messages[messages.length - 2];
     if (last?.role !== "assistant" || previous?.role !== "user") return;
-    ask.mutate({ value: previous.text, regenerate: true });
+    ask(selection, previous.text, true, searchSession);
   };
 
   const status = aiStatus.data;
@@ -233,14 +187,20 @@ export function AssistantPage() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <AddItemsButton variant="outline" className="hidden lg:inline-flex" />
+            {!embedded && <AddItemsButton variant="outline" className="hidden lg:inline-flex" />}
+            {canWrite && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+                <Paperclip />
+                Add document
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
               className="h-11 px-3 sm:h-10 sm:px-5"
               onClick={newConversation}
               aria-label="New conversation"
-              disabled={ask.isPending || messages.length === 0}
+              disabled={pending || messages.length === 0}
             >
               <RotateCcw />
               <span className="sm:hidden">New chat</span>
@@ -249,7 +209,29 @@ export function AssistantPage() {
           </div>
         </div>
         <div className="relative mt-3 flex flex-wrap items-center gap-2">
-          <SearchScopeSelect compact />
+          <SearchScopeControl scope={scope} compact />
+          {pageReferences.length > 0 && (
+            <div className="flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-xs" aria-label="Current assistant context">
+              <span className="min-w-0 truncate">
+                {pageReferences.length === 1 && pageReferences[0]
+                  ? `${pageReferences[0].kind}: ${pageReferences[0].name}`
+                  : `Selection: ${pageReferences.length} items`}
+              </span>
+              {pageReferences.length > 1 && (
+                <details className="relative shrink-0">
+                  <summary className="cursor-pointer underline underline-offset-2">View</summary>
+                  <ul className="surface absolute left-0 top-full z-40 mt-1 max-h-32 w-56 overflow-y-auto p-2 text-xs shadow-lg">
+                    {pageReferences.map((ref) => (
+                      <li key={`${ref.kind}:${ref.id}`} className="break-words py-1">{ref.name}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <button type="button" className="shrink-0 rounded px-1" onClick={() => setPageReferences([])} aria-label="Clear assistant context">
+                ×
+              </button>
+            </div>
+          )}
           <Badge
             variant={
               lastResponse?.mode === "ai"
@@ -317,6 +299,11 @@ export function AssistantPage() {
             </div>
           )}
         </div>
+        {tooManyReferences && (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            Select at most 12 items to ask about the selection, or clear the assistant context.
+          </p>
+        )}
       </div>
 
       <div className="relative min-h-0 flex-1">
@@ -329,7 +316,7 @@ export function AssistantPage() {
           className="h-full overflow-y-auto overscroll-contain pb-2"
         >
           <div className="mx-auto w-full max-w-5xl space-y-4">
-            {messages.length === 0 && !ask.isPending && (
+            {messages.length === 0 && !pending && (
               <div className="flex flex-col items-center px-2 py-10 text-center">
                 <Bot className="size-6 text-brass" strokeWidth={1.6} />
                 <h2 className="mt-2 font-display text-[1.35rem] tracking-[-0.025em]">
@@ -365,26 +352,28 @@ export function AssistantPage() {
                     onRegenerate={
                       index === messages.length - 1 ? regenerateLatest : undefined
                     }
-                    regenerateDisabled={ask.isPending}
+                    regenerateDisabled={pending}
                   />
-                  {index === messages.length - 1 && !ask.isPending && (
+                  {index === messages.length - 1 && !pending && (
                     <FollowUps
                       suggestions={followUpSuggestions(
                         message.response,
                         messages[index - 1]?.text ?? "",
                       )}
                       onAsk={askSuggestion}
+                      disabled={tooManyReferences}
                     />
                   )}
                 </div>
               ),
             )}
-            {ask.isPending && (
+            {pending && (
               <div className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Retrieving current records across your places…
               </div>
             )}
+            <AssistantDocumentSlot />
             <div ref={endRef} />
           </div>
         </div>
@@ -404,17 +393,18 @@ export function AssistantPage() {
 
       <div className="shrink-0 pt-2">
         <div className="mx-auto w-full max-w-5xl">
-          {messages.length === 0 && !ask.isPending && (
+          {messages.length === 0 && !pending && (
             <div
-              className="-mx-1 mb-2 flex gap-2 overflow-x-auto overflow-y-hidden px-1 pb-1"
+              className="-mx-1 mb-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto px-1 pb-1"
               aria-label="Suggested questions"
             >
               {SUGGESTIONS.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
+                  disabled={tooManyReferences}
                   onClick={() => askSuggestion(suggestion)}
-                  className="shrink-0 rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+                  className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50"
                 >
                   {suggestion}
                 </button>
@@ -459,9 +449,9 @@ export function AssistantPage() {
                   type="submit"
                   size="icon"
                   aria-label="Send question"
-                  disabled={ask.isPending || question.trim().length < 2}
+                  disabled={pending || tooManyReferences || question.trim().length < 2}
                 >
-                  {ask.isPending ? (
+                  {pending ? (
                     <Loader2 className="animate-spin" />
                   ) : (
                     <Send />
@@ -471,6 +461,14 @@ export function AssistantPage() {
             </form>
           </section>
         </div>
+        <DocumentUploadDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          onUploaded={(document) => {
+            selectDocument(document.id);
+            setPageReferences([{ kind: "document", id: document.id, name: document.title }]);
+          }}
+        />
       </div>
     </div>
   );
@@ -532,9 +530,11 @@ async function copyText(text: string) {
 function FollowUps({
   suggestions,
   onAsk,
+  disabled,
 }: {
   suggestions: string[];
   onAsk: (value: string) => void;
+  disabled?: boolean;
 }) {
   if (suggestions.length === 0) return null;
   return (
@@ -543,8 +543,9 @@ function FollowUps({
         <button
           key={suggestion}
           type="button"
+          disabled={disabled}
           onClick={() => onAsk(suggestion)}
-          className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+          className="rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground disabled:opacity-50"
         >
           {suggestion}
         </button>

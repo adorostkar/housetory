@@ -140,6 +140,7 @@ export function SearchSessionProvider({ children }: { children: React.ReactNode 
   const record = React.useCallback(
     (query: string, response: SearchQueryResponse) => {
       setState((current) => {
+        if (current.scopeKey !== scopeKey) return current;
         const boundedQuery = query.slice(0, MAX_CONTENT);
         const lastUserTurn = [...current.turns]
           .reverse()

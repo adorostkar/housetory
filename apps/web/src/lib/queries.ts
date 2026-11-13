@@ -499,11 +499,11 @@ export function useDocumentRelations(documentId: string | undefined) {
   });
 }
 
-export function useDocument(documentId: string | undefined) {
+export function useDocument(documentId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.document(documentId ?? ""),
     queryFn: () => api.get<DocumentRecord>(`/documents/${documentId}`),
-    enabled: Boolean(documentId),
+    enabled: Boolean(documentId) && enabled,
     refetchInterval: (query) => {
       const status = (query.state.data as DocumentRecord | undefined)?.ocr_status;
       return status === "queued" || status === "processing" ? 2000 : false;

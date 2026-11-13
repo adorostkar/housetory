@@ -36,6 +36,7 @@ import {
   useTags,
 } from "@/lib/queries";
 import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import {
   flattenLocations,
   flattenRoomTree,
@@ -117,6 +118,9 @@ export function ItemsPage() {
     enabled: canWrite,
     scopeKey: filterSignature,
   });
+  useRegisterAssistantPageContext(
+    selection.selectedItems.map((item) => ({ kind: "item", id: item.id, name: item.name })),
+  );
   const origin = itemOrigin(`${location.pathname}${location.search}`, "Items");
   useRestoreListScroll(items.length > 0, origin);
   const hasFilters = Boolean(

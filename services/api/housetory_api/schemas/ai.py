@@ -332,6 +332,16 @@ class SearchContextMemoryEntry(BaseModel):
     answer_meaning: str | None = Field(default=None, max_length=1200)
 
 
+class SearchPageReference(BaseModel):
+    kind: Literal["item", "document", "room", "location"]
+    id: uuid.UUID
+
+
+class SearchContextPageReference(SearchPageReference):
+    name: str = Field(max_length=200)
+    household_id: uuid.UUID
+
+
 class SearchConversationContext(BaseModel):
     """Small structured state carried between submit-time search turns.
 
@@ -345,6 +355,7 @@ class SearchConversationContext(BaseModel):
     candidate_items: list[SearchContextItemRef] = Field(default_factory=list, max_length=12)
     loans: list[SearchContextLoanRef] = Field(default_factory=list, max_length=12)
     dialogue_memory: list[SearchContextMemoryEntry] = Field(default_factory=list, max_length=24)
+    page_references: list[SearchContextPageReference] = Field(default_factory=list, max_length=12)
 
 
 class SearchQueryRequest(BaseModel):
@@ -352,6 +363,7 @@ class SearchQueryRequest(BaseModel):
     explicit_ask: bool = False
     history: list[AssistantHistoryMessage] = Field(default_factory=list, max_length=20)
     context: SearchConversationContext | None = None
+    page_context: list[SearchPageReference] = Field(default_factory=list, max_length=12)
     household_id: uuid.UUID | None = None
     property_id: uuid.UUID | None = None
     limit: int = Field(default=30, ge=1, le=100)

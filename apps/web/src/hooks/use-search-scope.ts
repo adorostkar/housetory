@@ -43,13 +43,15 @@ export function scopeLabel(
 ): string {
   if (!selection.householdId) return "All my places";
   const household = scopes.find((entry) => entry.id === selection.householdId);
-  if (!household) return "All my places";
+  if (!household) return selection.propertyId
+    ? "Selected property (unavailable)"
+    : "Selected household (unavailable)";
   if (!selection.propertyId) return household.name;
   const property = household.properties.find((entry) => entry.id === selection.propertyId);
-  return property ? `${household.name} · ${property.name}` : household.name;
+  return property ? `${household.name} · ${property.name}` : `${household.name} · Selected property (unavailable)`;
 }
 
-export function useSearchScope(syncUrl = true) {
+export function useSearchScope(syncUrl = true, loadScopes = false) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlHousehold = searchParams.get("household_id") ?? "";
   const urlProperty = searchParams.get("property_id") ?? "";
@@ -64,7 +66,7 @@ export function useSearchScope(syncUrl = true) {
     };
   });
   const scopesQuery = useSearchScopes(
-    syncUrl || Boolean(selection.householdId),
+    syncUrl || loadScopes || Boolean(selection.householdId),
   );
   const scopes = scopesQuery.data?.items ?? [];
 
@@ -121,7 +123,7 @@ export function useSearchScope(syncUrl = true) {
   // Drop a remembered scope when a membership is revoked or a property is
   // archived/missing. This is client-side convenience; the API validates again.
   React.useEffect(() => {
-    if (scopesQuery.isPending) return;
+    if (scopesQuery.isPending || scopesQuery.isError) return;
     if (!selection.householdId) {
       if (selection.propertyId) setSelection({ householdId: "", propertyId: "" });
       return;
@@ -137,7 +139,7 @@ export function useSearchScope(syncUrl = true) {
     ) {
       setSelection({ householdId: household.id, propertyId: "" });
     }
-  }, [scopes, scopesQuery.isPending, selection, setSelection]);
+  }, [scopes, scopesQuery.isPending, scopesQuery.isError, selection, setSelection]);
 
   return {
     selection,

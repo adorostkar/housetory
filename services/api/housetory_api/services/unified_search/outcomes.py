@@ -294,11 +294,10 @@ def _ai_outcome(
         )
         return outcome
 
-    allowed_ids = {
-        uuid.UUID(str(entry["id"])) for entry in index["items"] if entry.get("id")
-    }
+    allowed_ids = {uuid.UUID(str(entry["id"])) for entry in index["items"] if entry.get("id")}
     allowed_ids.update(ref.id for ref in context.resolved_items)
     allowed_ids.update(ref.id for ref in context.candidate_items)
+    allowed_ids.update(ref.id for ref in context.page_references if ref.kind == "item")
     plan = _validate_plan_arguments(
         plan,
         allowed_item_ids=allowed_ids,
@@ -322,9 +321,7 @@ def _ai_outcome(
         )
         outcome.ai_status = status
         outcome.ai_attempted = True
-        if outcome.result is not None and (
-            outcome.result.items or outcome.result.borrowed
-        ):
+        if outcome.result is not None and (outcome.result.items or outcome.result.borrowed):
             outcome.answer = assistant_service._deterministic_answer(outcome.result)
         outcome.notices.append(
             "The AI interpretation could not be executed safely. Direct inventory "
@@ -386,21 +383,15 @@ def _combined_facts(
         [item for outcome in outcomes if outcome.result for item in outcome.result.items]
     )
     borrowed = dedupe_by_id(
-        [
-            record
-            for outcome in outcomes
-            if outcome.result
-            for record in outcome.result.borrowed
-        ]
+        [record for outcome in outcomes if outcome.result for record in outcome.result.borrowed]
     )
     ambiguity = any(
-        outcome.result is not None and outcome.result.facts.get("ambiguous")
-        for outcome in outcomes
+        outcome.result is not None and outcome.result.facts.get("ambiguous") for outcome in outcomes
     )
     return {
-        "scope": "property" if scope.property is not None else (
-            "all_places" if len(scope.households) > 1 else "household"
-        ),
+        "scope": "property"
+        if scope.property is not None
+        else ("all_places" if len(scope.households) > 1 else "household"),
         "scope_label": scope.label,
         "mode": mode,
         "total": len(items),

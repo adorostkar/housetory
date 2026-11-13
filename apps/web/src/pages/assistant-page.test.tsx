@@ -1,12 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import * as React from "react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
 import { api } from "@/lib/api";
 import { SearchSessionProvider } from "@/lib/search-session";
+import { AssistantConversationProvider } from "@/lib/assistant-conversation";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import type { AiStatus, ItemSummary, SearchQueryResponse } from "@/lib/types";
 import { AssistantPage } from "@/pages/assistant-page";
 
@@ -210,9 +213,11 @@ function renderPage(entry: string) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
         <SearchSessionProvider>
-          <AddItemsProvider>
-            <AssistantPage />
-          </AddItemsProvider>
+          <AssistantConversationProvider>
+            <AddItemsProvider>
+              <AssistantPage />
+            </AddItemsProvider>
+          </AssistantConversationProvider>
         </SearchSessionProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -221,6 +226,7 @@ function renderPage(entry: string) {
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  window.localStorage.removeItem("housetory-search-scope");
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.get).mockImplementation(async (path) => {
@@ -234,6 +240,240 @@ beforeEach(() => {
 });
 
 describe("AssistantPage", () => {
+  it("explains the selection limit and allows clearing it without submitting a partial selection", async () => {
+    function LargeSelection() {
+      useRegisterAssistantPageContext(
+        Array.from({ length: 13 }, (_, index) => ({
+          kind: "item", id: `item-${index}`, name: `Item ${index}`,
+        })),
+      );
+      return <AssistantPage embedded />;
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/items"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><LargeSelection /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await userEvent.type(input, "Where are these?");
+    expect(await screen.findByRole("alert")).toHaveTextContent("at most 12");
+    expect(screen.getByRole("button", { name: "Send question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Where is my heavy drill?" })).toBeDisabled();
+    expect(api.post).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Clear assistant context" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).not.toHaveProperty("page_context");
+  });
+
+  it("sends the visible page target by ID and retains it across a full-page handoff", async () => {
+    function ContextFixture() {
+      const navigate = useNavigate();
+      const [target, setTarget] = React.useState(item);
+      useRegisterAssistantPageContext([{ kind: "item", id: target.id, name: target.name }]);
+      return (
+        <>
+          <button onClick={() => setTarget({ ...item, id: "item-ladder", name: "Ladder" })}>
+            Change page target
+          </button>
+          <button onClick={() => navigate("/assistant")}>Full page</button>
+          <AssistantPage embedded />
+        </>
+      );
+    }
+    let resolveAnswer!: (response: SearchQueryResponse) => void;
+    vi.mocked(api.post).mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveAnswer = resolve; }))
+      .mockResolvedValueOnce(secondAnswer);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/items/item-drill"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><ContextFixture /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    expect(await screen.findByLabelText("Current assistant context")).toHaveTextContent("item: Heavy drill");
+    const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "Where is it?");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      page_context: [{ kind: "item", id: "item-drill" }],
+    }));
+    await user.click(screen.getByRole("button", { name: "Change page target" }));
+    expect(screen.getByLabelText("Current assistant context")).toHaveTextContent("Ladder");
+    await act(async () => resolveAnswer(firstAnswer));
+    await user.click(screen.getByRole("button", { name: "Full page" }));
+    expect(screen.getByLabelText("Current assistant context")).toHaveTextContent("Ladder");
+    await user.click(screen.getByRole("button", { name: /Regenerate/ }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.post).mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      page_context: [{ kind: "item", id: "item-drill" }],
+    }));
+  });
+
+  it("keeps a pending request and edited draft when the view is reopened", async () => {
+    let resolveAnswer!: (response: SearchQueryResponse) => void;
+    vi.mocked(api.post).mockReset().mockImplementation(
+      () => new Promise((resolve) => { resolveAnswer = resolve; }),
+    );
+    function SwitchView() {
+      const [visible, setVisible] = React.useState(true);
+      return (
+        <>
+          <button onClick={() => setVisible((current) => !current)}>Toggle view</button>
+          {visible && <AssistantPage />}
+        </>
+      );
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/assistant"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><SwitchView /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "where is my heavy drill");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await user.clear(input);
+    await user.type(input, "A new draft");
+    await user.click(screen.getByRole("button", { name: "Toggle view" }));
+    await user.click(screen.getByRole("button", { name: "Toggle view" }));
+    expect(screen.getByText(/Retrieving current records/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send question" })).toBeDisabled();
+    await act(async () => resolveAnswer(firstAnswer));
+    expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }))
+      .toHaveValue("A new draft");
+  });
+
+  it("keeps a late answer in its original scope and sends its own history on return", async () => {
+    let resolveAnswer!: (response: SearchQueryResponse) => void;
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) {
+        return { items: [{ id: "house-1", name: "Home", properties: [] }] };
+      }
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    vi.mocked(api.post).mockReset()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveAnswer = resolve; }))
+      .mockResolvedValueOnce(secondAnswer);
+    renderPage("/assistant");
+    const user = userEvent.setup();
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await screen.findByRole("option", { name: "Home — all properties" });
+    await user.type(input, "where is my heavy drill");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await user.selectOptions(screen.getByLabelText("Search scope"), "household:house-1");
+    await act(async () => resolveAnswer(firstAnswer));
+    expect(screen.queryByText(/Alex has 1 of your 2 units/)).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Search scope"), "all");
+    expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "when is it due?");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await screen.findByText("That loan is recorded as due on 2026-11-15.");
+    expect(vi.mocked(api.post).mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      history: [
+        { role: "user", content: "where is my heavy drill" },
+        { role: "assistant", content: firstAnswer.answer },
+      ],
+      context: firstAnswer.context,
+    }));
+  });
+
+  it("keeps the question editable after a network failure", async () => {
+    vi.mocked(api.post).mockReset().mockRejectedValueOnce(new Error("offline"));
+    renderPage("/assistant");
+    const user = userEvent.setup();
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "where is my drill");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send question" })).toBeEnabled());
+    expect(input).toHaveValue("where is my drill");
+  });
+
+  it("does not silently widen a saved scope when scope loading fails", async () => {
+    window.localStorage.setItem("housetory-search-scope", JSON.stringify({
+      householdId: "house-1", propertyId: "",
+    }));
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) throw new Error("offline");
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    renderPage("/assistant");
+    const select = await screen.findByLabelText("Search scope");
+    await screen.findByRole("option", { name: "Selected household (unavailable)" });
+    expect(select).toHaveValue("household:house-1");
+    const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    await userEvent.type(input, "Where is my drill?");
+    expect(input).toHaveValue("Where is my drill?");
+    window.localStorage.removeItem("housetory-search-scope");
+  });
+
+  it("preserves the visible answer and unsent draft when the view is remounted", async () => {
+    function SwitchView() {
+      const [visible, setVisible] = React.useState(true);
+      return (
+        <>
+          <button onClick={() => setVisible((current) => !current)}>Toggle view</button>
+          {visible && <AssistantPage />}
+        </>
+      );
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/assistant"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><SwitchView /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "where is my heavy drill");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await screen.findByText(/Alex has 1 of your 2 units/);
+    await user.type(input, "Unsent follow-up");
+    await user.click(screen.getByRole("button", { name: "Toggle view" }));
+    await user.click(screen.getByRole("button", { name: "Toggle view" }));
+    expect(screen.getByText(/Alex has 1 of your 2 units/)).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }))
+      .toHaveValue("Unsent follow-up");
+  });
+
   it("answers a handed-off question through the shared submit endpoint", async () => {
     renderPage(`/assistant?q=${encodeURIComponent("where is my heavy drill")}`);
     expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
@@ -245,6 +485,7 @@ describe("AssistantPage", () => {
         history: [],
         limit: 40,
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(
       screen.getByRole("button", { name: /Privacy & model/ }),

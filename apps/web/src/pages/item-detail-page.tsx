@@ -54,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import {
   useCanWrite,
   useInvalidateInventory,
@@ -96,6 +97,11 @@ export function ItemDetailPage() {
     );
   const origin = readOrigin(searchParams);
   const itemQuery = useItem(itemId);
+  useRegisterAssistantPageContext(
+    itemQuery.data && !itemQuery.isError
+      ? [{ kind: "item", id: itemQuery.data.item.id, name: itemQuery.data.item.name }]
+      : [],
+  );
   const roomsQuery = useRooms();
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();

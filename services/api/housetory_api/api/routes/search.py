@@ -43,6 +43,7 @@ def unified_query(
         explicit_ask=payload.explicit_ask,
         history=payload.history,
         context=payload.context,
+        page_context=payload.page_context,
         household_id=payload.household_id,
         property_id=payload.property_id,
         limit=payload.limit,

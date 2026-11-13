@@ -1,8 +1,9 @@
 # Integrated assistant rework
 
-Status: Stage A implemented and validated on `feature/integrated-assistant`.
-See [Stage A evidence and acceptance checklist](ASSISTANT_STAGE_A_REPORT.md).
-Not deployed; Stage B awaits review. The remaining specification below is unchanged.
+Status: Stages A and B implemented on `feature/integrated-assistant`, not deployed.
+See the [Stage A report](ASSISTANT_STAGE_A_REPORT.md) and
+[Stage B report](ASSISTANT_STAGE_B_REPORT.md). Stage B awaits review;
+Stage C has not started. The remaining specification below is unchanged.
 
 ## Product outcome
 

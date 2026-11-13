@@ -418,6 +418,8 @@ def tool_search_documents(
     query = str(args.get("q") or "").strip()
     item_id = args.get("item_id")
     conditions = [Document.household_id == household_id]
+    if args.get("document_id"):
+        conditions.append(Document.id == uuid.UUID(str(args["document_id"])))
     if args.get("property_id") is not None:
         conditions.append(
             Document.items.any(

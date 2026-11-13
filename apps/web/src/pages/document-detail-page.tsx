@@ -39,6 +39,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import {
   DOCUMENT_TYPE_LABELS,
   DOCUMENT_TYPE_OPTIONS,
@@ -63,6 +64,11 @@ export function DocumentDetailPage() {
   const captureContext = capture?.documentId === documentId &&
     typeof capture.roomId === "string" && typeof capture.locationId === "string" ? capture : undefined;
   const documentQuery = useDocument(documentId);
+  useRegisterAssistantPageContext(
+    documentQuery.data && !documentQuery.isError
+      ? [{ kind: "document", id: documentQuery.data.id, name: documentQuery.data.title }]
+      : [],
+  );
   const [extractionOpened, setExtractionOpened] = React.useState(false);
   const [manualReviewRequest, setManualReviewRequest] = React.useState({ documentId: "", revision: 0 });
   const relationsQuery = useDocumentRelations(

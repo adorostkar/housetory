@@ -64,6 +64,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import {
   queryKeys,
   useCanWrite,
@@ -146,6 +147,13 @@ export function ContainerDetailPage() {
     enabled: canWrite,
     scopeKey: filterSignature,
   });
+  useRegisterAssistantPageContext(
+    selection.selectedItems.length
+      ? selection.selectedItems.map((item) => ({ kind: "item", id: item.id, name: item.name }))
+      : container && !containerQuery.isError
+        ? [{ kind: "location", id: container.id, name: container.name }]
+        : [],
+  );
   const origin = itemOrigin(
     `${location.pathname}${location.search}`,
     container?.identifier ?? container?.name ?? "container",

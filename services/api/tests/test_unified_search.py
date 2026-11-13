@@ -1,7 +1,7 @@
 import uuid
 
 from housetory_api.db import SessionLocal
-from housetory_api.models import AiProvider, AiTaskSetting
+from housetory_api.models import AiProvider, AiTaskSetting, HouseholdMember
 from housetory_api.schemas.ai import AiStatus
 from housetory_api.services import ai as ai_module
 from housetory_api.services.query_text import (
@@ -14,6 +14,7 @@ from tests.test_multi_household import (
     create_household,
     create_item,
     create_loan,
+    create_property,
     create_room,
     current_headers,
     household_id,
@@ -126,9 +127,7 @@ def test_persian_drill_question_uses_configured_ai_with_or_without_punctuation(
     owner_client, monkeypatch
 ):
     room = create_room_simple(owner_client, "Workshop")
-    drill = create_item_simple(
-        owner_client, "Heavy drill", room_id=room["id"], brand="Makita"
-    )
+    drill = create_item_simple(owner_client, "Heavy drill", room_id=room["id"], brand="Makita")
     create_loan_simple(
         owner_client,
         drill["id"],
@@ -337,18 +336,12 @@ def test_four_turn_dialogue_uses_context_and_fresh_loan_facts(owner_client, monk
 
 def test_multiple_mohsen_candidates_are_surfaced_not_guessed(owner_client, monkeypatch):
     room = create_room_simple(owner_client, "Shed")
-    first = create_item_simple(
-        owner_client, "Heavy drill Makita", room_id=room["id"], model="HP-2"
-    )
+    first = create_item_simple(owner_client, "Heavy drill Makita", room_id=room["id"], model="HP-2")
     second = create_item_simple(
         owner_client, "Heavy drill DeWalt", room_id=room["id"], model="DCD999"
     )
-    create_loan_simple(
-        owner_client, first["id"], borrower="Mohsen", lent_on="2026-01-01"
-    )
-    create_loan_simple(
-        owner_client, second["id"], borrower="Mohsen", lent_on="2026-02-01"
-    )
+    create_loan_simple(owner_client, first["id"], borrower="Mohsen", lent_on="2026-01-01")
+    create_loan_simple(owner_client, second["id"], borrower="Mohsen", lent_on="2026-02-01")
     monkeypatch.setattr(ai_module, "status_for", lambda *_a, **_k: fake_status())
     monkeypatch.setattr(ai_module, "config_for", lambda *_a, **_k: None)
     monkeypatch.setattr(
@@ -372,9 +365,7 @@ def test_multiple_mohsen_candidates_are_surfaced_not_guessed(owner_client, monke
     assert body["ambiguous"] is True
     assert body["needs_clarification"] is True
     assert len(body["facts"]["loan_history"]) == 2
-    assert {entry["borrower_name"] for entry in body["facts"]["loan_history"]} == {
-        "Mohsen"
-    }
+    assert {entry["borrower_name"] for entry in body["facts"]["loan_history"]} == {"Mohsen"}
     assert "Which one" in (body["answer"] or "")
 
 
@@ -438,9 +429,7 @@ def test_all_places_ai_is_per_household_and_never_crosses_provider_boundaries(
         second_provider,
     }
     assert len(captured) == 2
-    first_prompt = next(
-        prompt for provider_id, prompt in captured if provider_id == first_provider
-    )
+    first_prompt = next(prompt for provider_id, prompt in captured if provider_id == first_provider)
     second_prompt = next(
         prompt for provider_id, prompt in captured if provider_id == second_provider
     )
@@ -450,9 +439,7 @@ def test_all_places_ai_is_per_household_and_never_crosses_provider_boundaries(
     assert "A-only drill alpha" not in second_prompt
 
 
-def test_all_places_without_second_household_provider_does_not_fall_back(
-    owner_client, monkeypatch
-):
+def test_all_places_without_second_household_provider_does_not_fall_back(owner_client, monkeypatch):
     first_id = household_id(owner_client)
     first_room = create_room(owner_client, "Provider workshop")
     create_item(owner_client, "دریل A alpha", first_room["id"], 1)
@@ -483,9 +470,7 @@ def test_property_scoped_ai_respects_the_property_boundary(owner_client, monkeyp
     session = owner_client.get("/api/v1/auth/session").json()
     home_id = session["household"]["id"]
     home = owner_client.get("/api/v1/properties").json()["items"][0]
-    annex = owner_client.post(
-        "/api/v1/properties", json={"name": "Annex AI"}
-    ).json()
+    annex = owner_client.post("/api/v1/properties", json={"name": "Annex AI"}).json()
     annex_room = owner_client.post(
         "/api/v1/rooms",
         json={"name": "Annex workshop", "property_id": annex["id"]},
@@ -551,8 +536,7 @@ def test_other_household_cannot_read_context_or_results(owner_client, anon_clien
     body = response.json()
     assert body["items"] == []
     assert all(
-        entry.get("household", {}).get("id") != str(other_id)
-        for entry in body["quick_results"]
+        entry.get("household", {}).get("id") != str(other_id) for entry in body["quick_results"]
     )
     assert item["id"] not in {entry["id"] for entry in body["quick_results"]}
 
@@ -595,17 +579,352 @@ def test_offline_context_followups_stay_useful_without_a_provider(owner_client):
     assert history["facts"]["loan_history"][0]["open"] is True
 
 
+def test_page_item_context_is_authorized_and_explicit_names_take_precedence(owner_client):
+    room = create_room_simple(owner_client, "Context workshop")
+    drill = create_item_simple(owner_client, "Heavy drill", room_id=room["id"])
+    ladder = create_item_simple(owner_client, "Red ladder", room_id=room["id"])
+    hint = [{"kind": "item", "id": drill["id"]}]
+
+    followup = query(
+        owner_client,
+        {
+            "query": "Where is it?",
+            "explicit_ask": True,
+            "page_context": hint,
+        },
+    )
+    assert [item["id"] for item in followup["items"]] == [drill["id"]]
+    persian = query(
+        owner_client,
+        {
+            "query": "این کجاست",
+            "explicit_ask": True,
+            "page_context": hint,
+        },
+    )
+    assert [item["id"] for item in persian["items"]] == [drill["id"]]
+    mixed = query(
+        owner_client,
+        {
+            "query": "این drill کجاست",
+            "explicit_ask": True,
+            "page_context": hint,
+        },
+    )
+    assert [item["id"] for item in mixed["items"]] == [drill["id"]]
+    explicit = query(
+        owner_client,
+        {
+            "query": "Where is my Red ladder?",
+            "explicit_ask": True,
+            "page_context": hint,
+        },
+    )
+    assert [item["id"] for item in explicit["items"]] == [ladder["id"]]
+
+
+def test_explicit_target_overrides_previous_and_page_context_even_with_pronoun(owner_client):
+    room = create_room_simple(owner_client, "Precedence room")
+    drill = create_item_simple(owner_client, "Heavy drill", room_id=room["id"])
+    ladder = create_item_simple(owner_client, "Red ladder", room_id=room["id"])
+    initial = query(owner_client, {"query": "Where is my Heavy drill?"})
+    result = query(
+        owner_client,
+        {
+            "query": "Where is my Red ladder, and is it on loan?",
+            "explicit_ask": True,
+            "context": initial["context"],
+            "page_context": [{"kind": "item", "id": drill["id"]}],
+        },
+    )
+    assert drill["id"] not in {entry["id"] for entry in result["items"]}
+    assert (
+        any(entry["id"] == ladder["id"] for entry in result["items"])
+        or result["needs_clarification"]
+    )
+    if result["needs_clarification"]:
+        clarified = query(
+            owner_client,
+            {
+                "query": "Red ladder",
+                "explicit_ask": True,
+                "context": result["context"],
+                "page_context": [{"kind": "item", "id": drill["id"]}],
+            },
+        )
+        assert [entry["id"] for entry in clarified["items"]] == [ladder["id"]]
+    without_page = query(
+        owner_client,
+        {
+            "query": "Where is my Red ladder, and is it on loan?",
+            "explicit_ask": True,
+            "context": initial["context"],
+        },
+    )
+    assert drill["id"] not in {entry["id"] for entry in without_page["items"]}
+    assert (
+        any(entry["id"] == ladder["id"] for entry in without_page["items"])
+        or without_page["needs_clarification"]
+    )
+
+
+def test_page_context_rejects_references_outside_authorized_scope(owner_client, anon_client):
+    headers, _user, _households = add_membership(
+        email="page-context-stranger@example.com",
+        household_names=[("Private household", "owner")],
+    )
+    room = create_room_simple(owner_client, "Private room")
+    item = create_item_simple(owner_client, "Private item", room_id=room["id"])
+    response = anon_client.post(
+        "/api/v1/search/query",
+        headers=headers,
+        json={
+            "query": "Where is it?",
+            "explicit_ask": True,
+            "page_context": [{"kind": "item", "id": item["id"]}],
+        },
+    )
+    assert response.status_code == 404
+    assert "Private item" not in response.text
+
+
+def test_page_selection_does_not_guess_a_singular_target(owner_client):
+    room = create_room_simple(owner_client, "Selection room")
+    first = create_item_simple(owner_client, "First fixture", room_id=room["id"])
+    second = create_item_simple(owner_client, "Second fixture", room_id=room["id"])
+    result = query(
+        owner_client,
+        {
+            "query": "Where is it?",
+            "explicit_ask": True,
+            "page_context": [
+                {"kind": "item", "id": first["id"]},
+                {"kind": "item", "id": second["id"]},
+            ],
+        },
+    )
+    assert result["needs_clarification"] is True
+    assert not result["facts"].get("whereabouts")
+    plural = query(
+        owner_client,
+        {
+            "query": "Where are these?",
+            "explicit_ask": True,
+            "page_context": [
+                {"kind": "item", "id": first["id"]},
+                {"kind": "item", "id": second["id"]},
+            ],
+        },
+    )
+    assert {item["id"] for item in plural["items"]} == {first["id"], second["id"]}
+
+
+def test_naming_current_page_resolves_a_conflict_with_previous_context(owner_client):
+    room = create_room_simple(owner_client, "Changing context room")
+    first = create_item_simple(owner_client, "Drill", room_id=room["id"])
+    second = create_item_simple(owner_client, "Red ladder", room_id=room["id"])
+    initial = query(owner_client, {"query": "Where is my Drill?"})
+    hint = [{"kind": "item", "id": second["id"]}]
+    conflict = query(
+        owner_client,
+        {
+            "query": "Where is it?",
+            "explicit_ask": True,
+            "context": initial["context"],
+            "page_context": hint,
+        },
+    )
+    assert conflict["needs_clarification"]
+    clarified = query(
+        owner_client,
+        {
+            "query": "Where is Red ladder?",
+            "explicit_ask": True,
+            "context": conflict["context"],
+            "page_context": hint,
+        },
+    )
+    assert [entry["id"] for entry in clarified["items"]] == [second["id"]]
+    assert first["id"] not in {entry["id"] for entry in clarified["items"]}
+
+
+def test_room_page_context_uses_current_authorized_room(owner_client):
+    room = create_room_simple(owner_client, "Context garage")
+    drill = create_item_simple(owner_client, "Stored drill", room_id=room["id"])
+    result = query(
+        owner_client,
+        {
+            "query": "What is in this room?",
+            "explicit_ask": True,
+            "page_context": [{"kind": "room", "id": room["id"]}],
+        },
+    )
+    assert [item["id"] for item in result["items"]] == [drill["id"]]
+
+
+def test_location_context_is_scoped_and_deleted_items_are_reauthorized(owner_client):
+    property_one = create_property(owner_client, "First property")
+    property_two = create_property(owner_client, "Second property")
+    room = create_room(owner_client, "First workshop", property_id=property_one["id"])
+    container_response = owner_client.post(
+        "/api/v1/containers",
+        json={"room_id": room["id"], "name": "Tool box", "container_type": "box"},
+    )
+    assert container_response.status_code == 201
+    container = container_response.json()
+    item = create_item_simple(
+        owner_client, "Stored fixture", room_id=room["id"], storage_location_id=container["id"]
+    )
+    result = query(
+        owner_client,
+        {
+            "query": "What is in this box?",
+            "explicit_ask": True,
+            "property_id": property_one["id"],
+            "page_context": [{"kind": "location", "id": container["id"]}],
+        },
+    )
+    assert item["id"] in {entry["id"] for entry in result["items"]}
+    for kind, id in (("item", item["id"]), ("room", room["id"]), ("location", container["id"])):
+        response = owner_client.post(
+            "/api/v1/search/query",
+            json={
+                "query": "Where is it?",
+                "property_id": property_two["id"],
+                "page_context": [{"kind": kind, "id": id}],
+            },
+        )
+        assert response.status_code == 404
+        assert "Stored fixture" not in response.text
+    archived = owner_client.patch(f"/api/v1/items/{item['id']}", json={"is_archived": True})
+    assert archived.status_code == 200
+    response = owner_client.post(
+        "/api/v1/search/query",
+        json={"query": "Where is it?", "page_context": [{"kind": "item", "id": item["id"]}]},
+    )
+    assert response.status_code == 404
+
+
+def test_document_page_context_uses_exact_document_without_other_matches(owner_client):
+    def upload(title):
+        response = owner_client.post(
+            "/api/v1/documents",
+            data={"title": title, "document_type": "invoice"},
+            files={"file": ("invoice.txt", b"Total USD 12.00", "text/plain")},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    document = upload("Tools invoice")
+    upload("Tools invoice copy")
+    result = query(
+        owner_client,
+        {
+            "query": "Show this document",
+            "explicit_ask": True,
+            "page_context": [{"kind": "document", "id": document["id"]}],
+        },
+    )
+    assert [entry["id"] for entry in result["documents"]] == [document["id"]], result
+
+
+def test_document_context_rechecks_property_and_deleted_records(owner_client):
+    property_one = create_property(owner_client, "Receipt property")
+    property_two = create_property(owner_client, "Other property")
+    room = create_room(owner_client, "Receipt room", property_id=property_one["id"])
+    item = create_item(owner_client, "Receipt drill", room["id"])
+    response = owner_client.post(
+        "/api/v1/documents",
+        data={"title": "Scoped receipt", "document_type": "receipt", "item_ids": [item["id"]]},
+        files={"file": ("receipt.txt", b"Total USD 12.00", "text/plain")},
+    )
+    assert response.status_code == 201
+    document_id = response.json()["id"]
+    payload = {
+        "query": "Show this document",
+        "page_context": [{"kind": "document", "id": document_id}],
+    }
+    allowed = query(owner_client, {**payload, "property_id": property_one["id"]})
+    assert [entry["id"] for entry in allowed["documents"]] == [document_id]
+    denied = owner_client.post(
+        "/api/v1/search/query", json={**payload, "property_id": property_two["id"]}
+    )
+    assert denied.status_code == 404
+    deleted = owner_client.delete(f"/api/v1/documents/{document_id}")
+    assert deleted.status_code == 204
+    assert owner_client.post("/api/v1/search/query", json=payload).status_code == 404
+
+
+def test_page_context_is_reauthorized_after_membership_revocation(anon_client):
+    headers, user, household_ids = add_membership(
+        email="page-context-revoked@example.com",
+        household_names=[("Revoked context", "owner")],
+    )
+    created = anon_client.post(
+        "/api/v1/items",
+        headers=current_headers(anon_client, headers),
+        json={"name": "Revoked item"},
+    )
+    assert created.status_code == 201
+    item = created.json()["item"]
+    payload = {
+        "query": "Where is it?",
+        "explicit_ask": True,
+        "page_context": [{"kind": "item", "id": item["id"]}],
+    }
+    assert (
+        anon_client.post("/api/v1/search/query", headers=headers, json=payload).status_code == 200
+    )
+    with SessionLocal() as db:
+        membership = db.get(HouseholdMember, (household_ids[0], user.id))
+        assert membership is not None
+        db.delete(membership)
+        db.commit()
+    response = anon_client.post("/api/v1/search/query", headers=headers, json=payload)
+    assert response.status_code in {401, 403, 404, 409}
+    assert "Revoked item" not in response.text
+
+
+def test_page_reference_is_partitioned_and_labels_are_read_from_database(owner_client, monkeypatch):
+    first_id = household_id(owner_client)
+    room = create_room(owner_client, "First page workshop")
+    first = create_item(owner_client, "Page-only drill", room["id"])
+    create_household(owner_client, "Other page household")
+    second_id = household_id(owner_client)
+    other_room = create_room(owner_client, "Other page room")
+    create_item(owner_client, "Other-only wrench", other_room["id"])
+    switch(owner_client, first_id)
+    first_provider = _configure_provider(first_id, 11434, "First provider")
+    _configure_provider(second_id, 11435, "Other provider")
+    captured = []
+
+    def fake_plan(_system, prompt, *, config):
+        captured.append((config.provider_id, prompt))
+        return {"tool": "locate_item", "arguments": {"item_ids": [first["id"]]}}
+
+    monkeypatch.setattr(ai_module, "complete_json", fake_plan)
+    monkeypatch.setattr(ai_module, "complete_text", lambda *_a, **_k: "Local synthetic answer.")
+    body = query(
+        owner_client,
+        {
+            "query": "این کجاست",
+            "explicit_ask": True,
+            "page_context": [{"kind": "item", "id": first["id"], "name": "Forged page label"}],
+        },
+    )
+    assert body["items"][0]["id"] == first["id"]
+    assert len(captured) == 1
+    assert captured[0][0] == first_provider
+    assert "Page-only drill" in captured[0][1]
+    assert "Forged page label" not in captured[0][1]
+    assert "Other-only wrench" not in captured[0][1]
+
+
 def test_swedish_mixed_and_variant_names_match_without_a_provider(owner_client):
     room = create_room_simple(owner_client, "Language shelf")
-    swedish = create_item_simple(
-        owner_client, "Borrmaskin", room_id=room["id"], brand="Makita"
-    )
-    persian = create_item_simple(
-        owner_client, "دریل برقی", room_id=room["id"], model="DCD791"
-    )
-    mixed = create_item_simple(
-        owner_client, "Cordless DCD791", room_id=room["id"], model="DCD791"
-    )
+    swedish = create_item_simple(owner_client, "Borrmaskin", room_id=room["id"], brand="Makita")
+    persian = create_item_simple(owner_client, "دریل برقی", room_id=room["id"], model="DCD791")
+    mixed = create_item_simple(owner_client, "Cordless DCD791", room_id=room["id"], model="DCD791")
     swedish_body = query(owner_client, {"query": "Borrmaskin"})
     assert swedish_body["mode"] == "direct"
     assert swedish_body["items"][0]["id"] == swedish["id"]
@@ -647,9 +966,7 @@ def test_provider_failure_and_genuine_missing_item_are_not_false_no_results(
     assert "not a conclusive no-result" in (persian["answer"] or "")
 
 
-def test_legacy_multilingual_assistant_and_natural_routes_share_the_flow(
-    owner_client, monkeypatch
-):
+def test_legacy_multilingual_assistant_and_natural_routes_share_the_flow(owner_client, monkeypatch):
     room = create_room_simple(owner_client, "Legacy route room")
     drill = create_item_simple(owner_client, "Heavy drill", room_id=room["id"])
     monkeypatch.setattr(ai_module, "status_for", lambda *_a, **_k: fake_status())
@@ -664,18 +981,14 @@ def test_legacy_multilingual_assistant_and_natural_routes_share_the_flow(
         "complete_text",
         lambda *_a, **_k: "دریل شما در کارگاه است.",
     )
-    assistant = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "دریل من کجاست؟"}
-    )
+    assistant = owner_client.post("/api/v1/assistant/query", json={"question": "دریل من کجاست؟"})
     assert assistant.status_code == 200, assistant.text
     assistant_body = assistant.json()
     assert assistant_body["mode"] == "ai"
     assert assistant_body["items"][0]["id"] == drill["id"]
     assert "دریل" in assistant_body["answer"]
 
-    natural = owner_client.post(
-        "/api/v1/search/natural", json={"question": "دریل من کجاست؟"}
-    )
+    natural = owner_client.post("/api/v1/search/natural", json={"question": "دریل من کجاست؟"})
     assert natural.status_code == 200, natural.text
     natural_body = natural.json()
     assert natural_body["mode"] == "ai"
@@ -687,9 +1000,7 @@ def _scope_key_for(household_ids: list[uuid.UUID], property_id: uuid.UUID | None
     return f"{','.join(sorted(str(value) for value in household_ids))}|{property_id or ''}"
 
 
-def test_provider_payloads_are_partitioned_by_household_and_property(
-    owner_client, monkeypatch
-):
+def test_provider_payloads_are_partitioned_by_household_and_property(owner_client, monkeypatch):
     first_id = household_id(owner_client)
     first_room = create_room(owner_client, "Privacy first room")
     first_item = create_item(owner_client, "A-only drill sentinel", first_room["id"], 1)
@@ -699,9 +1010,7 @@ def test_provider_payloads_are_partitioned_by_household_and_property(
     second_id = uuid.UUID(created["household"]["id"])
     second_room = create_room(owner_client, "Privacy second room")
     second_item = create_item(owner_client, "B-only drill sentinel", second_room["id"], 1)
-    second_loan = create_loan(
-        owner_client, second_item["id"], borrower="B-borrower-sentinel"
-    )
+    second_loan = create_loan(owner_client, second_item["id"], borrower="B-borrower-sentinel")
     switch(owner_client, first_id)
 
     first_provider = _configure_provider(first_id, 11501, "Privacy first")
@@ -711,11 +1020,7 @@ def test_provider_payloads_are_partitioned_by_household_and_property(
 
     def fake_plan(system, prompt, *, config):
         plan_calls.append((config.provider_id, system, prompt))
-        chosen = (
-            first_item["id"]
-            if config.provider_id == first_provider
-            else second_item["id"]
-        )
+        chosen = first_item["id"] if config.provider_id == first_provider else second_item["id"]
         return {"tool": "locate_item", "arguments": {"item_ids": [chosen]}}
 
     def fake_answer(system, user, *, config=None, **_kwargs):
@@ -819,9 +1124,7 @@ def test_provider_payloads_are_partitioned_by_household_and_property(
     # Property scope: the same household's other property must not reach the
     # provider through prior history or context.
     auth = current_headers(owner_client)
-    first_property = owner_client.get(
-        "/api/v1/properties", headers=auth
-    ).json()["items"][0]
+    first_property = owner_client.get("/api/v1/properties", headers=auth).json()["items"][0]
     second_property = owner_client.post(
         "/api/v1/properties",
         headers=auth,
@@ -908,9 +1211,7 @@ def test_plain_named_lookup_stays_direct_with_context_and_reads_fresh_loans(
     owner_client, monkeypatch
 ):
     room = create_room_simple(owner_client, "Direct context room")
-    drill = create_item_simple(
-        owner_client, "Heavy drill", room_id=room["id"], quantity=1
-    )
+    drill = create_item_simple(owner_client, "Heavy drill", room_id=room["id"], quantity=1)
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("plain named lookup must not call a provider")
@@ -930,21 +1231,15 @@ def test_plain_named_lookup_stays_direct_with_context_and_reads_fresh_loans(
         lent_on="2026-10-01",
         due_on="2026-11-20",
     )
-    reloaded = query(
-        owner_client, {"query": "Heavy drill", "context": first["context"]}
-    )
+    reloaded = query(owner_client, {"query": "Heavy drill", "context": first["context"]})
     assert reloaded["mode"] == "direct"
     assert reloaded["ai_attempted"] is False
     assert reloaded["items"][0]["id"] == drill["id"]
-    quick = next(
-        result for result in reloaded["quick_results"] if result["id"] == drill["id"]
-    )
+    quick = next(result for result in reloaded["quick_results"] if result["id"] == drill["id"])
     assert quick["loan"]["on_loan_quantity"] == 1
     assert quick["loan"]["borrower_names"] == ["Fresh borrower"]
 
-    repeated = query(
-        owner_client, {"query": "Heavy drill", "context": reloaded["context"]}
-    )
+    repeated = query(owner_client, {"query": "Heavy drill", "context": reloaded["context"]})
     assert repeated["mode"] == "direct"
     assert repeated["ai_attempted"] is False
 
@@ -982,17 +1277,12 @@ def test_mixed_scope_memory_preserves_prior_constraint_without_foreign_broadcast
         plan_calls.append((config.provider_id, prompt))
         if turn["value"] == 1:
             return {"tool": "search_items", "arguments": {"q": "drill"}}
-        if (
-            config.provider_id == first_provider
-            and "not the battery drill" in prompt
-        ):
+        if config.provider_id == first_provider and "not the battery drill" in prompt:
             return {"tool": "locate_item", "arguments": {"item_ids": [corded["id"]]}}
         return {"tool": "locate_item", "arguments": {"item_ids": [second_item["id"]]}}
 
     monkeypatch.setattr(ai_module, "complete_json", fake_plan)
-    monkeypatch.setattr(
-        ai_module, "complete_text", lambda *_a, **_k: "Grounded constraint answer."
-    )
+    monkeypatch.setattr(ai_module, "complete_text", lambda *_a, **_k: "Grounded constraint answer.")
 
     first = query(
         owner_client,
@@ -1038,9 +1328,7 @@ def test_property_scope_memory_preserves_constraint_and_redacts_other_property(
 ):
     auth = current_headers(owner_client)
     household_id_value = household_id(owner_client)
-    first_property = owner_client.get(
-        "/api/v1/properties", headers=auth
-    ).json()["items"][0]
+    first_property = owner_client.get("/api/v1/properties", headers=auth).json()["items"][0]
     second_property = owner_client.post(
         "/api/v1/properties",
         headers=auth,

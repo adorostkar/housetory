@@ -10,12 +10,15 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ...api.errors import ApiError
 from ...models import Document, Household, Item, Loan, Room, StorageLocation
 from ...schemas.ai import (
     SearchContextItemRef,
     SearchContextLoanRef,
     SearchContextMemoryEntry,
+    SearchContextPageReference,
     SearchConversationContext,
+    SearchPageReference,
 )
 from ...schemas.borrowed import BorrowedOut
 from ...schemas.items import ItemSummary
@@ -25,10 +28,161 @@ from ..ai_tools.inventory_query import property_item_conditions
 from ..ai_tools.references import dedupe_by_id
 from ..query_text import (
     normalize_for_match,
+    text_contains_term,
 )
 from .scope import HouseholdOutcome, _scope_key
 
 MAX_HISTORY_TURNS = 8
+
+
+def _resolve_page_references(
+    db: Session,
+    scope: global_search.SearchScope,
+    references: list[SearchPageReference],
+) -> list[SearchContextPageReference]:
+    household_ids = [household.id for household, _role in scope.households]
+    property_id = scope.property.id if scope.property is not None else None
+    resolved: list[SearchContextPageReference] = []
+    seen: set[tuple[str, uuid.UUID]] = set()
+    for ref in references:
+        key = (ref.kind, ref.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if ref.kind == "item":
+            conditions = [
+                Item.id == ref.id,
+                Item.household_id.in_(household_ids),
+                Item.is_archived.is_(False),
+                *property_item_conditions(property_id),
+            ]
+            row = db.scalar(select(Item).where(*conditions))
+            label = row.name if row else None
+        elif ref.kind == "room":
+            conditions = [Room.id == ref.id, Room.household_id.in_(household_ids)]
+            if property_id is not None:
+                conditions.append(Room.property_id == property_id)
+            row = db.scalar(select(Room).where(*conditions))
+            label = row.name if row else None
+        elif ref.kind == "location":
+            conditions = [
+                StorageLocation.id == ref.id,
+                StorageLocation.household_id.in_(household_ids),
+                StorageLocation.active(),
+            ]
+            if property_id is not None:
+                conditions.append(StorageLocation.room.has(Room.property_id == property_id))
+            row = db.scalar(select(StorageLocation).where(*conditions))
+            label = row.name if row else None
+        else:
+            conditions = [Document.id == ref.id, Document.household_id.in_(household_ids)]
+            if property_id is not None:
+                conditions.append(
+                    Document.items.any(
+                        or_(
+                            Item.room.has(Room.property_id == property_id),
+                            Item.storage_location.has(
+                                StorageLocation.room.has(Room.property_id == property_id)
+                            ),
+                        )
+                    )
+                )
+            row = db.scalar(select(Document).where(*conditions))
+            label = row.title if row else None
+        if row is None or label is None:
+            raise ApiError(
+                404,
+                "page_context_unavailable",
+                "The current page or selection is unavailable in this search scope.",
+            )
+        resolved.append(
+            SearchContextPageReference(
+                kind=ref.kind,
+                id=ref.id,
+                name=label,
+                household_id=row.household_id,
+            )
+        )
+    return resolved
+
+
+def _page_reference_requested(query: str) -> bool:
+    tokens = set(re.findall(r"[\w]+", normalize_for_match(query), flags=re.UNICODE))
+    return bool(
+        tokens
+        & {
+            "it",
+            "its",
+            "this",
+            "that",
+            "these",
+            "those",
+            "them",
+            "they",
+            "این",
+            "آن",
+            "اون",
+            "اونی",
+            "همین",
+            "همون",
+            "همان",
+            "اینها",
+            "آنها",
+        }
+    )
+
+
+def _plural_page_reference_requested(query: str) -> bool:
+    tokens = set(re.findall(r"[\w]+", normalize_for_match(query), flags=re.UNICODE))
+    return bool(tokens & {"these", "those", "them", "they", "اینها", "آنها"})
+
+
+def _explicit_other_target(
+    db: Session,
+    scope: global_search.SearchScope,
+    query: str,
+    current_ids: set[uuid.UUID],
+) -> bool:
+    household_ids = [household.id for household, _role in scope.households]
+    property_id = scope.property.id if scope.property is not None else None
+    item_rows = db.execute(
+        select(Item.id, Item.name).where(
+            Item.household_id.in_(household_ids),
+            Item.is_archived.is_(False),
+            *property_item_conditions(property_id),
+        )
+    ).all()
+    room_conditions = [Room.household_id.in_(household_ids)]
+    location_conditions = [
+        StorageLocation.household_id.in_(household_ids),
+        StorageLocation.active(),
+    ]
+    document_conditions = [Document.household_id.in_(household_ids)]
+    if property_id is not None:
+        room_conditions.append(Room.property_id == property_id)
+        location_conditions.append(StorageLocation.room.has(Room.property_id == property_id))
+        document_conditions.append(
+            Document.items.any(
+                or_(
+                    Item.room.has(Room.property_id == property_id),
+                    Item.storage_location.has(
+                        StorageLocation.room.has(Room.property_id == property_id)
+                    ),
+                )
+            )
+        )
+    rows = [
+        *item_rows,
+        *db.execute(select(Room.id, Room.name).where(*room_conditions)).all(),
+        *db.execute(
+            select(StorageLocation.id, StorageLocation.name).where(*location_conditions)
+        ).all(),
+        *db.execute(select(Document.id, Document.title).where(*document_conditions)).all(),
+    ]
+    return any(
+        id not in current_ids and len(name.strip()) >= 3 and text_contains_term(query, name)
+        for id, name in rows
+    )
 
 
 def _bounded_history(history: list[Any]) -> list[Any]:
@@ -44,9 +198,7 @@ def _history_models(history: list[Any]) -> list[Any]:
     return _bounded_history(history)
 
 
-def _scope_allowed_item_ids(
-    db: Session, scope: global_search.SearchScope
-) -> set[uuid.UUID]:
+def _scope_allowed_item_ids(db: Session, scope: global_search.SearchScope) -> set[uuid.UUID]:
     allowed: set[uuid.UUID] = set()
     for household, _role in scope.households:
         conditions = [
@@ -222,8 +374,7 @@ def _partition_terms(
 ]:
     property_id = scope.property.id if scope.property is not None else None
     all_by_household = {
-        household.id: _household_terms(db, household.id)
-        for household, _role in scope.households
+        household.id: _household_terms(db, household.id) for household, _role in scope.households
     }
     own_terms: dict[tuple[uuid.UUID, uuid.UUID | None], set[str]] = {}
     foreign_terms: dict[tuple[uuid.UUID, uuid.UUID | None], set[str]] = {}
@@ -297,9 +448,7 @@ def _build_dialogue_memory(
 ) -> list[SearchContextMemoryEntry]:
     property_id = scope.property.id if scope.property is not None else None
     own_terms, foreign_terms = _partition_terms(db, scope)
-    outcome_by_household = {
-        outcome.household.id: outcome for outcome in (outcomes or [])
-    }
+    outcome_by_household = {outcome.household.id: outcome for outcome in (outcomes or [])}
     memory: list[SearchContextMemoryEntry] = []
     for household, _role in scope.households:
         key = (household.id, property_id)
@@ -311,12 +460,15 @@ def _build_dialogue_memory(
             if entry.household_id == household.id
             and (property_id is None or entry.property_id == property_id)
         ]
-        user_intent = _redact_memory_text(
-            query,
-            foreign_terms=foreign,
-            own_terms=own,
-            limit=800,
-        ) or "Earlier request"
+        user_intent = (
+            _redact_memory_text(
+                query,
+                foreign_terms=foreign,
+                own_terms=own,
+                limit=800,
+            )
+            or "Earlier request"
+        )
         meaning = _partition_answer_meaning(
             outcome_by_household.get(household.id), direct_items, household.id
         )
@@ -351,9 +503,7 @@ def _history_from_memory(
     for entry in context.dialogue_memory:
         messages.append(SimpleNamespace(role="user", content=entry.user_intent))
         if entry.answer_meaning:
-            messages.append(
-                SimpleNamespace(role="assistant", content=entry.answer_meaning)
-            )
+            messages.append(SimpleNamespace(role="assistant", content=entry.answer_meaning))
     return messages[-8:]
 
 
@@ -453,9 +603,7 @@ def _context_for_household(
     are never trusted. This runs before every provider planning and answer call.
     """
     property_id = scope.property.id if scope.property is not None else None
-    ref_ids = {
-        ref.id for ref in [*context.resolved_items, *context.candidate_items]
-    }
+    ref_ids = {ref.id for ref in [*context.resolved_items, *context.candidate_items]}
     loan_ids = [ref.id for ref in context.loans]
     loan_rows: list[Loan] = []
     if loan_ids:
@@ -467,9 +615,7 @@ def _context_for_household(
                 )
             ).all()
         )
-        ref_ids.update(
-            loan.item_id for loan in loan_rows if loan.item_id is not None
-        )
+        ref_ids.update(loan.item_id for loan in loan_rows if loan.item_id is not None)
     items = (
         list(
             db.scalars(
@@ -523,6 +669,9 @@ def _context_for_household(
         candidate_items=candidates,
         loans=loans[:12],
         dialogue_memory=memory,
+        page_references=[
+            ref for ref in context.page_references if ref.household_id == household.id
+        ],
     )
 
 
@@ -668,12 +817,8 @@ def _context_from_outcomes(
     items = dedupe_by_id(
         [item for outcome in outcomes if outcome.result for item in outcome.result.items]
     )
-    resolved = [
-        SearchContextItemRef(id=item.id, name=item.name) for item in items[:4]
-    ]
-    candidates = [
-        SearchContextItemRef(id=item.id, name=item.name) for item in items[:12]
-    ]
+    resolved = [SearchContextItemRef(id=item.id, name=item.name) for item in items[:4]]
+    candidates = [SearchContextItemRef(id=item.id, name=item.name) for item in items[:12]]
     loans: list[SearchContextLoanRef] = []
     seen_loans: set[uuid.UUID] = set()
     for outcome in outcomes:
@@ -694,9 +839,7 @@ def _context_from_outcomes(
                 loans.append(
                     SearchContextLoanRef(
                         id=loan_id,
-                        item_id=(
-                            uuid.UUID(str(item_id)) if item_id else None
-                        ),
+                        item_id=(uuid.UUID(str(item_id)) if item_id else None),
                         item_name=whereabouts.get("item_name"),
                         borrower_name=loan.get("borrower_name"),
                     )

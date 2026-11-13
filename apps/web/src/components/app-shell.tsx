@@ -12,9 +12,11 @@ import {
   Plus,
   Sparkles,
   Wallet,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { Suspense, useEffect } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -42,9 +44,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useCanWrite } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
+import { AssistantConversationProvider } from "@/lib/assistant-conversation";
+import { useAssistantDocuments } from "@/lib/assistant-documents";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -99,6 +104,10 @@ const mobileRightNav: NavItem[] = [
   { to: "/assistant", label: "Assistant", icon: Sparkles },
 ];
 
+const AssistantPage = lazy(() =>
+  import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
+);
+
 const mobileMoreNav: NavItem[] = [
   { to: "/rooms", label: "Rooms", icon: DoorOpen },
   { to: "/containers", label: "Containers", icon: Boxes },
@@ -132,9 +141,11 @@ function mobileTabClass(active: boolean) {
 export function AppShell() {
   return (
     <SearchSessionProvider>
-      <AddItemsProvider>
-        <AppShellLayout />
-      </AddItemsProvider>
+      <AssistantConversationProvider>
+        <AddItemsProvider>
+          <AppShellLayout />
+        </AddItemsProvider>
+      </AssistantConversationProvider>
     </SearchSessionProvider>
   );
 }
@@ -145,7 +156,11 @@ function AppShellLayout() {
   const canWrite = useCanWrite();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
   const isAssistant = location.pathname === "/assistant";
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const assistantTrigger = useRef<HTMLButtonElement | null>(null);
+  const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const { openAddItems } = useAddItems();
+  const { select: selectDocument } = useAssistantDocuments();
   const moreActive = mobileMoreNav.some((item) =>
     navItemActive(item, location.pathname),
   );
@@ -178,7 +193,19 @@ function AppShellLayout() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    setAssistantOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!assistantOpen) return;
+    const documentMatch = location.pathname.match(/^\/documents\/([^/]+)$/);
+    if (documentMatch?.[1]) selectDocument(documentMatch[1]);
+  }, [assistantOpen, location.pathname, selectDocument]);
+
+  const openAssistant = (trigger: HTMLButtonElement) => {
+    assistantTrigger.current = trigger;
+    setAssistantOpen(true);
+  };
 
   const renderMobileTab = (item: NavItem) => {
     const active = navItemActive(item, location.pathname);
@@ -215,6 +242,14 @@ function AppShellLayout() {
         <HouseholdSwitcher />
 
         <AddItemsButton className="mt-4 w-full justify-start pl-4" />
+        <button
+          type="button"
+          className="nav-link mt-2 w-full"
+          onClick={(event) => openAssistant(event.currentTarget)}
+        >
+          <Sparkles className="size-[1.05rem]" />
+          Open assistant panel
+        </button>
 
         <nav className="mt-6 space-y-5" aria-label="Primary">
           {navGroups.map((group) => (
@@ -311,7 +346,7 @@ function AppShellLayout() {
             className={cn("animate-fade-in", isAssistant && "min-h-0 flex-1")}
           >
             <Suspense fallback={<PageFallback />}>
-              <Outlet />
+              {!(isAssistant && assistantOpen) && <Outlet />}
             </Suspense>
           </div>
         </main>
@@ -339,7 +374,17 @@ function AppShellLayout() {
                   Add
                 </button>
               ) : null}
-              {mobileRightNav.map(renderMobileTab)}
+              {mobileRightNav.map((item) => (
+                <button
+                  key={item.to}
+                  type="button"
+                  className={mobileTabClass(isAssistant)}
+                  onClick={(event) => openAssistant(event.currentTarget)}
+                >
+                  <item.icon className="size-[1.25rem]" strokeWidth={1.7} />
+                  {item.label}
+                </button>
+              ))}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -387,6 +432,44 @@ function AppShellLayout() {
           </nav>
         )}
       </div>
+      <Dialog open={assistantOpen} onOpenChange={setAssistantOpen}>
+        <DialogPortal>
+          <DialogOverlay />
+          <DialogPrimitive.Content
+            aria-describedby={undefined}
+            className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:left-auto lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              assistantHeading.current?.focus();
+            }}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              assistantTrigger.current?.focus();
+            }}
+          >
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+              <DialogTitle ref={assistantHeading} tabIndex={-1} className="text-sm">
+                Assistant
+              </DialogTitle>
+              <div className="flex items-center gap-2">
+                {!isAssistant && (
+                  <Link to="/assistant" className="rounded-lg px-2 py-2 text-xs underline underline-offset-4">
+                    Open full page
+                  </Link>
+                )}
+                <DialogPrimitive.Close className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2" aria-label="Close assistant">
+                  <X className="size-5" />
+                </DialogPrimitive.Close>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+              <Suspense fallback={<PageFallback />}>
+                <AssistantPage embedded />
+              </Suspense>
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPortal>
+      </Dialog>
     </div>
   );
 }

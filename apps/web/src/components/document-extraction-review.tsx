@@ -57,11 +57,12 @@ import {
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
 import { enhancementLabel } from "@/lib/enrichment";
 
-export function DocumentExtractionReview({ document, onOpenChange, manualReviewRequest = 0, captureContext }: {
+export function DocumentExtractionReview({ document, onOpenChange, manualReviewRequest = 0, captureContext, enabled = true }: {
   document: DocumentRecord;
   onOpenChange?: (open: boolean) => void;
   manualReviewRequest?: number;
   captureContext?: DocumentCaptureContext;
+  enabled?: boolean;
 }) {
   const canWrite = useCanWrite();
   const defaultCurrency = useDefaultCurrency();
@@ -70,7 +71,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const extractionQuery = useQuery({
     queryKey: [...queryKeys.document(document.id), "extraction"],
     queryFn: () => api.get<ExtractionReview>(`/documents/${document.id}/extraction`),
-    enabled: document.ocr_status === "succeeded" && Boolean(document.extracted_text),
+    enabled: enabled && document.ocr_status === "succeeded" && Boolean(document.extracted_text),
     refetchInterval: (query) =>
       ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 1000 : false,
   });
@@ -84,8 +85,8 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const [open, setOpen] = React.useState(false);
   const [opened, setOpened] = React.useState(false);
   const reviewId = React.useId();
-  const roomsQuery = useRooms(undefined, opened);
-  const locationsQuery = useLocations(undefined, opened);
+  const roomsQuery = useRooms(undefined, opened && enabled);
+  const locationsQuery = useLocations(undefined, opened && enabled);
   const rooms = roomsQuery.data?.items ?? [];
   const locations = locationsQuery.data?.items ?? [];
   const [drafts, setDrafts] = React.useState<LineDraft[]>([]);

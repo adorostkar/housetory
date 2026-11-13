@@ -169,6 +169,16 @@ async function fixtureApp(page: Page) {
     if (url.pathname === "/api/v1/ai/status") {
       return route.fulfill({ json: aiStatus });
     }
+    if (url.pathname === "/api/v1/search/scopes") {
+      return route.fulfill({ json: { items: [{ id: householdId, name: "Synthetic review household", role: "owner", properties: [] }] } });
+    }
+    if (url.pathname === "/api/v1/documents" && method === "POST") {
+      return route.fulfill({ json: {
+        id: documentId,
+        title: "Synthetic invoice · Nordic Tools",
+        extracted_metadata: {},
+      } });
+    }
     if (url.pathname === "/api/v1/rooms") {
       return route.fulfill({
         json: {
@@ -459,6 +469,7 @@ for (const [operation, label] of [
       for (let index = 0; index < await buttons.count(); index++) {
         await expect(buttons.nth(index)).toBeDisabled();
       }
+
     }
     await expect(page.getByRole("button", { name: "Refresh matches", exact: true })).toBeEnabled();
     expect(operations).toEqual([operation]);
@@ -480,3 +491,42 @@ for (const [operation, label] of [
     expect(pageErrors).toEqual([]);
   });
 }
+
+test("assistant document review preserves manual edits across sheet and full-page views", async ({ page }) => {
+  const { calls, unexpected, pageErrors } = await fixtureApp(page);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: /Document review: Synthetic invoice/ })).toBeVisible();
+  await dialog.getByRole("region", { name: "Document processing" })
+    .getByRole("button", { name: "Use local/manual review now" }).click();
+  const merchant = dialog.getByLabel(/^Merchant/);
+  await expect(merchant).toHaveValue("NORDIC TOOLS");
+  await merchant.fill("Keep this draft");
+  await dialog.getByRole("button", { name: "Close assistant" }).click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
+  await expect(dialog.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
+  await dialog.getByRole("link", { name: "Open full page" }).click();
+  await expect(page.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
+  expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH"))).toEqual([]);
+  expect(unexpected).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("assistant capture uses the existing document upload and review path", async ({ page }) => {
+  const { calls, unexpected, pageErrors } = await fixtureApp(page);
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto("/assistant");
+  await page.getByRole("button", { name: "Add document" }).click();
+  const upload = page.getByRole("dialog", { name: "Add a document" });
+  await upload.locator('input[type="file"]').setInputFiles({
+    name: "invoice.txt", mimeType: "text/plain", buffer: Buffer.from(sourceText),
+  });
+  await upload.getByRole("button", { name: "Add document", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /Document review: Synthetic invoice/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Document processing" })).toBeVisible();
+  expect(calls.filter((call) => call.startsWith("POST"))).toEqual(["POST /api/v1/documents"]);
+  expect(unexpected).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

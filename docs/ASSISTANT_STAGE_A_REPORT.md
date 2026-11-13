@@ -3,9 +3,10 @@
 Branch: `feature/integrated-assistant`. Base: `origin/main` at `85b3ece`.
 The original brief is committed as `f106322`.
 
-Stage A implementation and validation are complete. Nothing has been deployed,
-no pre-existing application data or database has been changed, and Stage B has not started.
-The supplied brief remains the scope; this is not the shared-conversation rework.
+At the Stage A review boundary, implementation and validation were complete:
+nothing had been deployed, no pre-existing application data or database had been
+changed, and Stage B had not started. This report is historical; see the
+[Stage B report](ASSISTANT_STAGE_B_REPORT.md) for subsequent work.
 
 ## Evidence and root causes
 
@@ -297,7 +298,7 @@ application account. No dependencies or database migrations were added.
 | Healthy deployment queue p95 <=2 seconds | Not established by the small queue simulation |
 | Named real-model 1-3-page p95 <=45 seconds | Not verified: no available authorised model |
 | Reported failing real invoice and four-minute incident closed | Not verified: invoice and affected trace not supplied |
-| No deployment, production mutation, main merge or Stage B work | Preserved; feature branch only |
+| No deployment, production mutation, main merge or Stage B work | Preserved at the Stage A review boundary; feature branch only |
 
 ## Limitations and review boundary
 
@@ -325,5 +326,5 @@ tools, not disconnected-browser synchronisation or guaranteed offline speech
 recognition. No new cloud failover, model download, conversation shell, vector
 database, automatic trusted write or Stage B feature is included.
 
-**Stop here for Stage A review.** Later approved stages must continue on
+Stage A stopped for review before Stage B began. Later approved stages continue on
 `feature/integrated-assistant`; no merge to `main` or deployment is authorised.

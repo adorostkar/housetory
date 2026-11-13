@@ -57,6 +57,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
 import {
@@ -150,6 +151,15 @@ export function RoomDetailPage() {
     enabled: canWrite,
     scopeKey: filterSignature,
   });
+  useRegisterAssistantPageContext(
+    selection.selectedItems.length
+      ? selection.selectedItems.map((item) => ({ kind: "item", id: item.id, name: item.name }))
+      : selectedLocation
+        ? [{ kind: "location", id: selectedLocation.id, name: selectedLocation.name }]
+        : room && !roomsQuery.isError
+          ? [{ kind: "room", id: room.id, name: room.name }]
+          : [],
+  );
   const originLabel = selectedLocation
     ? selectedLocation.identifier ?? selectedLocation.name
     : room?.name ?? "room";

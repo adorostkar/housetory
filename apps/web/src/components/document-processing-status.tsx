@@ -21,9 +21,10 @@ const stageLabels: Record<DocumentProcessing["stage"], string> = {
   cancelled: "Processing cancelled",
 };
 
-export function DocumentProcessingStatus({ documentId, onManualReview }: {
+export function DocumentProcessingStatus({ documentId, onManualReview, enabled = true }: {
   documentId: string;
   onManualReview: () => void;
+  enabled?: boolean;
 }) {
   const canWrite = useCanWrite();
   const client = useQueryClient();
@@ -31,6 +32,7 @@ export function DocumentProcessingStatus({ documentId, onManualReview }: {
   const processing = useQuery({
     queryKey: key,
     queryFn: ({ signal }) => api.get<DocumentProcessing>(`/documents/${documentId}/processing`, { signal }),
+    enabled,
     refetchInterval: (query) => query.state.data && !activeStages.has(query.state.data.stage) ? false : 1000,
     retry: false,
   });
