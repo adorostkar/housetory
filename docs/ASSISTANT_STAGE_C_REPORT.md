@@ -4,6 +4,31 @@ Branch: `feature/integrated-assistant`, based on the Stage B correction
 `a658d0e`. This report records the supported journeys and their limits;
 it is not evidence of deployment or real-provider validation.
 
+## Natural-language correction
+
+The configured-provider action path no longer requires a fixed action verb or
+a whitelist of residual words. A structured model result must identify its
+action, literal target and value fragments, negation, additional actions,
+unsupported details and exact remaining framing. The server checks source
+coverage, explicit quantities and dates, and known safety indicators before
+passing a canonical request through existing scoped target resolution and typed
+proposal creation. Event dates and due dates are retained for lending and
+borrowing; return dates are retained. Unsupported schedules, conditions and
+ambiguous or incomplete output request clarification rather than silently
+discarding details. Explicit Apply and existing reauthorization, conflict and
+idempotency checks remain required.
+
+Authenticated HTTP tests with a mocked provider reproduce and cover “Transfer
+Drill to Kitchen” and “Could you move Drill into Kitchen for me?”, plus
+paraphrases, Persian and mixed-language requests, past lending/returns, dates,
+negation, exclusions, conditions and multiple actions. A mocked provider outage
+also verifies deterministic routing remains available and reports the failure.
+The browser routing test is intercepted; no real model has been tested.
+Correction checks: 165 backend tests passed before the final clarification
+refinement; 29 focused tests and a conflicting-date regression passed afterward.
+Three intercepted browser tests, 371 web unit tests, the production web build
+and changed-file Ruff checks also pass.
+
 ## Implemented and tested
 
 The assistant can prepare persisted, typed proposals for item edits, moves,
@@ -44,11 +69,13 @@ the proposal for idempotent retries. Cancellation is not undo.
   read-only search rather than a specific form. A provider failure is reported
   before using the same local routing; search answers explicitly state that
   they did not make changes.
-- Natural action interpretation remains conservative: English, Persian and
-  mixed-language examples work, but arbitrary phrasing and modifiers are not
-  guaranteed. Model-classified actions still require server validation and may
-  ask for more exact wording. Some Persian action messages are translated;
-  review controls, status and error messages remain in English.
+- Model output and semantic classifications are fallible: coverage checks and
+  known safety indicators cannot guarantee that every possible qualifier is
+  recognised. Exact source fragments and safety fields are required, so some
+  providers or valid phrasing may instead produce clarification. Relative dates
+  other than today/yesterday and non-ISO explicit dates need clarification.
+  Some Persian action messages are translated; review controls, status and
+  error messages remain in English.
 - Name, description, brand, model, serial number, quantity and condition are
   editable in item proposals; other item fields require the linked full item
   editor, which is separate from the pending proposal.

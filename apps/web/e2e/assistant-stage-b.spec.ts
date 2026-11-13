@@ -610,11 +610,13 @@ test("AI identifies an action-word lookup as a question", async ({ page }) => {
 test("AI-routed supported action opens review before any apply", async ({ page }) => {
   await fixture(page);
   let applies = 0;
+  const interpreted: string[] = [];
   await page.route("**/api/v1/assistant/actions/intent", (route) =>
     route.fulfill({ json: { intent: "supported_action", form: null } }),
   );
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: {
+  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
+    interpreted.push(route.request().postDataJSON().query);
+    return route.fulfill({ json: {
       handled: true,
       message: "Review the move before applying it.",
       proposal: {
@@ -623,8 +625,8 @@ test("AI-routed supported action opens review before any apply", async ({ page }
         destination: { id: "room-1", name: "Kitchen" },
         changes: {}, before: {},
       },
-    } }),
-  );
+    } });
+  });
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) => {
     applies += 1;
     return route.fulfill({ json: { message: "Moved 1 item(s)." } });
@@ -632,11 +634,12 @@ test("AI-routed supported action opens review before any apply", async ({ page }
   await page.goto("/items");
   await page.getByRole("button", { name: "Open assistant panel" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Could you place Drill in Kitchen?");
+  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Transfer Drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
   const review = dialog.getByLabel("Action review");
   await expect(review.getByText("Drill", { exact: true })).toBeVisible();
   await expect(review.getByText("Kitchen", { exact: true })).toBeVisible();
+  expect(interpreted).toEqual(["Transfer Drill to Kitchen"]);
   expect(applies).toBe(0);
   await review.getByRole("button", { name: "Apply" }).click();
   await expect(review.getByRole("status")).toContainText("Moved");
