@@ -581,6 +581,9 @@ def test_real_document_and_ai_jobs_complete_in_reserved_worker_lanes(
 
             assert _wait_for(document_jobs_completed, timeout=30), log_path.read_text()
             assert SyntheticProvider.requests == 1
+            processing = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+            assert isinstance(processing["timings"]["local_queue_ms"], int)
+            assert processing["timings"]["local_queue_ms"] >= 0
             for name in ("Drill", "Drill"):
                 assert owner_client.post("/api/v1/items", json={"name": name}).status_code == 201
             base = owner_client.get(f"/api/v1/documents/{document_id}/extraction").json()

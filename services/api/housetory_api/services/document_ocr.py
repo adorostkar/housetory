@@ -212,6 +212,7 @@ def enqueue_ocr(
         queue=queue,
     )
     job.payload = {
+        "job_id": str(job.id),
         "document_id": str(document.id),
         "household_id": str(document.household_id),
         "source_generation": document.source_generation,
