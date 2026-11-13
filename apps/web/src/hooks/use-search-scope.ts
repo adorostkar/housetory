@@ -51,7 +51,16 @@ export function scopeLabel(
   return property ? `${household.name} · ${property.name}` : `${household.name} · Selected property (unavailable)`;
 }
 
-export function useSearchScope(syncUrl = true, loadScopes = false) {
+export function useSearchScope(
+  syncUrl = true,
+  loadScopes = false,
+  options: {
+    remember?: boolean;
+    initialSelection?: SearchScopeSelection;
+    onSelectionChange?: (selection: SearchScopeSelection) => void;
+  } = {},
+) {
+  const { remember = true, initialSelection, onSelectionChange } = options;
   const [searchParams, setSearchParams] = useSearchParams();
   const urlHousehold = searchParams.get("household_id") ?? "";
   const urlProperty = searchParams.get("property_id") ?? "";
@@ -59,6 +68,7 @@ export function useSearchScope(syncUrl = true, loadScopes = false) {
     searchParams.has("household_id") || searchParams.has("property_id");
   const initializedUrl = React.useRef(false);
   const [selection, setSelectionState] = React.useState<SearchScopeSelection>(() => {
+    if (initialSelection) return initialSelection;
     const stored = readStoredScope();
     return {
       householdId: hasUrlScope ? urlHousehold : stored.householdId,
@@ -73,7 +83,8 @@ export function useSearchScope(syncUrl = true, loadScopes = false) {
   const setSelection = React.useCallback(
     (next: SearchScopeSelection, options: { syncUrl?: boolean } = {}) => {
       setSelectionState(next);
-      writeStoredScope(next);
+      onSelectionChange?.(next);
+      if (remember) writeStoredScope(next);
       if (!syncUrl || options.syncUrl === false) return;
       setSearchParams(
         (previous) => {
@@ -87,7 +98,7 @@ export function useSearchScope(syncUrl = true, loadScopes = false) {
         { replace: true },
       );
     },
-    [setSearchParams, syncUrl],
+    [setSearchParams, syncUrl, remember, onSelectionChange],
   );
 
   // Keep sibling scope controls and the page using them in sync. Without this,

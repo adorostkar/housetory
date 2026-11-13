@@ -1,7 +1,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 
-import type { SearchScopeSelection } from "@/hooks/use-search-scope";
+import { useSearchScope, type SearchScopeSelection } from "@/hooks/use-search-scope";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { AssistantDocumentsProvider } from "@/lib/assistant-documents";
 import {
@@ -38,6 +38,8 @@ interface SessionSnapshot {
 }
 
 interface AssistantConversationContextValue {
+  selection: SearchScopeSelection | null;
+  setSelection: (selection: SearchScopeSelection) => void;
   conversations: Record<string, Conversation>;
   setDraft: (scope: string, value: Updater<string>) => void;
   reset: (scope: string) => void;
@@ -56,6 +58,7 @@ const AssistantConversationContext =
   React.createContext<AssistantConversationContextValue | null>(null);
 
 function ConversationStore({ children }: { children: React.ReactNode }) {
+  const [selection, setSelection] = React.useState<SearchScopeSelection | null>(null);
   const [conversations, setConversations] = React.useState<Record<string, Conversation>>({});
   const conversationsRef = React.useRef(conversations);
   const controllers = React.useRef(new Set<AbortController>());
@@ -146,7 +149,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
         pending: false,
       }));
-      session.record(value, response);
+      if (session.scopeKey === scope) session.record(value, response);
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       update(scope, (entry) => ({ ...entry, pending: false }));
@@ -155,8 +158,8 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   }, [update]);
 
   const value = React.useMemo(
-    () => ({ conversations, setDraft, reset, ask }),
-    [conversations, setDraft, reset, ask],
+    () => ({ selection, setSelection, conversations, setDraft, reset, ask }),
+    [selection, conversations, setDraft, reset, ask],
   );
   return (
     <AssistantConversationContext.Provider value={value}>
@@ -186,4 +189,18 @@ export function useAssistantConversation(scope: string) {
     ask: (selection: SearchScopeSelection, value: string, regenerate: boolean, session: SessionSnapshot) =>
       store.ask(scope, selection, value, regenerate, session, references),
   };
+}
+
+export function useAssistantScope() {
+  const store = React.useContext(AssistantConversationContext);
+  if (!store) throw new Error("AssistantConversationProvider is required");
+  const scope = useSearchScope(false, true, {
+    remember: false,
+    initialSelection: store.selection ?? undefined,
+    onSelectionChange: store.setSelection,
+  });
+  React.useLayoutEffect(() => {
+    if (!store.selection) store.setSelection(scope.selection);
+  }, [store.selection, store.setSelection, scope.selection]);
+  return scope;
 }

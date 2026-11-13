@@ -4,6 +4,29 @@ Branch: `feature/integrated-assistant`, based on accepted Stage A correction
 `79ea841cd19757778b9f843e1e7251a4c8858161`. No deployment, main merge or
 production-data operation was performed. Stage C has not started.
 
+## Scope continuity correction
+
+The assistant previously recreated its scope from the underlying page URL each
+time the panel opened, making another scope's conversation and draft appear lost.
+The first assistant view still starts from the current page or remembered scope;
+its selection then lives in the authenticated shared store across navigation,
+closing, reopening and full-page handoff. Assistant changes do not rewrite the
+page URL or its remembered search scope. Existing scope validation and server
+authorization remain in effect. Answers and New conversation no longer update
+the page search session when its scope differs from the assistant's.
+
+The household and property browser regressions both failed before the fix and
+pass afterward. They cover separate URL filters, drafts, navigation, full-page
+handoff and a delayed property-scoped response while switching scopes. A
+component regression also covers first opening after navigation, property scope
+revalidation and isolation from another scope's search history. The tests use
+synthetic API responses, not a live provider or production data.
+
+Correction validation: full web suite **371 tests passed** and the production
+web build passed. All **six** Stage B browser tests passed at their configured
+mobile and desktop widths; the two scope regressions also passed after their
+final assertions were added. No backend code was changed in this correction.
+
 ## What changed
 
 The authenticated app provides a desktop assistant panel and a mobile full-screen

@@ -26,12 +26,11 @@ import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useSearchScope } from "@/hooks/use-search-scope";
 import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useCanWrite } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
-import { useAssistantConversation } from "@/lib/assistant-conversation";
+import { useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
@@ -57,7 +56,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const { select: selectDocument } = useAssistantDocuments();
   const { references: pageReferences, setReferences: setPageReferences } = useAssistantPageContext();
   const tooManyReferences = pageReferences.length > 12;
-  const scope = useSearchScope(!embedded, true);
+  const scope = useAssistantScope();
   const { selection, scopesQuery } = scope;
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -141,7 +140,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const newConversation = () => {
     if (pending) return;
     reset();
-    searchSession.reset();
+    if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     autoAskedRef.current = null;
   };
 

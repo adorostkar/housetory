@@ -46,6 +46,119 @@ async function fixture(page: Page) {
   return errors;
 }
 
+test("assistant retains a selected household scope when reopened over scoped page filters", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 844 });
+  await fixture(page);
+  const secondHousehold = "00000000-0000-0000-0000-000000000003";
+  await page.route("**/api/v1/search/scopes**", (route) =>
+    route.fulfill({ json: { items: [
+      { id: household.id, name: "Home A", properties: [] },
+      { id: secondHousehold, name: "Home B", properties: [] },
+    ] } }),
+  );
+  await page.goto(`/search?household_id=${household.id}`);
+  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  const trigger = page.getByRole("button", { name: "Open assistant panel" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  const scope = dialog.getByLabel("Search scope");
+  await expect(scope.getByRole("option", { name: "Home B — all properties" })).toHaveCount(1);
+  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  const pageStoredScope = await page.evaluate(() => localStorage.getItem("housetory-search-scope"));
+  await scope.selectOption(`household:${secondHousehold}`);
+  expect(await page.evaluate(() => localStorage.getItem("housetory-search-scope"))).toBe(pageStoredScope);
+  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await input.fill("Where is my drill?");
+  await dialog.getByRole("button", { name: "Send question" }).click();
+  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
+  await input.fill("Draft for home B");
+  await dialog.getByRole("button", { name: "Close assistant" }).click();
+  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  await trigger.click();
+  await expect(scope).toHaveValue(`household:${secondHousehold}`);
+  await expect(input).toHaveValue("Draft for home B");
+  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close assistant" }).click();
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Items", exact: true }).click();
+  await expect(page).toHaveURL(/\/items/);
+  await trigger.click();
+  await expect(scope).toHaveValue(`household:${secondHousehold}`);
+  await expect(input).toHaveValue("Draft for home B");
+  await dialog.getByRole("link", { name: "Open full page" }).click();
+  await expect(page).toHaveURL(/\/assistant/);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel("Search scope")).toHaveValue(`household:${secondHousehold}`);
+  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toHaveValue("Draft for home B");
+});
+
+test("property scope and in-flight response survive reopening and full-page handoff", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page);
+  const secondHousehold = "00000000-0000-0000-0000-000000000003";
+  const propertyA = "00000000-0000-0000-0000-000000000004";
+  const propertyB = "00000000-0000-0000-0000-000000000005";
+  await page.route("**/api/v1/search/scopes**", (route) =>
+    route.fulfill({ json: { items: [
+      { id: household.id, name: "Home A", properties: [{ id: propertyA, name: "Property A" }] },
+      { id: secondHousehold, name: "Home B", properties: [{ id: propertyB, name: "Property B" }] },
+    ] } }),
+  );
+  let release!: () => void;
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/v1/search/query", async (route) => {
+    await responseGate;
+    await route.fulfill({ json: {
+      query: "Where is it?", mode: "fallback", ai_used: false, ai_attempted: false,
+      direct_match: false, ambiguous: false, needs_clarification: false,
+      answer: "Answer from property B", answer_kind: "fallback", interpretation: "",
+      filters: {}, items: [], quick_results: [], borrowed: [], borrowed_total: 0,
+      total: 0, documents: [], locations: [], references: [], notices: [], facts: {},
+      tool: "fallback", ai_status: { configured: false },
+      context: { scope_key: `${secondHousehold}|${propertyB}`, resolved_items: [], candidate_items: [], loans: [], dialogue_memory: [] },
+      scope_label: "Home B · Property B", households: [], property: null,
+    } });
+  });
+  await page.goto(`/search?household_id=${household.id}&property_id=${propertyA}`);
+  const trigger = page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  const scope = dialog.getByLabel("Search scope");
+  await expect(scope.getByRole("option", { name: "Home B · Property B" })).toHaveCount(1);
+  await scope.selectOption(`household:${secondHousehold}|property:${propertyB}`);
+  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  const request = page.waitForRequest((candidate) =>
+    candidate.url().endsWith("/api/v1/search/query") && candidate.method() === "POST",
+  );
+  await input.fill("Where is it?");
+  await dialog.getByRole("button", { name: "Send question" }).click();
+  expect((await request).postDataJSON()).toMatchObject({ household_id: secondHousehold, property_id: propertyB });
+  await input.fill("Unsent property B draft");
+  await dialog.getByRole("button", { name: "Close assistant" }).click();
+  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  expect(new URL(page.url()).searchParams.get("property_id")).toBe(propertyA);
+  await trigger.click();
+  await expect(scope).toHaveValue(`household:${secondHousehold}|property:${propertyB}`);
+  await expect(input).toHaveValue("Unsent property B draft");
+  await expect(dialog.getByRole("button", { name: "Send question" })).toBeDisabled();
+  await dialog.getByRole("link", { name: "Open full page" }).click();
+  await expect(page).toHaveURL(/\/assistant/);
+  await expect(dialog).toHaveCount(0);
+  const fullScope = page.getByLabel("Search scope");
+  await expect(fullScope).toHaveValue(`household:${secondHousehold}|property:${propertyB}`);
+  await fullScope.selectOption(`household:${household.id}|property:${propertyA}`);
+  const response = page.waitForResponse((candidate) =>
+    candidate.url().endsWith("/api/v1/search/query") && candidate.request().method() === "POST",
+  );
+  release();
+  await (await response).finished();
+  await expect(page.getByText("Answer from property B")).toHaveCount(0);
+  await fullScope.selectOption(`household:${secondHousehold}|property:${propertyB}`);
+  await expect(page.getByText("Answer from property B")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toHaveValue("Unsent property B draft");
+  await fullScope.selectOption(`household:${household.id}|property:${propertyA}`);
+  await expect(page.getByText("Answer from property B")).toHaveCount(0);
+});
+
 for (const width of [390, 1440]) {
   test(`assistant continuity and focus at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });

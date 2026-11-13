@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
 import { api } from "@/lib/api";
-import { SearchSessionProvider } from "@/lib/search-session";
+import { SearchSessionProvider, useSearchSession } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import type { AiStatus, ItemSummary, SearchQueryResponse } from "@/lib/types";
@@ -405,6 +405,127 @@ describe("AssistantPage", () => {
       ],
       context: firstAnswer.context,
     }));
+  });
+
+  it("does not record an assistant answer into a different page search scope", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) {
+        return { items: [
+          { id: "house-1", name: "Home", properties: [] },
+          { id: "house-2", name: "Cabin", properties: [] },
+        ] };
+      }
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    function SearchSessionProbe() {
+      const session = useSearchSession();
+      return <>
+        <button onClick={() => session.record("page A lookup", firstAnswer)}>Record page search</button>
+        <output aria-label="Page search history">{session.turns.map((turn) => turn.content).join(" / ")}</output>
+      </>;
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/search?household_id=house-1"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><SearchSessionProbe /><AssistantPage embedded /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("option", { name: "Cabin — all properties" });
+    await user.click(screen.getByRole("button", { name: "Record page search" }));
+    const pageHistory = screen.getByLabelText("Page search history").textContent;
+    expect(pageHistory).toContain("page A lookup");
+    await user.selectOptions(screen.getByLabelText("Search scope"), "household:house-2");
+    await user.type(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "where is my heavy drill");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await screen.findByText(/Alex has 1 of your 2 units/, { selector: "p" });
+    expect(screen.getByLabelText("Page search history").textContent).toBe(pageHistory);
+    await user.click(screen.getByRole("button", { name: "New conversation" }));
+    expect(screen.getByLabelText("Page search history").textContent).toBe(pageHistory);
+  });
+
+  it("initializes scope from the current page when first opened after navigation", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) {
+        return { items: [{ id: "house-1", name: "Home", properties: [] }] };
+      }
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    function OpenAfterNavigation() {
+      const navigate = useNavigate();
+      const [open, setOpen] = React.useState(false);
+      return <>
+        <button onClick={() => navigate("/search?household_id=house-1")}>Navigate</button>
+        <button onClick={() => setOpen(true)}>Open assistant</button>
+        {open && <AssistantPage embedded />}
+      </>;
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/items"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><OpenAfterNavigation /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Navigate" }));
+    await user.click(screen.getByRole("button", { name: "Open assistant" }));
+    await screen.findByRole("option", { name: "Home — all properties" });
+    expect(screen.getByLabelText("Search scope")).toHaveValue("household:house-1");
+  });
+
+  it("revalidates a retained property scope when available scopes change", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) {
+        return { items: [{ id: "house-1", name: "Home", properties: [{ id: "property-1", name: "Cabin" }] }] };
+      }
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/search?household_id=house-1&property_id=property-1"]}>
+          <SearchSessionProvider>
+            <AssistantConversationProvider>
+              <AddItemsProvider><AssistantPage embedded /></AddItemsProvider>
+            </AssistantConversationProvider>
+          </SearchSessionProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const scope = await screen.findByLabelText("Search scope");
+    await screen.findByRole("option", { name: "Home · Cabin" });
+    expect(scope).toHaveValue("household:house-1|property:property-1");
+    act(() => {
+      client.setQueryData(["search", "scopes"], {
+        items: [{ id: "house-1", name: "Home", properties: [] }],
+      });
+    });
+    await waitFor(() => expect(scope).toHaveValue("household:house-1"));
+    await userEvent.type(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "where is my heavy drill");
+    await userEvent.click(screen.getByRole("button", { name: "Send question" }));
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).toEqual(expect.objectContaining({ household_id: "house-1" }));
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).not.toHaveProperty("property_id");
   });
 
   it("keeps the question editable after a network failure", async () => {
