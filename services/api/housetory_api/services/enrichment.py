@@ -23,6 +23,7 @@ from . import ai
 from .ai_runtime import AiRuntimeConfig
 
 TASK = "ai.enrich"
+DOCUMENT_AI_QUEUE = "ai-documents"
 logger = logging.getLogger("housetory.enrichment")
 
 
@@ -147,7 +148,37 @@ def cancel_enhancement(db: Session, source: Document | ImportBatch) -> None:
     state = _metadata(source).get("enhancement") or {}
     if state.get("status") not in {"queued", "running", "ready"}:
         raise ApiError(409, "enhancement_not_active", "No active suggestions to cancel.")
+    if isinstance(source, Document):
+        processing = _metadata(source).get("processing") or {}
+        if processing.get("stage") in {"waiting", "reading", "interpreting"}:
+            from .document_processing import cancel_processing
+
+            cancel_processing(db, source)
+            return
     _write(source, {**state, "status": "skipped", "reason": "cancelled"})
+    if isinstance(source, Document):
+        metadata = _metadata(source)
+        refinements = dict(metadata.get("extraction_refinements") or {})
+        before = set(state.get("refinement_versions_before") or [])
+        remove = set(refinements) - before
+        if not before:
+            remove = {
+                version
+                for version, refinement in refinements.items()
+                if refinement.get("source_version") == state.get("version")
+            }
+        for version in remove:
+            refinements.pop(version, None)
+        if refinements:
+            metadata["extraction_refinements"] = refinements
+        else:
+            metadata.pop("extraction_refinements", None)
+        if remove:
+            invalidated = list(metadata.get("cancelled_refinement_versions") or [])
+            metadata["cancelled_refinement_versions"] = list(
+                dict.fromkeys([*invalidated, *sorted(remove)])
+            )[-50:]
+        source.extracted_metadata = metadata
     job = db.get(Job, uuid.UUID(state["job_id"])) if state.get("job_id") else None
     if job is not None and job.status == "queued":
         job.status = "cancelled"
@@ -161,6 +192,8 @@ def schedule_enhancement(
     *,
     kind: str,
     inputs: dict | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    operation: str = "interpret",
 ) -> None:
     if isinstance(source, ImportBatch) and inputs is not None:
         source.metadata_json = {
@@ -185,6 +218,12 @@ def schedule_enhancement(
         "ai_attempted": False,
         "ai_succeeded": False,
     }
+    processing = _metadata(source).get("processing") if isinstance(source, Document) else None
+    if isinstance(source, Document):
+        state["operation"] = operation
+        state["refinement_versions_before"] = list(
+            (_metadata(source).get("extraction_refinements") or {}).keys()
+        )
     if config.configured:
         if config.mode == "cloud" and not config.cloud_consent:
             state["reason"] = "consent_required"
@@ -194,7 +233,7 @@ def schedule_enhancement(
                 db,
                 TASK,
                 {},
-                queue="ai",
+                queue=DOCUMENT_AI_QUEUE if isinstance(source, Document) else "ai",
                 commit=False,
                 max_attempts=1,
             )
@@ -208,11 +247,26 @@ def schedule_enhancement(
                 "inputs": inputs or {},
                 "job_id": str(job.id),
             }
+            if isinstance(source, Document) and processing:
+                job.payload.update(
+                    household_id=str(source.household_id),
+                    actor_user_id=str(actor_user_id) if actor_user_id else None,
+                    correlation_id=processing.get("correlation_id"),
+                    deadline_at=processing.get("deadline_at"),
+                    mode=processing.get("mode", "interactive"),
+                    source_generation=processing.get("source_generation"),
+                    operation=operation,
+                )
             state.update(status="queued", reason=None, version=version, job_id=str(job.id))
     _write(source, state)
 
 
-def retry_enhancement(db: Session, source: Document | ImportBatch) -> None:
+def retry_enhancement(
+    db: Session,
+    source: Document | ImportBatch,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
     source = _lock_source(db, source)
     state = enhancement_state(db, source) or {}
     if state.get("status") in {"queued", "running", "accepted"}:
@@ -237,6 +291,7 @@ def retry_enhancement(db: Session, source: Document | ImportBatch) -> None:
         source,
         kind="document" if isinstance(source, Document) else "import",
         inputs=inputs,
+        actor_user_id=actor_user_id,
     )
     db.commit()
 
@@ -255,6 +310,19 @@ def _load(db: Session, payload: dict, *, lock: bool = False):
 
 
 def _guard(db: Session, source, payload: dict) -> str | None:
+    if isinstance(source, Document) and payload.get("correlation_id"):
+        processing = _metadata(source).get("processing") or {}
+        if (
+            processing.get("correlation_id") != payload["correlation_id"]
+            or processing.get("stage") == "cancelled"
+        ):
+            return "superseded"
+    if (
+        isinstance(source, Document)
+        and payload.get("source_generation") is not None
+        and source.source_generation != payload["source_generation"]
+    ):
+        return "source_changed"
     if source_version(db, source) != payload["version"]:
         return "source_changed"
     config = ai.config_for(db, source.household_id, _task(source))
@@ -375,6 +443,38 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
     return changed
 
 
+def _document_match_proposal(db: Session, source: Document) -> dict:
+    from ..schemas.extraction import ExtractionRefinementOut
+    from .document_extraction import extraction_review
+    from .document_matching import match_lines
+    from .document_refinement import _match_inputs
+
+    review = extraction_review(db, source)
+    inputs = _match_inputs(review.fields, review.lines)
+    household_id = source.household_id
+    db.commit()
+    matches, status, ai_used, warnings = match_lines(db, household_id, inputs, use_ai=True)
+    if any(warning.startswith("AI ranking failed") for warning in warnings):
+        raise ai.AiUnavailable(
+            "Document ranking did not complete.",
+            code=ai.last_request_error_code() or "invalid_output",
+        )
+    return ExtractionRefinementOut(
+        document_id=review.document_id,
+        base_version=review.version,
+        version=review.version,
+        source_artifact=review.source_artifact,
+        generated_at=datetime.now(UTC),
+        fields=review.fields,
+        lines=review.lines,
+        warnings=[*review.warnings, *warnings],
+        financial_validation=review.financial_validation,
+        matches=matches,
+        ai_status=status,
+        ai_used=ai_used,
+    ).model_dump(mode="json")
+
+
 def run_enhancement(payload: dict) -> dict:
     started = time.monotonic()
     with SessionLocal() as db:
@@ -384,6 +484,15 @@ def run_enhancement(payload: dict) -> dict:
         state = _metadata(source).get("enhancement") or {}
         if state.get("job_id") != payload["job_id"] or state.get("status") != "queued":
             return {"status": "skipped", "reason": "superseded"}
+        processing = _metadata(source).get("processing") if isinstance(source, Document) else None
+        correlation_id = payload.get("correlation_id")
+        if (
+            isinstance(source, Document)
+            and processing
+            and correlation_id
+            and processing.get("correlation_id") != correlation_id
+        ):
+            return {"status": "skipped", "reason": "superseded"}
         reason = _guard(db, source, payload)
         state = {**state, "status": "skipped" if reason else "running", "reason": reason}
         _write(source, state)
@@ -391,24 +500,66 @@ def run_enhancement(payload: dict) -> dict:
         db.commit()
         if reason:
             return {"status": "skipped", "reason": reason}
+        if isinstance(source, Document) and processing:
+            from .document_processing import update_processing
+
+            timings = dict(processing.get("timings") or {})
+            job = db.get(Job, uuid.UUID(payload["job_id"]))
+            if job is not None:
+                timings["ai_queue_ms"] = (
+                    max(0, int((job.locked_at - job.created_at).total_seconds() * 1000))
+                    if job.locked_at
+                    else None
+                )
+            update_processing(
+                source,
+                correlation_id=correlation_id,
+                stage="interpreting",
+                reason=None,
+                ai_started_at=datetime.now(UTC).isoformat(),
+                timings=timings,
+            )
         state["ai_attempted"] = True
         _write(source, state)
         db.commit()
         error = None
         result = None
+        provider_ms = None
+        validation_ms = None
+        deadline_at = payload.get("deadline_at")
+        remaining = None
+        if deadline_at:
+            try:
+                deadline = datetime.fromisoformat(deadline_at)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=UTC)
+                remaining = (deadline.astimezone(UTC) - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                remaining = 0
+        if remaining is not None and remaining <= 0:
+            error = "deadline_exceeded"
         try:
-            if isinstance(source, Document):
-                from .document_refinement import refine_extraction
+            if error is None:
+                with ai.bounded_request_deadline(remaining or 90):
+                    try:
+                        if isinstance(source, Document):
+                            if payload.get("operation", "interpret") == "matches":
+                                result = _document_match_proposal(db, source)
+                            else:
+                                from .document_refinement import refine_extraction
 
-                result = refine_extraction(
-                    db,
-                    source.household_id,
-                    source,
-                    config=config,
-                    expected_job_id=payload["job_id"],
-                ).model_dump(mode="json")
-            else:
-                result = _import_proposals(db, source, payload["inputs"], config)
+                                result = refine_extraction(
+                                    db,
+                                    source.household_id,
+                                    source,
+                                    config=config,
+                                    expected_job_id=payload["job_id"],
+                                ).model_dump(mode="json")
+                        else:
+                            result = _import_proposals(db, source, payload["inputs"], config)
+                    finally:
+                        provider_ms = ai.last_request_duration_ms()
+                        validation_ms = ai.last_validation_duration_ms()
         except ai.AiError as exc:
             error = exc.code
         except ApiError as exc:
@@ -422,6 +573,20 @@ def run_enhancement(payload: dict) -> dict:
         current = _metadata(source).get("enhancement") or {}
         if current.get("job_id") != payload["job_id"] or current.get("status") != "running":
             return {"status": "skipped", "reason": "superseded"}
+        if isinstance(source, Document) and isinstance(result, dict):
+            version = result.get("version")
+            metadata = _metadata(source)
+            invalidated_versions = set(metadata.get("cancelled_refinement_versions") or [])
+            if version in invalidated_versions:
+                refinements = dict(metadata.get("extraction_refinements") or {})
+                refinements.pop(version, None)
+                if refinements:
+                    metadata["extraction_refinements"] = refinements
+                else:
+                    metadata.pop("extraction_refinements", None)
+                source.extracted_metadata = metadata
+                error = "refinement_version_invalidated"
+                result = None
         reason = _guard(db, source, payload)
         state = {
             **current,
@@ -449,6 +614,40 @@ def run_enhancement(payload: dict) -> dict:
         ):
             state["proposal" if isinstance(source, Document) else "proposals"] = result
         _write(source, state)
+        if isinstance(source, Document) and correlation_id:
+            from .document_processing import update_processing
+
+            processing = _metadata(source).get("processing") or {}
+            timings = dict(processing.get("timings") or {})
+            timings["provider_ms"] = provider_ms
+            timings["validation_ms"] = validation_ms
+            financial = (
+                (result or {}).get("financial_validation") if isinstance(result, dict) else None
+            ) or ((_metadata(source).get("extraction") or {}).get("financial_validation") or {})
+            needs_attention = financial.get("status") in {
+                "needs_attention",
+                "insufficient_evidence",
+            }
+            terminal_stage = "needs_attention" if reason or error or needs_attention else "ready"
+            reason_code = (
+                reason
+                or error
+                or (
+                    "financial_review_needed"
+                    if needs_attention
+                    else "no_changes"
+                    if state["reason"] == "no_changes"
+                    else None
+                )
+            )
+            update_processing(
+                source,
+                correlation_id=correlation_id,
+                stage=terminal_stage,
+                reason=reason_code,
+                can_retry=bool(error),
+                timings=timings,
+            )
         db.commit()
         logger.info(
             "Enhancement kind=%s provider=%s status=%s reason=%s duration_ms=%d",

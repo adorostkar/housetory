@@ -222,6 +222,16 @@ def apply_extraction(
     base_version = str(base_extraction.get("version"))
     extraction = base_extraction
     if payload.extraction_version != base_version:
+        enhancement = metadata.get("enhancement") or {}
+        if enhancement.get("reason") == "cancelled" or payload.extraction_version in (
+            metadata.get("cancelled_refinement_versions") or []
+        ):
+            raise ApiError(
+                409,
+                "extraction_cancelled",
+                "These AI suggestions were cancelled. Review the local extraction or "
+                "request a new interpretation.",
+            )
         refinements = metadata.get("extraction_refinements")
         refinement = (
             refinements.get(payload.extraction_version) if isinstance(refinements, dict) else None
@@ -280,6 +290,22 @@ def apply_extraction(
         raise ApiError(422, "purchase_required", "Purchase details are required.")
     if payload.purchase_action == "existing" and payload.purchase_id is None:
         raise ApiError(422, "purchase_required", "Choose the existing purchase to update.")
+    if payload.purchase_action != "none":
+        source_amounts = [(extraction.get("fields") or {}).get("total_cents")]
+        for decision in payload.lines:
+            line = lines.get(decision.line_id)
+            if decision.action != "skip" and line is not None:
+                source_amounts.extend(
+                    line.get(field)
+                    for field in ("quantity", "unit_price_cents", "line_total_cents")
+                )
+        if any(isinstance(amount, (int, float)) and amount < 0 for amount in source_amounts):
+            raise ApiError(
+                422,
+                "credit_purchase_unsupported",
+                "Credit and refund amounts are retained as evidence, but cannot create or "
+                "update an ordinary purchase. Keep the document or link items without a purchase.",
+            )
 
     existing_decisions = [
         decision

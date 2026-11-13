@@ -19,6 +19,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { DOCUMENT_FILE_ACCEPT, documentFileError, documentUploadFile } from "@/lib/document-files";
 import { DOCUMENT_TYPE_OPTIONS } from "@/lib/labels";
 import { useInvalidateInventory } from "@/lib/queries";
 import type { DocumentRecord, DocumentType } from "@/lib/types";
@@ -40,6 +41,7 @@ export function DocumentUploadDialog({
 }) {
   const invalidate = useInvalidateInventory();
   const [file, setFile] = React.useState<File | null>(null);
+  const [fileError, setFileError] = React.useState<string | null>(null);
   const [title, setTitle] = React.useState("");
   const [documentType, setDocumentType] = React.useState<DocumentType>(defaultType);
   const [merchant, setMerchant] = React.useState("");
@@ -62,6 +64,8 @@ export function DocumentUploadDialog({
   const upload = useMutation({
     mutationFn: () => {
       if (!file) throw new Error("Choose a file first.");
+      const error = documentFileError(file);
+      if (error) throw new Error(error);
       const formData = new FormData();
       formData.append("file", file);
       if (title.trim()) formData.append("title", title.trim());
@@ -86,6 +90,7 @@ export function DocumentUploadDialog({
         toast.success(manualMode ? "Manual added to the library" : "Document added to the library");
       }
       setFile(null);
+      setFileError(null);
       setTitle("");
       setMerchant("");
       setDocumentDate("");
@@ -99,6 +104,7 @@ export function DocumentUploadDialog({
   const reset = () => {
     if (upload.isPending) return;
     setFile(null);
+    setFileError(null);
     setTitle("");
     setMerchant("");
     setDocumentDate("");
@@ -134,6 +140,7 @@ export function DocumentUploadDialog({
           }}
         >
           {upload.error && <FormError message={getApiErrorMessage(upload.error)} />}
+          {fileError && <FormError message={fileError} />}
 
           <Field
             label={manualMode ? "Manual file" : "File"}
@@ -165,12 +172,18 @@ export function DocumentUploadDialog({
               id="document-file"
               type="file"
               required
-              accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,text/plain"
+              accept={DOCUMENT_FILE_ACCEPT}
               className="sr-only"
               disabled={upload.isPending}
               onChange={(event) => {
                 const selected = event.target.files?.[0] ?? null;
-                setFile(selected);
+                const error = selected ? documentFileError(selected) : null;
+                setFileError(error);
+                if (error) {
+                  event.target.value = "";
+                  return;
+                }
+                setFile(selected ? documentUploadFile(selected) : null);
                 if (selected && !title.trim()) {
                   setTitle(selected.name.replace(/\.[^.]+$/, ""));
                 }

@@ -1,0 +1,98 @@
+[
+  {
+    "name": "decimal-comma-quantity-unit-and-line-total",
+    "text": "NORDIC TOOLS\nDate: 13/11/2026\nDrill 2 x 1.234,50 2.469,00\nSubtotal 2.469,00\nTax 617,25\nTotal SEK 3.086,25\n",
+    "expected": {
+      "currency": "SEK",
+      "total_cents": 308625,
+      "subtotal_cents": 246900,
+      "product_lines": [
+        {
+          "description": "Drill",
+          "quantity": 2,
+          "unit_price_cents": 123450,
+          "line_total_cents": 246900
+        }
+      ],
+      "tax_treatment": "exclusive"
+    },
+    "uncertain": false
+  },
+  {
+    "name": "tax-inclusive-total",
+    "text": "EXAMPLE SHOP\nWidget 1 x 34.00\nTax included 3.00\nSubtotal 34.00\nTotal 34.00\n",
+    "expected": {
+      "total_cents": 3400,
+      "subtotal_cents": 3400,
+      "tax_cents": 300,
+      "product_lines": [
+        {
+          "description": "Widget",
+          "quantity": 1,
+          "unit_price_cents": 3400,
+          "line_total_cents": 3400
+        }
+      ],
+      "tax_treatment": "inclusive"
+    },
+    "uncertain": false
+  },
+  {
+    "name": "discount-shipping-and-exclusive-tax",
+    "text": "EXAMPLE SHOP\nTool 2 x 20.00 40.00\nDiscount -5.00\nShipping 2.00\nSubtotal 35.00\nTax 3.00\nTotal 40.00\n",
+    "expected": {
+      "total_cents": 4000,
+      "subtotal_cents": 3500,
+      "discount_cents": 500,
+      "shipping_cents": 200,
+      "tax_cents": 300,
+      "tax_treatment": "exclusive"
+    },
+    "uncertain": false
+  },
+  {
+    "name": "ambiguous-date-and-dollar-currency",
+    "text": "EXAMPLE SHOP\nDate: 03/04/2026\nWidget 1 x $10.00\nTotal $10.00\n",
+    "expected": {
+      "total_cents": 1000,
+      "attention_codes": ["ambiguous_date", "ambiguous_currency"]
+    },
+    "uncertain": true
+  },
+  {
+    "name": "credit-note-negative-line",
+    "text": "EXAMPLE SHOP\nReturned drill -10.00\nSubtotal -10.00\nTotal SEK -10.00\n",
+    "expected": {
+      "total_cents": -1000,
+      "subtotal_cents": -1000,
+      "product_lines": [
+        {
+          "description": "Returned drill",
+          "quantity": 1,
+          "unit_price_cents": -1000,
+          "line_total_cents": -1000
+        }
+      ],
+      "tax_treatment": "unknown"
+    },
+    "uncertain": false
+  },
+  {
+    "name": "repeated-description-distinct-prices",
+    "text": "EXAMPLE SHOP\nWidget 1 x 10.00\nWidget 1 x 14.00\nSubtotal 24.00\nTotal 24.00\n",
+    "expected": {
+      "total_cents": 2400,
+      "attention_codes": ["materially_distinct_repeated_lines"]
+    },
+    "uncertain": true
+  },
+  {
+    "name": "unreadable-amount",
+    "text": "EXAMPLE SHOP\nCable 1 x unreadable\nTotal 20.00\n",
+    "expected": {
+      "total_cents": 2000,
+      "attention_codes": ["unreadable_line_amount", "product_total_unavailable"]
+    },
+    "uncertain": true
+  }
+]

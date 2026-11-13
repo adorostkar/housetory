@@ -9,11 +9,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import String, cast, or_, select, update
+from sqlalchemy import String, case, cast, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .domain import JobStatus
-from .models import ImportBatch, Job, WorkerHeartbeat
+from .models import Document, ImportBatch, Job, WorkerHeartbeat
 
 AI_TASKS = frozenset(
     {
@@ -28,6 +28,8 @@ AI_TASKS = frozenset(
         "item_images.batch",
     }
 )
+DOCUMENT_LOCAL_QUEUE = "documents"
+DOCUMENT_AI_QUEUE = "ai-documents"
 
 
 def enqueue(
@@ -79,14 +81,102 @@ def route_legacy_ai_jobs(db: Session) -> None:
             ),
             Job.status == JobStatus.QUEUED.value,
         )
-        .values(queue="ai")
+        .values(
+            queue=case(
+                (
+                    (Job.task == "ai.enrich") & (Job.payload["kind"].astext == "document"),
+                    DOCUMENT_AI_QUEUE,
+                ),
+                else_="ai",
+            )
+        )
     )
+    from .services.document_processing import initialize_processing
+
+    legacy_documents = db.scalars(
+        select(Job)
+        .where(
+            Job.queue == "default",
+            Job.task == "documents.ocr",
+            Job.status == JobStatus.QUEUED.value,
+        )
+        .with_for_update(skip_locked=True)
+    ).all()
+    for job in legacy_documents:
+        payload = dict(job.payload or {})
+        try:
+            document_id = uuid.UUID(str(payload["document_id"]))
+        except (KeyError, ValueError):
+            continue
+        document = db.get(Document, document_id)
+        if document is None:
+            job.queue = DOCUMENT_LOCAL_QUEUE
+            continue
+        state = (document.extracted_metadata or {}).get("processing") or {}
+        if not state or not state.get("correlation_id"):
+            state = initialize_processing(document, page_count=1)
+        job.queue = state.get("local_queue", DOCUMENT_LOCAL_QUEUE)
+        job.payload = {
+            **payload,
+            "job_id": str(job.id),
+            "household_id": str(document.household_id),
+            "actor_user_id": payload.get("actor_user_id"),
+            "correlation_id": state["correlation_id"],
+            "deadline_at": state.get("deadline_at"),
+            "mode": state.get("mode", "interactive"),
+        }
+        if state.get("mode") != "background":
+            job.max_attempts = 1
+
+    legacy_ai_documents = db.scalars(
+        select(Job)
+        .where(
+            Job.queue == DOCUMENT_AI_QUEUE,
+            Job.task == "ai.enrich",
+            Job.payload["kind"].astext == "document",
+            Job.status == JobStatus.QUEUED.value,
+            Job.payload["correlation_id"].astext.is_(None),
+        )
+        .with_for_update(skip_locked=True)
+    ).all()
+    for job in legacy_ai_documents:
+        payload = dict(job.payload or {})
+        try:
+            document_id = uuid.UUID(str(payload["source_id"]))
+        except (KeyError, ValueError):
+            continue
+        document = db.get(Document, document_id)
+        if document is None:
+            continue
+        state = (document.extracted_metadata or {}).get("processing") or {}
+        if not state or not state.get("correlation_id"):
+            state = initialize_processing(document, page_count=1)
+        if state.get("stage") in {"waiting", "reading"}:
+            state.update(
+                stage="interpreting",
+                updated_at=datetime.now(UTC).isoformat(),
+            )
+            metadata = dict(document.extracted_metadata or {})
+            metadata["processing"] = state
+            document.extracted_metadata = metadata
+        job.payload = {
+            **payload,
+            "household_id": str(document.household_id),
+            "actor_user_id": payload.get("actor_user_id"),
+            "correlation_id": state["correlation_id"],
+            "deadline_at": state.get("deadline_at"),
+            "mode": state.get("mode", "interactive"),
+            "source_generation": document.source_generation,
+        }
+        if state.get("mode") != "background":
+            job.max_attempts = 1
     db.commit()
 
 
 def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | None:
     """Claim the highest-priority runnable job, skipping rows locked by peers."""
     now = datetime.now(UTC)
+    fair_queue = queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
     job = db.scalar(
         select(Job)
         .where(
@@ -94,7 +184,12 @@ def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | N
             Job.status == JobStatus.QUEUED.value,
             Job.run_at <= now,
         )
-        .order_by(Job.priority.desc(), Job.run_at.asc(), Job.created_at.asc())
+        .order_by(
+            Job.priority.desc(),
+            *([Job.payload["last_served_at"].astext.asc().nulls_first()] if fair_queue else []),
+            Job.run_at.asc(),
+            Job.created_at.asc(),
+        )
         .limit(1)
         .with_for_update(skip_locked=True)
     )
@@ -105,6 +200,28 @@ def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | N
     job.attempts += 1
     job.locked_by = worker_id
     job.locked_at = now
+    if fair_queue:
+        actor_key = (
+            (job.payload or {}).get("actor_user_id")
+            or (job.payload or {}).get("household_id")
+            or "__unattributed__"
+        )
+        queued_jobs = db.scalars(
+            select(Job).where(
+                Job.queue == queue,
+                Job.status == JobStatus.QUEUED.value,
+                func.coalesce(
+                    Job.payload["actor_user_id"].astext,
+                    Job.payload["household_id"].astext,
+                    "__unattributed__",
+                )
+                == actor_key,
+            )
+        ).all()
+        served_at = now.isoformat()
+        job.payload = {**(job.payload or {}), "last_served_at": served_at}
+        for queued in queued_jobs:
+            queued.payload = {**(queued.payload or {}), "last_served_at": served_at}
     db.commit()
     return job
 
@@ -116,7 +233,7 @@ def mark_succeeded(
     result: dict[str, Any] | None = None,
 ) -> None:
     job = db.get(Job, job_id)
-    if job is None:
+    if job is None or job.status == JobStatus.CANCELLED.value:
         return
     now = datetime.now(UTC)
     if result is not None:
@@ -131,13 +248,17 @@ def mark_succeeded(
 
 def mark_failed(db: Session, job_id: uuid.UUID, error: str) -> None:
     job = db.get(Job, job_id)
-    if job is None:
+    if job is None or job.status == JobStatus.CANCELLED.value:
         return
     now = datetime.now(UTC)
     job.last_error = error[:4000]
     job.locked_by = None
     job.locked_at = None
-    if job.attempts < job.max_attempts:
+    interactive_document = (
+        job.queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
+        and (job.payload or {}).get("mode") != "background"
+    )
+    if job.attempts < job.max_attempts and not interactive_document:
         job.status = JobStatus.QUEUED.value
         job.finished_at = None
         delay_seconds = min(2**job.attempts, 300)
@@ -167,13 +288,25 @@ def requeue_stale_jobs(db: Session, *, older_than_minutes: int = 15) -> int:
     for job in jobs:
         job.locked_by = None
         job.locked_at = None
-        if job.attempts < job.max_attempts:
+        interactive_document = (
+            job.queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
+            and (job.payload or {}).get("mode") != "background"
+        )
+        if job.attempts < job.max_attempts and not interactive_document:
             job.status = JobStatus.QUEUED.value
             job.last_error = "Worker did not finish this job; it was requeued."
         else:
             job.status = JobStatus.FAILED.value
             job.finished_at = datetime.now(UTC)
             job.last_error = "Worker did not finish this job and attempts were exhausted."
+            if interactive_document:
+                from .services.document_processing import fail_processing_for_job
+
+                fail_processing_for_job(
+                    db,
+                    job,
+                    reason="worker_interrupted",
+                )
     db.commit()
     return len(jobs)
 

@@ -1,7 +1,9 @@
+import time
 import uuid
 from typing import Any
 
 from fastapi import UploadFile
+from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -10,6 +12,7 @@ from ..domain import DocumentType, OcrStatus
 from ..models import Document, DocumentScan, Item
 from . import storage
 from .document_ocr import enqueue_ocr
+from .document_processing import initialize_processing, update_processing
 
 
 def document_load_options() -> list:
@@ -58,6 +61,7 @@ def create_document(
     merchant: str | None,
     document_date,
     notes: str | None,
+    actor_user_id: uuid.UUID | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Document:  # noqa: ANN001
     clean_title = (title or "").strip()
@@ -67,7 +71,10 @@ def create_document(
         clean_title = (upload.filename or "Document").rsplit(".", 1)[0][:200] or "Document"
 
     items = resolve_document_items(db, household_id, item_ids)
+    upload_started = time.monotonic()
     stored = storage.store_document(household_id, upload)
+    upload_ms = max(0, round((time.monotonic() - upload_started) * 1000))
+    preprocess_started = time.monotonic()
     content_sha256 = storage.file_sha256(stored.original_storage_key)
     extracted_metadata = dict(metadata or {})
     duplicates = list(
@@ -107,7 +114,27 @@ def create_document(
     db.add(document)
     try:
         db.flush()
-        enqueue_ocr(db, document, commit=False)
+        page_count = 1
+        if document.original_content_type == "application/pdf":
+            page_count = len(
+                PdfReader(str(storage.resolve_key(document.original_storage_key))).pages
+            )
+        processing = initialize_processing(
+            document,
+            page_count=page_count,
+        )
+        timings = dict(processing["timings"])
+        timings.update(
+            upload_ms=upload_ms,
+            local_preprocess_ms=max(0, round((time.monotonic() - preprocess_started) * 1000)),
+        )
+        update_processing(document, timings=timings)
+        enqueue_ocr(
+            db,
+            document,
+            commit=False,
+            actor_user_id=actor_user_id,
+        )
         db.commit()
     except Exception:
         db.rollback()

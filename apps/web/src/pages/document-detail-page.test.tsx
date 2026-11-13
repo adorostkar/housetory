@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentDetailPage } from "@/pages/document-detail-page";
+import { api } from "@/lib/api";
 import type { DocumentRecord, DocumentType } from "@/lib/types";
 
 const state = vi.hoisted(() => ({
@@ -16,6 +17,11 @@ const state = vi.hoisted(() => ({
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+
+vi.mock("@/lib/api", async (original) => {
+  const actual = await original<typeof import("@/lib/api")>();
+  return { ...actual, api: { ...actual.api, get: vi.fn() } };
+});
 
 vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
@@ -102,9 +108,22 @@ function renderPage(documentType: DocumentType, overrides: Partial<DocumentRecor
 beforeEach(() => {
   state.relations.mockClear();
   state.canWrite = true;
+  vi.mocked(api.get).mockResolvedValue({
+    correlation_id: "attempt-1", stage: "ready", started_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:01Z", elapsed_ms: 1000, local_available: true,
+    can_cancel: false, can_retry: true, worker_available: true, reason: null,
+    timings: { local_queue_ms: 1, local_processing_ms: 2, ai_queue_ms: null,
+      provider_ms: null, validation_ms: null },
+  });
 });
 
 describe("DocumentDetailPage extraction review", () => {
+  it("takes manual review to the review section without focusing an editable field", async () => {
+    renderPage("invoice");
+    await userEvent.click(await screen.findByRole("button", { name: "Use local/manual review now" }));
+    expect(screen.getByRole("region", { name: "Extraction review" })).toHaveFocus();
+  });
+
   it("offers image cleanup in place and labels the actual original type, not page count", async () => {
     renderPage("receipt", {
       original_content_type: "image/png",

@@ -1,12 +1,16 @@
 import csv
 import io
+import json
 import uuid
+from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import (
+    Document,
     DocumentExtractionApply,
     Household,
     HouseholdMember,
@@ -559,6 +563,107 @@ Deposit EUR 2.00
     assert "currency" in review["fields"]["uncertain_fields"]
 
 
+def test_financial_extraction_preserves_decimal_comma_credit_and_unreadable_lines(owner_client):
+    fixtures = json.loads((Path(__file__).parent / "fixtures" / "invoice_stage_a.json").read_text())
+    for fixture in fixtures:
+        document = upload_document(owner_client, text=fixture["text"], document_type="invoice")
+        review = ocr_document(owner_client, document["id"], text=fixture["text"]).json()
+        expected = fixture["expected"]
+        fields = review["fields"]
+        validation = review["financial_validation"]
+
+        for field in (
+            "currency",
+            "total_cents",
+            "subtotal_cents",
+            "discount_cents",
+            "shipping_cents",
+            "tax_cents",
+        ):
+            if field in expected:
+                assert fields[field] == expected[field], fixture["name"]
+        if "tax_treatment" in expected:
+            assert validation["tax_treatment"] == expected["tax_treatment"], fixture["name"]
+        if "product_lines" in expected:
+            products = [line for line in review["lines"] if line["kind"] == "product"]
+            actual = [
+                {
+                    "description": line["description"],
+                    "quantity": line["quantity"],
+                    "unit_price_cents": line["unit_price_cents"],
+                    "line_total_cents": line["line_total_cents"],
+                }
+                for line in products
+            ]
+            assert actual == expected["product_lines"], fixture["name"]
+            assert all(line["evidence"]["text"] in fixture["text"] for line in products)
+        codes = {check["code"] for check in validation["checks"]}
+        assert set(expected.get("attention_codes", [])).issubset(codes), fixture["name"]
+        assert (validation["status"] != "consistent") is fixture["uncertain"], fixture["name"]
+
+
+def test_extraction_maps_source_lines_to_stored_ocr_page_evidence():
+    from housetory_api.services.document_extraction import build_extraction
+
+    page_one = "EXAMPLE SHOP\nWidget 1 x 10.00\n"
+    page_two = "Cable 2 x 5.00 10.00\nTotal 20.00\n"
+    text = (page_one + "\n" + page_two).strip()
+    document = SimpleNamespace(
+        id=uuid.uuid4(),
+        document_type="invoice",
+        title="Invoice",
+        document_date=None,
+    )
+
+    extraction = build_extraction(
+        document,
+        text,
+        {
+            "ocr_pages": [
+                {"page": 1, "text": page_one},
+                {"page": 2, "text": page_two},
+            ]
+        },
+        source_artifact="original",
+    )
+    products = [line for line in extraction["lines"] if line["kind"] == "product"]
+
+    assert [line["evidence"]["page"] for line in products] == [1, 2]
+    assert [line["evidence"]["text"] for line in products] == [
+        "Widget 1 x 10.00",
+        "Cable 2 x 5.00 10.00",
+    ]
+
+
+def test_stale_extraction_records_are_rebuilt_with_current_financial_validation(owner_client):
+    text = "EXAMPLE SHOP\nDate: 03/04/2026\nWidget 1 x $10.00\nTotal $10.00\n"
+    document = upload_document(owner_client, text=text, document_type="invoice")
+    ocr_document(owner_client, document["id"], text=text)
+
+    with SessionLocal() as db:
+        stored = db.get(Document, uuid.UUID(document["id"]))
+        metadata = dict(stored.extracted_metadata)
+        extraction = dict(metadata["extraction"])
+        extraction["extractor_version"] = "old-parser"
+        extraction["financial_validation"] = {"status": "consistent"}
+        metadata["extraction"] = extraction
+        stored.extracted_metadata = metadata
+        db.commit()
+
+    response = owner_client.get(f"/api/v1/documents/{document['id']}/extraction")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert any(
+        check["code"] == "ambiguous_date" for check in body["financial_validation"]["checks"]
+    )
+    assert any(
+        check["code"] == "ambiguous_currency" for check in body["financial_validation"]["checks"]
+    )
+    with SessionLocal() as db:
+        stored = db.get(Document, uuid.UUID(document["id"]))
+        assert stored.extracted_metadata["extraction"]["extractor_version"] == "2026-11-13.1"
+
+
 def _ai_status(**overrides):
     values = {
         "provider": "ollama",
@@ -643,6 +748,11 @@ def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
     assert refinement["fields"]["merchant"] == "Corner Hardware"
     assert refinement["lines"][0]["description"] == "Cordless Drill XPH12"
     assert refinement["lines"][0]["evidence"]["text"].startswith("Cordless Drill")
+    assert "financial_validation" in refinement
+    assert any(
+        check["code"] == "ambiguous_currency"
+        for check in refinement["financial_validation"]["checks"]
+    )
     assert refinement["matches"]
     assert calls
     assert "untrusted" in calls[0][0][0].lower()
@@ -743,6 +853,30 @@ def test_ai_refinement_rejects_malformed_schema(owner_client, monkeypatch, confi
     result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
     assert result.status_code == 422
     assert result.json()["detail"]["code"] == "ai_refinement_failed"
+
+
+def test_ai_refinement_rejects_supported_amounts_with_inconsistent_line_arithmetic(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import document_refinement
+
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    monkeypatch.setattr(document_refinement.ai, "status_for", lambda *args, **kwargs: _ai_status())
+    payload = json.loads(json.dumps(_refinement_payload()))
+    payload["lines"][0]["unit_price_cents"] = 15998
+    payload["lines"][0]["line_total_cents"] = 7999
+    monkeypatch.setattr(
+        document_refinement.ai,
+        "complete_json",
+        lambda *args, **kwargs: payload,
+    )
+
+    response = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "ai_refinement_invalid"
+    assert "quantity × unit price" in response.json()["detail"]["message"]
 
 
 def test_allocations_support_multiple_lines_to_one_item_and_do_not_split_total(owner_client):

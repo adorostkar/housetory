@@ -1,4 +1,5 @@
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -14,7 +15,13 @@ from housetory_api.schemas.extraction import ExtractionApplyRequest
 from housetory_api.services import ai
 from housetory_api.services.document_extraction_apply import apply_extraction
 from housetory_api.services.enrichment import run_enhancement
-from tests.test_document_extraction import _refinement_payload, ocr_document, upload_document
+from tests.test_document_extraction import (
+    _add_member,
+    _headers,
+    _refinement_payload,
+    ocr_document,
+    upload_document,
+)
 from tests.test_hierarchy_imports import process, upload_markdown
 from tests.test_imports import process_import, upload_text_import
 
@@ -22,8 +29,249 @@ from tests.test_imports import process_import, upload_text_import
 def job_payload(detail):
     with SessionLocal() as db:
         job = db.get(Job, detail["enhancement"]["job_id"])
-        assert job.queue == "ai"
+        expected_queue = "ai-documents" if job.payload.get("kind") == "document" else "ai"
+        assert job.queue == expected_queue
         return job.payload
+
+
+@pytest.mark.parametrize("outcome", ["ready", "cancel", "stale", "correlation"])
+def test_review_matching_is_queued_guarded_and_publishes_full_proposal(
+    owner_client, configured_ai, monkeypatch, outcome
+):
+    document = upload_document(owner_client, "Hardware\nDrill 1 x 10.00 10.00\nTotal $10.00")
+    ocr_document(
+        owner_client, document["id"], "Hardware\nDrill 1 x 10.00 10.00\nTotal $10.00"
+    ).json()
+    assert (
+        owner_client.post(f"/api/v1/documents/{document['id']}/processing/cancel").status_code
+        == 200
+    )
+    for name in ("Drill", "Drill"):
+        assert owner_client.post("/api/v1/items", json={"name": name}).status_code == 201
+    base = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    match = next(match for match in base["matches"] if len(match["candidates"]) >= 2)
+    reversed_ids = [candidate["id"] for candidate in reversed(match["candidates"])]
+    calls = []
+
+    def rank(*args, **kwargs):
+        calls.append(True)
+        if outcome == "cancel":
+            response = owner_client.post(f"/api/v1/documents/{document['id']}/processing/cancel")
+            assert response.status_code == 200
+        elif outcome == "stale":
+            with SessionLocal() as db:
+                stored = db.get(Document, document["id"])
+                stored.source_generation += 1
+                db.commit()
+        elif outcome == "correlation":
+            with SessionLocal() as db:
+                stored = db.get(Document, document["id"])
+                metadata = dict(stored.extracted_metadata)
+                metadata["processing"] = {
+                    **metadata["processing"],
+                    "correlation_id": uuid.uuid4().hex,
+                    "stage": "waiting",
+                }
+                stored.extracted_metadata = metadata
+                db.commit()
+        return {"matches": [{"line_id": match["line_id"], "candidate_ids": reversed_ids}]}
+
+    monkeypatch.setattr(ai, "complete_json", rank)
+    url = f"/api/v1/documents/{document['id']}/processing/retry"
+    queued = owner_client.post(url, json={"operation": "matches"})
+    assert queued.status_code == 200, queued.text
+    assert queued.json()["stage"] == "interpreting"
+    assert calls == []
+    duplicate = owner_client.post(url, json={"operation": "matches"})
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["correlation_id"] == queued.json()["correlation_id"]
+    with SessionLocal() as db:
+        jobs = db.scalars(
+            select(Job).where(
+                Job.queue == "ai-documents",
+                Job.payload["correlation_id"].astext == queued.json()["correlation_id"],
+            )
+        ).all()
+        assert len(jobs) == 1
+        assert jobs[0].payload["operation"] == "matches"
+        assert jobs[0].payload["actor_user_id"]
+        payload = jobs[0].payload
+    result = run_enhancement(payload)
+    after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    assert len(calls) == 1
+    if outcome == "ready":
+        assert result["status"] == "ready"
+        proposal = after["suggested_refinement"]
+        assert proposal["fields"] == base["fields"]
+        assert proposal["lines"] == base["lines"]
+        ranked = next(
+            entry for entry in proposal["matches"] if entry["line_id"] == match["line_id"]
+        )
+        assert [candidate["id"] for candidate in ranked["candidates"]] == reversed_ids
+    else:
+        assert result["status"] == "skipped"
+        assert after["suggested_refinement"] is None
+        processing = owner_client.get(f"/api/v1/documents/{document['id']}/processing").json()
+        assert (
+            processing["stage"]
+            == {
+                "cancel": "cancelled",
+                "stale": "needs_attention",
+                "correlation": "waiting",
+            }[outcome]
+        )
+        if outcome == "stale":
+            assert processing["reason"] == "source_changed"
+
+
+def test_ai_validation_timing_measures_validation_not_provider(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import document_refinement
+
+    document = upload_document(owner_client)
+    review = ocr_document(owner_client, document["id"]).json()
+    original = document_refinement._validate_lines
+
+    def slow_validation(*args, **kwargs):
+        time.sleep(0.03)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(document_refinement, "_validate_lines", slow_validation)
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: _refinement_payload())
+    assert run_enhancement(job_payload(review))["status"] == "ready"
+    timings = owner_client.get(f"/api/v1/documents/{document['id']}/processing").json()["timings"]
+    assert timings["provider_ms"] is None
+    assert timings["validation_ms"] >= 25
+
+
+def test_explicit_interpret_is_bounded_deduplicated_and_never_runs_in_request(
+    owner_client, configured_ai, monkeypatch
+):
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    assert (
+        owner_client.post(f"/api/v1/documents/{document['id']}/processing/cancel").status_code
+        == 200
+    )
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(True)
+        return _refinement_payload()
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    url = f"/api/v1/documents/{document['id']}/processing/retry"
+    first = owner_client.post(url, json={"operation": "interpret"})
+    assert first.status_code == 200, first.text
+    assert first.json()["stage"] == "interpreting"
+    assert calls == []
+    same = owner_client.post(url, json={"operation": "interpret"})
+    assert same.json()["correlation_id"] == first.json()["correlation_id"]
+    assert owner_client.post(url, json={"operation": "matches"}).status_code == 409
+    assert owner_client.post(url).status_code == 409
+    new_review = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    payload = job_payload(new_review)
+    assert payload["operation"] == "interpret"
+    assert run_enhancement(payload)["status"] == "ready"
+    assert len(calls) == 1
+    assert owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()[
+        "suggested_refinement"
+    ]
+
+
+@pytest.mark.parametrize("operation", ["interpret", "matches"])
+def test_explicit_review_ai_does_not_dispatch_when_disabled(owner_client, monkeypatch, operation):
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    monkeypatch.setattr(ai, "complete_json", lambda *args, **kwargs: pytest.fail("AI disabled"))
+    response = owner_client.post(
+        f"/api/v1/documents/{document['id']}/processing/retry", json={"operation": operation}
+    )
+    assert response.status_code == 409
+    with SessionLocal() as db:
+        assert not db.scalars(
+            select(Job).where(
+                Job.queue == "ai-documents", Job.payload["source_id"].astext == document["id"]
+            )
+        ).all()
+
+
+def test_bounded_openai_json_mode_does_not_retry_after_http_400(configured_ai, monkeypatch):
+    config = replace(configured_ai, provider="openai", base_url="https://example.invalid")
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise ai.AiUnavailable("Inference provider returned HTTP 400.")
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    monkeypatch.setattr(ai, "_request_json", request)
+    with ai.bounded_request_deadline(10), pytest.raises(ai.AiUnavailable):
+        ai._openai_chat(config, "system", "user", json_mode=True, image_path=None, image_mime=None)
+    assert len(calls) == 1
+    calls.clear()
+    assert (
+        ai._openai_chat(config, "system", "user", json_mode=True, image_path=None, image_mime=None)
+        == "{}"
+    )
+    assert len(calls) == 2
+
+
+def test_queued_ranking_reports_rate_limit_without_retry(owner_client, configured_ai, monkeypatch):
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    assert (
+        owner_client.post(f"/api/v1/documents/{document['id']}/processing/cancel").status_code
+        == 200
+    )
+    calls = []
+
+    def rate_limited(*args, **kwargs):
+        calls.append(True)
+        raise ai.AiUnavailable("synthetic rate limit", code="rate_limited")
+
+    monkeypatch.setattr(ai, "_ollama_chat", rate_limited)
+    response = owner_client.post(
+        f"/api/v1/documents/{document['id']}/processing/retry", json={"operation": "matches"}
+    )
+    assert response.status_code == 200
+    review = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    result = run_enhancement(job_payload(review))
+    assert result == {"status": "failed", "reason": "rate_limited"}
+    assert len(calls) == 1
+    status = owner_client.get(f"/api/v1/documents/{document['id']}/processing").json()
+    assert status["stage"] == "needs_attention"
+    assert status["reason"] == "rate_limited"
+    assert status["can_retry"] is True
+    assert status["timings"]["validation_ms"] is None
+
+
+def test_queued_ranking_cancel_prevents_dispatch_and_viewer_cannot_enqueue(
+    owner_client, anon_client, configured_ai, monkeypatch
+):
+    document = upload_document(owner_client)
+    ocr_document(owner_client, document["id"])
+    url = f"/api/v1/documents/{document['id']}/processing"
+    assert owner_client.post(f"{url}/cancel").status_code == 200
+    token, _ = _add_member(owner_client, email="ranking-viewer@example.com", role="viewer")
+    assert anon_client.get(url, headers=_headers(token)).status_code == 200
+    assert (
+        anon_client.post(
+            f"{url}/retry", headers=_headers(token), json={"operation": "matches"}
+        ).status_code
+        == 403
+    )
+    queued = owner_client.post(f"{url}/retry", json={"operation": "matches"})
+    assert queued.status_code == 200
+    review = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()
+    payload = job_payload(review)
+    assert owner_client.post(f"{url}/cancel").status_code == 200
+    monkeypatch.setattr(ai, "complete_json", lambda *args, **kwargs: pytest.fail("cancelled"))
+    assert run_enhancement(payload) == {"status": "skipped", "reason": "superseded"}
+    with SessionLocal() as db:
+        assert db.get(Job, payload["job_id"]).status == "cancelled"
 
 
 def test_stalled_ai_does_not_block_local_review_apply_or_queue(

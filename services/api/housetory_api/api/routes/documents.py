@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, defer, selectinload
 from ...db import get_db
 from ...domain import DocumentType, OcrStatus
 from ...models import Document, DocumentScan, DocumentScanPage, Item, Purchase
+from ...schemas.document_processing import DocumentProcessingSnapshot, ProcessingRetryRequest
 from ...schemas.documents import (
     DocumentItemLink,
     DocumentList,
@@ -21,6 +22,11 @@ from ...schemas.documents import (
 )
 from ...services import storage
 from ...services.document_ocr import enqueue_ocr
+from ...services.document_processing import (
+    cancel_processing,
+    processing_snapshot,
+    retry_processing,
+)
 from ...services.documents import (
     create_document,
     delete_document,
@@ -202,6 +208,7 @@ def upload_document(
         merchant=merchant.strip() if merchant and merchant.strip() else None,
         document_date=document_date,
         notes=notes,
+        actor_user_id=auth.user.id,
     )
     return document_out(document)
 
@@ -231,6 +238,7 @@ def upload_item_document(
         merchant=merchant.strip() if merchant and merchant.strip() else None,
         document_date=document_date,
         notes=notes,
+        actor_user_id=auth.user.id,
     )
     return document_out(document)
 
@@ -257,6 +265,50 @@ def read_document(
     db: Session = Depends(get_db),
 ) -> DocumentOut:
     return document_out(get_document(db, auth.household.id, document_id))
+
+
+@router.get(
+    "/documents/{document_id}/processing",
+    response_model=DocumentProcessingSnapshot,
+)
+def read_document_processing(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentProcessingSnapshot:
+    document = get_document(db, auth.household.id, document_id)
+    return processing_snapshot(db, document)
+
+
+@router.post(
+    "/documents/{document_id}/processing/cancel",
+    response_model=DocumentProcessingSnapshot,
+)
+def cancel_document_processing(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentProcessingSnapshot:
+    document = get_document(db, auth.household.id, document_id)
+    document = cancel_processing(db, document)
+    return processing_snapshot(db, document)
+
+
+@router.post(
+    "/documents/{document_id}/processing/retry",
+    response_model=DocumentProcessingSnapshot,
+)
+def retry_document_processing(
+    document_id: uuid.UUID,
+    payload: ProcessingRetryRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentProcessingSnapshot:
+    document = get_document(db, auth.household.id, document_id)
+    document = retry_processing(
+        db, document, actor_user_id=auth.user.id, operation=payload.operation if payload else None
+    )
+    return processing_snapshot(db, document)
 
 
 @router.patch("/documents/{document_id}", response_model=DocumentOut)
@@ -341,7 +393,15 @@ def retry_document_ocr(
             "ocr_in_progress",
             "OCR is already queued or running for this document.",
         )
-    enqueue_ocr(db, document)
+    if document.ocr_status == OcrStatus.FAILED.value:
+        retry_processing(db, document, actor_user_id=auth.user.id)
+    else:
+        enqueue_ocr(
+            db,
+            document,
+            actor_user_id=auth.user.id,
+            force=document.ocr_status == OcrStatus.SUCCEEDED.value,
+        )
     document = get_document(db, auth.household.id, document.id)
     return document_out(document)
 

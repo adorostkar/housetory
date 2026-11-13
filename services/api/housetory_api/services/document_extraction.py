@@ -12,6 +12,7 @@ import hashlib
 import re
 import uuid
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select
@@ -29,13 +30,13 @@ from ..schemas.extraction import (
     SourceEvidence,
 )
 from . import ai
+from .invoice_validation import validate_invoice_financials
 from .ocr import (
     CURRENCY_SYMBOLS,
     DATE_PATTERNS,
     ISO_CURRENCIES,
     MONEY_RE,
     MONTHS,
-    _parse_amount,
     _parse_brand_model,
     _parse_date,
     _parse_invoice_number,
@@ -44,7 +45,7 @@ from .ocr import (
     _parse_warranty_fields,
 )
 
-EXTRACTION_VERSION = "2026-11-10.1"
+EXTRACTION_VERSION = "2026-11-13.1"
 MAX_LINES = 50
 
 NON_PRODUCT_WORDS = {
@@ -129,6 +130,16 @@ DISCOUNT_WORDS = {"discount", "promo", "coupon", "savings", "markdown", "rabatt"
 SHIPPING_WORDS = {"shipping", "delivery", "freight", "handling"}
 QTY_RE = re.compile(r"\b(?P<qty>\d{1,4})\s*(?:x|×|@)\s*", re.IGNORECASE)
 QTY_PREFIX_RE = re.compile(r"^\s*(?:qty|quantity)\s*[:#-]?\s*(?P<qty>\d{1,4})\b", re.IGNORECASE)
+GROUPED_MONEY_RE = re.compile(
+    r"(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹]|"
+    r"(?<![A-Za-z])(?:SEK|NOK|DKK|EUR|USD|GBP|CHF)(?![A-Za-z]))?\s*"
+    r"(?P<amount>\d{1,3}(?:[.,]\d{3})+[.,]\d{2})"
+)
+SPACE_DECIMAL_MONEY_RE = re.compile(
+    r"(?P<currency>US\$|CA\$|AU\$|C\$|A\$|[$€£¥₹]|"
+    r"(?<![A-Za-z])(?:SEK|NOK|DKK|EUR|USD|GBP|CHF)(?![A-Za-z]))?\s*"
+    r"(?P<amount>\d{1,3}(?: \d{3})* \d{2})$"
+)
 
 
 def _normalized(value: str) -> str:
@@ -137,13 +148,25 @@ def _normalized(value: str) -> str:
 
 def _money_matches(line: str) -> list[tuple[int, str | None, int, bool]]:
     matches: list[tuple[int, str | None, int, bool]] = []
-    for match in MONEY_RE.finditer(line):
-        amount = _parse_amount(match.group("amount"))
+    grouped_matches = list(GROUPED_MONEY_RE.finditer(line))
+    space_decimal_matches = list(SPACE_DECIMAL_MONEY_RE.finditer(line))
+    special_matches = grouped_matches + space_decimal_matches
+    for match in [*special_matches, *MONEY_RE.finditer(line)]:
+        if match not in special_matches and any(
+            match.start() < special.end() and match.end() > special.start()
+            for special in special_matches
+        ):
+            continue
+        amount = _financial_amount(match.group("amount"))
         if amount is None:
             continue
         prefix = line[max(0, match.start() - 3) : match.start()]
         suffix = line[match.end() : match.end() + 2]
-        negative = "-" in prefix or suffix.lstrip().startswith("-")
+        negative = (
+            "-" in prefix
+            or suffix.lstrip().startswith("-")
+            or (line[max(0, match.start() - 1) : match.start()] == "(" and ")" in suffix)
+        )
         matches.append(
             (
                 amount,
@@ -153,6 +176,34 @@ def _money_matches(line: str) -> list[tuple[int, str | None, int, bool]]:
             )
         )
     return matches
+
+
+def _financial_amount(raw: str) -> int | None:
+    value = raw.strip()
+    if " " in value and "," not in value and "." not in value:
+        whole, fraction = value.rsplit(" ", 1)
+        if len(fraction) == 2 and whole.replace(" ", "").isdigit():
+            value = f"{whole.replace(' ', '')}.{fraction}"
+    value = value.replace(" ", "")
+    if "," in value and "." in value:
+        decimal_separator = "," if value.rfind(",") > value.rfind(".") else "."
+        grouping_separator = "." if decimal_separator == "," else ","
+        value = value.replace(grouping_separator, "")
+        value = value.replace(decimal_separator, ".")
+    elif "," in value or "." in value:
+        separator = "," if "," in value else "."
+        whole, fraction = value.rsplit(separator, 1)
+        if len(fraction) == 2:
+            value = f"{whole.replace(',', '').replace('.', '')}.{fraction}"
+        elif len(fraction) == 3 and len(whole.replace(",", "").replace(".", "")) <= 3:
+            value = whole.replace(",", "").replace(".", "") + fraction
+        else:
+            return None
+    try:
+        cents = int((Decimal(value) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
+        return None
+    return cents if cents >= 0 else None
 
 
 def _line_kind(line: str) -> str:
@@ -200,13 +251,78 @@ def _line_description(line: str, matches: list[tuple[int, str | None, int, bool]
     return description[:300]
 
 
-def _parse_line(line: str, line_number: int, product_index: int, document_id, version: str):
+def _page_spans(text: str, metadata: dict[str, Any]) -> list[tuple[int, int, int]]:
+    spans: list[tuple[int, int, int]] = []
+    cursor = 0
+    pages = metadata.get("ocr_pages")
+    if not isinstance(pages, list):
+        return spans
+    for entry in pages[:40]:
+        if not isinstance(entry, dict):
+            continue
+        page = entry.get("page")
+        page_text = entry.get("text")
+        if not isinstance(page, int) or page < 1 or not isinstance(page_text, str) or not page_text:
+            continue
+        page_text = page_text.strip()
+        if not page_text:
+            continue
+        start = text.find(page_text, cursor)
+        if start < 0:
+            continue
+        end = start + len(page_text)
+        spans.append((start, end, page))
+        cursor = end
+    return spans
+
+
+def _source_lines(text: str, metadata: dict[str, Any]) -> list[tuple[int, str, int | None]]:
+    page_spans = _page_spans(text, metadata)
+    lines: list[tuple[int, str, int | None]] = []
+    offset = 0
+    for line_number, raw_line in enumerate(text.splitlines(keepends=True), start=1):
+        line = raw_line.strip()
+        if line:
+            line_start = offset + len(raw_line) - len(raw_line.lstrip())
+            page = next(
+                (page for start, end, page in page_spans if start <= line_start < end),
+                None,
+            )
+            lines.append((line_number, line, page))
+        offset += len(raw_line)
+    return lines
+
+
+def page_number_for_evidence(text: str, metadata: dict[str, Any], evidence: str) -> int | None:
+    start = text.find(evidence)
+    if start < 0:
+        return None
+    return next(
+        (
+            page
+            for page_start, end, page in _page_spans(text, metadata)
+            if page_start <= start < end
+        ),
+        None,
+    )
+
+
+def _parse_line(
+    line: str,
+    line_number: int,
+    product_index: int,
+    document_id,
+    version: str,
+    page_number: int | None = None,
+):
     lowered = _normalized(line)
     kind = _line_kind(line)
     amounts = _money_matches(line)
     if kind == "product":
         if not amounts:
-            return None
+            quantity_match = QTY_RE.search(line) or QTY_PREFIX_RE.search(line)
+            if quantity_match is None:
+                return None
         quantity_match = QTY_RE.search(line) or QTY_PREFIX_RE.search(line)
         quantity = int(quantity_match.group("qty")) if quantity_match else 1
         description = _line_description(line, amounts)
@@ -226,9 +342,16 @@ def _parse_line(line: str, line_number: int, product_index: int, document_id, ve
     unit_price: int | None = None
     line_total: int | None = None
     if amounts:
-        line_total = abs(amounts[-1][0])
+        line_total = -abs(amounts[-1][0]) if amounts[-1][3] else abs(amounts[-1][0])
         if len(amounts) >= 2:
-            unit_price = abs(amounts[-2][0])
+            unit_price = -abs(amounts[-2][0]) if amounts[-2][3] else abs(amounts[-2][0])
+        elif quantity and quantity > 1 and QTY_RE.search(line):
+            unit_price = line_total
+            line_total *= quantity
+            warnings.append(
+                "The line amount follows an explicit quantity × marker and was "
+                "treated as unit price."
+            )
         elif quantity == 1:
             unit_price = line_total
         if kind == "product" and quantity and quantity > 1 and unit_price is None:
@@ -263,7 +386,7 @@ def _parse_line(line: str, line_number: int, product_index: int, document_id, ve
         unit_price_cents=unit_price,
         line_total_cents=line_total,
         evidence=SourceEvidence(
-            page=None,
+            page=page_number,
             line_number=line_number,
             text=line[:1000],
         ),
@@ -272,9 +395,11 @@ def _parse_line(line: str, line_number: int, product_index: int, document_id, ve
     )
 
 
-def _named_amount(lines: list[tuple[int, str]], names: tuple[str, ...]) -> tuple[int | None, str]:
+def _named_amount(
+    lines: list[tuple[int, str, int | None]], names: tuple[str, ...]
+) -> tuple[int | None, str]:
     candidates: list[tuple[int, str]] = []
-    for _line_number, line in reversed(lines):
+    for _line_number, line, _page in reversed(lines):
         lowered = _normalized(line)
         if not any(name in lowered for name in names):
             continue
@@ -285,14 +410,18 @@ def _named_amount(lines: list[tuple[int, str]], names: tuple[str, ...]) -> tuple
             continue
         # A VAT table row (gross, VAT, net) is a last resort and uses its gross amount.
         if len(amounts) >= 3:
-            candidates.append((1, f"{abs(amounts[0][0])}\0{line}"))
+            candidates.append((1, f"{amounts[0][0]}\0{line}"))
         else:
-            candidates.append((0, f"{abs(amounts[-1][0])}\0{line}"))
+            candidates.append((0, f"{amounts[-1][0]}\0{line}"))
     if not candidates:
         return None, ""
     _rank, packed = min(candidates, key=lambda candidate: candidate[0])
     value, line = packed.split("\0", 1)
-    return int(value), line
+    amount = int(value)
+    matched = _money_matches(line)
+    if matched and matched[-1][3]:
+        amount = -amount
+    return amount, line
 
 
 def _all_dates(text: str) -> list[date]:
@@ -337,17 +466,13 @@ def build_extraction(
     version = hashlib.sha256(
         f"{EXTRACTION_VERSION}\0{document.document_type}\0{text}".encode()
     ).hexdigest()[:24]
-    raw_lines = [
-        (index, re.sub(r"(\d{2,})[ ,](\d{2})$", r"\1.\2", line.strip()))
-        for index, line in enumerate(text.splitlines(), start=1)
-        if line.strip()
-    ]
+    raw_lines = _source_lines(text, metadata)
     fields = ExtractionFields()
     warnings: list[str] = []
     uncertain: list[str] = []
     sources: dict[str, str] = {}
 
-    merchant = metadata.get("merchant") or _parse_merchant([line for _n, line in raw_lines])
+    merchant = metadata.get("merchant") or _parse_merchant([line for _n, line, _p in raw_lines])
     if merchant:
         fields.merchant = str(merchant)[:160]
         sources["merchant"] = "Extracted from the document header."
@@ -377,7 +502,7 @@ def build_extraction(
     if total_cents is None and metadata.get("total_cents") is not None:
         total_cents = int(metadata["total_cents"])
     if total_cents is not None:
-        fields.total_cents = abs(total_cents)
+        fields.total_cents = total_cents
         if total_line:
             sources["total_cents"] = total_line[:500]
     else:
@@ -389,8 +514,15 @@ def build_extraction(
         sources["subtotal_cents"] = subtotal_line[:500]
 
     line_items: list[ExtractionLine] = []
-    for line_number, line in raw_lines:
-        item = _parse_line(line, line_number, len(line_items), document.id, version)
+    for line_number, line, page_number in raw_lines:
+        item = _parse_line(
+            line,
+            line_number,
+            len(line_items),
+            document.id,
+            version,
+            page_number,
+        )
         if item is not None:
             line_items.append(item)
             if len(line_items) >= MAX_LINES:
@@ -435,16 +567,13 @@ def build_extraction(
     tax_cents: int | None = None
     discount_cents: int | None = None
     shipping_cents: int | None = None
-    product_total = 0
     for line in line_items:
         if line.kind == "tax" and line.line_total_cents is not None:
             tax_cents = (tax_cents or 0) + line.line_total_cents
         elif line.kind == "discount" and line.line_total_cents is not None:
-            discount_cents = (discount_cents or 0) + line.line_total_cents
+            discount_cents = (discount_cents or 0) + abs(line.line_total_cents)
         elif line.kind == "shipping" and line.line_total_cents is not None:
             shipping_cents = (shipping_cents or 0) + line.line_total_cents
-        elif line.kind == "product" and line.line_total_cents is not None:
-            product_total += line.line_total_cents
     if tax_cents is not None:
         fields.tax_cents = tax_cents
     if discount_cents is not None:
@@ -504,23 +633,6 @@ def build_extraction(
     else:
         uncertain.append("document_date")
 
-    if fields.total_cents is not None and line_items:
-        expected = product_total + (tax_cents or 0) + (shipping_cents or 0) - (discount_cents or 0)
-        difference = fields.total_cents - expected
-        if abs(difference) > 1:
-            warnings.append(
-                f"Receipt total {fields.total_cents}¢ does not match the "
-                f"product/tax/shipping/discount sum {expected}¢ "
-                f"(difference {difference}¢). Review before applying."
-            )
-    if fields.subtotal_cents is not None and line_items:
-        expected_subtotal = product_total - (discount_cents or 0)
-        difference = fields.subtotal_cents - expected_subtotal
-        if abs(difference) > 1:
-            warnings.append(
-                f"Subtotal {fields.subtotal_cents}¢ differs from the product line "
-                f"sum after discounts {expected_subtotal}¢ (difference {difference}¢)."
-            )
     if fields.total_cents is None:
         warnings.append("No receipt total was found. Enter or confirm the total manually.")
     if line_items and (tax_cents or discount_cents or shipping_cents):
@@ -540,6 +652,18 @@ def build_extraction(
 
     fields.field_sources = sources
     fields.uncertain_fields = sorted(set(uncertain))
+    financial_validation = validate_invoice_financials(
+        fields,
+        line_items,
+        source=text,
+    )
+    for check in financial_validation.checks:
+        if check.code == "ambiguous_date":
+            fields.uncertain_fields = sorted(set(fields.uncertain_fields + ["purchase_date"]))
+        elif check.code == "ambiguous_currency":
+            fields.uncertain_fields = sorted(set(fields.uncertain_fields + ["currency"]))
+        if check.message not in warnings:
+            warnings.append(check.message)
     fields_data = fields.model_dump(mode="json")
     lines_data = [line.model_dump(mode="json") for line in line_items]
     return {
@@ -551,6 +675,8 @@ def build_extraction(
         "fields": fields_data,
         "lines": lines_data,
         "warnings": warnings,
+        "financial_validation": financial_validation.model_dump(mode="json"),
+        "extractor_version": EXTRACTION_VERSION,
     }
 
 
@@ -561,7 +687,7 @@ def _stored_extraction(document: Document) -> dict[str, Any] | None:
 
 def ensure_extraction(db: Session, document: Document) -> dict[str, Any]:
     extraction = _stored_extraction(document)
-    if extraction is not None:
+    if extraction is not None and extraction.get("extractor_version") == EXTRACTION_VERSION:
         return extraction
     if not (document.extracted_text or "").strip():
         raise ValueError("Document has no OCR text to extract.")
@@ -667,6 +793,45 @@ def extraction_review(db: Session, document: Document) -> ExtractionReviewOut:
     from .enrichment import enhancement_state
 
     enhancement = enhancement_state(db, document, document_matches=matches) or {}
+    financial_validation = validate_invoice_financials(
+        fields,
+        lines,
+        source=document.extracted_text or "",
+    )
+    warnings = list(extraction.get("warnings") or [])
+    for check in financial_validation.checks:
+        if check.message not in warnings:
+            warnings.append(check.message)
+    suggested_refinement = (
+        enhancement.get("proposal") if enhancement.get("status") == "ready" else None
+    )
+    if isinstance(suggested_refinement, dict):
+        suggested_refinement = dict(suggested_refinement)
+        refined_fields = ExtractionFields.model_validate(suggested_refinement.get("fields") or {})
+        refined_lines = [
+            ExtractionLine.model_validate(line) for line in suggested_refinement.get("lines", [])
+        ]
+        refined_validation = validate_invoice_financials(
+            refined_fields,
+            refined_lines,
+            source=document.extracted_text or "",
+        )
+        if any(check.code == "ambiguous_currency" for check in refined_validation.checks):
+            refined_fields.uncertain_fields = sorted(
+                set(refined_fields.uncertain_fields + ["currency"])
+            )
+        if any(check.code == "ambiguous_date" for check in refined_validation.checks):
+            refined_fields.uncertain_fields = sorted(
+                set(refined_fields.uncertain_fields + ["purchase_date", "document_date"])
+            )
+        suggested_refinement["fields"] = refined_fields.model_dump(mode="json")
+        suggested_refinement["financial_validation"] = refined_validation.model_dump(mode="json")
+        suggested_refinement["warnings"] = list(
+            dict.fromkeys(
+                list(suggested_refinement.get("warnings") or [])
+                + [check.message for check in refined_validation.checks]
+            )
+        )
     return ExtractionReviewOut(
         document_id=document.id,
         version=str(extraction["version"]),
@@ -676,13 +841,16 @@ def extraction_review(db: Session, document: Document) -> ExtractionReviewOut:
         purchase_eligible=bool(extraction.get("purchase_eligible")),
         fields=fields,
         lines=lines,
-        warnings=list(extraction.get("warnings") or []),
+        warnings=warnings,
+        financial_validation=validate_invoice_financials(
+            fields,
+            lines,
+            source=document.extracted_text or "",
+        ),
         matches=matches,
         duplicate_documents=_duplicate_documents(db, document),
         applied=_applied_summaries(db, document),
         ai_status=status,
         enhancement=enhancement or None,
-        suggested_refinement=(
-            enhancement.get("proposal") if enhancement.get("status") == "ready" else None
-        ),
+        suggested_refinement=suggested_refinement,
     )

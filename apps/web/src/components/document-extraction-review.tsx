@@ -32,6 +32,8 @@ import {
 import type {
   AiStatus,
   CandidateItem,
+  DocumentCaptureContext,
+  DocumentProcessing,
   DocumentRecord,
   ExtractionApplyResponse,
   ExtractionLineMatch,
@@ -49,14 +51,17 @@ import {
   fieldValue,
   lineDraft,
   parseQuantity,
+  parseMoney,
   qualityLabel,
 } from "@/components/document-extraction-helpers";
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
 import { enhancementLabel } from "@/lib/enrichment";
 
-export function DocumentExtractionReview({ document, onOpenChange }: {
+export function DocumentExtractionReview({ document, onOpenChange, manualReviewRequest = 0, captureContext }: {
   document: DocumentRecord;
   onOpenChange?: (open: boolean) => void;
+  manualReviewRequest?: number;
+  captureContext?: DocumentCaptureContext;
 }) {
   const canWrite = useCanWrite();
   const defaultCurrency = useDefaultCurrency();
@@ -67,8 +72,15 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
     queryFn: () => api.get<ExtractionReview>(`/documents/${document.id}/extraction`),
     enabled: document.ocr_status === "succeeded" && Boolean(document.extracted_text),
     refetchInterval: (query) =>
-      ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 2000 : false,
+      ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 1000 : false,
   });
+  const processingKey = [...queryKeys.document(document.id), "processing"];
+  const processingQuery = useQuery({
+    queryKey: processingKey,
+    queryFn: ({ signal }) => api.get<DocumentProcessing>(`/documents/${document.id}/processing`, { signal }),
+    enabled: false,
+  });
+  const queueingRef = React.useRef(false);
   const [open, setOpen] = React.useState(false);
   const [opened, setOpened] = React.useState(false);
   const reviewId = React.useId();
@@ -99,12 +111,25 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   const [applyResult, setApplyResult] = React.useState<ExtractionApplyResponse | null>(null);
   const [activeVersion, setActiveVersion] = React.useState("");
   const [refinement, setRefinement] = React.useState<ExtractionRefinement | null>(null);
-  const [refinementActive, setRefinementActive] = React.useState(false);
+  const [activeRefinement, setActiveRefinement] = React.useState<ExtractionRefinement | null>(null);
+  const refinementActive = activeRefinement != null;
   const versionRef = React.useRef<string | null>(null);
-  const data = extractionQuery.data;
+  const manualChosenRef = React.useRef(false);
+  const editedRef = React.useRef(false);
+  const [newVersionAvailable, setNewVersionAvailable] = React.useState(false);
+  const sourceData = extractionQuery.data;
+  const data = sourceData && activeRefinement
+    ? { ...sourceData, fields: activeRefinement.fields, lines: activeRefinement.lines,
+        matches: activeRefinement.matches, warnings: activeRefinement.warnings,
+        financial_validation: activeRefinement.financial_validation,
+        version: activeRefinement.version, source_artifact: activeRefinement.source_artifact }
+    : sourceData;
   const toggleReview = (next: boolean) => {
     setOpen(next);
-    if (next) setOpened(true);
+    if (next) {
+      manualChosenRef.current = true;
+      setOpened(true);
+    }
     onOpenChange?.(next);
   };
 
@@ -120,14 +145,17 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
     );
     const productLines = lines.filter((line) => line.kind === "product");
     setDrafts(
-      productLines.map((line) =>
-        lineDraft(
+      productLines.map((line) => {
+        const draft = lineDraft(
           line,
           matchMap[line.id]?.candidates[0],
           fields,
           productLines.length === 1,
-        ),
-      ),
+        );
+        if (captureContext?.documentId !== document.id) return draft;
+        return { ...draft, newItem: { ...draft.newItem,
+          roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
+      }),
     );
     setMatches(proposalMatches);
     setMerchant(fieldValue(fields.merchant ?? document.merchant));
@@ -149,25 +177,55 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   };
 
   React.useEffect(() => {
-    if (!data || versionRef.current === data.version) return;
-    versionRef.current = data.version;
+    if (!sourceData || versionRef.current === sourceData.version) return;
+    if (editedRef.current) {
+      setNewVersionAvailable(true);
+      return;
+    }
+    versionRef.current = sourceData.version;
     loadProposal(
-      data.fields,
-      data.lines,
-      data.matches,
-      data.version,
-      data.purchase_eligible,
+      sourceData.fields,
+      sourceData.lines,
+      sourceData.matches,
+      sourceData.version,
+      sourceData.purchase_eligible,
     );
-    setAiStatus(data.ai_status);
+    setAiStatus(sourceData.ai_status);
     setAiWarnings([]);
     setRefinement(null);
-    setRefinementActive(false);
+    setActiveRefinement(null);
     // The proposal identity intentionally resets drafts only for a new OCR version.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [sourceData]);
+
+  React.useEffect(() => {
+    const suggested = sourceData?.suggested_refinement;
+    if (!suggested || !sourceData || !suggested.ai_used ||
+      suggested.base_version !== sourceData.version ||
+      manualChosenRef.current || editedRef.current ||
+      sourceData.enhancement?.status !== "ready") return;
+    loadProposal(suggested.fields, suggested.lines, suggested.matches,
+      suggested.version, sourceData.purchase_eligible);
+    setRefinement(null);
+    setActiveRefinement(suggested);
+    // Only an untouched, unopened draft can adopt background suggestions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceData]);
+
+  React.useEffect(() => {
+    if (!manualReviewRequest) return;
+    if (refinementActive && sourceData && !editedRef.current) {
+      loadProposal(sourceData.fields, sourceData.lines, sourceData.matches,
+        sourceData.version, sourceData.purchase_eligible);
+      setRefinement(null);
+      setActiveRefinement(null);
+    }
+    toggleReview(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualReviewRequest]);
 
   const retryEnhancement = useMutation({
-    mutationFn: (action: "retry" | "cancel") => api.post<ExtractionReview>(
+    mutationFn: (action: "cancel") => api.post<ExtractionReview>(
       `/documents/${document.id}/extraction/enhancement/${action}`,
     ),
     onSuccess: (result) => {
@@ -185,11 +243,11 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   });
 
   const matchMutation = useMutation({
-    mutationFn: (useAi: boolean) =>
+    mutationFn: () =>
       api.post<ExtractionMatchResponse>(
         `/documents/${document.id}/extraction/matches`,
         {
-          use_ai: useAi,
+          use_ai: false,
           lines: drafts.map((draft) => ({
             line_id: draft.line.id,
             description: draft.description.trim() || draft.line.description,
@@ -200,40 +258,45 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           })),
         },
       ),
-    onSuccess: (result, useAi) => {
+    onSuccess: (result) => {
       setMatches(result.matches);
       setAiStatus(result.ai_status);
       setAiWarnings(result.warnings);
-      if (useAi) {
-        toast.success(
-          result.ai_used
-            ? "AI re-ranked the household candidates"
-            : "Deterministic matches were kept",
-        );
-      }
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
-  const refineMutation = useMutation({
-    mutationFn: () =>
-      api.post<ExtractionRefinement>(
-        `/documents/${document.id}/extraction/refine`,
-        {},
-      ),
-    onSuccess: (result) => {
-      setRefinement(result.ai_used ? result : null);
-      setAiStatus(result.ai_status);
-      setAiWarnings(result.warnings);
+  const queueAi = useMutation({
+    mutationFn: async (operation: "interpret" | "matches") => {
+      await queryClient.cancelQueries({ queryKey: processingKey, exact: true });
+      return api.post<DocumentProcessing>(`/documents/${document.id}/processing/retry`, { operation });
+    },
+    onSuccess: (snapshot) => {
+      const current = queryClient.getQueryData<DocumentProcessing>(processingKey);
+      const activeStages = ["waiting", "reading", "interpreting"];
+      const newerTerminal = current?.correlation_id === snapshot.correlation_id &&
+        !activeStages.includes(current.stage) &&
+        Date.parse(current.updated_at) >= Date.parse(snapshot.updated_at);
+      if (!newerTerminal) queryClient.setQueryData(processingKey, snapshot);
+      void queryClient.invalidateQueries({ queryKey: processingKey, exact: true });
       void queryClient.invalidateQueries({
         queryKey: [...queryKeys.document(document.id), "extraction"],
       });
-      toast.success(result.ai_used
-        ? "AI proposed a field and line refinement; review before accepting"
-        : "AI review complete · no changes");
+      if (!newerTerminal && activeStages.includes(snapshot.stage)) {
+        toast.message("AI review queued; your current draft stays unchanged");
+      }
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
+    onSettled: () => { queueingRef.current = false; },
   });
+  const aiProcessing = queueAi.isPending ||
+    ["waiting", "reading", "interpreting"].includes(processingQuery.data?.stage ?? "") ||
+    ["queued", "running"].includes(sourceData?.enhancement?.status ?? "");
+  const queueOperation = (operation: "interpret" | "matches") => {
+    if (queueingRef.current || aiProcessing || matchMutation.isPending) return;
+    queueingRef.current = true;
+    queueAi.mutate(operation);
+  };
 
   const applyMutation = useMutation({
     mutationFn: () =>
@@ -258,7 +321,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   if (document.ocr_status === "queued" || document.ocr_status === "processing") {
     return (
       <div className="mt-5 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-4 py-5 text-xs text-muted-foreground">
-        <Spinner /> Waiting for the local OCR worker…
+        Local evidence is not available yet. Follow processing above, or enter items manually.
       </div>
     );
   }
@@ -311,7 +374,14 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   );
 
   const validationErrors: string[] = [];
+  const amountError = (value: string) => value.trim() !== "" && parseMoney(value) == null;
+  if (purchaseAction !== "none" && amountError(total)) {
+    validationErrors.push("Purchase amounts must be non-negative with at most two decimal places. Credit notes remain evidence; no refund is recorded by this form.");
+  }
   for (const draft of drafts) {
+    if (draft.action !== "skip" && (amountError(draft.unitPrice) || amountError(draft.lineTotal))) {
+      validationErrors.push("A selected line has a negative or invalid amount. Correct an editable line total or skip unsupported credit lines; source unit prices are evidence only.");
+    }
     if (draft.action === "create") {
       if (!draft.newItem.name.trim()) validationErrors.push("A new item needs a name.");
       if (!draft.newItem.roomId) validationErrors.push("A new item needs a room.");
@@ -348,6 +418,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   );
 
   const updateDraft = (lineId: string, update: (draft: LineDraft) => LineDraft) => {
+    editedRef.current = true;
     setDrafts((current) =>
       current.map((draft) => (draft.line.id === lineId ? update(draft) : draft)),
     );
@@ -418,7 +489,8 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
       refinement.version,
       data.purchase_eligible,
     );
-    setRefinementActive(true);
+    setActiveRefinement(refinement);
+    setRefinement(null);
     toast.success("AI refinement added to the review draft; apply is still separate");
   };
 
@@ -427,15 +499,16 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
   };
 
   const revertRefinement = () => {
+    if (!sourceData) return;
     loadProposal(
-      data.fields,
-      data.lines,
-      data.matches,
-      data.version,
-      data.purchase_eligible,
+      sourceData.fields,
+      sourceData.lines,
+      sourceData.matches,
+      sourceData.version,
+      sourceData.purchase_eligible,
     );
     setRefinement(null);
-    setRefinementActive(false);
+    setActiveRefinement(null);
   };
 
   const refinementFieldRows = refinement
@@ -460,6 +533,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
 
   const applyDisabled =
     applyMutation.isPending ||
+    newVersionAvailable ||
     reapplyBlocked ||
     validationErrors.length > 0 ||
     (purchaseAction === "none" &&
@@ -467,7 +541,33 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
       !editedDocumentFields);
 
   return (
-    <div className="mt-5 space-y-5">
+    <div className="mt-5 space-y-5" onChangeCapture={() => { editedRef.current = true; }}>
+      {!open && ["queued", "running"].includes(data.enhancement?.status ?? "") && (
+        <div className="rounded-xl border border-brass/25 bg-brass-soft/30 p-3.5 text-xs">
+          <p role="status">Preparing one AI-assisted review. Local evidence is already available.</p>
+          <Button className="mt-2" size="sm" variant="outline" onClick={() => toggleReview(true)}>
+            Use local/manual review now
+          </Button>
+        </div>
+      )}
+      {newVersionAvailable && (
+        <div className="rounded-xl border border-brass/25 p-3 text-xs">
+          <p role="alert">New document extraction is available. Your edited draft is unchanged. Loading refreshed extraction replaces your edits.</p>
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => {
+            if (!sourceData) return;
+            loadProposal(sourceData.fields, sourceData.lines, sourceData.matches,
+              sourceData.version, sourceData.purchase_eligible);
+            versionRef.current = sourceData.version;
+            manualChosenRef.current = true;
+            editedRef.current = false;
+            setAiStatus(sourceData.ai_status);
+            setAiWarnings([]);
+            setRefinement(null);
+            setActiveRefinement(null);
+            setNewVersionAvailable(false);
+          }}>Replace draft with refreshed extraction</Button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground">
@@ -481,7 +581,8 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
               data.lines.some((line) => line.warnings.length > 0) || aiWarnings.length > 0 ||
               validationErrors.length > 0 || (applyResult?.warnings.length ?? 0) > 0 ||
               drafts.some((draft) => draft.line.warnings.length > 0) ||
-              (data.suggested_refinement?.warnings.length ?? 0) > 0) && (
+              (data.suggested_refinement?.warnings.length ?? 0) > 0 ||
+              (data.financial_validation != null && data.financial_validation.status !== "consistent")) && (
               <Badge variant="brass"><AlertTriangle className="mr-1 size-3" />Review warnings</Badge>
             )}
           </div>
@@ -493,12 +594,13 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
       </div>
       {data.enhancement && (
         <div className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
-          <Badge variant="outline">Local results</Badge>
+          <Badge variant="outline">{refinementActive ? "AI-assisted review" : "Local results"}</Badge>
           <Badge variant={data.enhancement.status === "ready" ? "brass" : "outline"}>
-            {data.enhancement.reason === "no_changes"
+            {refinementActive ? "Check and Apply when ready" : data.enhancement.reason === "no_changes"
               ? "AI review complete · no changes" : enhancementLabel(data.enhancement)}
           </Badge>
-          {data.suggested_refinement && !refinement && !refinementActive && (
+          {data.suggested_refinement && !refinement &&
+            data.suggested_refinement.version !== activeRefinement?.version && (
             <Button size="sm" variant="outline"
               onClick={() => {
                 setRefinement(data.suggested_refinement ?? null);
@@ -509,9 +611,9 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           )}
           {data.enhancement.error && <span>{data.enhancement.error}</span>}
           {["off", "failed", "skipped"].includes(data.enhancement.status) && aiAvailable && (
-            <Button size="sm" variant="outline" onClick={() => retryEnhancement.mutate("retry")}
-              disabled={retryEnhancement.isPending}>
-              {retryEnhancement.isPending ? <Spinner /> : <Sparkles />} Retry AI only
+            <Button size="sm" variant="outline" onClick={() => queueOperation("interpret")}
+              disabled={aiProcessing || matchMutation.isPending || retryEnhancement.isPending}>
+              {queueAi.isPending ? <Spinner /> : <Sparkles />} Retry AI only
             </Button>
           )}
           {["queued", "running"].includes(data.enhancement.status) && (
@@ -520,7 +622,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
               Skip AI suggestions
             </Button>
           )}
-          {data.enhancement.status === "ready" && data.suggested_refinement && (
+          {data.enhancement.status === "ready" && data.suggested_refinement && !refinementActive && (
             <Button size="sm" variant="ghost" onClick={() => retryEnhancement.mutate("cancel")}
               disabled={retryEnhancement.isPending}>
               Dismiss AI suggestions
@@ -529,7 +631,39 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
         </div>
       )}
       {retryEnhancement.error && <FormError message={getApiErrorMessage(retryEnhancement.error)} />}
+      {queueAi.error && <FormError message={getApiErrorMessage(queueAi.error)} />}
       {opened && <div id={reviewId} hidden={!open} className="space-y-5">
+      {refinementActive && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brass/25 bg-brass-soft/30 p-3 text-xs">
+          <p><Sparkles className="mr-1 inline size-3.5" />AI-assisted draft. Check every value before Apply.</p>
+          <Button type="button" size="sm" variant="outline" onClick={revertRefinement}>
+            Use deterministic proposal
+          </Button>
+        </div>
+      )}
+      {data.financial_validation && data.financial_validation.status !== "consistent" && (
+        <section className="rounded-xl border border-brass/30 bg-brass-soft/35 p-3.5 text-xs" aria-label="Financial checks">
+          <h3 className="flex items-center gap-1.5 font-medium"><AlertTriangle className="size-3.5" />Check invoice amounts and evidence</h3>
+          <p className="mt-1 text-muted-foreground">
+            {data.financial_validation.status === "insufficient_evidence"
+              ? "There is not enough evidence to reconcile this invoice. Confirm unknown amounts from the original."
+              : "Some invoice amounts or source details need your attention. Nothing is corrected automatically."}
+            {" "}These checks describe the source extraction, before your corrections.
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-4">
+            {data.financial_validation.checks.map((check) => (
+              <li key={`${check.code}:${check.line_ids.join(",")}`}>
+                {check.message}
+                {check.line_ids.map((lineId) => {
+                  const line = data.lines.find((entry) => entry.id === lineId);
+                  return line && <a key={lineId} href={`#extraction-source-${lineId}`}
+                    className="ml-2 underline underline-offset-2">Review line {line.line_number}</a>;
+                })}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {applyResult && (
         <div className="rounded-xl border border-sage/25 bg-sage-soft/60 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-accent-foreground">
@@ -602,13 +736,12 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
         </div>
       )}
 
-      {(refinement || refinementActive) && (
+      {refinement && (
         <div className="rounded-xl border border-brass/30 bg-brass-soft/35 p-3.5 text-2xs leading-relaxed">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="flex items-center gap-1.5 font-medium text-brass">
               <Sparkles className="size-3.5" />
               AI refinement proposal
-              {refinementActive && <Badge variant="brass">Active</Badge>}
             </p>
             {refinement && (
               <span className="text-2xs text-muted-foreground">
@@ -620,7 +753,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           <p className="mt-1 text-muted-foreground">
             AI suggestions are separate from the deterministic proposal and your edits.
             Nothing is saved until you accept the refinement and then apply the reviewed
-            changes. Accepting replaces the current draft fields and lines.
+            changes. Accepting replaces the current draft fields, lines and matches.
           </p>
           {refinement && refinementFieldRows.length > 0 && (
             <div className="mt-2 grid gap-1 rounded-lg border border-border/50 bg-background/40 p-2.5 sm:grid-cols-2">
@@ -651,6 +784,13 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
                   <p className="mt-0.5 line-clamp-2 text-2xs text-muted-foreground">
                     {line.evidence.text}
                   </p>
+                  {refinement.matches.find((match) => match.line_id === line.id)?.candidates.length ? (
+                    <p className="mt-1 text-2xs text-muted-foreground">
+                      Suggested inventory matches:{" "}
+                      {refinement.matches.find((match) => match.line_id === line.id)
+                        ?.candidates.map((candidate) => candidate.name).join(", ")}
+                    </p>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -658,25 +798,14 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           {refinement?.warnings && refinement.warnings.length > 0 && (
             <p className="mt-2 text-2xs text-brass">{refinement.warnings.join(" ")}</p>
           )}
-          {refineMutation.error && (
-            <FormError message={getApiErrorMessage(refineMutation.error)} />
-          )}
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {refinementActive ? (
-              <Button type="button" size="sm" variant="outline" onClick={revertRefinement}>
-                Use deterministic proposal
-              </Button>
-            ) : (
-              <>
-                <Button type="button" size="sm" onClick={acceptRefinement}>
-                  <Check /> Accept AI refinement
-                </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={rejectRefinement}
-                  disabled={retryEnhancement.isPending}>
-                  Reject AI suggestion
-                </Button>
-              </>
-            )}
+            <Button type="button" size="sm" onClick={acceptRefinement}>
+              <Check /> Accept AI refinement
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={rejectRefinement}
+              disabled={retryEnhancement.isPending}>
+              Reject AI suggestion
+            </Button>
           </div>
         </div>
       )}
@@ -782,12 +911,14 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
                 </option>
               ))}
             </Select>
+            {!data.fields.currency && <p className="mt-1 text-2xs text-brass">
+              Currency is unknown in the source. Confirm the selected household default before applying.
+            </p>}
           </Field>
           <Field label="Total" htmlFor="extraction-total" optional>
             <Input
               id="extraction-total"
               type="number"
-              min={0}
               step="0.01"
               inputMode="decimal"
               value={total}
@@ -801,11 +932,12 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           data.fields.shipping_cents != null) && (
           <p className="mt-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
             Recorded subtotal{" "}
-            {formatCurrency(data.fields.subtotal_cents ?? 0, currency)} · tax{" "}
-            {formatCurrency(data.fields.tax_cents ?? 0, currency)} · discount{" "}
-            {formatCurrency(data.fields.discount_cents ?? 0, currency)} · shipping{" "}
-            {formatCurrency(data.fields.shipping_cents ?? 0, currency)}. These charge lines
+            {data.fields.subtotal_cents == null ? "unknown" : formatCurrency(data.fields.subtotal_cents, currency)} · tax{" "}
+            {data.fields.tax_cents == null ? "unknown" : formatCurrency(data.fields.tax_cents, currency)} · discount{" "}
+            {data.fields.discount_cents == null ? "unknown" : formatCurrency(data.fields.discount_cents, currency)} · shipping{" "}
+            {data.fields.shipping_cents == null ? "unknown" : formatCurrency(data.fields.shipping_cents, currency)}. These charge lines
             are kept separate and are not allocated to products.
+            {data.financial_validation && ` Tax treatment: ${data.financial_validation.tax_treatment}.`}
           </p>
         )}
         {Object.keys(data.fields.field_sources).length > 0 && (
@@ -841,22 +973,22 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => refineMutation.mutate()}
-              disabled={!aiAvailable || refineMutation.isPending || drafts.length === 0}
+              onClick={() => queueOperation("interpret")}
+              disabled={!aiAvailable || aiProcessing || matchMutation.isPending || drafts.length === 0}
               title={
                 aiAvailable
                   ? "Ask the configured document AI to refine fields and product lines"
                   : "Configure and consent to the documents AI task first"
               }
             >
-              {refineMutation.isPending ? <Spinner /> : <Sparkles />}
+              {queueAi.isPending && queueAi.variables === "interpret" ? <Spinner /> : <Sparkles />}
               Refine fields &amp; lines
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => matchMutation.mutate(false)}
+              onClick={() => matchMutation.mutate()}
               disabled={matchMutation.isPending || drafts.length === 0}
             >
               {matchMutation.isPending ? <Spinner /> : <Search />}
@@ -866,11 +998,11 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
               type="button"
               size="sm"
               variant="ghost"
-              onClick={() => matchMutation.mutate(true)}
-              disabled={!aiAvailable || matchMutation.isPending || drafts.length === 0}
+              onClick={() => queueOperation("matches")}
+              disabled={!aiAvailable || aiProcessing || matchMutation.isPending || drafts.length === 0}
               title={
                 aiAvailable
-                  ? "Re-rank supplied candidates with the configured document AI"
+                  ? "Queue a reviewed candidate-ranking proposal with the configured document AI"
                   : "Configure and consent to the documents AI task first"
               }
             >
@@ -880,6 +1012,10 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           </div>
         </div>
 
+        {aiProcessing && <p role="status" className="text-2xs text-muted-foreground">
+          {queueAi.isPending ? "Requesting bounded AI review…" : "Document processing is active; use the processing controls above to cancel."}
+          {" "}Suggestions use stored document evidence. Your current draft stays editable.
+        </p>}
         {aiWarnings.length > 0 && (
           <div className="rounded-lg border border-brass/20 bg-brass-soft/40 px-3 py-2 text-2xs text-muted-foreground">
             {aiWarnings.join(" ")}
@@ -903,6 +1039,7 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
             return (
               <article
                 key={draft.line.id}
+                id={`extraction-source-${draft.line.id}`}
                 className="surface space-y-3 p-4 sm:p-5"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -961,22 +1098,17 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
                     <Input
                       id={`line-unit-${draft.line.id}`}
                       type="number"
-                      min={0}
                       step="0.01"
                       value={draft.unitPrice}
-                      onChange={(event) =>
-                        updateDraft(draft.line.id, (current) => ({
-                          ...current,
-                          unitPrice: event.target.value,
-                        }))
-                      }
+                      readOnly
+                      aria-describedby={`line-unit-note-${draft.line.id}`}
+                      className="bg-secondary/30"
                     />
                   </Field>
                   <Field label="Line total" htmlFor={`line-total-${draft.line.id}`} optional>
                     <Input
                       id={`line-total-${draft.line.id}`}
                       type="number"
-                      min={0}
                       step="0.01"
                       value={draft.lineTotal}
                       onChange={(event) =>
@@ -988,6 +1120,9 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
                     />
                   </Field>
                 </div>
+                <p id={`line-unit-note-${draft.line.id}`} className="text-2xs text-muted-foreground">
+                  Unit price is source evidence. Reviewed quantity and line total determine purchase allocation.
+                </p>
 
                 {draft.line.warnings.length > 0 && (
                   <ul className="space-y-1 text-2xs text-brass">
@@ -1504,14 +1639,14 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
           </summary>
           <ul className="mt-3 divide-y divide-border/60">
             {charges.map((line) => (
-              <li key={line.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <li key={line.id} id={`extraction-source-${line.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="min-w-0">
                   <span className="block text-xs font-medium">{line.description}</span>
                   <span className="block text-2xs text-muted-foreground">
                     {line.kind} · source line {line.line_number}
                   </span>
                 </span>
-                <span className="text-xs tabular-nums">{formatCurrency(line.line_total_cents ?? 0, currency)}</span>
+                <span className="text-xs tabular-nums">{line.line_total_cents == null ? "Amount unknown" : formatCurrency(line.line_total_cents, currency)}</span>
               </li>
             ))}
           </ul>
@@ -1657,20 +1792,20 @@ export function DocumentExtractionReview({ document, onOpenChange }: {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => refineMutation.mutate()}
-              disabled={!aiAvailable || refineMutation.isPending}
+              onClick={() => queueOperation("interpret")}
+              disabled={!aiAvailable || aiProcessing || matchMutation.isPending}
             >
-              {refineMutation.isPending ? <Spinner /> : <Sparkles />}
+              {queueAi.isPending && queueAi.variables === "interpret" ? <Spinner /> : <Sparkles />}
               Refine fields &amp; lines
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => matchMutation.mutate(true)}
-              disabled={!aiAvailable || matchMutation.isPending}
+              onClick={() => queueOperation("matches")}
+              disabled={!aiAvailable || aiProcessing || matchMutation.isPending}
             >
-              {matchMutation.isPending ? <Spinner /> : <Wand2 />}
+              {queueAi.isPending && queueAi.variables === "matches" ? <Spinner /> : <Wand2 />}
               Re-rank matches
             </Button>
           </div>

@@ -73,7 +73,10 @@ vi.mock("@/lib/queries", async (importOriginal) => {
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+  return <>
+    <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+    <output data-testid="navigation-state">{JSON.stringify(location.state)}</output>
+  </>;
 }
 
 function RegisteredContext() {
@@ -160,6 +163,80 @@ beforeEach(() => {
 });
 
 describe("AddItems smart input", () => {
+  it("uploads a PDF directly as a document, retaining the note without image recognition", async () => {
+    vi.mocked(api.postForm).mockResolvedValue({ id: "invoice-1" });
+    await open(officeBox);
+    await userEvent.type(textbox(), "Invoice for the office");
+    const file = new File(["%PDF-1.4"], "invoice.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByTestId("smart-add-library"), { target: { files: [file] } });
+    expect(screen.getByText("invoice.pdf")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    await waitFor(() => expect(currentUrl().pathname).toBe("/documents/invoice-1"));
+    expect(api.postForm).toHaveBeenCalledTimes(1);
+    const [path, form] = vi.mocked(api.postForm).mock.calls[0]!;
+    expect(path).toBe("/documents");
+    expect(form.get("file")).toBe(file);
+    expect(form.get("notes")).toBe("Invoice for the office");
+    expect(form.get("document_type")).toBe("invoice");
+    expect(form.get("room_id")).toBeNull();
+    expect(form.get("location_id")).toBeNull();
+    expect(screen.getByTestId("navigation-state")).toHaveTextContent(
+      JSON.stringify({ documentCapture: { documentId: "invoice-1", roomId: "room-1", locationId: "box-1" } }),
+    );
+  });
+
+  it("lets a receipt image bypass recognition through an explicit evidence intent", async () => {
+    vi.mocked(api.postForm).mockResolvedValue({ id: "receipt-1" });
+    await open();
+    attachPhoto("receipt.png");
+    await userEvent.click(screen.getByRole("radio", { name: "Invoice or evidence" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    await waitFor(() => expect(currentUrl().pathname).toBe("/documents/receipt-1"));
+    expect(api.postForm).toHaveBeenCalledExactlyOnceWith("/documents", expect.any(FormData));
+  });
+
+  it("accepts a PDF dropped without browser MIME metadata and supplies its upload MIME", async () => {
+    vi.mocked(api.postForm).mockResolvedValue({ id: "pdf-1" });
+    await open();
+    const file = new File(["%PDF"], "invoice.PDF");
+    fireEvent.drop(textbox().parentElement!, { dataTransfer: { files: [file] } });
+    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    await waitFor(() => expect(api.postForm).toHaveBeenCalled());
+    const uploaded = vi.mocked(api.postForm).mock.calls[0]![1].get("file") as File;
+    expect(uploaded.type).toBe("application/pdf");
+    expect(uploaded.name).toBe("invoice.PDF");
+    expect(uploaded.size).toBe(file.size);
+  });
+
+  it("rejects unsupported attachments before upload without discarding the draft or valid file", async () => {
+    await open();
+    await userEvent.type(textbox(), "Keep my note");
+    attachPhoto();
+    fireEvent.change(screen.getByTestId("smart-add-library"), {
+      target: { files: [new File(["zip"], "archive.zip", { type: "application/zip" })] },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("PDF");
+    expect(textbox()).toHaveValue("Keep my note");
+    expect(screen.getByText("backpack.png")).toBeVisible();
+    expect(api.postForm).not.toHaveBeenCalled();
+  });
+
+  it("shows actual upload state and retains a failed document attachment for retry", async () => {
+    let rejectUpload!: (error: Error) => void;
+    vi.mocked(api.postForm).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectUpload = reject;
+    }));
+    await open();
+    const file = new File(["%PDF"], "invoice.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByTestId("smart-add-library"), { target: { files: [file] } });
+    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Uploading original document");
+    await act(async () => rejectUpload(new Error("Upload unavailable")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Upload unavailable");
+    expect(screen.getByText("invoice.pdf")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review document" })).toBeEnabled();
+  });
+
   it("waits for a tap to focus the mobile box and live-detects text, link and photo input", async () => {
     await open();
     expect(screen.getByRole("heading", { name: "Add items" })).toHaveFocus();

@@ -1,6 +1,8 @@
 # Integrated assistant rework
 
-Status: implementation brief, 13 November 2026. Application code unchanged.
+Status: Stage A implemented and validated on `feature/integrated-assistant`.
+See [Stage A evidence and acceptance checklist](ASSISTANT_STAGE_A_REPORT.md).
+Not deployed; Stage B awaits review. The remaining specification below is unchanged.
 
 ## Product outcome
 

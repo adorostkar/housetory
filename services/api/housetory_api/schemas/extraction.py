@@ -34,11 +34,11 @@ class ExtractionFields(BaseModel):
     purchase_date: date | None = None
     document_date: date | None = None
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
-    total_cents: int | None = Field(default=None, ge=0, le=10**12)
-    subtotal_cents: int | None = Field(default=None, ge=0, le=10**12)
-    tax_cents: int | None = Field(default=None, ge=0, le=10**12)
+    total_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    subtotal_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    tax_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     discount_cents: int | None = Field(default=None, ge=0, le=10**12)
-    shipping_cents: int | None = Field(default=None, ge=0, le=10**12)
+    shipping_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     order_number: str | None = Field(default=None, max_length=120)
     brand: str | None = Field(default=None, max_length=120)
     model: str | None = Field(default=None, max_length=120)
@@ -57,11 +57,36 @@ class ExtractionLine(BaseModel):
     kind: LineKind
     description: str = Field(min_length=1, max_length=300)
     quantity: int | None = Field(default=None, ge=1, le=100_000)
-    unit_price_cents: int | None = Field(default=None, ge=0, le=10**12)
-    line_total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    unit_price_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    line_total_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     evidence: SourceEvidence
     warnings: list[str] = Field(default_factory=list)
     purchase_eligible: bool = True
+
+
+class FinancialCheck(BaseModel):
+    code: str
+    severity: Literal["warning", "error"] = "warning"
+    message: str
+    line_ids: list[str] = Field(default_factory=list)
+
+
+class FinancialComputedTotals(BaseModel):
+    product_total_cents: int | None = None
+    discount_cents: int | None = None
+    shipping_cents: int | None = None
+    tax_cents: int | None = None
+    expected_total_cents: int | None = None
+    total_difference_cents: int | None = None
+
+
+class FinancialValidation(BaseModel):
+    status: Literal["consistent", "needs_attention", "insufficient_evidence"] = (
+        "insufficient_evidence"
+    )
+    tax_treatment: Literal["inclusive", "exclusive", "unknown"] = "unknown"
+    computed: FinancialComputedTotals = Field(default_factory=FinancialComputedTotals)
+    checks: list[FinancialCheck] = Field(default_factory=list)
 
 
 class CandidatePurchase(BaseModel):
@@ -127,6 +152,7 @@ class ExtractionReviewOut(BaseModel):
     fields: ExtractionFields
     lines: list[ExtractionLine]
     warnings: list[str] = Field(default_factory=list)
+    financial_validation: FinancialValidation = Field(default_factory=FinancialValidation)
     matches: list[LineMatch] = Field(default_factory=list)
     duplicate_documents: list[DuplicateDocumentBrief] = Field(default_factory=list)
     applied: list[ExtractionApplySummary] = Field(default_factory=list)
@@ -263,11 +289,11 @@ class AiRefinedFields(BaseModel):
     purchase_date: date | None = None
     document_date: date | None = None
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
-    total_cents: int | None = Field(default=None, ge=0, le=10**12)
-    subtotal_cents: int | None = Field(default=None, ge=0, le=10**12)
-    tax_cents: int | None = Field(default=None, ge=0, le=10**12)
+    total_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    subtotal_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    tax_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     discount_cents: int | None = Field(default=None, ge=0, le=10**12)
-    shipping_cents: int | None = Field(default=None, ge=0, le=10**12)
+    shipping_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     order_number: str | None = Field(default=None, max_length=120)
     brand: str | None = Field(default=None, max_length=120)
     model: str | None = Field(default=None, max_length=120)
@@ -285,8 +311,8 @@ class AiRefinedLine(BaseModel):
     description: str = Field(min_length=1, max_length=300)
     kind: LineKind
     quantity: int | None = Field(default=None, ge=1, le=100_000)
-    unit_price_cents: int | None = Field(default=None, ge=0, le=10**12)
-    line_total_cents: int | None = Field(default=None, ge=0, le=10**12)
+    unit_price_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
+    line_total_cents: int | None = Field(default=None, ge=-(10**12), le=10**12)
     evidence: str = Field(min_length=1, max_length=1000)
     uncertainty: list[str] = Field(default_factory=list, max_length=10)
 
@@ -309,6 +335,7 @@ class ExtractionRefinementOut(BaseModel):
     fields: ExtractionFields
     lines: list[ExtractionLine]
     warnings: list[str] = Field(default_factory=list)
+    financial_validation: FinancialValidation = Field(default_factory=FinancialValidation)
     matches: list[LineMatch] = Field(default_factory=list)
     ai_status: AiStatus
     ai_used: bool = False

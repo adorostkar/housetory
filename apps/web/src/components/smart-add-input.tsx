@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Camera,
   ChevronDown,
+  FileText,
   ImagePlus,
   Link2,
   MapPin,
@@ -19,6 +20,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDuration, useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { DOCUMENT_FILE_ACCEPT, documentFileError, documentFileType, documentUploadFile } from "@/lib/document-files";
 import { appendOrigin, itemOrigin } from "@/lib/navigation";
 import {
   queryKeys,
@@ -69,10 +71,6 @@ export const CONFLICT_MESSAGE = "A link can't be read together with a photo — 
 export const VOICE_NOT_CONFIGURED = "Voice needs transcription — set up in AI settings";
 export const VOICE_HAS_CONTENT = "Voice is sent on its own — clear the box to record.";
 
-function firstImage(files: FileList | File[] | null | undefined): File | null {
-  return Array.from(files ?? []).find((file) => file.type.startsWith("image/")) ?? null;
-}
-
 function useObjectUrl(file: File | null): string | null {
   const [url, setUrl] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -92,7 +90,7 @@ const iconButton =
 
 /**
  * One input for adding items: describe them, paste a product link, attach a
- * photo or record a voice note. Everything ends in the import review.
+ * photo/document or record a voice note. Documents use the existing extraction review.
  */
 export function SmartAddInput({
   context,
@@ -132,7 +130,10 @@ export function SmartAddInput({
 
   const [text, setText] = React.useState("");
   const [photo, setPhoto] = React.useState<File | null>(null);
-  const photoUrl = useObjectUrl(photo);
+  const [attachmentIntent, setAttachmentIntent] = React.useState<"photo" | "document">("photo");
+  const isImage = Boolean(photo && documentFileType(photo).startsWith("image/"));
+  const isDocument = Boolean(photo && (!isImage || attachmentIntent === "document"));
+  const photoUrl = useObjectUrl(isImage ? photo : null);
   const [dragging, setDragging] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [micHint, setMicHint] = React.useState<string | null>(null);
@@ -196,16 +197,22 @@ export function SmartAddInput({
     onError: (caught) => setError(getApiErrorMessage(caught)),
   });
 
-  // A photographed receipt or invoice is stored as a document and read by the
-  // extraction review, which creates items, the purchase and the receipt link.
+  // Explicit documents bypass recognition; detected receipts reuse this same
+  // extraction review and its purchase/item/document-link apply path.
   const storeAsDocument = useMutation({
     mutationFn: ({ file, type }: { file: File; type: string }) => {
       const form = new FormData();
       form.append("file", file);
       form.append("document_type", type);
+      if (text.trim()) form.append("notes", text.trim());
       return api.postForm<DocumentRecord>("/documents", form);
     },
-    onSuccess: (document) => finishAt(`/documents/${document.id}`),
+    onSuccess: (document) => {
+      onFinish();
+      navigate(`/documents/${document.id}`, {
+        state: { documentCapture: { documentId: document.id, roomId, locationId } },
+      });
+    },
     onError: (caught) => {
       setError(getApiErrorMessage(caught));
       setRecognitionId(null);
@@ -346,7 +353,13 @@ export function SmartAddInput({
 
   const attach = (file: File | null) => {
     if (!file || inputLocked) return;
-    setPhoto(file);
+    const validation = documentFileError(file);
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    setPhoto(documentUploadFile(file));
+    setAttachmentIntent(documentFileType(file).startsWith("image/") ? "photo" : "document");
     setError(null);
   };
 
@@ -355,7 +368,8 @@ export function SmartAddInput({
     setError(null);
     if (kind === "empty" || kind === "conflict") return;
     const trimmed = text.trim();
-    if (photo) createRecognition.mutate({ file: photo, note: trimmed });
+    if (photo && isDocument) storeAsDocument.mutate({ file: photo, type: "invoice" });
+    else if (photo) createRecognition.mutate({ file: photo, note: trimmed });
     else if (kind === "link") createTextImport.mutate({ productUrl: trimmed });
     else createTextImport.mutate({ text: trimmed });
   };
@@ -480,7 +494,7 @@ export function SmartAddInput({
     </div>
   );
 
-  const chipLabel = KIND_LABEL[kind];
+  const chipLabel = isDocument ? "Document" : KIND_LABEL[kind];
   const showInlinePicker = layout === "sheet" && pickerOpen;
 
   return (
@@ -533,9 +547,11 @@ export function SmartAddInput({
               setDragging(false);
               if (!event.dataTransfer.files.length) return;
               event.preventDefault();
-              const file = firstImage(event.dataTransfer.files);
-              if (file) attach(file);
-              else setError("Only a photo can be attached here.");
+              if (event.dataTransfer.files.length > 1) {
+                setError("Attach one file at a time. Your current draft is unchanged.");
+                return;
+              }
+              attach(event.dataTransfer.files[0] ?? null);
             }}
           >
             <label htmlFor={`${ids}-text`} className="sr-only">
@@ -557,13 +573,13 @@ export function SmartAddInput({
                 }
               }}
               onPaste={(event) => {
-                const file = firstImage(event.clipboardData?.files);
+                const file = event.clipboardData?.files?.[0];
                 if (!file) return;
                 event.preventDefault();
                 attach(file);
               }}
               placeholder={
-                "Two camping chairs in the garage…\nor paste one product link, or add a photo."
+                "Two camping chairs in the garage…\nor paste one product link, or attach a PDF or photo."
               }
               className="block min-h-28 w-full resize-none rounded-t-2xl bg-transparent px-4 pb-2 pt-3.5 text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 lg:text-[0.95rem]"
             />
@@ -578,13 +594,13 @@ export function SmartAddInput({
                       className="size-9 shrink-0 rounded-lg object-cover"
                     />
                   ) : (
-                    <Camera className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <FileText className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   )}
                   <span className="truncate text-sm">{photo.name || "Photo"}</span>
                   <button
                     type="button"
                     className={iconButton}
-                    aria-label="Remove photo"
+                    aria-label={isImage ? "Remove photo" : "Remove document"}
                     disabled={inputLocked}
                     onClick={() => setPhoto(null)}
                   >
@@ -636,8 +652,8 @@ export function SmartAddInput({
                 <button
                   type="button"
                   className={iconButton}
-                  aria-label="Choose photo"
-                  title="Choose photo"
+                  aria-label="Choose photo or document"
+                  title="Choose photo or document"
                   disabled={inputLocked}
                   onClick={() => libraryRef.current?.click()}
                 >
@@ -671,7 +687,7 @@ export function SmartAddInput({
                   {chipLabel && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-foreground/80 lg:text-2xs">
                       {kind === "link" && <Link2 className="size-3.5" aria-hidden="true" />}
-                      {(kind === "photo" || kind === "photo-note") && (
+                      {isDocument ? <FileText className="size-3.5" aria-hidden="true" /> : (kind === "photo" || kind === "photo-note") && (
                         <Camera className="size-3.5" aria-hidden="true" />
                       )}
                       {chipLabel}
@@ -692,28 +708,50 @@ export function SmartAddInput({
             aria-hidden="true"
             data-testid="smart-add-camera"
             onChange={(event) => {
-              attach(firstImage(event.target.files));
+              attach(event.target.files?.[0] ?? null);
               event.target.value = "";
             }}
           />
           <input
             ref={libraryRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            accept={DOCUMENT_FILE_ACCEPT}
             className="sr-only"
             tabIndex={-1}
             aria-hidden="true"
             data-testid="smart-add-library"
             onChange={(event) => {
-              attach(firstImage(event.target.files));
+              attach(event.target.files?.[0] ?? null);
               event.target.value = "";
             }}
           />
 
+          {photo && isImage && (
+            <fieldset disabled={inputLocked} className="flex flex-wrap gap-x-4 gap-y-2 text-sm lg:text-xs">
+              <legend className="mb-2 text-muted-foreground">How should this image be used?</legend>
+              <label className="inline-flex min-h-11 items-center gap-2">
+                <input type="radio" name={`${ids}-intent`} value="photo"
+                  className="size-4 accent-primary"
+                  checked={attachmentIntent === "photo"} onChange={() => setAttachmentIntent("photo")} />
+                Inventory photo
+              </label>
+              <label className="inline-flex min-h-11 items-center gap-2">
+                <input type="radio" name={`${ids}-intent`} value="document"
+                  className="size-4 accent-primary"
+                  checked={attachmentIntent === "document"} onChange={() => setAttachmentIntent("document")} />
+                Invoice or evidence
+              </label>
+            </fieldset>
+          )}
+          {storeAsDocument.isPending && (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner /> Uploading original document…
+            </p>
+          )}
           <div aria-live="polite" className="empty:hidden">
             {kind === "conflict" && (
               <p className="text-sm leading-snug text-destructive lg:text-xs">
-                {CONFLICT_MESSAGE}
+                {isDocument ? "A link can't be read together with a document — remove one." : CONFLICT_MESSAGE}
               </p>
             )}
             {recorder.error && (
@@ -756,7 +794,7 @@ export function SmartAddInput({
               aria-keyshortcuts="Control+Enter Meta+Enter"
             >
               {submitting ? <Spinner /> : kind === "link" ? <Link2 /> : <Sparkles />}
-              {submitting ? "Interpreting…" : "Review items"}
+              {storeAsDocument.isPending ? "Uploading…" : submitting ? "Interpreting…" : isDocument ? "Review document" : "Review items"}
             </Button>
           </div>
         </form>

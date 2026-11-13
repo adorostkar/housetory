@@ -11,6 +11,8 @@ no unstructured tool execution. Provider credentials are decrypted per request.
 """
 
 import base64
+import contextlib
+import contextvars
 import errno
 import http.client
 import json
@@ -50,6 +52,64 @@ purchases. Mark unknown values as null. You are read-only and cannot modify data
 
 _semaphore = threading.BoundedSemaphore(get_settings().ai_max_concurrency)
 logger = logging.getLogger("housetory.ai")
+_request_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "ai_request_deadline", default=None
+)
+_last_request_duration: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "ai_last_request_duration_ms", default=None
+)
+_last_request_error: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "ai_last_request_error", default=None
+)
+_validation_duration: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "ai_validation_duration", default=None
+)
+
+
+@contextlib.contextmanager
+def bounded_request_deadline(seconds: float):
+    """Bound provider attempts and retries to an interactive job's remaining time."""
+    token = _request_deadline.set(time.monotonic() + max(0.0, seconds))
+    _last_request_duration.set(None)
+    _last_request_error.set(None)
+    _validation_duration.set(None)
+    try:
+        yield
+    finally:
+        _request_deadline.reset(token)
+
+
+def last_request_duration_ms() -> int | None:
+    return _last_request_duration.get()
+
+
+def last_request_error_code() -> str | None:
+    return _last_request_error.get()
+
+
+@contextlib.contextmanager
+def measure_validation():
+    if _request_deadline.get() is None:
+        yield
+        return
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        _validation_duration.set((_validation_duration.get() or 0) + time.monotonic() - started)
+
+
+def last_validation_duration_ms() -> int | None:
+    duration = _validation_duration.get()
+    return round(duration * 1000) if duration is not None else None
+
+
+def _bounded_timeout(timeout: int | None, default: int) -> int:
+    deadline = _request_deadline.get()
+    if deadline is None:
+        return timeout or default
+    remaining = max(1, int(deadline - time.monotonic()))
+    return min(timeout or default, remaining)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -232,7 +292,7 @@ def _request_json(
     settings = _settings()
     request_headers = {"Content-Type": "application/json", **(headers or {})}
     data = json.dumps(payload).encode() if payload is not None else None
-    attempts = 2
+    attempts = 1 if _request_deadline.get() is not None else 2
     breaker_key = _preflight(url)
     for attempt in range(attempts):
         logger.info("Inference JSON request attempt=%d", attempt + 1)
@@ -249,7 +309,7 @@ def _request_json(
             # its default TLS certificate verification.
             opener = _opener()
             with opener.open(  # nosec B310
-                request, timeout=timeout or settings.ai_timeout_seconds
+                request, timeout=_bounded_timeout(timeout, settings.ai_timeout_seconds)
             ) as response:
                 body = response.read(3_000_000)
             break
@@ -320,7 +380,7 @@ def request_multipart_json(
         "Content-Type": f"multipart/form-data; boundary={boundary}",
         **(headers or {}),
     }
-    attempts = 2
+    attempts = 1 if _request_deadline.get() is not None else 2
     breaker_key = _preflight(url)
     for attempt in range(attempts):
         logger.info("Inference multipart request attempt=%d", attempt + 1)
@@ -328,7 +388,7 @@ def request_multipart_json(
         try:
             opener = _opener()
             with opener.open(  # nosec B310
-                request, timeout=timeout or settings.ai_timeout_seconds
+                request, timeout=_bounded_timeout(timeout, settings.ai_timeout_seconds)
             ) as response:
                 response_body = response.read(3_000_000)
             break
@@ -917,7 +977,7 @@ def _openai_chat(
             _url(config, "/chat/completions"), payload, headers=_headers(config)
         )
     except AiUnavailable as exc:
-        if json_mode and "HTTP 400" in str(exc):
+        if json_mode and "HTTP 400" in str(exc) and _request_deadline.get() is None:
             payload.pop("response_format", None)
             response = _request_json(
                 _url(config, "/chat/completions"), payload, headers=_headers(config)
@@ -1027,9 +1087,12 @@ def _chat(
     image_path: Path | None = None,
     image_mime: str | None = None,
 ) -> str:
+    _last_request_error.set(None)
     if not config.configured:
+        _last_request_error.set("not_configured")
         raise AiUnavailable(config.error or "AI is not configured.", code="not_configured")
     if not _semaphore.acquire(timeout=5):
+        _last_request_error.set("busy")
         raise AiUnavailable("AI inference is busy; try again shortly.", code="busy")
     started = time.monotonic()
     reason = "completed"
@@ -1064,9 +1127,11 @@ def _chat(
         )
     except AiError as exc:
         reason = exc.code
+        _last_request_error.set(exc.code)
         raise
     finally:
         _semaphore.release()
+        _last_request_duration.set(round((time.monotonic() - started) * 1000))
         logger.info(
             "Inference task=%s provider=%s model=%s reason=%s duration_ms=%d",
             config.task,

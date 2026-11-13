@@ -4,10 +4,12 @@ Runs durable maintenance jobs from PostgreSQL. The worker has no HTTP port and
 is intentionally able to run on CPU-only hosts.
 """
 
+import contextlib
 import json
 import logging
 import multiprocessing
 import os
+import signal
 import socket
 import threading
 import time
@@ -20,6 +22,8 @@ from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.domain import JobStatus
 from housetory_api.jobs import (
+    DOCUMENT_AI_QUEUE,
+    DOCUMENT_LOCAL_QUEUE,
     claim_job,
     enqueue,
     has_active_job,
@@ -126,6 +130,159 @@ def _record_worker_heartbeat(worker_id: str) -> None:
             row.version = __version__
             row.updated_at = datetime.now(UTC)
         db.commit()
+
+
+def _queue_heartbeat_file(queue: str) -> Path:
+    if queue == "default":
+        return Path(
+            os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
+        )
+    base = Path(
+        os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
+    )
+    return base.with_name(f"{base.name}-{queue}")
+
+
+def _interrupt_on_termination(_signum, _frame) -> None:
+    raise KeyboardInterrupt
+
+
+def _stop_process(child, *, timeout: float = 10) -> None:
+    if child.is_alive():
+        with contextlib.suppress(ProcessLookupError):
+            child.terminate()
+        child.join(timeout=timeout)
+        if child.is_alive():
+            with contextlib.suppress(ProcessLookupError):
+                child.kill()
+            child.join(timeout=2)
+
+
+def _run_document_child(target, args) -> None:
+    if os.name == "posix":
+        os.setsid()
+    target(*args)
+
+
+def _stop_document_process(child) -> None:
+    pid = child.pid
+    if os.name == "posix" and pid is not None:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGTERM)
+    _stop_process(child, timeout=2)
+    if os.name == "posix" and pid is not None:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, signal.SIGKILL)
+
+
+def _fail_interrupted_job(job_id: uuid.UUID) -> None:
+    from housetory_api.services.document_processing import fail_processing_for_job
+
+    with SessionLocal() as db:
+        current = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
+        if current is not None and current.status == JobStatus.RUNNING.value:
+            current.status = JobStatus.FAILED.value
+            current.last_error = "interactive_worker_interrupted"
+            current.finished_at = datetime.now(UTC)
+            current.locked_by = None
+            current.locked_at = None
+            db.commit()
+            fail_processing_for_job(db, current, reason="worker_interrupted")
+
+
+def process_interactive_job(
+    job: Job,
+    *,
+    process_context=None,
+    process_target=None,
+    process_args=None,
+) -> None:
+    """Run document work in a killable child, bounded by its persisted deadline."""
+    from housetory_api.services.document_processing import INTERACTIVE_DEADLINE_SECONDS
+
+    deadline_value = (job.payload or {}).get("deadline_at")
+    if deadline_value:
+        try:
+            deadline = datetime.fromisoformat(deadline_value)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=UTC)
+            timeout = max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+        except (TypeError, ValueError):
+            timeout = 0.0
+    else:
+        timeout = 15 * 60 if (job.payload or {}).get("mode") == "background" else 0
+    if (job.payload or {}).get("mode") != "background":
+        timeout = min(timeout, INTERACTIVE_DEADLINE_SECONDS)
+    if timeout <= 0:
+        with SessionLocal() as db:
+            current = db.get(Job, job.id)
+            if current is not None:
+                mark_failed(db, job.id, "interactive_deadline_exceeded")
+                from housetory_api.services.document_processing import (
+                    fail_processing_for_job,
+                )
+
+                fail_processing_for_job(db, current, reason="deadline_exceeded")
+        return
+
+    expires_at = time.monotonic() + timeout
+    context = process_context or multiprocessing.get_context("spawn")
+    child = None
+    try:
+        child = context.Process(
+            target=_run_document_child,
+            args=(
+                process_target or process_job,
+                tuple(process_args) if process_args is not None else (job,),
+            ),
+            daemon=True,
+        )
+        child.start()
+    except Exception:
+        logger.exception("Could not start supervised document job %s", job.id)
+        if child is not None:
+            _stop_document_process(child)
+        _fail_interrupted_job(job.id)
+        return
+    try:
+        while child.is_alive():
+            child.join(timeout=min(0.5, max(0.0, expires_at - time.monotonic())))
+            if time.monotonic() >= expires_at and child.is_alive():
+                _stop_document_process(child)
+                with SessionLocal() as db:
+                    current = db.get(Job, job.id)
+                    if current is not None:
+                        mark_failed(db, job.id, "interactive_deadline_exceeded")
+                        from housetory_api.services.document_processing import (
+                            fail_processing_for_job,
+                        )
+
+                        fail_processing_for_job(db, current, reason="deadline_exceeded")
+                return
+            with SessionLocal() as db:
+                current = db.get(Job, job.id)
+                if current is None or current.status == JobStatus.CANCELLED.value:
+                    _stop_document_process(child)
+                    return
+        if child.exitcode not in {0, None}:
+            _fail_interrupted_job(job.id)
+        else:
+            with SessionLocal() as db:
+                current = db.get(Job, job.id)
+                if current is not None and current.status == JobStatus.FAILED.value:
+                    from housetory_api.services.document_processing import (
+                        fail_processing_for_job,
+                    )
+
+                    fail_processing_for_job(db, current, reason="worker_interrupted")
+                elif current is not None and current.status == JobStatus.RUNNING.value:
+                    _fail_interrupted_job(job.id)
+    except KeyboardInterrupt:
+        _stop_document_process(child)
+        _fail_interrupted_job(job.id)
+        raise
+    finally:
+        _stop_document_process(child)
 
 
 def prune_expired_sessions(payload: dict) -> dict:
@@ -268,6 +425,33 @@ def _keep_heartbeat(worker_id: str) -> None:
 
 
 def _run_queue(queue: str, peer=None) -> None:
+    global HEARTBEAT_FILE
+    HEARTBEAT_FILE = _queue_heartbeat_file(queue)
+    previous_handler = signal.signal(signal.SIGTERM, _interrupt_on_termination)
+    lane_peer = None
+    lane_queue = (
+        DOCUMENT_LOCAL_QUEUE
+        if queue == "default"
+        else DOCUMENT_AI_QUEUE
+        if queue == "ai"
+        else None
+    )
+    try:
+        if lane_queue is not None:
+            lane_peer = multiprocessing.get_context("spawn").Process(
+                target=_run_queue,
+                args=(lane_queue,),
+            )
+            lane_peer.start()
+        _serve_queue(queue, peer=peer, lane_peer=lane_peer, lane_queue=lane_queue)
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if lane_peer is not None:
+            _stop_process(lane_peer)
+        signal.signal(signal.SIGTERM, previous_handler)
+
+
+def _serve_queue(queue: str, *, peer, lane_peer, lane_queue: str | None) -> None:
     settings = get_settings()
     logger.info(
         "Housetory worker starting (environment=%s, heartbeat=%s, queue=%s)",
@@ -289,22 +473,36 @@ def _run_queue(queue: str, peer=None) -> None:
     threading.Thread(target=_keep_heartbeat, args=(worker_id,), daemon=True).start()
 
     last_maintenance_check = time.monotonic()
+    last_legacy_routing_check = time.monotonic()
     last_db_heartbeat = time.monotonic()
     while True:
         if peer is not None and not peer.is_alive():
             raise RuntimeError("The AI worker exited; restart both execution lanes.")
+        if lane_peer is not None and not lane_peer.is_alive():
+            raise RuntimeError(f"The reserved {lane_queue} worker exited.")
         try:
             job = None
             with SessionLocal() as db:
                 job = claim_job(db, worker_id=worker_id, queue=queue)
             if job is not None:
-                process_job(job)
+                if queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE} or (
+                    job.task == OCR_TASK
+                    and (job.payload or {}).get("mode") == "background"
+                ):
+                    process_interactive_job(job)
+                else:
+                    process_job(job)
             else:
                 time.sleep(POLL_SECONDS)
             if queue == "default" and time.monotonic() - last_maintenance_check > 60:
                 schedule_maintenance()
                 dispatch_scheduled_reviews()
                 last_maintenance_check = time.monotonic()
+            if queue == "default" and time.monotonic() - last_legacy_routing_check > 60:
+                with SessionLocal() as db:
+                    route_legacy_ai_jobs(db)
+                    requeue_stale_jobs(db)
+                last_legacy_routing_check = time.monotonic()
             if time.monotonic() - last_db_heartbeat > 15:
                 _record_worker_heartbeat(worker_id)
                 last_db_heartbeat = time.monotonic()
@@ -318,25 +516,25 @@ def _run_queue(queue: str, peer=None) -> None:
 
 
 def _run_ai_child() -> None:
-    global HEARTBEAT_FILE
-    HEARTBEAT_FILE = HEARTBEAT_FILE.with_name(HEARTBEAT_FILE.name + "-ai")
     _run_queue("ai")
 
 
 def run() -> None:
-    queue = get_settings().worker_queue
-    if queue != "all":
-        _run_queue(queue)
-        return
-    child = multiprocessing.get_context("spawn").Process(
-        target=_run_ai_child, daemon=True
-    )
-    child.start()
+    previous_handler = signal.signal(signal.SIGTERM, _interrupt_on_termination)
+    child = None
     try:
+        queue = get_settings().worker_queue
+        if queue != "all":
+            _run_queue(queue)
+            return
+        child = multiprocessing.get_context("spawn").Process(target=_run_ai_child)
+        child.start()
         _run_queue("default", peer=child)
     finally:
-        child.terminate()
-        child.join(timeout=10)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if child is not None:
+            _stop_process(child)
+        signal.signal(signal.SIGTERM, previous_handler)
 
 
 if __name__ == "__main__":

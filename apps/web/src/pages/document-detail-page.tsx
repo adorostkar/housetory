@@ -13,11 +13,12 @@ import {
   Trash2,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
+import { DocumentProcessingStatus } from "@/components/document-processing-status";
 import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
@@ -51,14 +52,19 @@ import {
   useDocumentRelations,
   useInvalidateInventory,
 } from "@/lib/queries";
-import type { DocumentRecord, DocumentType } from "@/lib/types";
+import type { DocumentCaptureContext, DocumentRecord, DocumentType } from "@/lib/types";
 import { formatDate, formatFileSize, versionedUrl } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function DocumentDetailPage() {
   const { documentId = "" } = useParams();
+  const navigation = useLocation();
+  const capture = (navigation.state as { documentCapture?: DocumentCaptureContext } | null)?.documentCapture;
+  const captureContext = capture?.documentId === documentId &&
+    typeof capture.roomId === "string" && typeof capture.locationId === "string" ? capture : undefined;
   const documentQuery = useDocument(documentId);
   const [extractionOpened, setExtractionOpened] = React.useState(false);
+  const [manualReviewRequest, setManualReviewRequest] = React.useState({ documentId: "", revision: 0 });
   const relationsQuery = useDocumentRelations(
     documentQuery.data && extractionOpened ? documentId : undefined,
   );
@@ -194,6 +200,12 @@ export function DocumentDetailPage() {
     >
       <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
         <div className="space-y-6">
+          <DocumentProcessingStatus documentId={document.id} onManualReview={() => {
+            setManualReviewRequest((request) => ({ documentId: document.id, revision: request.revision + 1 }));
+            const review = window.document.getElementById("document-extraction-review");
+            review?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+            review?.focus({ preventScroll: true });
+          }} />
           <section className="surface overflow-hidden">
             {isImageContentType(document.content_type) ? (
               <div className="flex max-h-[70vh] items-center justify-center bg-secondary/30 p-4">
@@ -282,10 +294,11 @@ export function DocumentDetailPage() {
             </section>
           )}
 
-            <section className="surface p-5 sm:p-6">
+            <section id="document-extraction-review" tabIndex={-1}
+              aria-labelledby="document-extraction-heading" className="surface p-5 sm:p-6">
               <div className="flex items-center gap-2">
                 <Sparkles className="size-4 text-brass" strokeWidth={1.7} />
-                <h2 className="text-sm font-medium">
+                <h2 id="document-extraction-heading" className="text-sm font-medium">
                   Extraction review
                 </h2>
               </div>
@@ -295,6 +308,8 @@ export function DocumentDetailPage() {
                   : "Review document fields, line items and household matches before anything changes."}
               </p>
               <DocumentExtractionReview key={`${document.id}:${cleanupRevision}`} document={document}
+                captureContext={captureContext}
+                manualReviewRequest={manualReviewRequest.documentId === document.id ? manualReviewRequest.revision : 0}
                 onOpenChange={(open) => { if (open) setExtractionOpened(true); }} />
             </section>
 
@@ -453,10 +468,9 @@ export function DocumentDetailPage() {
               </Badge>
             </div>
             {document.ocr_status === "queued" || document.ocr_status === "processing" ? (
-              <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <Spinner className="size-3.5" />
-                The worker is reading this document on your server. This page updates
-                automatically.
+              <p className="mt-3 text-xs text-muted-foreground">
+                Local reading is pending. See processing status above for worker
+                availability, cancellation and retry.
               </p>
             ) : document.ocr_status === "failed" ? (
               <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3">

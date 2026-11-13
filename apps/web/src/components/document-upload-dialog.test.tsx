@@ -113,6 +113,19 @@ beforeEach(() => {
 });
 
 describe("DocumentUploadDialog", () => {
+  it("rejects an unsupported replacement without discarding the selected document or title", async () => {
+    renderDialog();
+    const file = new File(["%PDF"], "invoice.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^File/), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText(/^File/), {
+      target: { files: [new File(["zip"], "archive.zip", { type: "application/zip" })] },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF");
+    expect(screen.getByDisplayValue("invoice")).toBeVisible();
+    expect(screen.getByText("invoice.pdf")).toBeVisible();
+    expect(api.postForm).not.toHaveBeenCalled();
+  });
+
   it("attaches an item-context manual automatically without asking for compatible items", async () => {
     const { onOpenChange, onUploaded } = renderDialog({
       defaultItemIds: ["item-1"],

@@ -1,5 +1,9 @@
 """Queue mechanics tests."""
 
+import statistics
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 from housetory_api.db import SessionLocal
@@ -116,3 +120,119 @@ def test_live_worker_long_inference_is_not_recovered_as_a_crash():
         db.commit()
         assert requeue_stale_jobs(db) == 0
         assert db.get(Job, job.id).status == "running"
+
+
+def test_document_lanes_are_reserved_and_round_robin_by_actor():
+    with SessionLocal() as db:
+        background = enqueue(db, "ai.enrich", queue="ai")
+        first = enqueue(
+            db,
+            "documents.ocr",
+            {"household_id": "house-a", "actor_user_id": "user-a"},
+            queue="documents",
+            priority=5,
+        )
+        second = enqueue(
+            db,
+            "documents.ocr",
+            {"household_id": "house-a", "actor_user_id": "user-a"},
+            queue="documents",
+            priority=5,
+        )
+        other_user = enqueue(
+            db,
+            "documents.ocr",
+            {"household_id": "house-b", "actor_user_id": "user-b"},
+            queue="documents",
+            priority=5,
+        )
+        document_ai = enqueue(db, "ai.enrich", {"kind": "document"}, queue="ai-documents")
+
+        assert claim_job(db, worker_id="background", queue="ai").id == background.id
+        assert claim_job(db, worker_id="local", queue="documents").id == first.id
+        assert claim_job(db, worker_id="local", queue="documents").id == other_user.id
+        assert claim_job(db, worker_id="local", queue="documents").id == second.id
+        assert claim_job(db, worker_id="document-ai", queue="ai-documents").id == document_ai.id
+
+
+def test_reserved_document_ai_lane_dispatches_during_stalled_background_handler():
+    legacy_waits = []
+    reserved_waits = []
+    stall_seconds = 0.08
+
+    for sample in range(5):
+        release = threading.Event()
+        started = threading.Event()
+        with SessionLocal() as db:
+            background = enqueue(db, "ai.enrich", queue="ai")
+            assert claim_job(db, worker_id=f"background-{sample}", queue="ai").id == background.id
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            handler = executor.submit(
+                lambda started_event=started, release_event=release: (
+                    started_event.set(),
+                    release_event.wait(timeout=2),
+                )
+            )
+            assert started.wait(timeout=1)
+            with SessionLocal() as db:
+                interactive = enqueue(
+                    db,
+                    "ai.enrich",
+                    {"kind": "document", "household_id": "household", "actor_user_id": "user"},
+                    queue="ai",
+                    priority=10,
+                )
+            time.sleep(stall_seconds)
+            release.set()
+            handler.result(timeout=1)
+            with SessionLocal() as db:
+                claimed = claim_job(db, worker_id=f"legacy-{sample}", queue="ai")
+                legacy_waits.append(
+                    max(0, (claimed.locked_at - interactive.created_at).total_seconds() * 1000)
+                )
+
+        release = threading.Event()
+        started = threading.Event()
+        with SessionLocal() as db:
+            background = enqueue(db, "ai.enrich", queue="ai")
+            assert (
+                claim_job(db, worker_id=f"background-reserved-{sample}", queue="ai").id
+                == background.id
+            )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            handler = executor.submit(
+                lambda started_event=started, release_event=release: (
+                    started_event.set(),
+                    release_event.wait(timeout=2),
+                )
+            )
+            assert started.wait(timeout=1)
+            with SessionLocal() as db:
+                interactive = enqueue(
+                    db,
+                    "ai.enrich",
+                    {"kind": "document", "household_id": "household", "actor_user_id": "user"},
+                    queue="ai-documents",
+                    priority=10,
+                )
+                claimed = claim_job(
+                    db,
+                    worker_id=f"reserved-{sample}",
+                    queue="ai-documents",
+                )
+                reserved_waits.append(
+                    max(0, (claimed.locked_at - interactive.created_at).total_seconds() * 1000)
+                )
+            release.set()
+            handler.result(timeout=1)
+
+    print(
+        "stage-a-synthetic-dispatch "
+        f"samples={len(legacy_waits)} stall_ms={stall_seconds * 1000:.0f} "
+        f"shared_p50_ms={statistics.median(legacy_waits):.1f} "
+        f"reserved_p50_ms={statistics.median(reserved_waits):.1f} "
+        f"shared_samples_ms={[round(value, 1) for value in legacy_waits]} "
+        f"reserved_samples_ms={[round(value, 1) for value in reserved_waits]}"
+    )
+    assert statistics.median(legacy_waits) >= stall_seconds * 1000
+    assert statistics.median(reserved_waits) < statistics.median(legacy_waits)

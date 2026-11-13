@@ -54,9 +54,10 @@ export function centsInput(cents: number | null): string {
 export function parseMoney(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed < 0) return null;
-  return Math.round(parsed * 100);
+  if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(trimmed)) return null;
+  const [whole, fraction = ""] = trimmed.split(".");
+  const cents = Number(whole || "0") * 100 + Number(fraction.padEnd(2, "0"));
+  return Number.isSafeInteger(cents) ? cents : null;
 }
 
 export function parseQuantity(value: string): number | null {

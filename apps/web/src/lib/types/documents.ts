@@ -92,6 +92,32 @@ export interface DocumentRecord extends DocumentSummary {
   pages: DocumentPage[];
 }
 
+export interface DocumentCaptureContext {
+  documentId: UUID;
+  roomId: UUID;
+  locationId: UUID;
+}
+
+export interface DocumentProcessing {
+  correlation_id: string;
+  stage: "waiting" | "reading" | "interpreting" | "ready" | "needs_attention" | "failed" | "cancelled";
+  started_at: string;
+  updated_at: string;
+  elapsed_ms: number;
+  local_available: boolean;
+  can_cancel: boolean;
+  can_retry: boolean;
+  worker_available: boolean | null;
+  reason: string | null;
+  timings: {
+    local_queue_ms: number | null;
+    local_processing_ms: number | null;
+    ai_queue_ms: number | null;
+    provider_ms: number | null;
+    validation_ms: number | null;
+  };
+}
+
 export interface ManualProfile {
   id: UUID;
   item_id: UUID;
@@ -308,7 +334,27 @@ export interface ExtractionApplySummary {
   purchase_id: UUID | null;
 }
 
+export interface FinancialValidation {
+  status: "consistent" | "needs_attention" | "insufficient_evidence";
+  tax_treatment: "inclusive" | "exclusive" | "unknown";
+  computed: {
+    product_total_cents: number | null;
+    discount_cents: number | null;
+    shipping_cents: number | null;
+    tax_cents: number | null;
+    expected_total_cents: number | null;
+    total_difference_cents: number | null;
+  };
+  checks: Array<{
+    code: string;
+    severity: "warning" | "error";
+    message: string;
+    line_ids: string[];
+  }>;
+}
+
 export interface ExtractionReview {
+  financial_validation?: FinancialValidation | null;
   enhancement?: import("@/lib/types/enrichment").EnhancementState | null;
   suggested_refinement?: ExtractionRefinement | null;
   document_id: UUID;
@@ -327,6 +373,7 @@ export interface ExtractionReview {
 }
 
 export interface ExtractionRefinement {
+  financial_validation?: FinancialValidation | null;
   document_id: UUID;
   base_version: string;
   version: string;
