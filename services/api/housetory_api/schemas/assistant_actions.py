@@ -235,3 +235,13 @@ class AssistantActionInterpretOut(BaseModel):
     message: str
     proposal: AssistantActionProposalOut | None = None
     item_choices: list[AssistantActionTarget] = Field(default_factory=list)
+    reason: (
+        Literal[
+            "model_schema",
+            "ambiguity",
+            "unsupported_semantics",
+            "domain_resolution",
+            "provider_unavailable",
+        ]
+        | None
+    ) = None

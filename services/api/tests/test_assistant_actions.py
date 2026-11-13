@@ -218,6 +218,67 @@ def test_configured_assistant_interprets_natural_move_without_executing(
 
 
 @pytest.mark.parametrize(
+    ("query", "kind", "subject", "destination", "framing"),
+    [
+        ("Return 1 Drill from Sam", "return_loan", "1 Drill", "Sam", ["Return"]),
+        ("Could you move Drill into Kitchen for me?", "move", "Drill", "Kitchen", []),
+        ("Could you move Drill into Kitchen for me?", "move", "Drill", "Kitchen", "reformatted"),
+        ("۱ Drill رو از Sam پس بگیر", "return_loan", "۱ Drill", "Sam", ["پس بگیر"]),
+        ("Give back 1 Ladder to Alex", "return_borrowed", "1 Ladder", "Alex", ["give back"]),
+    ],
+)
+def test_ai_review_accepts_imperfect_framing(
+    owner_client, configured_ai, monkeypatch, query, kind, subject, destination, framing
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    drill = client.post("/api/v1/items", json={"name": "Drill", "quantity": 2}).json()["item"]
+    kitchen = client.post("/api/v1/rooms", json={"name": "Kitchen"}).json()
+    loan = client.post(
+        "/api/v1/loans",
+        json={
+            "item_id": drill["id"],
+            "borrower_name": "Sam",
+            "quantity": 2,
+            "lent_on": "2025-01-03",
+            "request_id": str(uuid.uuid4()),
+        },
+    ).json()
+    borrowed = client.post(
+        "/api/v1/borrowed",
+        json={
+            "item_name": "Ladder",
+            "owner_name": "Alex",
+            "quantity": 2,
+            "borrowed_on": "2025-01-03",
+            "request_id": str(uuid.uuid4()),
+        },
+    ).json()
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: _action_plan(kind, subject, destination, framing=framing),
+    )
+    response = client.post(
+        "/api/v1/assistant/actions/interpret",
+        json={"query": query, "local_date": "2025-01-04"},
+    )
+    assert response.status_code == 200, response.text
+    proposal = response.json()["proposal"]
+    assert proposal is not None, response.json()
+    if kind == "move":
+        assert proposal["targets"][0]["id"] == drill["id"]
+        assert proposal["destination"]["id"] == kitchen["id"]
+    else:
+        assert proposal["kind"] == kind
+        assert proposal["targets"][0]["id"] == (
+            loan["id"] if kind == "return_loan" else borrowed["id"]
+        )
+        assert proposal["changes"]["quantity"] == 1
+
+
+@pytest.mark.parametrize(
     "query", ["Transfer Drill to Kitchen", "Could you move Drill into Kitchen for me?"]
 )
 def test_configured_assistant_accepts_move_paraphrases(
@@ -449,7 +510,7 @@ def test_ai_plan_requires_safety_fields_and_rejects_unaccounted_details(
     assert response.json()["message"]
 
 
-def test_ai_plan_cannot_omit_text_from_its_framing(owner_client, configured_ai, monkeypatch):
+def test_ai_plan_cannot_drop_an_additional_detail(owner_client, configured_ai, monkeypatch):
     from housetory_api.services import ai
 
     owner_client.post("/api/v1/items", json={"name": "Drill"})
@@ -467,6 +528,142 @@ def test_ai_plan_cannot_omit_text_from_its_framing(owner_client, configured_ai, 
     )
     assert response.status_code == 200
     assert response.json()["proposal"] is None
+    assert response.json()["reason"] == "unsupported_semantics"
+
+
+@pytest.mark.parametrize(
+    ("query", "plan", "reason", "message"),
+    [
+        (
+            "Return 1 Drill from Sam",
+            _action_plan("return_loan", "1 Drill"),
+            "ambiguity",
+            "borrower",
+        ),
+        (
+            "Return Drill from Sam",
+            _action_plan("return_loan", "Drill", "Sam"),
+            "ambiguity",
+            "quantity",
+        ),
+        (
+            "Return 2 Drill from Sam",
+            _action_plan("return_loan", "1 Drill", "Sam"),
+            "ambiguity",
+            "item",
+        ),
+        (
+            "Return 2 Drill from Sam",
+            _action_plan("return_loan", "Drill", "Sam"),
+            "ambiguity",
+            "quantity",
+        ),
+        (
+            "Return 1 Drill from Sam",
+            _action_plan("return_borrowed", "1 Drill", "Sam"),
+            "ambiguity",
+            "whom",
+        ),
+        (
+            "Return 1 Drill to Sam",
+            _action_plan("return_loan", "1 Drill", "Sam"),
+            "ambiguity",
+            "whom",
+        ),
+        (
+            "Move Drill to Kitchen",
+            _action_plan("move", "Drill", "Garage"),
+            "ambiguity",
+            "destination",
+        ),
+        ("Move Drill to Kitchen", {"kind": "move"}, "model_schema", "interpret"),
+        (
+            "Move Drill to Kitchen if ready",
+            _action_plan("move", "Drill", "Kitchen"),
+            "unsupported_semantics",
+            "condition",
+        ),
+        (
+            "Move Drill to Kitchen and sell Hammer",
+            _action_plan("move", "Drill", "Kitchen"),
+            "unsupported_semantics",
+            "separately",
+        ),
+        (
+            "Move Drill to Kitchen, sell Hammer",
+            _action_plan("move", "Drill", "Kitchen"),
+            "unsupported_semantics",
+            "separately",
+        ),
+        (
+            "Move red Drill to Kitchen",
+            _action_plan("move", "Drill", "Kitchen"),
+            "ambiguity",
+            "description",
+        ),
+        (
+            "I lent Drill to Sam on 2025-01-03",
+            _action_plan("lend", "Drill", "Sam"),
+            "ambiguity",
+            "date",
+        ),
+        (
+            "Set Drill brand to Bosch",
+            _action_plan("edit_item", "Drill", "Bosch", field="description", field_text="brand"),
+            "ambiguity",
+            "field",
+        ),
+    ],
+)
+def test_ai_requests_specific_clarification_for_unresolved_semantics(
+    owner_client, configured_ai, monkeypatch, query, plan, reason, message
+):
+    from housetory_api.services import ai
+
+    monkeypatch.setattr(ai, "complete_json", lambda *args, **kwargs: plan)
+    response = owner_client.post(
+        "/api/v1/assistant/actions/interpret",
+        json={"query": query, "local_date": "2025-01-04"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["proposal"] is None
+    assert response.json()["reason"] == reason
+    assert message in response.json()["message"].lower()
+
+
+def test_ai_reports_domain_resolution_without_private_input(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    monkeypatch.setattr(
+        ai, "complete_json", lambda *args, **kwargs: _action_plan("move", "Drill", "Kitchen")
+    )
+    response = owner_client.post(
+        "/api/v1/assistant/actions/interpret", json={"query": "Move Drill to Kitchen"}
+    )
+    assert response.json()["proposal"] is None
+    assert response.json()["reason"] == "domain_resolution"
+
+
+def test_invalid_model_json_has_schema_reason_and_preserves_local_fallback(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    item = owner_client.post("/api/v1/items", json={"name": "Drill"}).json()["item"]
+    owner_client.post("/api/v1/rooms", json={"name": "Kitchen"})
+
+    def invalid(*args, **kwargs):
+        raise ai.AiInvalidOutput("Invalid JSON")
+
+    monkeypatch.setattr(ai, "complete_json", invalid)
+    response = owner_client.post(
+        "/api/v1/assistant/actions/interpret", json={"query": "Move Drill to Kitchen"}
+    )
+    assert response.status_code == 200
+    assert response.json()["reason"] == "model_schema"
+    assert response.json()["proposal"]["targets"][0]["id"] == item["id"]
 
 
 def test_ai_requests_specific_missing_destination(owner_client, configured_ai, monkeypatch):
@@ -602,6 +799,7 @@ def test_offline_provider_failure_preserves_deterministic_actions(
     assert proposal["targets"][0]["id"] == item["id"]
     assert proposal["destination"]["id"] == room["id"]
     assert "AI" in response.json()["message"]
+    assert response.json()["reason"] == "provider_unavailable"
     assert owner_client.get(f"/api/v1/items/{item['id']}").json()["item"]["room"] is None
 
 

@@ -107,6 +107,8 @@ test("a reviewed action becomes the target of an action follow-up", async ({ pag
   await input.fill("Rename Drill to Cordless drill");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await expect(dialog.getByLabel("Action review")).toBeVisible();
+  await expect(dialog.getByLabel("Action review")).toContainText("Original request");
+  await expect(dialog.getByLabel("Action review")).toContainText("Rename Drill to Cordless drill");
   await input.fill("Move it to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await expect(dialog.getByText("Move review.")).toBeVisible();
@@ -148,6 +150,8 @@ test("duplicate action targets can be clarified after reopening the assistant", 
   dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Drill · Office" }).click();
   await expect(dialog.getByLabel("Action review")).toContainText("Kitchen");
+  await expect(dialog.getByLabel("Action review")).toContainText("Original request");
+  await expect(dialog.getByLabel("Action review")).toContainText("Move Drill to Kitchen");
   await expect(dialog.getByLabel("Action review")).toContainText("Selected: Drill · Office");
   await expect(dialog.getByRole("button", { name: "Drill · Office" })).toBeDisabled();
   expect(clarified).toMatchObject({ query: "Move Drill to Kitchen", clarified_item_id: first });
@@ -870,6 +874,7 @@ test("assistant move review edits the destination without changing its target", 
   await expect(dialog.getByText("Scope: Synthetic household · Home")).toBeVisible();
   await expect(dialog.getByText("Garage", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Synthetic drill", { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Action review")).toContainText("Move Synthetic drill to Kitchen");
 });
 
 test("a stale move must be refreshed and reviewed before applying", async ({ page }) => {
@@ -904,6 +909,7 @@ test("a stale move must be refreshed and reviewed before applying", async ({ pag
   await expect(dialog.getByRole("button", { name: "Apply" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Refresh proposal" }).click();
   await expect(dialog.getByText("Updated drill", { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Action review")).toContainText("Move Synthetic drill to Kitchen");
   await expect(dialog.getByRole("button", { name: "Apply" })).toBeEnabled();
 });
 
@@ -947,6 +953,7 @@ test("pending proposal retains its original scope across a scope switch", async 
   expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
   await scope.selectOption(`household:${household.id}`);
   await expect(dialog.getByLabel("Action review")).toContainText("Scope: Home A");
+  await expect(dialog.getByLabel("Action review")).toContainText("Move Drill to Kitchen");
   await dialog.getByLabel("Action review").getByRole("button", { name: "Apply" }).click();
   await expect(dialog.getByLabel("Action review").getByRole("status")).toContainText("Moved");
   expect(appliedUrl).toContain(`/proposals/${proposalId}/apply`);

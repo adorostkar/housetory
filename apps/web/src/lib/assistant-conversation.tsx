@@ -54,6 +54,7 @@ export interface AssistantActionProposal {
 
 interface AssistantActionState {
   proposal: AssistantActionProposal;
+  originalRequest: string;
   requestId: string;
   pending: boolean;
   clarificationLabel?: string;
@@ -316,7 +317,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
             {
               role: "assistant", text: answer,
               ...(response.proposal ? {
-                action: { proposal: response.proposal, requestId: crypto.randomUUID(), pending: false },
+                action: { proposal: response.proposal, originalRequest: value, requestId: crypto.randomUUID(), pending: false },
               } : response.item_choices?.length ? {
                 clarification: {
                   id: crypto.randomUUID(), query: value, selection, pageReferences,
@@ -469,7 +470,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           { role: "user", text: reply.text },
           {
             role: "assistant", text: answer,
-            action: { proposal, requestId: crypto.randomUUID(), pending: false, clarificationLabel: choice.name },
+            action: { proposal, originalRequest: clarification.query, requestId: crypto.randomUUID(), pending: false, clarificationLabel: choice.name },
           },
         ],
         turns: [

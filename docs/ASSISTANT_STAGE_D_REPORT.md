@@ -117,3 +117,79 @@ External provider timeouts/rate limits are simulated, and provider/model output 
 Broader multilingual natural phrasing, comparative duplicate merging, realistic
 concurrent users, native mobile behavior, and original-incident latency remain
 open. No Stage D check justifies claiming a production SLA.
+
+## Action interpretation contract correction
+
+The user reported an exploratory comparison at `014702d`, with three synthetic
+requests repeated twice per model on the same OpenRouter connection: DeepSeek
+v4.1 Flash produced 5/6 correct proposals (median 11 seconds) and GPT-6 Luna
+2/6 (median 3.3 seconds). These are user-reported small samples, not model
+rankings or measurements of this correction. Luna's four failures had correct
+semantics but imperfect framing; DeepSeek's missing borrower was a genuine
+missing value. No proposal was applied in that comparison.
+
+The interpreter no longer requires coverage of every residual word by model
+framing. Its typed plan still requires source-anchored subject, person/place,
+field and dates; explicit return quantities; and safety indicators. Existing
+server checks for negation, conjunctions, unrepresented numbers/dates and
+conditions remain, with additional checks for return direction, common
+unrepresented descriptors and comma-separated additional actions. Missing
+borrower, quantity or other values now trigger specific clarification.
+Domain resolution, permission and scope rechecks, frozen proposals, stale
+checks, transactions and explicit Apply remain authoritative. Review cards
+display the original request, including after target clarification, edits
+and refresh; they do not add another confirmation step.
+
+The response optionally includes a privacy-conscious `reason` category:
+`model_schema`, `ambiguity`, `unsupported_semantics`, `domain_resolution` or
+`provider_unavailable`. No prompt, response, credential or household content
+is logged by this change. These categories describe the detected failure,
+not proof that every possible failure has been classified.
+
+Regression evidence uses synthetic records and mocked provider outputs, not
+actual inference. Four supplied-style incomplete framing examples failed
+before the correction, while equivalent fully framed control tests passed.
+Tests exercise absent, incomplete and reformatted framing; both partial-return
+directions; English, Persian and mixed input; omitted and invented values;
+conflicting return directions; conditions, exclusions, negation, quantities,
+dates and multiple actions. Browser interception verifies the original request
+is visible in desktop and mobile reviews and survives clarification, edit and
+refresh. One provider call remains the normal path; no repair call or
+additional per-request provider charge was introduced.
+
+The deterministic guards are deliberately not a complete language parser:
+an unrecognised modifier or action omitted by a model can still reach review,
+and conservative checks may also reject harmless wording. Users must compare
+the original request with the proposed change; this is not a guarantee of
+perfect interpretation. No authorised configured provider was available for a
+repeat comparison, so corrected real-model quality, provider latency and
+actual token cost are unmeasured and need local validation. The original
+invoice and four-minute incident remain unverified. The release recommendation
+above remains **not ready**.
+
+Checks for this correction, using the disposable `semantics_red_626d61c5`
+database, intercepted browser responses and no provider credentials:
+
+- `pytest -q tests/test_assistant_actions.py`: 114 passed before the final
+  additional safety checks; a 77-case action/safety selection also passed
+  before those final checks.
+- Final `pytest -q tests/test_assistant_actions.py -k 'imperfect_framing or
+  requests_specific_clarification_for_unresolved_semantics or
+  reports_domain_resolution or additional_detail or ai_move_paraphrases or
+  ai_records_past_loan or ai_records_persian_past or
+  ai_records_mixed_language_borrowed_return or natural_item_detail_edit or
+  mixed_language_condition or plan_requires_safety_fields'`: 35 passed.
+- `pytest -q tests/test_assistant_actions.py -k
+  'invalid_model_json_has_schema_reason or
+  offline_provider_failure_preserves_deterministic_actions'`: 2 passed after
+  the final diagnostic mapping change.
+- `ruff check housetory_api tests` and `ruff format --check` on the three
+  changed Python files: passed.
+- `npm run build` and `npm test -- src/pages/assistant-page.test.tsx` in
+  `apps/web`: build and 16 tests passed.
+- `npx playwright test -c playwright.stage-b.config.ts -g 'a reviewed action
+  becomes|duplicate action targets can be clarified'`: 2 passed.
+- `npx playwright test -c playwright.stage-b.config.ts -g 'assistant move
+  review edits|a stale move must be refreshed'`: 2 passed on a 390px viewport.
+- `npx playwright test -c playwright.stage-b.config.ts -g 'pending proposal
+  retains its original scope'`: 1 passed.

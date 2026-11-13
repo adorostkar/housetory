@@ -350,6 +350,8 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                   {message.action ? (
                     <div className="surface space-y-3 p-5" aria-label="Action review">
                       <p dir="auto" className="text-sm">{message.text}</p>
+                      <p className="text-xs text-muted-foreground">Original request</p>
+                      <p dir="auto" className="whitespace-pre-wrap break-words text-sm">{message.action.originalRequest}</p>
                       <p className="break-words text-xs text-muted-foreground">
                         Scope: {message.action.proposal.scope_label}
                       </p>
