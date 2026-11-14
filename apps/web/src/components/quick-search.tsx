@@ -61,6 +61,22 @@ function contextLine(result: QuickSearchResult) {
   return [loan, base].filter(Boolean).join(" · ");
 }
 
+function isConversationalQuery(query: string, questionLike = false) {
+  if (questionLike || /[?؟]/u.test(query)) return true;
+  const normalized = query.trim().toLocaleLowerCase();
+  return (
+    /^(?:where|what|when|who|why|how|which|whose|is|are|do|does|did|can|could|should|would|will|have|has)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:add|create|record|save|put|store|move|mark|update|remove|delete|lend|loan|borrow|return|assign|change|set)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:i|we)\s+(?:bought|purchased|got|received|acquired)\b/u.test(
+      normalized,
+    )
+  );
+}
+
 export function QuickSearch({
   variant = "top",
   className,
@@ -272,8 +288,17 @@ export function QuickSearch({
       }
       const active = flatResults[activeIndex];
       if (active && !event.shiftKey) choose(active);
-      else if (onAsk && !isItemsPage && term.length >= 2) askAssistant();
-      else submitToResults(event.shiftKey);
+      else if (
+        onAsk &&
+        term.length >= 2 &&
+        (event.shiftKey ||
+          isConversationalQuery(
+            term,
+            search.data?.query === debouncedTerm && search.data.question_like,
+          ))
+      ) {
+        askAssistant();
+      } else submitToResults(false);
     }
   };
 

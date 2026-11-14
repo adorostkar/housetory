@@ -98,12 +98,24 @@ async function fixture(
       return route.fulfill({ json: { intent: "unavailable", form: null } });
     }
     if (url.pathname === "/api/v1/search/quick") {
+      const query = url.searchParams.get("q") ?? "";
       return route.fulfill({
         json: {
-          query: url.searchParams.get("q") ?? "",
+          query,
           effective_query: null,
-          question_like: true,
-          results: [],
+          question_like: query.includes("?") || /^(where|what|when|who|why|how)\b/i.test(query),
+          results: /\bdrill\b/i.test(query)
+            ? [{
+                id: "00000000-0000-0000-0000-000000000005",
+                kind: "item",
+                title: "Cordless drill",
+                subtitle: "Acme · D-1",
+                context: "Garage · Box 2",
+                url: "/items/00000000-0000-0000-0000-000000000005",
+                household: null,
+                loan: null,
+              }]
+            : [],
         },
       });
     }
@@ -242,6 +254,104 @@ test("normal header submission opens the assistant without selecting its prompt"
   await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(headerSearch).toBeVisible();
   await expect(page).toHaveURL("/");
+  expect(errors).toEqual([]);
+});
+
+test("ordinary lookup submitted from Items stays on the lightweight item search", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("drill");
+  await expect(page.getByRole("option", { name: /Cordless drill/ })).toBeVisible();
+  await headerSearch.press("Enter");
+  await expect(page).toHaveURL(/\/items\?q=drill$/);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("ordinary lookup submitted from Overview uses results without opening conversation", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("drill");
+  await expect(page.getByRole("option", { name: /Cordless drill/ })).toBeVisible();
+  await headerSearch.press("Enter");
+  await expect(page).toHaveURL(/\/search\?q=drill/);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("question submitted from Overview enters conversation on ordinary Enter", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("Where is my drill?");
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("question submitted from Items enters conversation on ordinary Enter", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("Where is my drill?");
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
+  await expect(page).toHaveURL(/\/items(?:\?|$)/);
+  expect(errors).toEqual([]);
+});
+
+test("creation request submitted from Overview enters the reviewed conversation flow", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cable");
+  expect(errors).toEqual([]);
+});
+
+test("creation request submitted from Items enters the reviewed conversation flow", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cable");
+  expect(errors).toEqual([]);
+});
+
+test("assistant composer and Send stay inside short desktop and keyboard-sized mobile viewports", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const panel = page.getByTestId("assistant-panel");
+
+  await page.setViewportSize({ width: 1440, height: 600 });
+  await headerSearch.fill("Where is my drill?");
+  await headerSearch.press("Enter");
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  const send = panel.getByRole("button", { name: "Send question" });
+  await expect(composer).toBeVisible();
+  await expect(send).toBeVisible();
+
+  const assertControlsFit = async (height: number) => {
+    for (const control of [composer, send]) {
+      const bounds = await control.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+    }
+  };
+  await assertControlsFit(600);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 520 });
+  await expect(composer).toBeVisible();
+  await expect(send).toBeVisible();
+  await assertControlsFit(520);
   expect(errors).toEqual([]);
 });
 

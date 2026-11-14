@@ -439,7 +439,7 @@ function AppShellLayout() {
         <aside
           aria-labelledby="assistant-panel-title"
           data-testid="assistant-panel"
-          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
+          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
         >
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <h2
