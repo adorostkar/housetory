@@ -92,6 +92,7 @@ def serialize_source_file(source: ImportSourceFile) -> ImportSourceFileOut:
 def serialize_batch(db: Session, batch: ImportBatch) -> ImportBatchDetail:
     from ..enrichment import enhancement_state
 
+    enhancement = enhancement_state(db, batch)
     entries = list(
         db.scalars(
             select(ImportEntry)
@@ -137,7 +138,7 @@ def serialize_batch(db: Session, batch: ImportBatch) -> ImportBatchDetail:
         ignored_notes=metadata.get("ignored_notes") or [],
         broken_links=metadata.get("broken_links") or [],
         metadata={key: value for key, value in metadata.items() if not key.startswith("_")},
-        enhancement=enhancement_state(db, batch),
+        enhancement=enhancement,
     )
 
 

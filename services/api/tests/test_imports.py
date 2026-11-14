@@ -674,6 +674,311 @@ def test_primary_ai_cancel_returns_deterministic_fallback_and_ignores_late_resul
     assert owner_client.get("/api/v1/items").json()["total"] == 0
 
 
+def test_primary_ai_configuration_change_before_job_falls_back_and_can_retry(
+    owner_client, monkeypatch, configured_ai
+):
+    from dataclasses import replace
+
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Please register two Validation Headphones in Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    original_entries = initial["entries"]
+    changed_config = replace(configured_ai, model="replacement-extract")
+    monkeypatch.setattr(ai, "config_for", lambda *args, **kwargs: changed_config)
+
+    result = run_import_enhancement(initial)
+
+    assert result == {"status": "skipped", "reason": "configuration_changed"}
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert "settings changed" in fallback["metadata"]["ai_error"].lower()
+    assert fallback["entries"] == original_entries
+    assert fallback["entries"][0]["proposed"]["room"]["matched_id"] == room["id"]
+
+    from housetory_api.services import ai
+
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {"name": "Validation Headphones", "quantity": 2, "room": "Storage"}
+            ],
+            "warnings": [],
+        },
+    )
+    retry = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/retry")
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["status"] == "review"
+    assert retry.json()["enhancement"]["status"] == "queued"
+    assert run_import_enhancement(retry.json())["status"] == "ready"
+    reviewed = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert reviewed["status"] == "review"
+    suggestion = reviewed["enhancement"]["proposals"][0]
+    assert suggestion["entry_id"] == original_entries[0]["id"]
+    assert suggestion["proposed"]["name"] == "Validation Headphones"
+    assert suggestion["proposed"]["quantity"] == 2
+    assert reviewed["entries"] == original_entries
+    accepted = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/accept")
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["entries"][0]["id"] == original_entries[0]["id"]
+    assert accepted.json()["entries"][0]["proposed"]["name"] == "Validation Headphones"
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+def test_primary_ai_configuration_change_during_inference_discards_stale_output(
+    owner_client, monkeypatch, configured_ai
+):
+    from dataclasses import replace
+
+    from housetory_api.services import ai
+
+    create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Please register two Validation Headphones in Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    original_entries = initial["entries"]
+    changed_config = replace(configured_ai, model="replacement-extract")
+
+    def complete_json(*args, **kwargs):
+        monkeypatch.setattr(ai, "config_for", lambda *a, **k: changed_config)
+        return {
+            "items": [
+                {"name": "Stale Validation Headphones", "quantity": 99, "room": "Storage"}
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete_json)
+
+    result = run_import_enhancement(initial)
+
+    assert result == {"status": "skipped", "reason": "configuration_changed"}
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert fallback["enhancement"]["reason"] == "configuration_changed"
+    assert fallback["entries"] == original_entries
+    assert "Stale Validation Headphones" not in repr(fallback["entries"])
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+def test_primary_ai_late_result_does_not_overwrite_user_edits(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import ImportEntry
+    from housetory_api.services import ai
+
+    create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    entry_id = initial["entries"][0]["id"]
+
+    def complete_json(*args, **kwargs):
+        with SessionLocal() as db:
+            entry = db.get(ImportEntry, entry_id)
+            entry.proposed = {**entry.proposed, "name": "User-edited monitor"}
+            db.commit()
+        return {
+            "items": [
+                {"name": "AI replacement monitor", "quantity": 8, "room": "Storage"}
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete_json)
+
+    assert run_import_enhancement(initial) == {"status": "skipped", "reason": "source_changed"}
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert fallback["status"] == "review"
+    assert fallback["enhancement"]["reason"] == "source_changed"
+    assert "capture changed" in fallback["metadata"]["ai_error"].lower()
+    assert fallback["entries"][0]["proposed"]["name"] == "User-edited monitor"
+    assert fallback["entries"][0]["id"] == entry_id
+    assert "AI replacement monitor" not in repr(fallback["entries"])
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+@pytest.mark.parametrize("job_state", ["failed", "missing_job", "missing_id"])
+def test_interrupted_primary_ai_job_recovers_to_review_and_can_retry(
+    owner_client, monkeypatch, configured_ai, job_state
+):
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import ImportBatch, Job
+    from housetory_api.services import ai
+
+    create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    original_entries = initial["entries"]
+    with SessionLocal() as db:
+        job = db.get(Job, initial["enhancement"]["job_id"])
+        if job_state == "failed":
+            job.status = "failed"
+            job.last_error = "synthetic worker crash"
+        elif job_state == "missing_job":
+            db.delete(job)
+        else:
+            source = db.get(ImportBatch, batch["id"])
+            source.metadata_json = {
+                **source.metadata_json,
+                "enhancement": {
+                    **source.metadata_json["enhancement"],
+                    "job_id": None,
+                },
+            }
+        db.commit()
+
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert "interrupted" in fallback["metadata"]["ai_error"]
+    assert fallback["enhancement"]["status"] == "failed"
+    assert fallback["enhancement"]["reason"] == "worker_interrupted"
+    assert fallback["entries"] == original_entries
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {"name": "Validation Monitor", "quantity": 1, "room": "Storage"}
+            ],
+            "warnings": [],
+        },
+    )
+    retry = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/retry")
+    assert retry.status_code == 200, retry.text
+    assert run_import_enhancement(retry.json())["status"] == "ready"
+    refreshed = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert refreshed["enhancement"]["proposals"][0]["entry_id"] == original_entries[0]["id"]
+    assert refreshed["entries"] == original_entries
+
+
+def test_expired_primary_ai_extraction_preserves_fallback_and_rejects_late_job(
+    owner_client, monkeypatch, configured_ai
+):
+    from datetime import UTC, datetime, timedelta
+
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services import ai
+
+    create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    original_entries = initial["entries"]
+    with SessionLocal() as db:
+        job = db.get(Job, initial["enhancement"]["job_id"])
+        job.payload = {
+            **job.payload,
+            "deadline_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        }
+        db.commit()
+
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert fallback["enhancement"]["reason"] == "deadline_exceeded"
+    assert fallback["entries"] == original_entries
+    assert run_import_enhancement(initial) == {"status": "skipped", "reason": "superseded"}
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {"name": "Validation Monitor", "quantity": 1, "room": "Storage"}
+            ],
+            "warnings": [],
+        },
+    )
+    retry = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/retry")
+    assert retry.status_code == 200, retry.text
+    assert run_import_enhancement(retry.json())["status"] == "ready"
+    refreshed = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert refreshed["enhancement"]["proposals"][0]["entry_id"] == original_entries[0]["id"]
+    assert refreshed["entries"] == original_entries
+
+
+def test_primary_ai_cancellation_during_inference_discards_late_result_and_retries(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import ai
+
+    create_room(owner_client, "Storage")
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    original_entries = initial["entries"]
+    calls = 0
+
+    def complete_json(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            response = owner_client.post(
+                f"/api/v1/imports/{batch['id']}/enhancement/cancel"
+            )
+            assert response.status_code == 200, response.text
+        return {
+            "items": [
+                {"name": "Late Validation Monitor", "quantity": 20, "room": "Storage"}
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete_json)
+
+    assert run_import_enhancement(initial) == {"status": "skipped", "reason": "superseded"}
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert fallback["status"] == "review"
+    assert fallback["enhancement"]["reason"] == "cancelled"
+    assert fallback["entries"] == original_entries
+    assert "Late Validation Monitor" not in repr(fallback["entries"])
+
+    retry = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/retry")
+    assert retry.status_code == 200, retry.text
+    assert run_import_enhancement(retry.json())["status"] == "ready"
+    refreshed = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert refreshed["enhancement"]["proposals"][0]["entry_id"] == original_entries[0]["id"]
+    assert refreshed["entries"] == original_entries
+    assert calls == 2
+
+
 @pytest.mark.parametrize(
     "output",
     [
@@ -700,7 +1005,7 @@ def test_primary_ai_failure_keeps_labeled_local_fallback(
     fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
     assert fallback["status"] == "review"
     assert fallback["metadata"]["ai_used"] is False
-    assert "deterministic results are shown" in fallback["metadata"]["ai_error"]
+    assert "deterministic proposals are ready" in fallback["metadata"]["ai_error"]
     assert fallback["entries"][0]["proposed"]["name"] == "Validation Monitor"
     assert fallback["entries"][0]["proposed"]["room"]["matched_id"] == room["id"]
     assert owner_client.get("/api/v1/items").json()["total"] == 0

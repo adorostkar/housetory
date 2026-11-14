@@ -74,10 +74,34 @@ async function fixture(
   path = "/assistant",
   onSearchQuery?: (body: Record<string, unknown>) => void,
   aiAvailable = false,
+  simulateImportRecovery = false,
 ) {
   const errors: string[] = [];
   let creationQuery = "";
   let activeImportBatch = importBatch;
+  let recoveryPolls = 0;
+  let recoveryBatch = {
+    ...importBatch,
+    status: "review",
+    metadata: {
+      assistant_capture: true,
+      ai_used: false,
+      ai_error: "AI extraction was interrupted; deterministic proposals are ready to review or retry.",
+      progress: { stage: "review", message: "Review the deterministic item description fallback" },
+    },
+    enhancement: {
+      status: "failed",
+      job_id: "00000000-0000-0000-0000-000000000012",
+      version: "synthetic-version",
+      reason: "worker_interrupted",
+      error: "AI extraction was interrupted; deterministic proposals are ready to review or retry.",
+      provider: "synthetic",
+      model: "synthetic-model",
+      ai_attempted: true,
+      ai_succeeded: false,
+      proposals: [] as Array<Record<string, unknown>>,
+    },
+  };
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -308,7 +332,78 @@ async function fixture(
         },
       });
     }
+    if (
+      url.pathname === `/api/v1/imports/${activeImportBatch.id}/enhancement/retry` &&
+      route.request().method() === "POST"
+    ) {
+      recoveryBatch = {
+        ...recoveryBatch,
+        enhancement: { ...recoveryBatch.enhancement, status: "queued", reason: null },
+      };
+      return route.fulfill({ json: recoveryBatch });
+    }
+    if (
+      url.pathname === `/api/v1/imports/${activeImportBatch.id}/enhancement/accept` &&
+      route.request().method() === "POST"
+    ) {
+      recoveryBatch = {
+        ...recoveryBatch,
+        entries: recoveryBatch.entries.map((entry) => ({
+          ...entry,
+          proposed: { ...entry.proposed, name: "AI suggested cables" },
+        })),
+        enhancement: { ...recoveryBatch.enhancement, status: "accepted" },
+      };
+      return route.fulfill({ json: recoveryBatch });
+    }
     if (url.pathname === `/api/v1/imports/${activeImportBatch.id}`) {
+      if (simulateImportRecovery) {
+        recoveryPolls += 1;
+        if (recoveryPolls === 1) {
+          return route.fulfill({
+            json: {
+              ...importBatch,
+              status: "processing",
+              metadata: {
+                assistant_capture: true,
+                ai_used: false,
+                progress: { stage: "interpreting", message: "Interpreting your item description" },
+              },
+              enhancement: {
+                status: "running",
+                job_id: "00000000-0000-0000-0000-000000000012",
+                version: "synthetic-version",
+                reason: null,
+                error: null,
+                provider: "synthetic",
+                model: "synthetic-model",
+                ai_attempted: true,
+                ai_succeeded: false,
+                proposals: [],
+              },
+            },
+          });
+        }
+        if (recoveryBatch.enhancement.status === "queued") {
+          recoveryBatch = {
+            ...recoveryBatch,
+            enhancement: {
+              ...recoveryBatch.enhancement,
+              status: "ready",
+              proposals: [{
+                entry_id: importBatch.entries[0]!.id,
+                entity_type: "item",
+                legacy_identifier: null,
+                source_excerpt: "AI suggestion",
+                source_path: null,
+                source_file_id: null,
+                proposed: { ...importBatch.entries[0]!.proposed, name: "AI suggested cables" },
+              }],
+            },
+          };
+        }
+        return route.fulfill({ json: recoveryBatch });
+      }
       return route.fulfill({ json: activeImportBatch });
     }
     if (["/api/v1/items", "/api/v1/properties", "/api/v1/rooms", "/api/v1/storage-locations", "/api/v1/categories", "/api/v1/tags"].includes(url.pathname)) {
@@ -564,6 +659,33 @@ test("manual creation fallback still reaches review when intent AI is unavailabl
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("button", { name: "Review fields" })).toBeVisible();
   expect(intentQueries).toEqual([query]);
+  expect(errors).toEqual([]);
+});
+
+test("interrupted primary capture polling reaches local review and retry", async ({ page }) => {
+  const errors = await fixture(
+    page,
+    `/imports/${importBatch.id}`,
+    undefined,
+    false,
+    true,
+  );
+
+  await expect(page.getByText("Local results are ready to review. Optional AI never applies inventory changes.")).toBeVisible({
+    timeout: 10_000,
+  });
+  const itemName = page.getByLabel("Item name");
+  await expect(itemName).toHaveValue("Ethernet cables");
+  await itemName.fill("User-edited Ethernet cables");
+  await expect(page.getByRole("button", { name: "Retry AI only" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry AI only" }).click();
+  const reviewSuggestions = page.getByText("Review AI suggestions", { exact: true });
+  await expect(reviewSuggestions).toBeVisible();
+  await expect(itemName).toHaveValue("User-edited Ethernet cables");
+  await reviewSuggestions.click();
+  await page.getByRole("button", { name: "Load suggestions into review" }).click();
+  await expect(itemName).toHaveValue("User-edited Ethernet cables");
+  await expect(page.getByText("Suggestions loaded into review. Manual edits were kept; apply is still separate.")).toBeVisible();
   expect(errors).toEqual([]);
 });
 

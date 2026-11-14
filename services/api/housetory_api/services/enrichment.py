@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
@@ -90,6 +90,103 @@ def _write(source: Document | ImportBatch, state: dict) -> None:
         source.metadata_json = metadata
 
 
+def _is_primary_capture(source: Document | ImportBatch) -> bool:
+    return (
+        isinstance(source, ImportBatch)
+        and bool((source.metadata_json or {}).get("assistant_capture"))
+        and source.status == ImportStatus.PROCESSING.value
+    )
+
+
+def _primary_capture_fallback(
+    db: Session,
+    batch: ImportBatch,
+    state: dict,
+    *,
+    reason: str,
+    message: str,
+    status: str,
+) -> dict:
+    batch.status = ImportStatus.REVIEW.value
+    batch.completed_at = None
+    metadata = _metadata(batch)
+    metadata.update(
+        ai_used=False,
+        ai_error=message,
+        progress={
+            "stage": "review",
+            "message": "Review the deterministic item description fallback",
+        },
+    )
+    warning = {"type": "ai_fallback", "message": message}
+    warnings = batch.warnings or []
+    if warning not in warnings:
+        batch.warnings = [*warnings, warning]
+    snapshot = metadata.get("_enhancement_snapshot")
+    if snapshot:
+        metadata["_enhancement_snapshot"] = {
+            **snapshot,
+            "version": source_version(db, batch),
+        }
+    state = {
+        **state,
+        "status": status,
+        "reason": reason,
+        "ai_succeeded": False,
+        "error": message,
+    }
+    metadata["enhancement"] = state
+    batch.metadata_json = metadata
+    return state
+
+
+def recover_interrupted_primary_capture(db: Session, batch: ImportBatch) -> bool:
+    if not _is_primary_capture(batch):
+        return False
+    metadata = _metadata(batch)
+    state = metadata.get("enhancement") or {}
+    if state.get("status") not in {"queued", "running"}:
+        return False
+    try:
+        job_id = uuid.UUID(str(state["job_id"])) if state.get("job_id") else None
+    except (TypeError, ValueError):
+        job_id = None
+    job = db.get(Job, job_id) if job_id is not None else None
+    now = datetime.now(UTC)
+    deadline_at = job.payload.get("deadline_at") if job is not None else None
+    expired = False
+    if deadline_at:
+        try:
+            deadline = datetime.fromisoformat(deadline_at)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=UTC)
+            expired = deadline.astimezone(UTC) <= now
+        except (TypeError, ValueError):
+            expired = True
+    interrupted = job is None or job.status in {"failed", "cancelled", "succeeded"}
+    if not expired and not interrupted:
+        return False
+    reason = "deadline_exceeded" if expired else "worker_interrupted"
+    message = (
+        "AI extraction expired; deterministic proposals are ready to review or retry."
+        if expired
+        else "AI extraction was interrupted; deterministic proposals are ready to review or retry."
+    )
+    _primary_capture_fallback(
+        db,
+        batch,
+        state,
+        reason=reason,
+        message=message,
+        status="failed",
+    )
+    if job is not None and job.status == "queued":
+        job.status = "cancelled"
+        job.finished_at = now
+    db.commit()
+    return True
+
+
 def _task(source: Document | ImportBatch) -> str:
     return AiTask.DOCUMENTS.value if isinstance(source, Document) else AiTask.IMPORTS.value
 
@@ -117,6 +214,12 @@ def enhancement_state(
 
         if not refinement_has_changes(db, source, state["proposal"], matches=document_matches):
             return {**state, "status": "skipped", "reason": "no_changes", "proposal": None}
+    if (
+        isinstance(source, ImportBatch)
+        and _is_primary_capture(source)
+        and recover_interrupted_primary_capture(db, source)
+    ):
+        return _metadata(source).get("enhancement")
     if not state or state.get("status") not in {"queued", "running"}:
         return state
     job = db.get(Job, uuid.UUID(state["job_id"]))
@@ -155,8 +258,8 @@ def cancel_enhancement(db: Session, source: Document | ImportBatch) -> None:
 
             cancel_processing(db, source)
             return
-    _write(source, {**state, "status": "skipped", "reason": "cancelled"})
     if isinstance(source, Document):
+        _write(source, {**state, "status": "skipped", "reason": "cancelled"})
         metadata = _metadata(source)
         refinements = dict(metadata.get("extraction_refinements") or {})
         before = set(state.get("refinement_versions_before") or [])
@@ -179,29 +282,20 @@ def cancel_enhancement(db: Session, source: Document | ImportBatch) -> None:
                 dict.fromkeys([*invalidated, *sorted(remove)])
             )[-50:]
         source.extracted_metadata = metadata
-    elif (
-        isinstance(source, ImportBatch)
-        and (source.metadata_json or {}).get("assistant_capture")
-        and source.status == ImportStatus.PROCESSING.value
-    ):
-        metadata = _metadata(source)
-        metadata.update(
-            ai_used=False,
-            ai_error="AI extraction was cancelled; deterministic results are shown.",
-            progress={
-                "stage": "review",
-                "message": "Review the deterministic item description fallback",
-            },
+    elif _is_primary_capture(source):
+        _primary_capture_fallback(
+            db,
+            source,
+            state,
+            reason="cancelled",
+            message=(
+                "AI extraction was cancelled; deterministic proposals are ready "
+                "to review or retry."
+            ),
+            status="skipped",
         )
-        source.metadata_json = metadata
-        source.status = ImportStatus.REVIEW.value
-        source.warnings = [
-            *source.warnings,
-            {
-                "type": "ai_fallback",
-                "message": "AI extraction was cancelled; deterministic results are shown.",
-            },
-        ]
+    else:
+        _write(source, {**state, "status": "skipped", "reason": "cancelled"})
     job = db.get(Job, uuid.UUID(state["job_id"])) if state.get("job_id") else None
     if job is not None and job.status == "queued":
         job.status = "cancelled"
@@ -242,6 +336,10 @@ def schedule_enhancement(
         "ai_succeeded": False,
     }
     processing = _metadata(source).get("processing") if isinstance(source, Document) else None
+    deadline_at = None
+    if isinstance(source, ImportBatch) and (source.metadata_json or {}).get("assistant_capture"):
+        timeout = ai._settings().ai_timeout_seconds
+        deadline_at = (datetime.now(UTC) + timedelta(seconds=max(180, timeout + 60))).isoformat()
     if isinstance(source, Document):
         state["operation"] = operation
         state["refinement_versions_before"] = list(
@@ -274,6 +372,7 @@ def schedule_enhancement(
                 "config": fingerprint(asdict(config)),
                 "inputs": inputs or {},
                 "job_id": str(job.id),
+                "deadline_at": deadline_at,
             }
             if isinstance(source, Document) and processing:
                 job.payload.update(
@@ -313,7 +412,17 @@ def retry_enhancement(
             )
         if source_version(db, source) != snapshot["version"]:
             raise ApiError(409, "enhancement_stale", "The import changed. Keep the current review.")
-        inputs = snapshot["inputs"]
+        inputs = dict(snapshot["inputs"])
+        if (source.metadata_json or {}).get("assistant_capture"):
+            inputs["entry_ids"] = [
+                str(entry.id)
+                for entry in db.scalars(
+                    select(ImportEntry)
+                    .where(ImportEntry.batch_id == source.id)
+                    .order_by(ImportEntry.position)
+                ).all()
+            ]
+            inputs["primary_extraction"] = True
     schedule_enhancement(
         db,
         source,
@@ -579,12 +688,37 @@ def run_enhancement(payload: dict) -> dict:
         ):
             return {"status": "skipped", "reason": "superseded"}
         reason = _guard(db, source, payload)
-        state = {**state, "status": "skipped" if reason else "running", "reason": reason}
+        if reason:
+            if _is_primary_capture(source):
+                if reason == "source_changed":
+                    message = (
+                        "The capture changed; deterministic proposals are ready to review or retry."
+                    )
+                elif reason == "configuration_changed":
+                    message = (
+                        "AI settings changed; deterministic proposals are ready to review or retry."
+                    )
+                else:
+                    message = (
+                        "AI settings or household consent changed; deterministic proposals are "
+                        "ready to review or retry."
+                    )
+                _primary_capture_fallback(
+                    db,
+                    source,
+                    state,
+                    reason=reason,
+                    message=message,
+                    status="skipped",
+                )
+            else:
+                _write(source, {**state, "status": "skipped", "reason": reason})
+            db.commit()
+            return {"status": "skipped", "reason": reason}
+        state = {**state, "status": "running", "reason": None}
         _write(source, state)
         config = ai.config_for(db, source.household_id, _task(source))
         db.commit()
-        if reason:
-            return {"status": "skipped", "reason": reason}
         if isinstance(source, Document) and processing:
             from .document_processing import update_processing
 
@@ -673,12 +807,34 @@ def run_enhancement(payload: dict) -> dict:
                 error = "refinement_version_invalidated"
                 result = None
         reason = _guard(db, source, payload)
-        primary_capture = (
-            isinstance(source, ImportBatch)
-            and bool((source.metadata_json or {}).get("assistant_capture"))
-            and source.status == ImportStatus.PROCESSING.value
-        )
-        if primary_capture and reason is None:
+        primary_capture = _is_primary_capture(source)
+        if primary_capture and reason:
+            if reason == "source_changed":
+                message = (
+                    "The capture changed during extraction; deterministic proposals are ready "
+                    "to review or retry."
+                )
+            elif reason == "configuration_changed":
+                message = (
+                    "AI settings changed during extraction; deterministic proposals are ready "
+                    "to review or retry."
+                )
+            else:
+                message = (
+                    "AI settings or household consent changed; deterministic proposals are "
+                    "ready to review or retry."
+                )
+            _primary_capture_fallback(
+                db,
+                source,
+                current,
+                reason=reason,
+                message=message,
+                status="skipped",
+            )
+            db.commit()
+            return {"status": "skipped", "reason": reason}
+        if primary_capture:
             if error is None and result:
                 try:
                     _publish_primary_import(db, source, result)
@@ -694,41 +850,17 @@ def run_enhancement(payload: dict) -> dict:
                     return {"status": "ready", "reason": None}
             elif error is None:
                 error = "no_items"
-            metadata = _metadata(source)
-            metadata.update(
-                ai_used=False,
-                ai_error=(
-                    "AI extraction did not produce item proposals; deterministic results are shown."
+            _primary_capture_fallback(
+                db,
+                source,
+                {**current, "ai_attempted": True},
+                reason=error or "invalid_output",
+                message=(
+                    "AI extraction did not produce item proposals; deterministic proposals "
+                    "are ready to review or retry."
                 ),
-                progress={
-                    "stage": "review",
-                    "message": "Review the deterministic item description fallback",
-                },
+                status="failed",
             )
-            source.metadata_json = metadata
-            source.warnings = [
-                *source.warnings,
-                {
-                    "type": "ai_fallback",
-                    "message": (
-                        "AI extraction did not produce item proposals; "
-                        "deterministic results are shown."
-                    ),
-                },
-            ]
-            source.status = ImportStatus.REVIEW.value
-            state = {
-                **current,
-                "status": "failed",
-                "reason": error,
-                "ai_attempted": True,
-                "ai_succeeded": False,
-                "error": (
-                    "AI extraction did not produce a valid proposal. "
-                    "Deterministic results are unchanged."
-                ),
-            }
-            _write(source, state)
             db.commit()
             return {"status": "failed", "reason": error}
         state = {

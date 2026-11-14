@@ -334,7 +334,7 @@ def process_import_batch(
             )
             batch.completed_at = None
             db.flush()
-            from ..enrichment import schedule_enhancement
+            from ..enrichment import _primary_capture_fallback, schedule_enhancement
             from .ai_enrichment import _ai_chunks
 
             entries = db.scalars(
@@ -383,26 +383,24 @@ def process_import_batch(
             if assistant_capture:
                 enhancement = (batch.metadata_json or {}).get("enhancement") or {}
                 if enhancement.get("status") != "queued":
-                    batch.status = ImportStatus.REVIEW.value
-                    batch.metadata_json = {
-                        **(batch.metadata_json or {}),
-                        "ai_error": (
-                            "AI extraction is unavailable; deterministic results are shown."
-                        ),
-                        "progress": {
-                            "stage": "review",
-                            "message": "Review the deterministic item description fallback",
-                        },
-                    }
-                    batch.warnings = [
-                        *batch.warnings,
-                        {
-                            "type": "ai_fallback",
-                            "message": (
-                                "AI extraction is unavailable; deterministic results are shown."
-                            ),
-                        },
-                    ]
+                    reason = enhancement.get("reason") or "not_configured"
+                    message = (
+                        "AI consent is unavailable; deterministic proposals are ready to review "
+                        "or retry."
+                        if reason == "consent_required"
+                        else (
+                            "AI is unavailable; deterministic proposals are ready "
+                            "to review or retry."
+                        )
+                    )
+                    _primary_capture_fallback(
+                        db,
+                        batch,
+                        enhancement,
+                        reason=reason,
+                        message=message,
+                        status=enhancement.get("status", "off"),
+                    )
             db.commit()
             return {"batch_id": str(batch.id), "entries": entry_count}
         except Exception as exc:  # noqa: BLE001 - persisted for recovery
