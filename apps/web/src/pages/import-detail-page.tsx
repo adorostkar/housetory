@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { useAssistantDocuments } from "@/lib/assistant-documents";
 import {
   IMPORT_SOURCE_LABELS,
   IMPORT_STATUS_LABELS,
@@ -67,69 +68,70 @@ export function ImportDetailPage({
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { getImportReviewDraft, saveImportReviewDraft } = useAssistantDocuments();
   const [edits, setEdits] = React.useState<Record<string, ProposedItem>>({});
   const [decisions, setDecisions] = React.useState<Record<string, ImportDecision>>({});
-  const [initialized, setInitialized] = React.useState(false);
+  const [initializedBatchId, setInitializedBatchId] = React.useState("");
+  const initialized = initializedBatchId === batchId;
   const [summary, setSummary] = React.useState<ImportApplyResult | null>(null);
 
   React.useEffect(() => {
-    setEdits({});
-    setDecisions({});
-    setInitialized(false);
     setSummary(null);
   }, [batchId]);
 
   const batch = batchQuery.data;
   React.useEffect(() => {
-    if (!batch || initialized) return;
+    if (!batch || batch.id !== batchId || initialized) return;
     if (batch.status !== "review" && batch.status !== "completed") return;
-    setEdits((current) => {
-      const next = { ...current };
-      for (const entry of batch.entries) {
-        if (!(entry.id in next)) next[entry.id] = entry.proposed;
+    const savedDraft = getImportReviewDraft(batchId);
+    const nextEdits = { ...(savedDraft?.edits ?? {}) };
+    for (const entry of batch.entries) {
+      if (!(entry.id in nextEdits)) nextEdits[entry.id] = entry.proposed;
+    }
+    const nextDecisions = { ...(savedDraft?.decisions ?? {}) };
+    const duplicateThreshold = batch.metadata.hierarchy === true ? 55 : 70;
+    for (const entry of batch.entries) {
+      const highDuplicate = entry.duplicate_candidates.find(
+        (candidate) => candidate.score >= duplicateThreshold,
+      );
+      const final = [
+        "imported",
+        "merged",
+        "skipped",
+        "rejected",
+        "failed",
+      ].includes(entry.status);
+      if (final) {
+        nextDecisions[entry.id] = {
+          include: false,
+          action: entry.status === "failed" ? "import" : "skip",
+          mergeItemId: entry.matched_item_id ?? "",
+          mergeFields: [],
+        };
+      } else if (!(entry.id in nextDecisions)) {
+        const needsReview = entry.proposed.relationships?.review === true;
+        nextDecisions[entry.id] = {
+          include: !highDuplicate && !needsReview,
+          action: highDuplicate ? "skip" : "import",
+          mergeItemId: highDuplicate?.item_id ?? "",
+          mergeFields: highDuplicate ? ["serial_number"] : [],
+        };
       }
-      return next;
-    });
-    setDecisions((current) => {
-      const next = { ...current };
-      const duplicateThreshold = batch.metadata.hierarchy === true ? 55 : 70;
-      for (const entry of batch.entries) {
-        const highDuplicate = entry.duplicate_candidates.find(
-          (candidate) => candidate.score >= duplicateThreshold,
-        );
-        const final = [
-          "imported",
-          "merged",
-          "skipped",
-          "rejected",
-          "failed",
-        ].includes(entry.status);
-        if (final) {
-          next[entry.id] = {
-            include: false,
-            action: entry.status === "failed" ? "import" : "skip",
-            mergeItemId: entry.matched_item_id ?? "",
-            mergeFields: [],
-          };
-        } else if (!(entry.id in next)) {
-          const needsReview = entry.proposed.relationships?.review === true;
-          next[entry.id] = {
-            include: !highDuplicate && !needsReview,
-            action: highDuplicate ? "skip" : "import",
-            mergeItemId: highDuplicate?.item_id ?? "",
-            mergeFields: highDuplicate ? ["serial_number"] : [],
-          };
-        }
-      }
-      return next;
-    });
-    setInitialized(true);
-  }, [batch, initialized]);
+    }
+    setEdits(nextEdits);
+    setDecisions(nextDecisions);
+    setInitializedBatchId(batchId);
+  }, [batch, batchId, getImportReviewDraft, initialized]);
+
+  React.useEffect(() => {
+    if (!initialized || !batch || batch.id !== batchId) return;
+    saveImportReviewDraft(batchId, { edits, decisions });
+  }, [batch, batchId, decisions, edits, initialized, saveImportReviewDraft]);
 
   const retry = useMutation({
     mutationFn: () => api.post(`/imports/${batchId}/retry`),
     onSuccess: () => {
-      setInitialized(false);
+      setInitializedBatchId("");
       void queryClient.invalidateQueries({ queryKey: queryKeys.importBatch(batchId) });
       toast.success("Import queued again");
     },
@@ -158,15 +160,17 @@ export function ImportDetailPage({
       after: await api.post<ImportBatchDetail>(`/imports/${batchId}/enhancement/accept`),
     }),
     onSuccess: ({ before, after }) => {
-      setEdits((current) => Object.fromEntries(after.entries.map((entry) => {
+      const nextEdits = Object.fromEntries(after.entries.map((entry) => {
         const base = before?.entries.find((item) => item.id === entry.id);
-        const edited = current[entry.id];
+        const edited = edits[entry.id];
         return [entry.id, base && edited
           ? keepManualEdits(base.proposed, edited, entry.proposed)
           : entry.proposed];
-      })));
+      }));
+      setEdits(nextEdits);
+      saveImportReviewDraft(batchId, { edits: nextEdits, decisions });
       queryClient.setQueryData(queryKeys.importBatch(batchId), after);
-      setInitialized(false);
+      setInitializedBatchId("");
       toast.success("Suggestions loaded into review. Manual edits were kept; apply is still separate.");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
@@ -219,7 +223,7 @@ export function ImportDetailPage({
     },
     onSuccess: (result) => {
       setSummary(result);
-      setInitialized(false);
+      setInitializedBatchId("");
       queryClient.setQueryData(queryKeys.importBatch(batchId), result.batch);
       invalidate();
       toast.success(

@@ -219,6 +219,22 @@ describe("QuickSearch", () => {
     });
   });
 
+  it("submits a normal header query to the assistant while keeping quick matches selectable", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      const query = queryFromPath(path);
+      return response(query, [result({ title: "Heavy drill" })]);
+    });
+    const onAsk = vi.fn();
+    renderSearch("/", false, { onAsk });
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "Where is my drill?");
+    expect(await screen.findByRole("option", { name: /Heavy drill/ })).toBeVisible();
+    await userEvent.keyboard("{Enter}");
+    expect(onAsk).toHaveBeenCalledWith("Where is my drill?", input);
+  });
+
   it("offers an explicit Ask path that bypasses heuristics", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
       const query = queryFromPath(path);
@@ -284,11 +300,19 @@ describe("QuickSearch", () => {
   it("hands a validated attachment to the capture panel", async () => {
     const onAttach = vi.fn();
     renderSearch("/", false, { onAttach });
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "This is the invoice for my laptop");
     const button = screen.getByRole("button", { name: "Attach a file" });
     await userEvent.click(button);
     const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
     await userEvent.upload(document.querySelector('input[type="file"]')!, file);
-    expect(onAttach).toHaveBeenCalledWith(file, button);
+    expect(onAttach).toHaveBeenCalledWith(
+      file,
+      button,
+      "This is the invoice for my laptop",
+    );
     expect(screen.getByTestId("location")).toHaveTextContent("/");
   });
 

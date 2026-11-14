@@ -70,7 +70,7 @@ export function QuickSearch({
   variant?: "top" | "mobile";
   className?: string;
   onAsk?: (query: string, trigger: HTMLElement) => void;
-  onAttach?: (file: File, trigger: HTMLElement) => void;
+  onAttach?: (file: File, trigger: HTMLElement, query: string) => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -127,7 +127,7 @@ export function QuickSearch({
   const urlQuery = ["/search", "/items"].includes(location.pathname)
     ? (searchParams.get("q") ?? "")
     : null;
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     pendingEditRef.current = null;
     if (urlQuery === null) return;
     setQuery((current) => (current === urlQuery ? current : urlQuery));
@@ -272,6 +272,7 @@ export function QuickSearch({
       }
       const active = flatResults[activeIndex];
       if (active && !event.shiftKey) choose(active);
+      else if (onAsk && !isItemsPage && term.length >= 2) askAssistant();
       else submitToResults(event.shiftKey);
     }
   };
@@ -440,7 +441,7 @@ export function QuickSearch({
                       variant="ghost"
                       size="sm"
                       className="h-7 px-2 text-2xs"
-                      onClick={() => submitToResults(true)}
+                      onClick={() => onAsk ? askAssistant() : submitToResults(true)}
                       title="Ask the configured assistant (Shift+Enter)"
                     >
                       <Sparkles className="size-3" />
@@ -527,7 +528,7 @@ export function QuickSearch({
               }
               setAttachmentError(null);
               setFocused(false);
-              if (attachButtonRef.current) onAttach(file, attachButtonRef.current);
+              if (attachButtonRef.current) onAttach(file, attachButtonRef.current, query);
             }}
           />
           <button

@@ -8,7 +8,72 @@ const household = {
   warranty_reminder_days: 30,
 };
 
-async function fixture(page: Page, path = "/assistant") {
+const importBatch = {
+  id: "00000000-0000-0000-0000-000000000003",
+  title: "Assistant item description",
+  source_type: "text",
+  status: "review",
+  original_filename: null,
+  content_type: null,
+  byte_size: null,
+  error: null,
+  warnings: [],
+  total_entries: 1,
+  imported_entries: 0,
+  skipped_entries: 0,
+  failed_entries: 0,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  completed_at: null,
+  source_url: null,
+  entry_count: 1,
+  entries: [{
+    id: "00000000-0000-0000-0000-000000000004",
+    source_file_id: null,
+    source_path: null,
+    source_excerpt: "three Ethernet cables",
+    note_title: null,
+    proposed: {
+      name: "Ethernet cable",
+      description: null,
+      quantity: 3,
+      category: null,
+      brand: null,
+      model: null,
+      serial_number: null,
+      room: null,
+      storage_location: null,
+      purchase: null,
+      warranty: null,
+      tags: [],
+      notes: null,
+      collection: null,
+      relationships: {},
+      field_sources: {},
+      confidence: null,
+    },
+    field_sources: {},
+    confidence: null,
+    status: "proposed",
+    duplicate_candidates: [],
+    duplicate_resolution: null,
+    matched_item_id: null,
+    imported_item_id: null,
+    error: null,
+    position: 0,
+  }],
+  files: [],
+  vault_tree: [],
+  ignored_notes: [],
+  broken_links: [],
+  metadata: {},
+};
+
+async function fixture(
+  page: Page,
+  path = "/assistant",
+  onSearchQuery?: (body: Record<string, unknown>) => void,
+) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", async (route) => {
@@ -42,6 +107,66 @@ async function fixture(page: Page, path = "/assistant") {
         },
       });
     }
+    if (url.pathname === "/api/v1/search/query") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      onSearchQuery?.(body);
+      return route.fulfill({
+        json: {
+          query: body.query,
+          mode: "fallback",
+          ai_used: false,
+          ai_attempted: false,
+          direct_match: false,
+          ambiguous: false,
+          needs_clarification: false,
+          answer: `Synthetic answer for ${String(body.query)}`,
+          answer_kind: "text",
+          interpretation: "",
+          filters: {},
+          items: [],
+          quick_results: [],
+          borrowed: [],
+          borrowed_total: 0,
+          total: 0,
+          documents: [],
+          locations: [],
+          references: [],
+          notices: [],
+          facts: {},
+          tool: null,
+          ai_status: {
+            provider: "none",
+            mode: "disabled",
+            model: null,
+            configured: false,
+            available: false,
+            catalog_checked: false,
+            catalog_count: 0,
+            cloud_enabled: false,
+            cloud_consent: false,
+            data_leaves_server: false,
+            error: null,
+            privacy_note: "AI off",
+          },
+          context: {
+            scope_key: null,
+            last_query: body.query,
+            resolved_items: [],
+            candidate_items: [],
+            loans: [],
+          },
+        },
+      });
+    }
+    if (
+      url.pathname === "/api/v1/imports" &&
+      route.request().method() === "POST"
+    ) {
+      return route.fulfill({ json: importBatch });
+    }
+    if (url.pathname === `/api/v1/imports/${importBatch.id}`) {
+      return route.fulfill({ json: importBatch });
+    }
     if (["/api/v1/items", "/api/v1/properties", "/api/v1/rooms", "/api/v1/storage-locations", "/api/v1/categories", "/api/v1/tags"].includes(url.pathname)) {
       return route.fulfill({ json: { items: [], total: 0, limit: 24, offset: 0 } });
     }
@@ -65,15 +190,15 @@ test("desktop and keyboard-open mobile screenshots show the shared capture compo
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4 synthetic"),
   });
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("invoice.pdf")).toBeVisible();
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByText("invoice.pdf")).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: resolve("..", "..", "docs", "assistant-unified-capture-desktop.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  const composer = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
   await composer.focus();
-  await expect(dialog.getByRole("button", { name: "Attach a file" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Attach a file" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(390);
   await page.waitForTimeout(400);
@@ -99,11 +224,97 @@ test("the header entry opens the assistant panel without separate assistant navi
   );
   await page.getByRole("option", { name: /Ask the assistant:/ }).click();
   await intentRequest;
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(page).toHaveURL("/");
-  await dialog.getByRole("button", { name: "Close assistant" }).click();
+  await headerSearch.fill("What is in my garage?");
+  await expect(headerSearch).toHaveValue("What is in my garage?");
+  await panel.getByRole("button", { name: "Close assistant" }).click();
   await expect(headerSearch).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("normal header submission opens the assistant without selecting its prompt", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("Where is my drill?");
+  await headerSearch.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(headerSearch).toBeVisible();
+  await expect(page).toHaveURL("/");
+  expect(errors).toEqual([]);
+});
+
+test("fresh header requests start without prior turns while panel follow-ups retain context", async ({ page }) => {
+  const searchBodies: Record<string, unknown>[] = [];
+  const errors = await fixture(page, "/", (body) => searchBodies.push(body));
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const firstQuestion = "Where is my drill?";
+  await headerSearch.fill(firstQuestion);
+  const firstSearch = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/v1/search/query" &&
+    request.postDataJSON().query === firstQuestion,
+  );
+  await headerSearch.press("Enter");
+  await firstSearch;
+  const panel = page.getByTestId("assistant-panel");
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await expect(panel.getByText(`Synthetic answer for ${firstQuestion}`)).toBeVisible();
+  expect(searchBodies[0]).toMatchObject({ query: firstQuestion, history: [] });
+  expect(searchBodies[0]).not.toHaveProperty("context");
+
+  const followUp = "And when did I last use it?";
+  await composer.fill(followUp);
+  const followUpSearch = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/v1/search/query" &&
+    request.postDataJSON().query === followUp,
+  );
+  await composer.press("Enter");
+  await followUpSearch;
+  await expect(panel.getByText(`Synthetic answer for ${followUp}`)).toBeVisible();
+  expect(searchBodies[1]?.history).toEqual([
+    { role: "user", content: firstQuestion },
+    { role: "assistant", content: `Synthetic answer for ${firstQuestion}` },
+  ]);
+
+  const freshQuestion = "What else is in my garage?";
+  await headerSearch.fill(freshQuestion);
+  const freshSearch = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/v1/search/query" &&
+    request.postDataJSON().query === freshQuestion,
+  );
+  await headerSearch.press("Enter");
+  await freshSearch;
+  await expect(panel.getByText(`Synthetic answer for ${freshQuestion}`)).toBeVisible();
+  expect(searchBodies[2]).toMatchObject({ query: freshQuestion, history: [] });
+  expect(searchBodies[2]).not.toHaveProperty("context");
+  expect(errors).toEqual([]);
+});
+
+test("item review edits survive closing the panel and switching views", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
+  await headerSearch.press("Enter");
+
+  const panel = page.getByTestId("assistant-panel");
+  const itemName = panel.getByLabel("Item name");
+  await expect(itemName).toHaveValue("Ethernet cable");
+  await itemName.fill("Blue Ethernet cable");
+  await panel.getByRole("checkbox", { name: "Include Blue Ethernet cable" }).uncheck();
+
+  await panel.getByRole("button", { name: "Close assistant" }).click();
+  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await expect(page).toHaveURL(/\/items$/);
+  await page.evaluate((path) => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/imports/${importBatch.id}`);
+  const fullPageReview = page.getByLabel("Item name");
+  await expect(fullPageReview).toHaveValue("Blue Ethernet cable");
+  await expect(
+    page.getByRole("checkbox", { name: "Include Blue Ethernet cable" }),
+  ).not.toBeChecked();
   expect(errors).toEqual([]);
 });
 
@@ -117,6 +328,21 @@ test("browser file picker displays a preview that can be removed", async ({ page
   await expect(page.getByText("invoice.pdf")).toBeVisible();
   await page.getByRole("button", { name: "Remove attachment" }).click();
   await expect(page.getByText("invoice.pdf")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("attaching from the header keeps the accompanying text in the capture composer", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  await page.getByRole("combobox", { name: "Search or ask about your inventory" })
+    .fill("This invoice is for the kitchen fridge");
+  await page.getByRole("banner").getByTestId("quick-search-attachment-input").setInputFiles({
+    name: "invoice.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 synthetic"),
+  });
+  const composer = page.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(page.getByText("invoice.pdf")).toBeVisible();
   expect(errors).toEqual([]);
 });
 

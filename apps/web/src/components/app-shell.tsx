@@ -14,8 +14,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -43,7 +42,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useCanWrite } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
@@ -158,6 +156,7 @@ function AppShellLayout() {
   } | null>(null);
   const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
+  const restoreAssistantFocus = useRef(false);
   const { openAddItems } = useAddItems();
   const { select: selectDocument } = useAssistantDocuments();
   const moreActive = mobileMoreNav.some((item) =>
@@ -190,8 +189,9 @@ function AppShellLayout() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [navigate]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    restoreAssistantFocus.current = false;
     setAssistantOpen(false);
   }, [location.pathname]);
 
@@ -201,7 +201,25 @@ function AppShellLayout() {
     if (documentMatch?.[1]) selectDocument(documentMatch[1]);
   }, [assistantOpen, location.pathname, selectDocument]);
 
+  useEffect(() => {
+    if (!assistantOpen) {
+      if (restoreAssistantFocus.current) assistantTrigger.current?.focus();
+      restoreAssistantFocus.current = false;
+      return;
+    }
+    assistantHeading.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        restoreAssistantFocus.current = true;
+        setAssistantOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [assistantOpen]);
+
   const openAssistant = (text: string, trigger: HTMLElement, file?: File) => {
+    restoreAssistantFocus.current = true;
     assistantTrigger.current = trigger;
     setAssistantRequest({ id: crypto.randomUUID(), text, ...(file ? { file } : {}) });
     setAssistantOpen(true);
@@ -304,7 +322,7 @@ function AppShellLayout() {
               variant="top"
               className="w-full max-w-2xl"
               onAsk={(query, trigger) => openAssistant(query, trigger)}
-              onAttach={canWrite ? (file, trigger) => openAssistant("", trigger, file) : undefined}
+              onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
             />
           </div>
         </header>
@@ -326,7 +344,7 @@ function AppShellLayout() {
             <QuickSearch
               variant="mobile"
               onAsk={(query, trigger) => openAssistant(query, trigger)}
-              onAttach={canWrite ? (file, trigger) => openAssistant("", trigger, file) : undefined}
+              onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
             />
           </div>
           {!canWrite && (
@@ -417,45 +435,45 @@ function AppShellLayout() {
           </nav>
         )}
       </div>
-      <Dialog open={assistantOpen} onOpenChange={setAssistantOpen}>
-        <DialogPortal>
-          <DialogOverlay />
-          <DialogPrimitive.Content
-            aria-describedby={undefined}
-            className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:left-auto lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
-            onOpenAutoFocus={(event) => {
-              event.preventDefault();
-              assistantHeading.current?.focus();
-            }}
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              assistantTrigger.current?.focus();
-            }}
-          >
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
-              <DialogTitle ref={assistantHeading} tabIndex={-1} className="text-sm">
-                Assistant
-              </DialogTitle>
-              <div className="flex items-center gap-2">
-                <DialogPrimitive.Close className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2" aria-label="Close assistant">
-                  <X className="size-5" />
-                </DialogPrimitive.Close>
-              </div>
+      {assistantOpen && (
+        <aside
+          aria-labelledby="assistant-panel-title"
+          data-testid="assistant-panel"
+          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
+        >
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <h2
+              id="assistant-panel-title"
+              ref={assistantHeading}
+              tabIndex={-1}
+              className="text-sm"
+            >
+              Assistant
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAssistantOpen(false)}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
+                aria-label="Close assistant"
+              >
+                <X className="size-5" />
+              </button>
             </div>
-            <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
-              <Suspense fallback={<PageFallback />}>
-                <AssistantPage
-                  embedded
-                  initialRequest={assistantRequest}
-                  onInitialRequestHandled={(id) => {
-                    setAssistantRequest((current) => current?.id === id ? null : current);
-                  }}
-                />
-              </Suspense>
-            </div>
-          </DialogPrimitive.Content>
-        </DialogPortal>
-      </Dialog>
+          </div>
+          <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+            <Suspense fallback={<PageFallback />}>
+              <AssistantPage
+                embedded
+                initialRequest={assistantRequest}
+                onInitialRequestHandled={(id) => {
+                  setAssistantRequest((current) => current?.id === id ? null : current);
+                }}
+              />
+            </Suspense>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

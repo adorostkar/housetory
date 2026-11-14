@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import * as React from "react";
 
 import { useSession } from "@/lib/queries";
+import type { ImportDecision, ProposedItem } from "@/lib/types";
 
 const AssistantDocumentReview = React.lazy(() =>
   import("@/components/assistant-document-review").then((module) => ({
@@ -24,6 +25,13 @@ interface DocumentReviewContext {
   selectImport: (id: string) => void;
   importNode: HTMLDivElement;
   setImportVisible: (visible: boolean) => void;
+  getImportReviewDraft: (id: string) => ImportReviewDraft | undefined;
+  saveImportReviewDraft: (id: string, draft: ImportReviewDraft) => void;
+}
+
+export interface ImportReviewDraft {
+  edits: Record<string, ProposedItem>;
+  decisions: Record<string, ImportDecision>;
 }
 
 const AssistantDocumentsContext = React.createContext<DocumentReviewContext | null>(null);
@@ -40,6 +48,10 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     householdId, activeId: null, ids: [],
   });
   const [importVisible, setImportVisible] = React.useState(false);
+  const [reviewDraftState, setReviewDraftState] = React.useState<{
+    householdId: string;
+    drafts: Record<string, ImportReviewDraft>;
+  }>({ householdId, drafts: {} });
   const activeId = state.householdId === householdId ? state.activeId : null;
   const ids = state.householdId === householdId ? state.ids : [];
   const activeImportId = importState.householdId === householdId ? importState.activeId : null;
@@ -64,9 +76,27 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       };
     });
   }, [householdId]);
+  const getImportReviewDraft = React.useCallback((id: string) =>
+    reviewDraftState.householdId === householdId
+      ? reviewDraftState.drafts[id]
+      : undefined,
+  [householdId, reviewDraftState]);
+  const saveImportReviewDraft = React.useCallback((id: string, draft: ImportReviewDraft) => {
+    setReviewDraftState((current) => ({
+      householdId,
+      drafts: {
+        ...(current.householdId === householdId ? current.drafts : {}),
+        [id]: draft,
+      },
+    }));
+  }, [householdId]);
   const value = React.useMemo(() => ({
     activeId, select, node, setVisible, activeImportId, selectImport, importNode, setImportVisible,
-  }), [activeId, select, node, activeImportId, selectImport, importNode]);
+    getImportReviewDraft, saveImportReviewDraft,
+  }), [
+    activeId, select, node, activeImportId, selectImport, importNode,
+    getImportReviewDraft, saveImportReviewDraft,
+  ]);
   return (
     <AssistantDocumentsContext.Provider value={value}>
       {children}

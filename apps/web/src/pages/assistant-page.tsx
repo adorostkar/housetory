@@ -91,7 +91,11 @@ export function AssistantPage({
 } = {}) {
   const aiStatus = useAiStatus();
   const canWrite = useCanWrite();
-  const { select: selectDocument, selectImport } = useAssistantDocuments();
+  const {
+    activeImportId,
+    select: selectDocument,
+    selectImport,
+  } = useAssistantDocuments();
   const session = useSession();
   const selectHousehold = useSelectHousehold();
   const { references: pageReferences, setReferences: setPageReferences } = useAssistantPageContext();
@@ -104,9 +108,18 @@ export function AssistantPage({
   const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
+  const retainedImportId = [...messages]
+    .reverse()
+    .find((message) => message.capture?.importId)?.capture?.importId;
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
   const handledInitialRequestRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (retainedImportId && retainedImportId !== activeImportId) {
+      selectImport(retainedImportId);
+    }
+  }, [activeImportId, retainedImportId, selectImport]);
+
   React.useEffect(() => {
     if (embedded) return;
     const value = searchParams.get("q")?.trim() ?? "";
@@ -277,7 +290,7 @@ export function AssistantPage({
     }
   };
 
-  const submitValue = (value: string) => {
+  const submitValue = (value: string, freshRequest = false) => {
     if (pending || tooManyReferences || capturePending) return;
     if (attachment || (canWrite && looksLikeItemDescription(value))) {
       if (!attachment && value.length < 2) return;
@@ -287,7 +300,14 @@ export function AssistantPage({
     }
     if (value.length < 2) return;
     dictation.stop();
-    ask(selection, value, false, searchSession);
+    ask(
+      selection,
+      value,
+      false,
+      freshRequest
+        ? { scopeKey: scopeSignature, turns: [], context: null, record: () => undefined }
+        : searchSession,
+    );
   };
 
   React.useEffect(() => {
@@ -295,9 +315,14 @@ export function AssistantPage({
       !embedded ||
       !initialRequest ||
       scopesQuery.isPending ||
+      pending ||
+      capturePending ||
+      actionPending ||
       handledInitialRequestRef.current === initialRequest.id
     ) return;
     handledInitialRequestRef.current = initialRequest.id;
+    reset();
+    if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     if (initialRequest.file) {
       setAttachment(initialRequest.file);
       setAttachmentIntent(
@@ -306,13 +331,20 @@ export function AssistantPage({
       setQuestion(initialRequest.text);
       setCaptureError(null);
     } else if (initialRequest.text.trim()) {
-      submitValue(initialRequest.text.trim());
+      submitValue(initialRequest.text.trim(), true);
     }
     onInitialRequestHandled?.(initialRequest.id);
   }, [
+    actionPending,
+    capturePending,
     embedded,
     initialRequest,
     onInitialRequestHandled,
+    pending,
+    reset,
+    scopeSignature,
+    searchSession.reset,
+    searchSession.scopeKey,
     scopesQuery.isPending,
     selection,
     setAttachment,
