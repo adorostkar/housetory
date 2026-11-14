@@ -451,6 +451,52 @@ test("desktop and keyboard-open mobile screenshots show the shared capture compo
   expect(errors).toEqual([]);
 });
 
+test("mobile navigation has five equal, working slots with a centered Add control", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const nav = page.getByTestId("mobile-bottom-nav");
+  const controls = [
+    nav.getByRole("link", { name: "Home", exact: true }),
+    nav.getByRole("link", { name: "Items", exact: true }),
+    nav.getByRole("button", { name: "Add items" }),
+    nav.getByRole("link", { name: "Loans", exact: true }),
+    nav.getByRole("button", { name: "More destinations" }),
+  ];
+  const boxes = await Promise.all(controls.map((control) => control.boundingBox()));
+  expect(boxes.every((box) => box !== null)).toBe(true);
+  const slots = boxes.filter((box) => box !== null);
+  expect(Math.max(...slots.map((box) => box.width)) - Math.min(...slots.map((box) => box.width))).toBeLessThan(1);
+  const addBox = slots[2]!;
+  const navBox = await nav.boundingBox();
+  expect(navBox).not.toBeNull();
+  expect(Math.abs(addBox.x + addBox.width / 2 - (navBox!.x + navBox!.width / 2))).toBeLessThan(1);
+  for (let left = 0; left < slots.length; left += 1) {
+    for (let right = left + 1; right < slots.length; right += 1) {
+      expect(
+        slots[left]!.x + slots[left]!.width <= slots[right]!.x + 0.5 ||
+          slots[right]!.x + slots[right]!.width <= slots[left]!.x + 0.5,
+      ).toBe(true);
+    }
+  }
+  const paddingBottom = await nav.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom));
+  expect(paddingBottom).toBeGreaterThanOrEqual(12);
+
+  await controls[0]!.click();
+  await expect(page).toHaveURL("/");
+  await controls[1]!.click();
+  await expect(page).toHaveURL("/items");
+  await controls[2]!.click();
+  await expect(page.getByRole("dialog", { name: "Add items" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await controls[3]!.click();
+  await expect(page).toHaveURL("/loans");
+  await controls[4]!.click();
+  await page.getByRole("menuitem", { name: "Rooms" }).click();
+  await expect(page).toHaveURL("/rooms");
+  expect(errors).toEqual([]);
+});
+
 test("the header entry opens the assistant panel without separate assistant navigation", async ({ page }) => {
   const errors = await fixture(page, "/");
   await expect(page.getByRole("link", { name: "Assistant", exact: true })).toHaveCount(0);

@@ -96,6 +96,12 @@ const mobileLeftNav: NavItem[] = [
   { to: "/items", label: "Items", icon: Package },
 ];
 
+const mobileLoansNav: NavItem = {
+  to: "/loans",
+  label: "Loans",
+  icon: HandCoins,
+};
+
 const AssistantPage = lazy(() =>
   import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
 );
@@ -371,23 +377,25 @@ function AppShellLayout() {
             aria-label="Primary"
             data-testid="mobile-bottom-nav"
           >
-            <div className="mx-auto flex max-w-md items-stretch justify-around">
+            <div className="mx-auto grid max-w-md grid-cols-5 items-stretch">
               {mobileLeftNav.map(renderMobileTab)}
-              {canWrite ? (
-                <button
-                  type="button"
-                  aria-label="Add items"
-                  onClick={(event) =>
-                    openAddItems(undefined, event.currentTarget)
-                  }
-                  className="relative -mt-4 flex min-w-0 flex-1 flex-col items-center justify-start gap-0.5 px-1 text-2xs font-medium text-muted-foreground"
-                >
-                  <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lift">
-                    <Plus className="size-5" strokeWidth={2.2} />
-                  </span>
-                  Add
-                </button>
-              ) : null}
+              <button
+                type="button"
+                aria-label="Add items"
+                onClick={
+                  canWrite
+                    ? (event) => openAddItems(undefined, event.currentTarget)
+                    : undefined
+                }
+                disabled={!canWrite}
+                className="relative -mt-4 flex w-full min-w-0 flex-col items-center justify-start gap-0.5 px-1 text-2xs font-medium text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lift">
+                  <Plus className="size-5" strokeWidth={2.2} />
+                </span>
+                Add
+              </button>
+              {renderMobileTab(mobileLoansNav)}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
