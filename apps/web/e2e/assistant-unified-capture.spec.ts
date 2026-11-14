@@ -69,6 +69,23 @@ const importBatch = {
   metadata: {},
 };
 
+async function fakeMicrophone(page: Page) {
+  await page.addInitScript(() => {
+    const getUserMedia = async () => {
+      const context = new AudioContext();
+      const oscillator = context.createOscillator();
+      const destination = context.createMediaStreamDestination();
+      oscillator.connect(destination);
+      oscillator.start();
+      return destination.stream;
+    };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+  });
+}
+
 async function fixture(
   page: Page,
   path = "/assistant",
@@ -80,6 +97,7 @@ async function fixture(
   let creationQuery = "";
   let activeImportBatch = importBatch;
   let recoveryPolls = 0;
+  let voiceReads = 0;
   let recoveryBatch = {
     ...importBatch,
     status: "review",
@@ -120,6 +138,40 @@ async function fixture(
     }
     if (url.pathname === "/api/v1/ai/status") {
       return route.fulfill({ json: { configured: aiAvailable, available: aiAvailable, data_leaves_server: false, privacy_note: aiAvailable ? "Synthetic AI" : "AI off" } });
+    }
+    if (url.pathname === "/api/v1/voice/config") {
+      return route.fulfill({
+        json: {
+          transcription_configured: aiAvailable,
+          max_duration_seconds: 120,
+          max_upload_mb: 20,
+          supported_formats: ["audio/webm"],
+          retention_note: "Synthetic voice fixture",
+        },
+      });
+    }
+    if (url.pathname === "/api/v1/voice" && route.request().method() === "POST") {
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: "header-voice-note",
+          status: "queued",
+          transcript: null,
+          transcript_error: null,
+        },
+      });
+    }
+    if (url.pathname === "/api/v1/voice/header-voice-note") {
+      voiceReads += 1;
+      const transcribed = voiceReads > 1;
+      return route.fulfill({
+        json: {
+          id: "header-voice-note",
+          status: transcribed ? "transcribed" : "transcribing",
+          transcript: transcribed ? "Where is my drill?" : null,
+          transcript_error: null,
+        },
+      });
     }
     if (url.pathname === "/api/v1/assistant/actions/intent") {
       const { query } = route.request().postDataJSON() as { query: string };
@@ -495,6 +547,114 @@ test("mobile navigation has five equal, working slots with a centered Add contro
   await page.getByRole("menuitem", { name: "Rooms" }).click();
   await expect(page).toHaveURL("/rooms");
   expect(errors).toEqual([]);
+});
+
+test("header dictation transcribes into an editable query without auto-submitting", async ({ page }) => {
+  await fakeMicrophone(page);
+  const errors = await fixture(page, "/", undefined, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const input = page.locator('input[data-quick-search-variant="top"]');
+  const attach = page.getByRole("button", { name: "Attach a file" }).first();
+  const mic = page.getByRole("button", { name: "Record voice search" }).first();
+  expect(await input.inputValue()).toBe("");
+  await expect(attach).toBeVisible();
+  await expect(mic).toBeVisible();
+  const attachBox = await attach.boundingBox();
+  const micBox = await mic.boundingBox();
+  expect(attachBox).not.toBeNull();
+  expect(micBox).not.toBeNull();
+  expect(attachBox!.x + attachBox!.width).toBeLessThanOrEqual(micBox!.x);
+
+  const submittedQueries: string[] = [];
+  let uploadCount = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/search/query") submittedQueries.push(request.postDataJSON().query);
+    if (url.pathname === "/api/v1/voice" && request.method() === "POST") uploadCount += 1;
+  });
+
+  await mic.click();
+  const recording = page.getByRole("group", { name: "Recording voice search" });
+  await expect(recording).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Stop recording" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Transcribing your recording" })).toBeVisible();
+  await expect(input).toHaveValue("Where is my drill?", { timeout: 10_000 });
+  await expect(page.getByText(/Transcript ready\. Review or edit it/)).toBeVisible();
+  await expect(input).toBeFocused();
+  expect(uploadCount).toBe(1);
+  expect(submittedQueries).toEqual([]);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  await expect(page).toHaveURL("/");
+
+  await input.fill("Where is my blue drill?");
+  await input.press("Enter");
+  await expect(page.getByTestId("assistant-panel")).toBeVisible();
+  await expect(page.getByText("Synthetic answer for Where is my blue drill?")).toBeVisible();
+  expect(submittedQueries).toEqual(["Where is my blue drill?"]);
+  expect(errors).toEqual([]);
+});
+
+test("cancelling header dictation sends no audio or search", async ({ page }) => {
+  await fakeMicrophone(page);
+  const errors = await fixture(page, "/", undefined, true);
+  const input = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const mic = page.getByRole("button", { name: "Record voice search" }).first();
+  let uploads = 0;
+  let searches = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/voice" && request.method() === "POST") uploads += 1;
+    if (url.pathname === "/api/v1/search/query") searches += 1;
+  });
+  await mic.click();
+  await expect(page.getByRole("group", { name: "Recording voice search" })).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Cancel recording" }).click();
+  await expect(page.getByText("Recording cancelled. Nothing was sent.")).toBeVisible();
+  await expect(mic).toBeFocused();
+  expect(await input.inputValue()).toBe("");
+  expect(uploads).toBe(0);
+  expect(searches).toBe(0);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  await expect(page).toHaveURL("/");
+  expect(errors).toEqual([]);
+});
+
+test("header microphone explains unavailable transcription and links to AI settings", async ({ page }) => {
+  await fixture(page, "/", undefined, false);
+  const mic = page.getByRole("button", { name: "Record voice search" }).first();
+  await expect(mic).toBeVisible();
+  await mic.click();
+  await expect(page.getByRole("alert")).toContainText("Voice transcription is not configured");
+  await expect(page.getByRole("link", { name: "AI settings" })).toHaveAttribute("href", "/settings/ai");
+});
+
+test("mobile header keeps microphone and attachment controls inside the search box", async ({ page }) => {
+  await fixture(page, "/");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const input = page.locator('input[data-quick-search-variant="mobile"]');
+  const attach = page.getByRole("button", { name: "Attach a file" });
+  const mic = page.getByRole("button", { name: "Record voice search" });
+  await expect(input).toBeVisible();
+  await expect(attach).toBeVisible();
+  await expect(mic).toBeVisible();
+
+  const [inputBox, attachBox, micBox] = await Promise.all([
+    input.boundingBox(),
+    attach.boundingBox(),
+    mic.boundingBox(),
+  ]);
+  expect(inputBox).not.toBeNull();
+  expect(attachBox).not.toBeNull();
+  expect(micBox).not.toBeNull();
+  expect(attachBox!.x).toBeGreaterThanOrEqual(inputBox!.x);
+  expect(attachBox!.x + attachBox!.width).toBeLessThanOrEqual(micBox!.x);
+  expect(micBox!.x + micBox!.width).toBeLessThanOrEqual(inputBox!.x + inputBox!.width);
+  expect(micBox!.y + micBox!.height / 2).toBeCloseTo(inputBox!.y + inputBox!.height / 2, 0);
 });
 
 test("the header entry opens the assistant panel without separate assistant navigation", async ({ page }) => {

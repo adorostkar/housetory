@@ -5,24 +5,34 @@ import {
   HandCoins,
   Loader2,
   MapPin,
+  Mic,
   Package,
   Paperclip,
   Search,
   Sparkles,
+  Square,
   X,
 } from "lucide-react";
 import * as React from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getApiErrorMessage } from "@/lib/api";
+import { formatDuration, useVoiceRecorder } from "@/hooks/use-voice-recorder";
+import { api, getApiErrorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRememberedSearchScope } from "@/hooks/use-search-scope";
 import { withHousehold } from "@/lib/household-links";
-import { useQuickSearch } from "@/lib/queries";
-import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
+import {
+  queryKeys,
+  useAiStatus,
+  useQuickSearch,
+  useVoiceConfig,
+  useVoiceNote,
+} from "@/lib/queries";
+import type { QuickSearchKind, QuickSearchResult, VoiceNote } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import { DOCUMENT_FILE_ACCEPT, documentFileError } from "@/lib/document-files";
 
@@ -94,9 +104,12 @@ export function QuickSearch({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const attachInputRef = React.useRef<HTMLInputElement>(null);
   const attachButtonRef = React.useRef<HTMLButtonElement>(null);
+  const voiceButtonRef = React.useRef<HTMLButtonElement>(null);
   const pendingEditRef = React.useRef<string | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const voiceNoticeId = React.useId();
+  const queryClient = useQueryClient();
   const [query, setQuery] = React.useState(() =>
     ["/search", "/items"].includes(location.pathname) ? (searchParams.get("q") ?? "") : "",
   );
@@ -104,6 +117,46 @@ export function QuickSearch({
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
+  const [voiceNoteId, setVoiceNoteId] = React.useState<string | null>(null);
+  const [voiceAvailabilityRequested, setVoiceAvailabilityRequested] = React.useState(false);
+  const [pendingRecording, setPendingRecording] = React.useState(false);
+  const [voiceNotice, setVoiceNotice] = React.useState<{
+    kind: "checking" | "ready" | "cancelled" | "unavailable" | "error" | "processing";
+    message: string;
+  } | null>(null);
+  const transcriptionStatus = useAiStatus("transcription", {
+    enabled: voiceAvailabilityRequested,
+  });
+  const voiceConfig = useVoiceConfig({ enabled: voiceAvailabilityRequested });
+  const voiceNoteQuery = useVoiceNote(voiceNoteId ?? undefined);
+  const voiceUpload = useMutation({
+    mutationFn: ({ file, duration }: { file: File; duration: number }) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("duration_seconds", String(duration));
+      return api.postForm<VoiceNote>("/voice", form);
+    },
+    onSuccess: (note) => {
+      queryClient.setQueryData(queryKeys.voiceNote(note.id), note);
+      setVoiceNoteId(note.id);
+      setVoiceNotice({ kind: "processing", message: "Transcribing your recording…" });
+    },
+    onError: (error) => {
+      setVoiceNotice({
+        kind: "error",
+        message: `The recording could not be transcribed: ${getApiErrorMessage(error)}`,
+      });
+    },
+  });
+  const recorder = useVoiceRecorder({
+    maxSeconds: voiceConfig.data?.max_duration_seconds ?? 120,
+    onRecorded: (file, duration) => {
+      setVoiceNotice({ kind: "processing", message: "Uploading and transcribing your recording…" });
+      voiceUpload.mutate({ file, duration });
+    },
+  });
+  const voiceNote = voiceNoteQuery.data;
+  const voiceProcessing = voiceUpload.isPending || Boolean(voiceNoteId);
   const isItemsPage = location.pathname === "/items";
   const debounced = useDebouncedValue(query, 220);
   const term = query.trim();
@@ -131,6 +184,78 @@ export function QuickSearch({
   const showAskRow = term.length >= 2 && !loading && !error;
   const askIndex = flatResults.length;
   const optionCount = flatResults.length + (showAskRow ? 1 : 0);
+
+  React.useEffect(() => {
+    if (!voiceNoteId || voiceNote?.id !== voiceNoteId) return;
+    if (voiceNote.status === "transcribed") {
+      if (!voiceNote.transcript?.trim()) {
+        setVoiceNotice({
+          kind: "error",
+          message: voiceNote.transcript_error || "No words were recognized. Try recording again.",
+        });
+      } else {
+        const transcript = voiceNote.transcript.trim();
+        const next = query.trim() ? `${query.trimEnd()} ${transcript}` : transcript;
+        pendingEditRef.current = next;
+        setQuery(next);
+        setFocused(true);
+        setVoiceNotice({
+          kind: "ready",
+          message: "Transcript ready. Review or edit it, then press Enter to search or ask.",
+        });
+        window.requestAnimationFrame(() => inputRef.current?.focus());
+      }
+      setVoiceNoteId(null);
+    } else if (voiceNote.status === "failed" || voiceNote.status === "cancelled") {
+      setVoiceNotice({
+        kind: "error",
+        message: voiceNote.transcript_error || "The recording could not be transcribed. Try again.",
+      });
+      setVoiceNoteId(null);
+    }
+  }, [query, voiceNote, voiceNoteId]);
+
+  React.useEffect(() => {
+    if (!voiceNoteId || !voiceNoteQuery.isError) return;
+    setVoiceNotice({
+      kind: "error",
+      message: `The transcript could not be loaded: ${getApiErrorMessage(voiceNoteQuery.error)}`,
+    });
+    setVoiceNoteId(null);
+  }, [voiceNoteId, voiceNoteQuery.error, voiceNoteQuery.isError]);
+
+  React.useEffect(() => {
+    if (!pendingRecording || transcriptionStatus.isPending || voiceConfig.isPending) return;
+    setPendingRecording(false);
+    if (
+      transcriptionStatus.isError ||
+      !transcriptionStatus.data?.configured ||
+      !transcriptionStatus.data.available
+    ) {
+      const details = transcriptionStatus.isError
+        ? getApiErrorMessage(transcriptionStatus.error)
+        : transcriptionStatus.data?.error;
+      setVoiceNotice({
+        kind: "unavailable",
+        message: details
+          ? `Voice transcription is unavailable: ${details}`
+          : transcriptionStatus.data?.configured
+            ? "Voice transcription is currently unavailable. Check AI settings and try again."
+            : "Voice transcription is not configured. Set it up in AI settings.",
+      });
+      return;
+    }
+    setVoiceNotice(null);
+    void recorder.start();
+  }, [
+    pendingRecording,
+    recorder.start,
+    transcriptionStatus.data,
+    transcriptionStatus.error,
+    transcriptionStatus.isError,
+    transcriptionStatus.isPending,
+    voiceConfig.isPending,
+  ]);
 
   React.useEffect(() => {
     setActiveIndex(-1);
@@ -229,7 +354,24 @@ export function QuickSearch({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [showPanel, term]);
+  }, [showPanel, term, voiceNotice, recorder.recording, voiceProcessing]);
+
+  const startRecording = () => {
+    if (voiceProcessing || pendingRecording) return;
+    setFocused(false);
+    setVoiceAvailabilityRequested(true);
+    setPendingRecording(true);
+    setVoiceNotice({
+      kind: "checking",
+      message: "Checking voice transcription availability…",
+    });
+  };
+
+  const cancelRecording = () => {
+    recorder.cancel();
+    setVoiceNotice({ kind: "cancelled", message: "Recording cancelled. Nothing was sent." });
+    window.requestAnimationFrame(() => voiceButtonRef.current?.focus());
+  };
 
   const submitToResults = (explicitAsk: boolean) => {
     if (!term) return;
@@ -281,6 +423,10 @@ export function QuickSearch({
       return;
     }
     if (event.key === "Enter") {
+      if (recorder.recording || voiceProcessing || pendingRecording) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       if (showAskRow && activeIndex === askIndex && !event.shiftKey) {
         askAssistant();
@@ -521,15 +667,18 @@ export function QuickSearch({
         onChange={(event) => {
           pendingEditRef.current = event.target.value;
           setQuery(event.target.value);
+          setVoiceNotice(null);
           setFocused(true);
           setActiveIndex(-1);
         }}
         onKeyDown={onKeyDown}
+        disabled={recorder.recording || voiceProcessing || pendingRecording}
+        aria-describedby={voiceNotice ? voiceNoticeId : undefined}
         className={cn(
           "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-11 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
           variant === "top"
-            ? cn("h-12 text-[0.95rem]", onAttach ? "pr-24" : "pr-16")
-            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-20" : "pr-16"),
+            ? cn("h-12 text-[0.95rem]", onAttach ? "pr-36" : "pr-28")
+            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-28" : "pr-20"),
         )}
       />
       {onAttach && (
@@ -562,7 +711,8 @@ export function QuickSearch({
             type="button"
             aria-label="Attach a file"
             title="Attach a PDF or image"
-            className="absolute right-10 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+            disabled={recorder.recording || voiceProcessing || pendingRecording}
+            className="absolute right-20 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
             onClick={() => attachInputRef.current?.click()}
           >
             <Paperclip className="size-4" />
@@ -571,25 +721,109 @@ export function QuickSearch({
       )}
       <kbd className={cn(
         "pointer-events-none absolute top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block",
-        onAttach ? "right-20" : "right-11",
+        onAttach ? "right-[7.25rem]" : "right-20",
       )}>
         ⌘K
       </kbd>
+      <button
+        ref={voiceButtonRef}
+        type="button"
+        aria-label={recorder.recording ? "Stop recording" : "Record voice search"}
+        title={
+          pendingRecording
+            ? "Checking voice transcription availability"
+            : recorder.recording
+              ? "Stop recording"
+              : "Record a voice search"
+        }
+        aria-pressed={recorder.recording}
+        aria-busy={pendingRecording}
+        aria-describedby={voiceNotice ? voiceNoticeId : undefined}
+        disabled={voiceProcessing}
+        className={cn(
+          "absolute right-11 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
+          recorder.recording && "animate-pulse bg-primary text-primary-foreground hover:bg-primary",
+        )}
+        onClick={recorder.recording ? recorder.stop : startRecording}
+      >
+        {recorder.recording ? <Square className="size-4" /> : <Mic className="size-4" />}
+      </button>
       {query ? (
         <button
           type="button"
+          disabled={recorder.recording || voiceProcessing || pendingRecording}
           onClick={() => {
             pendingEditRef.current = "";
             setQuery("");
+            setVoiceNotice(null);
             setActiveIndex(-1);
             inputRef.current?.focus();
           }}
-          className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
           aria-label="Clear search"
         >
           <X className="size-4" />
         </button>
       ) : null}
+      {recorder.recording && (
+        <div
+          role="group"
+          aria-label="Recording voice search"
+          className="mt-2 flex min-h-11 items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-1.5"
+        >
+          <span className="size-2.5 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
+          <p role="status" aria-live="polite" className="min-w-0 flex-1 text-xs tabular-nums">
+            Recording {formatDuration(recorder.elapsed)} / {formatDuration(voiceConfig.data?.max_duration_seconds ?? 120)}
+          </p>
+          <button
+            type="button"
+            aria-label="Cancel recording"
+            className="flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            onClick={cancelRecording}
+          >
+            <X className="size-3.5" />
+            Cancel
+          </button>
+        </div>
+      )}
+      {!recorder.recording && voiceProcessing && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="mt-2 flex min-h-10 items-center gap-2 px-2 text-xs text-muted-foreground"
+        >
+          <Loader2 className="size-4 animate-spin" />
+          Transcribing your recording…
+        </p>
+      )}
+      {!recorder.recording && recorder.error && (
+        <p role="alert" className="mt-2 px-2 text-xs text-destructive">
+          {recorder.error}
+        </p>
+      )}
+      {!recorder.recording && voiceNotice && !voiceProcessing && (
+        <p
+          id={voiceNoticeId}
+          role={["unavailable", "error"].includes(voiceNotice.kind) ? "alert" : "status"}
+          aria-live={["unavailable", "error"].includes(voiceNotice.kind) ? "assertive" : "polite"}
+          className={cn(
+            "mt-2 px-2 text-xs",
+            ["unavailable", "error"].includes(voiceNotice.kind)
+              ? "text-destructive"
+              : "text-muted-foreground",
+          )}
+        >
+          {voiceNotice.message}
+          {["unavailable", "error"].includes(voiceNotice.kind) && (
+            <>
+              {" "}
+              <Link to="/settings/ai" className="underline underline-offset-4">
+                AI settings
+              </Link>
+            </>
+          )}
+        </p>
+      )}
       {attachmentError && (
         <p role="alert" className="mt-1 px-2 text-2xs text-destructive">
           {attachmentError}

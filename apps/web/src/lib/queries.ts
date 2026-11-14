@@ -563,10 +563,11 @@ export function useImportBatch(batchId: string | undefined) {
   });
 }
 
-export function useVoiceConfig() {
+export function useVoiceConfig(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.voiceConfig,
     queryFn: () => api.get<VoiceConfig>("/voice/config"),
+    enabled: options.enabled ?? true,
     staleTime: 60_000,
     retry: false,
   });
@@ -591,11 +592,12 @@ export function useVoiceNote(noteId: string | undefined) {
 
 export function useAiStatus(
   task = "assistant",
-  options: { refetchOnMount?: boolean | "always" } = {},
+  options: { enabled?: boolean; refetchOnMount?: boolean | "always" } = {},
 ) {
   return useQuery({
     queryKey: [...queryKeys.aiStatus, task],
     queryFn: () => api.get<AiStatus>(`/ai/status?task=${encodeURIComponent(task)}`),
+    enabled: options.enabled ?? true,
     staleTime: 30_000,
     refetchOnMount: options.refetchOnMount ?? true,
     retry: false,
