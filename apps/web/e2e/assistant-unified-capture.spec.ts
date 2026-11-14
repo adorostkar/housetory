@@ -95,27 +95,79 @@ async function fixture(
       return route.fulfill({ json: { configured: false, available: false, data_leaves_server: false, privacy_note: "AI off" } });
     }
     if (url.pathname === "/api/v1/assistant/actions/intent") {
-      return route.fulfill({ json: { intent: "unavailable", form: null } });
+      const { query } = route.request().postDataJSON() as { query: string };
+      return route.fulfill({
+        json: /^(?:Transfer|Shift)\b|دریل را به انبار منتقل کن/u.test(query)
+          ? { intent: "supported_action", form: null }
+          : { intent: "unavailable", form: null },
+      });
+    }
+    if (url.pathname === "/api/v1/assistant/actions/interpret") {
+      return route.fulfill({
+        json: {
+          handled: true,
+          message: "Move proposal ready for review.",
+          proposal: {
+            id: "00000000-0000-0000-0000-000000000006",
+            kind: "move",
+            state: "proposed",
+            scope_label: household.name,
+            targets: [{
+              id: "00000000-0000-0000-0000-000000000007",
+              name: "Validation Hammer Drill",
+            }],
+            destination: {
+              id: "00000000-0000-0000-0000-000000000008",
+              name: "Storage",
+            },
+            changes: {},
+            before: {},
+          },
+        },
+      });
     }
     if (url.pathname === "/api/v1/search/quick") {
       const query = url.searchParams.get("q") ?? "";
+      const results = /\brecord\s+player\b/i.test(query)
+        ? [{
+            id: "00000000-0000-0000-0000-000000000009",
+            kind: "item",
+            title: "Record Player",
+            subtitle: "Acme · RP-1",
+            context: "Living room",
+            url: "/items/00000000-0000-0000-0000-000000000009",
+            household: null,
+            loan: null,
+          }]
+        : /^(?:transfer|shift)\b/i.test(query)
+          ? [{
+              id: "00000000-0000-0000-0000-000000000007",
+              kind: "item",
+              title: "Validation Hammer Drill",
+              subtitle: "Acme · V-1",
+              context: "Garage",
+              url: "/items/00000000-0000-0000-0000-000000000007",
+              household: null,
+              loan: null,
+            }]
+          : query.trim().toLocaleLowerCase() === "drill"
+          ? [{
+              id: "00000000-0000-0000-0000-000000000005",
+              kind: "item",
+              title: "Cordless drill",
+              subtitle: "Acme · D-1",
+              context: "Garage · Box 2",
+              url: "/items/00000000-0000-0000-0000-000000000005",
+              household: null,
+              loan: null,
+            }]
+          : [];
       return route.fulfill({
         json: {
           query,
           effective_query: null,
           question_like: query.includes("?") || /^(where|what|when|who|why|how)\b/i.test(query),
-          results: /\bdrill\b/i.test(query)
-            ? [{
-                id: "00000000-0000-0000-0000-000000000005",
-                kind: "item",
-                title: "Cordless drill",
-                subtitle: "Acme · D-1",
-                context: "Garage · Box 2",
-                url: "/items/00000000-0000-0000-0000-000000000005",
-                household: null,
-                loan: null,
-              }]
-            : [],
+          results,
         },
       });
     }
@@ -352,6 +404,119 @@ test("assistant composer and Send stay inside short desktop and keyboard-sized m
   await expect(composer).toBeVisible();
   await expect(send).toBeVisible();
   await assertControlsFit(520);
+  expect(errors).toEqual([]);
+});
+
+test("Transfer action submitted from Items reaches review without applying automatically", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const intentQueries: string[] = [];
+  const applyRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+    if (/\/api\/v1\/assistant\/actions\/proposals\/[^/]+\/apply$/.test(url.pathname)) {
+      applyRequests.push(url.pathname);
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const query = "Transfer Validation Hammer Drill to Storage";
+  await headerSearch.fill(query);
+  await expect(page.getByRole("option", { name: /^Validation Hammer Drill/ })).toBeVisible();
+  expect(intentQueries).toEqual([]);
+  await headerSearch.press("Enter");
+
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
+  await expect(panel.getByLabel("Action review")).toContainText("Storage");
+  await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
+  await expect(page).toHaveURL(/\/items(?:\?|$)/);
+  expect(intentQueries).toEqual([query]);
+  expect(applyRequests).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("Shift paraphrase submitted from Overview uses the same reviewed action flow", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const intentQueries: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const query = "Shift Validation Hammer Drill to Storage";
+  await headerSearch.fill(query);
+  await expect(page.getByRole("option", { name: /^Validation Hammer Drill/ })).toBeVisible();
+  expect(intentQueries).toEqual([]);
+  await headerSearch.press("Enter");
+
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
+  await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
+  await expect(page).toHaveURL("/");
+  expect(intentQueries).toEqual([query]);
+  expect(errors).toEqual([]);
+});
+
+test("markless multilingual transfer submitted from Items reaches action interpretation", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const intentQueries: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  const query = "دریل را به انبار منتقل کن";
+  await headerSearch.fill(query);
+  await expect(page.getByText(/No quick matches for/)).toBeVisible();
+  expect(intentQueries).toEqual([]);
+  await headerSearch.press("Enter");
+
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
+  await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
+  expect(intentQueries).toEqual([query]);
+  expect(errors).toEqual([]);
+});
+
+test("record player remains a lightweight lookup from Items", async ({ page }) => {
+  const errors = await fixture(page, "/items");
+  const intentQueries: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("record player");
+  await expect(page.getByRole("option", { name: /Record Player/ })).toBeVisible();
+  await headerSearch.press("Enter");
+
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/items\?/);
+  expect(intentQueries).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("record player remains a lightweight lookup from Overview", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  const intentQueries: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("record player");
+  await expect(page.getByRole("option", { name: /Record Player/ })).toBeVisible();
+  await headerSearch.press("Enter");
+
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/search\?/);
+  expect(intentQueries).toEqual([]);
   expect(errors).toEqual([]);
 });
 

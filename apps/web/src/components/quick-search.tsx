@@ -61,20 +61,20 @@ function contextLine(result: QuickSearchResult) {
   return [loan, base].filter(Boolean).join(" · ");
 }
 
-function isConversationalQuery(query: string, questionLike = false) {
-  if (questionLike || /[?؟]/u.test(query)) return true;
-  const normalized = query.trim().toLocaleLowerCase();
-  return (
-    /^(?:where|what|when|who|why|how|which|whose|is|are|do|does|did|can|could|should|would|will|have|has)\b/u.test(
-      normalized,
-    ) ||
-    /\b(?:add|create|record|save|put|store|move|mark|update|remove|delete|lend|loan|borrow|return|assign|change|set)\b/u.test(
-      normalized,
-    ) ||
-    /\b(?:i|we)\s+(?:bought|purchased|got|received|acquired)\b/u.test(
-      normalized,
-    )
-  );
+function hasConfidentQuickMatch(query: string, results: QuickSearchResult[]) {
+  const queryTokens = query.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (queryTokens.length === 0) return false;
+  const queryPhrase = ` ${queryTokens.join(" ")} `;
+  return results.some((result) => {
+    const resultPhrase = ` ${
+      `${result.title} ${result.subtitle ?? ""}`
+        .normalize("NFKC")
+        .toLocaleLowerCase()
+        .match(/[\p{L}\p{N}]+/gu)
+        ?.join(" ") ?? ""
+    } `;
+    return resultPhrase.includes(queryPhrase);
+  });
 }
 
 export function QuickSearch({
@@ -292,13 +292,14 @@ export function QuickSearch({
         onAsk &&
         term.length >= 2 &&
         (event.shiftKey ||
-          isConversationalQuery(
-            term,
-            search.data?.query === debouncedTerm && search.data.question_like,
+          !(
+            search.data?.query === debouncedTerm &&
+            !search.data.question_like &&
+            hasConfidentQuickMatch(term, results)
           ))
       ) {
         askAssistant();
-      } else submitToResults(false);
+      } else submitToResults(event.shiftKey);
     }
   };
 
