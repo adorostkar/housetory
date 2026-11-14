@@ -13,6 +13,11 @@ import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import type { AiStatus, ItemSummary, SearchQueryResponse } from "@/lib/types";
 import { AssistantPage } from "@/pages/assistant-page";
 
+vi.mock("@/lib/queries", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/queries")>(),
+  useCaptureReviews: () => ({ data: [], isError: false }),
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -358,6 +363,7 @@ describe("AssistantPage", () => {
       new File(["invoice"], "invoice.pdf", { type: "application/pdf" }),
     );
     const send = screen.getByRole("button", { name: "Send question" });
+    await user.selectOptions(screen.getByLabelText("Document type"), "invoice");
     await user.click(send);
     expect(await screen.findByRole("alert")).toHaveTextContent("Choose the household");
     expect(api.postForm).not.toHaveBeenCalled();

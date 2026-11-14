@@ -14,6 +14,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { CaptureReviewQueue } from "@/components/capture-review-queue";
 import { EmptyState } from "@/components/empty-state";
 import { FormError } from "@/components/form-field";
 import { PageHeader } from "@/components/page-header";
@@ -524,6 +525,8 @@ export function ReviewPage() {
           </Badge>
         }
       />
+
+      <CaptureReviewQueue />
 
       <SectionNav
         sections={[

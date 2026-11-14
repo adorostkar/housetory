@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...schemas.inventory_review import (
+    CaptureReviewOut,
     ReviewAcceptRequest,
     ReviewBulkAcceptOut,
     ReviewBulkAcceptRequest,
@@ -20,10 +21,19 @@ from ...schemas.inventory_review import (
     ReviewSummaryOut,
 )
 from ...services import inventory_review, inventory_review_schedule
+from ...services.capture_reviews import pending_captures
 from ..deps import AuthContext, require_auth, require_owner
 from ..errors import ApiError
 
 router = APIRouter(prefix="/inventory-review", tags=["inventory-review"])
+
+
+@router.get("/captures", response_model=list[CaptureReviewOut])
+def read_capture_reviews(
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[CaptureReviewOut]:
+    return pending_captures(db, auth.household.id)
 
 
 @router.get("/schedule", response_model=ReviewScheduleOut | None)

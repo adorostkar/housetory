@@ -126,6 +126,7 @@ interface Conversation {
   draft: string;
   attachment: File | null;
   attachmentIntent: "photo" | "document" | null;
+  attachmentDocumentType: string;
   captureHouseholdId: string;
   capturePending: boolean;
   captureError: string | null;
@@ -151,6 +152,7 @@ interface AssistantConversationContextValue {
   setDraft: (scope: string, value: Updater<string>) => void;
   setAttachment: (scope: string, file: File | null) => void;
   setAttachmentIntent: (scope: string, value: "photo" | "document" | null) => void;
+  setAttachmentDocumentType: (scope: string, value: string) => void;
   setCaptureHouseholdId: (scope: string, value: string) => void;
   setCapturePending: (scope: string, value: boolean) => void;
   setCaptureError: (scope: string, value: string | null) => void;
@@ -198,6 +200,7 @@ const EMPTY: Conversation = {
   draft: "",
   attachment: null,
   attachmentIntent: null,
+  attachmentDocumentType: "",
   captureHouseholdId: "",
   capturePending: false,
   captureError: null,
@@ -250,6 +253,10 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     }));
   }, [update]);
 
+  const setAttachmentDocumentType = React.useCallback((scope: string, value: string) => {
+    update(scope, (current) => ({ ...current, attachmentDocumentType: value }));
+  }, [update]);
+
   const setAttachment = React.useCallback((scope: string, file: File | null) => {
     update(scope, (current) => ({ ...current, attachment: file, captureError: null }));
   }, [update]);
@@ -288,9 +295,10 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         { role: "user", text: userText, ...(attachment ? { attachment } : {}) },
         { role: "assistant", text: assistantText, capture },
       ],
-      draft: "",
-      attachment: null,
-      attachmentIntent: null,
+      draft: freshTopic ? current.draft : "",
+      attachment: freshTopic ? current.attachment : null,
+      attachmentIntent: freshTopic ? current.attachmentIntent : null,
+      attachmentDocumentType: freshTopic ? current.attachmentDocumentType : "",
       captureError: null,
       capturePending: false,
       context: freshTopic ? null : current.context,
@@ -391,7 +399,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           { role: "assistant", text: answer, fallback },
         ],
         turns: [...history, { role: "user" as const, content: value }, { role: "assistant" as const, content: answer }].slice(-8),
-        draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+        draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
         pending: false,
       }));
     };
@@ -464,7 +472,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
             { role: "assistant" as const, content: answer.slice(0, 1200) },
           ].slice(-8),
           actionItemIds: response.proposal ? proposalItemIds(response.proposal) : entry.actionItemIds,
-          draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+          draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
           pending: false,
         }));
       });
@@ -490,7 +498,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         ].slice(-8),
         context: response.context,
         actionItemIds: null,
-        draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+        draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
         pending: false,
       }));
       if (session.scopeKey === scope) session.record(value, response);
@@ -509,7 +517,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       const captureItem = () => {
         update(scope, (entry) => ({
           ...entry,
-          draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+          draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
           pending: false,
         }));
         void onCreateItem(value);
@@ -1000,14 +1008,14 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
 
   const value = React.useMemo(
     () => ({
-      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
+      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
       reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     }),
     [
-      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
+      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
       reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
@@ -1045,6 +1053,7 @@ export function useAssistantConversation(scope: string) {
     setQuestion: (value: Updater<string>) => store.setDraft(scope, value),
     setAttachment: (file: File | null) => store.setAttachment(scope, file),
     setAttachmentIntent: (value: "photo" | "document" | null) => store.setAttachmentIntent(scope, value),
+    setAttachmentDocumentType: (value: string) => store.setAttachmentDocumentType(scope, value),
     setCaptureHouseholdId: (value: string) => store.setCaptureHouseholdId(scope, value),
     setCapturePending: (value: boolean) => store.setCapturePending(scope, value),
     setCaptureError: (value: string | null) => store.setCaptureError(scope, value),
@@ -1088,7 +1097,7 @@ export function useAssistantConversation(scope: string) {
         store.clarifyAction(scope, last.clarification.id, { location: match[1], text: value });
         return;
       }
-      store.ask(scope, selection, value, regenerate, session, references, onCreateItem, freshTopic);
+      store.ask(scope, selection, value, regenerate, session, freshTopic ? [] : references, onCreateItem, freshTopic);
     },
   };
 }

@@ -236,6 +236,7 @@ def create_recognition(
     room_id: Annotated[uuid.UUID | None, Form()] = None,
     property_id: Annotated[uuid.UUID | None, Form()] = None,
     text: Annotated[str | None, Form(max_length=10_000)] = None,
+    assistant_capture: Annotated[bool, Form()] = False,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiRecognitionOut:
@@ -257,9 +258,11 @@ def create_recognition(
     context_text = (text or "").strip()
     add_items = (
         {"text": context_text, "property_id": str(property_record.id) if property_record else None}
-        if context_text or property_record is not None
+        if context_text or property_record is not None or assistant_capture
         else None
     )
+    if assistant_capture:
+        add_items = {**(add_items or {}), "assistant_capture": True}
     stored = storage.store_ai_image(auth.household.id, file)
     recognition = AiRecognition(
         household_id=auth.household.id,

@@ -13,6 +13,10 @@ import type {
 } from "@/lib/types";
 import { ReviewPage } from "@/pages/review-page";
 
+vi.mock("@/components/capture-review-queue", () => ({
+  CaptureReviewQueue: () => null,
+}));
+
 function item(overrides: Partial<ItemSummary> & { id: string; name: string }): ItemSummary {
   return {
     description: null,

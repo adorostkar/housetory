@@ -50,6 +50,7 @@ def enqueue_import(db: Session, batch: ImportBatch) -> Any:
         priority=4,
         queue="ai" if (batch.metadata_json or {}).get("product_url") else "default",
     )
+    batch.metadata_json = {**(batch.metadata_json or {}), "processing_attempt": str(job.id)}
     db.commit()
     return job
 

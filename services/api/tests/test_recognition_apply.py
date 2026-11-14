@@ -47,6 +47,59 @@ def fake_vision(monkeypatch, suggestions):
     )
 
 
+def test_assistant_photo_queue_restores_attempts_converts_once_and_cancels(
+    owner_client, monkeypatch
+):
+    fake_vision(monkeypatch, [{"name": "Photo cable", "quantity": 2, "confidence": 90}])
+    uploaded = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("capture.png", make_image(), "image/png")},
+        data={"assistant_capture": "true"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    photo_id = uploaded.json()["id"]
+    path = f"/api/v1/ai/recognitions/{photo_id}"
+    initial = owner_client.get("/api/v1/inventory-review/captures").json()
+    assert initial[0]["kind"] == "photo"
+    run_recognition(photo_id)
+    assert owner_client.get(path).json()["status"] == "succeeded"
+    assert (
+        owner_client.get("/api/v1/inventory-review/captures").json()[0]["generation"]
+        == (initial[0]["generation"])
+    )
+    retry = owner_client.post(f"{path}/retry")
+    assert retry.status_code == 200, retry.text
+    retried = owner_client.get("/api/v1/inventory-review/captures").json()
+    assert retried[0]["generation"] != initial[0]["generation"]
+    run_recognition(photo_id)
+    converted = owner_client.post(f"/api/v1/imports/from-recognition/{photo_id}")
+    assert converted.status_code == 201, converted.text
+    replay = owner_client.post(f"/api/v1/imports/from-recognition/{photo_id}")
+    assert replay.json()["id"] == converted.json()["id"]
+    queue = owner_client.get("/api/v1/inventory-review/captures").json()
+    assert [(entry["kind"], entry["id"]) for entry in queue] == [("import", converted.json()["id"])]
+    assert owner_client.get("/api/v1/items").json()["items"] == []
+    entry = converted.json()["entries"][0]
+    assert entry["proposed"]["name"] == "Photo cable"
+    assert entry["proposed"]["quantity"] == 2
+    applied = owner_client.post(
+        f"/api/v1/imports/{converted.json()['id']}/apply",
+        json={"entries": [{"id": entry["id"], "action": "import"}]},
+    )
+    assert applied.status_code == 200, applied.text
+    assert owner_client.get("/api/v1/items").json()["items"][0]["quantity"] == 2
+    assert owner_client.get("/api/v1/inventory-review/captures").json() == []
+    cancelled = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("cancel.png", make_image(), "image/png")},
+        data={"assistant_capture": "true"},
+    )
+    assert len(owner_client.get("/api/v1/inventory-review/captures").json()) == 1
+    deleted = owner_client.delete(f"/api/v1/ai/recognitions/{cancelled.json()['id']}")
+    assert deleted.status_code == 204
+    assert owner_client.get("/api/v1/inventory-review/captures").json() == []
+
+
 def test_multi_object_recognition_review_and_idempotent_apply(owner_client, monkeypatch):
     room = create_room(owner_client)
     container = create_container(owner_client, room["id"])

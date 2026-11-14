@@ -197,10 +197,15 @@ async function fixture(
   aiAvailable = false,
   simulateImportRecovery = false,
   simulateImportCompletion = false,
+  simulateDocumentRetry = false,
 ) {
   const errors: string[] = [];
   let creationQuery = "";
   let activeImportBatch = importBatch;
+  const capturedBatches = new Map<string, typeof importBatch>();
+  let documentPending = false;
+  let documentStage = simulateDocumentRetry ? "failed" : "ready";
+  let documentGeneration = "synthetic-document-processing";
   let recoveryPolls = 0;
   let importCompletionPolls = 0;
   let voiceReads = 0;
@@ -253,7 +258,20 @@ async function fixture(
         },
       });
     }
+    if (url.pathname === "/api/v1/inventory-review/captures") {
+      return route.fulfill({ json: [
+        ...[...capturedBatches.values()].filter((batch) => batch.status !== "completed").map((batch) => ({
+          id: batch.id, kind: "import", title: batch.title, status: batch.status,
+          generation: "synthetic-import-attempt-1",
+        })),
+        ...(documentPending ? [{
+          id: assistantDocumentId, kind: "document", title: assistantDocument.title,
+          status: documentStage, generation: documentGeneration,
+        }] : []),
+      ] });
+    }
     if (url.pathname === "/api/v1/documents" && route.request().method() === "POST") {
+      documentPending = true;
       return route.fulfill({ status: 201, json: assistantDocument });
     }
     if (url.pathname === `/api/v1/documents/${assistantDocumentId}`) {
@@ -262,16 +280,16 @@ async function fixture(
     if (url.pathname === `/api/v1/documents/${assistantDocumentId}/processing`) {
       return route.fulfill({
         json: {
-          correlation_id: "synthetic-document-processing",
-          stage: "ready",
+          correlation_id: documentGeneration,
+          stage: documentStage,
           started_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:01Z",
           elapsed_ms: 1000,
           local_available: true,
           can_cancel: false,
-          can_retry: false,
+          can_retry: documentStage === "failed",
           worker_available: true,
-          reason: null,
+          reason: documentStage === "failed" ? "Synthetic worker failure" : null,
           timings: {
             local_queue_ms: 0,
             local_processing_ms: 500,
@@ -282,7 +300,16 @@ async function fixture(
         },
       });
     }
+    if (url.pathname === `/api/v1/documents/${assistantDocumentId}/processing/retry`) {
+      documentGeneration = "synthetic-document-processing-retry";
+      documentStage = "ready";
+      return route.fulfill({ json: {
+        correlation_id: documentGeneration, stage: documentStage, elapsed_ms: 0,
+        local_available: true, can_retry: false, can_cancel: false, reason: null,
+      } });
+    }
     if (url.pathname === `/api/v1/documents/${assistantDocumentId}/extraction/apply`) {
+      documentPending = false;
       const body = route.request().postDataJSON() as { request_id: string };
       return route.fulfill({
         json: {
@@ -342,7 +369,7 @@ async function fixture(
     }
     if (url.pathname === "/api/v1/assistant/actions/intent") {
       const { query } = route.request().postDataJSON() as { query: string };
-      if (/^(?:(?:please|could you|can you|would you)\s+)*(?:add|create)\b|(?:bought|purchased)\b|اضافه\s+کن/u.test(query)) {
+      if (/^(?:(?:please|could you|can you|would you)\s+)*(?:add|create)\b|(?:bought|purchased)\b|اضافه\s+کن/iu.test(query)) {
         creationQuery = query;
         return route.fulfill({
           json: aiAvailable
@@ -489,9 +516,16 @@ async function fixture(
       const destinationName = /box 2/i.test(creationQuery) ? "Box 2" : "Storage";
       activeImportBatch = {
         ...importBatch,
+        id: /Alpha|Beta/.test(creationQuery)
+          ? /Alpha/.test(creationQuery) ? "00000000-0000-0000-0000-000000000021" : "00000000-0000-0000-0000-000000000022"
+          : importBatch.id,
+        title: /Alpha|Beta/.test(creationQuery) ? /Alpha/.test(creationQuery) ? "Alpha" : "Beta" : importBatch.title,
         status: simulateImportCompletion ? "processing" : "review",
         entries: importBatch.entries.map((entry) => ({
           ...entry,
+          id: /Alpha|Beta/.test(creationQuery)
+            ? /Alpha/.test(creationQuery) ? "00000000-0000-0000-0000-000000000023" : "00000000-0000-0000-0000-000000000024"
+            : entry.id,
           source_excerpt: creationQuery,
           proposed: {
             ...entry.proposed,
@@ -525,8 +559,23 @@ async function fixture(
           },
         })),
       };
+      if (/Alpha|Beta/.test(creationQuery)) {
+        activeImportBatch.entries[0]!.proposed.name = /Alpha/.test(creationQuery) ? "Alpha cable" : "Beta adapter";
+      }
+      capturedBatches.set(activeImportBatch.id, activeImportBatch);
       return route.fulfill({ json: activeImportBatch });
     }
+    const batchMatch = url.pathname.match(/^\/api\/v1\/imports\/([^/]+)(\/apply)?$/);
+    const storedBatch = batchMatch?.[1] ? capturedBatches.get(batchMatch[1]) : undefined;
+    if (storedBatch && batchMatch?.[2]) {
+      const body = route.request().postDataJSON() as { entries: Array<{ action: string }> };
+      const created = body.entries.filter((entry) => entry.action === "import").length;
+      const skipped = body.entries.filter((entry) => entry.action === "skip").length;
+      const completed = { ...storedBatch, status: "completed", imported_entries: created, skipped_entries: skipped };
+      capturedBatches.set(storedBatch.id, completed);
+      return route.fulfill({ json: { batch: completed, created, merged: 0, skipped, rejected: 0, failed: 0, failures: [] } });
+    }
+    if (storedBatch && storedBatch.id !== activeImportBatch.id) return route.fulfill({ json: storedBatch });
     if (url.pathname === `/api/v1/imports/${activeImportBatch.id}/apply`) {
       const body = route.request().postDataJSON() as {
         entries: Array<{ action: string }>;
@@ -581,6 +630,7 @@ async function fixture(
         importCompletionPolls += 1;
         if (importCompletionPolls > 1) {
           activeImportBatch = { ...activeImportBatch, status: "review" };
+          capturedBatches.set(activeImportBatch.id, activeImportBatch);
         }
         return route.fulfill({ json: activeImportBatch });
       }
@@ -947,13 +997,13 @@ test("completed item capture notifies once and opens its review without resolvin
   await page.getByRole("link", { name: "Items", exact: true }).click();
   await expect(page).toHaveURL(/\/items$/);
 
-  await expect(page.getByText("Items ready for review")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Items ready for review")).toHaveCount(1);
+  await expect(page.getByText("Assistant item description ready for review")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Assistant item description ready for review")).toHaveCount(1);
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("region", { name: "Assistant item review" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
-  await expect(page.getByText("Items ready for review")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toContainText("4");
+  await expect(page.getByText("Assistant item description ready for review")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -966,7 +1016,7 @@ test("attached invoice flows through extraction, notification, and explicit appr
     }
   });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-  await headerSearch.fill("This invoice is for the kitchen fridge");
+  await headerSearch.fill("This is for the kitchen fridge");
   await page.getByTestId("quick-search-attachment-input").setInputFiles({
     name: "invoice.pdf",
     mimeType: "application/pdf",
@@ -974,27 +1024,31 @@ test("attached invoice flows through extraction, notification, and explicit appr
   });
   const panel = page.getByTestId("assistant-panel");
   const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
-  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(composer).toHaveValue("This is for the kitchen fridge");
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
+  await panel.getByLabel("Document type").selectOption("invoice");
   await panel.getByRole("button", { name: "Send question" }).click();
 
   await expect(panel.getByText("Document attached. Progress, extracted details and review are shown below.")).toBeVisible();
   await expect(page.getByText("Validation invoice ready for review")).toHaveCount(1);
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await expect(panel.getByRole("region", { name: "Assistant document review" })).toContainText("Validation invoice");
-  await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
+  await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toContainText("4");
   await panel.getByRole("button", { name: "Review extraction" }).click();
   await expect(panel.getByLabel("Description")).toHaveValue("Cordless drill");
   expect(applyRequests).toBe(0);
   await panel.getByRole("button", { name: "Apply reviewed changes" }).click();
   await expect.poll(() => applyRequests).toBe(1);
   await expect(page.getByText("Reviewed extraction applied")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
 
   await page.reload();
   await page.evaluate(() => {
     const detail = {
       id: "00000000-0000-0000-0000-000000000013",
       kind: "document",
+      householdId: "00000000-0000-0000-0000-000000000001",
+      generation: "synthetic-document-processing",
       title: "Validation invoice ready for review",
       description: "Review the extracted details before applying.",
     };
@@ -1492,7 +1546,7 @@ test("attaching from the header keeps the accompanying text in the capture compo
   expect(errors).toEqual([]);
 });
 
-test("unsent attachment and context survive panel closure and navigation", async ({ page }) => {
+test("parked attachment survives a fresh header question without uploading or consuming the draft", async ({ page }) => {
   const errors = await fixture(page, "/");
   let documentUploads = 0;
   page.on("request", (request) => {
@@ -1500,6 +1554,7 @@ test("unsent attachment and context survive panel closure and navigation", async
       documentUploads += 1;
     }
   });
+
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("This invoice is for the kitchen fridge");
   await page.getByTestId("quick-search-attachment-input").setInputFiles({
@@ -1513,23 +1568,214 @@ test("unsent attachment and context survive panel closure and navigation", async
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
   await panel.getByRole("button", { name: "Close assistant" }).click();
   await page.getByRole("link", { name: "Items", exact: true }).click();
-  await page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" }).click();
+  await expect(page).toHaveURL(/\/items$/);
+  await headerSearch.fill("Where is my drill?");
+  await headerSearch.press("Enter");
+  await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
+  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(panel.getByText("invoice.pdf")).toBeVisible();
+  await headerSearch.fill("Add one Validation Monitor to Storage");
+  await headerSearch.press("Enter");
+  await panel.getByRole("button", { name: "Review fields" }).click();
+  await expect(panel.getByLabel("Item name")).toHaveValue("Validation Monitor");
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
   expect(documentUploads).toBe(0);
   expect(errors).toEqual([]);
 });
 
+test("multiple captures restore after reload and an older notification opens its exact review until Apply resolves it", async ({ page }) => {
+    const errors = await fixture(page, "/", undefined, true);
+    const header = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+    const panel = page.getByTestId("assistant-panel");
+    await header.fill("Add an Alpha cable to Storage");
+    await header.press("Enter");
+    await expect(page.getByText("Alpha ready for review", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    await header.fill("Add a Beta adapter to Storage");
+    await header.press("Enter");
+    await expect(page.getByText("Beta ready for review", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
+    await page.locator("[data-sonner-toast][data-front='true']").hover();
+    await page.locator("[data-sonner-toast]").filter({ hasText: "Alpha ready for review" }).getByRole("button", { name: "Review", exact: true }).click();
+    await panel.getByRole("button", { name: "Review fields" }).click();
+    await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
+    await panel.getByLabel("Item name").fill("Reviewed Alpha cable");
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" }).click();
+    await expect(panel.getByLabel("Item name")).toHaveValue("Reviewed Alpha cable");
+    await header.fill("ordinary lookup");
+    await expect(page).toHaveURL(/q=ordinary\+lookup.*#assistant$/);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByLabel("Item name")).toHaveValue("Reviewed Alpha cable");
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
+    await panel.getByRole("button", { name: "Review Alpha", exact: true }).click();
+    await panel.getByRole("button", { name: "Review fields" }).click();
+    await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
+    await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
+    await panel.getByRole("checkbox", { name: "Include Alpha cable" }).check();
+    await panel.getByRole("button", { name: "Approve selected" }).click();
+    await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Review Alpha", exact: true })).toHaveCount(0);
+    await panel.getByRole("button", { name: "Review Beta", exact: true }).click();
+    await panel.getByRole("button", { name: "Review fields" }).click();
+    await expect(panel.getByRole("textbox", { name: "Item name", exact: true })).toHaveValue("Beta adapter");
+    expect(errors).toEqual([]);
+  });
+
+  test("mobile assistant traps focus, restores it on Back and keeps touch controls inside a narrow keyboard viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 520 });
+    const errors = await fixture(page, "/");
+    for (const name of ["Attach a file", "Record voice search"]) {
+      const box = await page.getByRole("button", { name }).boundingBox();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+    const launcher = page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" });
+    await launcher.click();
+    const panel = page.getByTestId("assistant-panel");
+    await expect(panel).toBeVisible();
+    for (let index = 0; index < 25; index += 1) {
+      await page.keyboard.press(index % 2 ? "Tab" : "Shift+Tab");
+      expect(await panel.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+    }
+    expect(await page.getByTestId("mobile-bottom-nav").evaluate((element) =>
+      Boolean(element.closest('[aria-hidden="true"]')),
+    )).toBe(true);
+    for (const name of ["Attach a file", "Dictate question", "Send question", "Close assistant"]) {
+      const box = await panel.getByRole("button", { name, exact: true }).boundingBox();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(520);
+    }
+    await page.goBack();
+    await expect(panel).toHaveCount(0);
+    await expect(launcher).toBeFocused();
+    await launcher.click();
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(launcher).toBeFocused();
+    expect(errors).toEqual([]);
+  });
+
+  test("a failed document reopens after reload and retry completion notifies once for the new attempt", async ({ page }) => {
+    const errors = await fixture(page, "/", undefined, true, false, false, true);
+    await page.getByTestId("quick-search-attachment-input").setInputFiles({
+      name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic"),
+    });
+    const panel = page.getByTestId("assistant-panel");
+    await panel.getByLabel("Document type").selectOption("invoice");
+    await panel.getByRole("button", { name: "Send question" }).click();
+    await expect(page.getByText("Validation invoice needs attention", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    await page.reload();
+    await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
+    await panel.getByRole("button", { name: "Review Validation invoice", exact: true }).click();
+    await panel.getByRole("button", { name: "Retry processing" }).click();
+    await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(1);
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(1);
+    await page.reload();
+    await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
+    await panel.getByRole("button", { name: "Review Validation invoice", exact: true }).click();
+    await panel.getByRole("button", { name: "Review extraction" }).click();
+    await panel.getByRole("button", { name: "Apply reviewed changes" }).click();
+    await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("photo processing survives closure and reload, recovers a failed attempt and resolves only after approved import", async ({ page }) => {
+    const errors = await fixture(page, "/");
+    let photoId = "00000000-0000-0000-0000-000000000030";
+    let exists = false;
+    let status = "queued";
+    let attempt = 1;
+    let converted = false;
+    let applied = false;
+    let conversions = 0;
+    await page.route("**/api/v1/ai/recognitions**", async (route) => {
+      if (route.request().method() === "DELETE") {
+        exists = false;
+        return route.fulfill({ status: 204 });
+      }
+      if (route.request().method() === "POST") {
+        exists = true;
+        if (route.request().url().endsWith("/retry")) attempt += 1;
+        status = "queued";
+      }
+      return route.fulfill({ json: {
+        id: photoId, status, error: status === "failed" ? "Synthetic worker failure" : null,
+        result: { _add_items: { assistant_capture: true, processing_attempt: `photo-${attempt}`, ...(converted ? { import_batch_id: importBatch.id } : {}) } },
+      } });
+    });
+    await page.route("**/api/v1/inventory-review/captures", (route) => route.fulfill({ json:
+      exists && !applied ? [{
+        id: converted ? importBatch.id : photoId, kind: converted ? "import" : "photo",
+        title: "Recovered photo", status: converted ? "review" : status, generation: `photo-${attempt}`,
+      }] : [],
+    }));
+    await page.route(`**/api/v1/imports/from-recognition/${photoId}`, (route) => {
+      conversions += 1;
+      converted = true;
+      return route.fulfill({ json: { ...importBatch, title: "Recovered photo" } });
+    });
+    page.on("request", (request) => {
+      if (request.url().endsWith(`/imports/${importBatch.id}/apply`)) applied = true;
+    });
+    await page.getByTestId("quick-search-attachment-input").setInputFiles({
+      name: "photo.jpg", mimeType: "image/jpeg", buffer: Buffer.from("synthetic image"),
+    });
+    const panel = page.getByTestId("assistant-panel");
+    await panel.getByRole("radio", { name: "Inventory photo" }).check();
+    await panel.getByRole("button", { name: "Send question" }).click();
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
+    status = "failed";
+    await expect(page.getByText("Recovered photo needs attention", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
+    await panel.getByRole("button", { name: "Review Recovered photo", exact: true }).click();
+    await panel.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(panel.getByText("Waiting to interpret inventory photo…", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    status = "succeeded";
+    await expect.poll(() => conversions, { timeout: 10_000 }).toBe(1);
+    await expect(page.getByText("Recovered photo ready for review", { exact: true })).toHaveCount(1);
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    await panel.getByRole("checkbox", { name: "Include Ethernet cables" }).check();
+    await panel.getByRole("button", { name: "Approve selected" }).click();
+    await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
+    expect(conversions).toBe(1);
+    await panel.getByRole("button", { name: "Close assistant" }).click();
+    converted = false;
+    applied = false;
+    photoId = "00000000-0000-0000-0000-000000000031";
+    await page.getByTestId("quick-search-attachment-input").setInputFiles({
+      name: "cancel.jpg", mimeType: "image/jpeg", buffer: Buffer.from("synthetic image"),
+    });
+    await panel.getByRole("radio", { name: "Inventory photo" }).check();
+    await panel.getByRole("button", { name: "Send question" }).click();
+    await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
+    await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
+    expect(conversions).toBe(1);
+    expect(errors).toEqual([]);
+  });
 test("browser drag-and-drop and clipboard paste attach supported files", async ({ page }) => {
   const errors = await fixture(page);
   await page.getByRole("textbox", { name: "Ask the Housetory assistant" }).evaluate((textarea) => {
     const file = new File(["drop"], "dropped.pdf", { type: "application/pdf" });
     const transfer = new DataTransfer();
     transfer.items.add(file);
-    const root = document.querySelector(".animate-fade-up");
-    root?.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
-    root?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
-    void textarea;
+    textarea.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
+    textarea.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
   });
   await expect(page.getByText("dropped.pdf")).toBeVisible();
   await page.getByRole("button", { name: "Remove attachment" }).click();

@@ -138,6 +138,14 @@ def enqueue_recognition(db, recognition: AiRecognition) -> Any:
         priority=4,
         queue="ai" if use_ai else "default",
     )
+    if (recognition.result or {}).get("_add_items") is not None:
+        recognition.result = {
+            **(recognition.result or {}),
+            "_add_items": {
+                **(recognition.result or {})["_add_items"],
+                "processing_attempt": str(job.id),
+            },
+        }
     db.commit()
     return job
 

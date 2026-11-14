@@ -7,6 +7,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .common import trimmed
 
+
+class CaptureReviewOut(BaseModel):
+    id: uuid.UUID
+    kind: Literal["document", "import", "photo"]
+    title: str
+    status: str
+    generation: str
+
+
 ReviewScopeType = Literal["items", "room", "container", "property", "household"]
 ReviewSuggestionType = Literal[
     "category",

@@ -24,6 +24,63 @@ def create_room(client, name="Workshop"):
     return response.json()
 
 
+def test_capture_reviews_restore_authorized_pending_work_and_resolve_on_apply(
+    owner_client,
+    pdf_bytes,
+):
+    from housetory_api.services.import_pipeline import process_import_batch
+
+    client = owner_client
+    room = create_room(client)
+    batch_ids = []
+    for name in ("Alpha cable", "Beta adapter"):
+        created = client.post(
+            "/api/v1/imports",
+            data={
+                "text": f"Add a {name} to Workshop",
+                "title": name,
+                "room_id": room["id"],
+                "assistant_capture": "true",
+            },
+        )
+        assert created.status_code == 201, created.text
+        batch_ids.append(created.json()["id"])
+        process_import_batch(created.json()["id"])
+    document = client.post(
+        "/api/v1/documents",
+        data={
+            "title": "Uncaptioned invoice",
+            "document_type": "invoice",
+            "assistant_capture": "true",
+        },
+        files={"file": ("scan.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert document.status_code == 201, document.text
+    captures = client.get("/api/v1/inventory-review/captures").json()
+    assert {entry["id"] for entry in captures} == {*batch_ids, document.json()["id"]}
+    alpha = next(entry for entry in captures if entry["id"] == batch_ids[0])
+    assert alpha["generation"]
+    # Merely reading an older review cannot resolve it or select the newer one.
+    first = client.get(f"/api/v1/imports/{batch_ids[0]}").json()
+    assert client.get("/api/v1/inventory-review/captures").json() == captures
+    applied = client.post(
+        f"/api/v1/imports/{batch_ids[0]}/apply",
+        json={"entries": [{"id": first["entries"][0]["id"], "action": "import"}]},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 1
+    remaining = client.get("/api/v1/inventory-review/captures").json()
+    assert {entry["id"] for entry in remaining} == {batch_ids[1], document.json()["id"]}
+    assert client.get("/api/v1/items").json()["items"][0]["name"] == "Alpha cable"
+    other = client.post(
+        "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
+    )
+    assert other.status_code == 201, other.text
+    selected = client.post(f"/api/v1/households/{other.json()['household']['id']}/select")
+    assert selected.status_code == 200
+    assert client.get("/api/v1/inventory-review/captures").json() == []
+
+
 def create_category(client, name):
     response = client.post("/api/v1/categories", json={"name": name})
     assert response.status_code == 201, response.text

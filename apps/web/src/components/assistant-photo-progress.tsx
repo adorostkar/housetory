@@ -51,13 +51,14 @@ export function AssistantPhotoProgress({
 
   const retry = async () => {
     if (!capture.recognitionId || capture.importing) return;
-    onChange({ error: undefined, importError: undefined });
+    onChange({ importError: undefined });
     try {
       const updated = await api.post<AiRecognition>(
         `/ai/recognitions/${capture.recognitionId}/retry`,
       );
       if (updated.status === "queued" || updated.status === "processing") {
         await recognition.refetch();
+        onChange({ error: undefined });
       }
     } catch (error) {
       onChange({ error: getApiErrorMessage(error) });

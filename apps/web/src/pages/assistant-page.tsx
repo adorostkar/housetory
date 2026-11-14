@@ -20,7 +20,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AnswerText } from "@/components/answer-text";
-import { AssistantPhotoProgress } from "@/components/assistant-photo-progress";
 import { CONDITIONS } from "@/components/item-form-sections";
 import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +34,8 @@ import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
 import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
-import { AssistantDocumentSlot, AssistantImportSlot, useAssistantDocuments } from "@/lib/assistant-documents";
+import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
+import { CaptureReviewQueue } from "@/components/capture-review-queue";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
 import type { AiRecognition, DocumentRecord, ImportBatchDetail } from "@/lib/types";
@@ -89,9 +89,9 @@ export function AssistantPage({
   const aiStatus = useAiStatus();
   const canWrite = useCanWrite();
   const {
-    activeImportId,
     select: selectDocument,
     selectImport,
+    selectPhoto,
   } = useAssistantDocuments();
   const session = useSession();
   const selectHousehold = useSelectHousehold();
@@ -107,20 +107,12 @@ export function AssistantPage({
     if (!submitCaptureRef.current) throw new Error("The item capture handler is not ready.");
     return submitCaptureRef.current(value);
   }, []);
-  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
-  const retainedImportId = [...messages]
-    .reverse()
-    .find((message) => message.capture?.importId)?.capture?.importId;
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
   const handledInitialRequestRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (retainedImportId && retainedImportId !== activeImportId) {
-      selectImport(retainedImportId);
-    }
-  }, [activeImportId, retainedImportId, selectImport]);
 
   React.useEffect(() => {
     if (embedded) return;
@@ -198,21 +190,29 @@ export function AssistantPage({
     || (!multipleHouseholds ? session.data?.household?.id : undefined);
 
   const submitCapture = async (value: string, freshTopic = false) => {
+    const captureAttachment = freshTopic ? null : attachment;
+    const destinationHousehold = freshTopic
+      ? selection.householdId || (!multipleHouseholds ? session.data?.household?.id : undefined)
+      : captureHousehold;
     if (capturePending) return;
     if (!canWrite) {
       setCaptureError("You need member access to add items or attach files.");
       return;
     }
-    if (attachment && documentFileError(attachment)) {
-      setCaptureError(documentFileError(attachment));
+    if (captureAttachment && documentFileError(captureAttachment)) {
+      setCaptureError(documentFileError(captureAttachment));
       return;
     }
-    const isImage = Boolean(attachment && documentFileType(attachment).startsWith("image/"));
+    const isImage = Boolean(captureAttachment && documentFileType(captureAttachment).startsWith("image/"));
     if (isImage && !attachmentIntent) {
       setCaptureError("Is this an inventory photo or a document/evidence image?");
       return;
     }
-    if (!captureHousehold || (multipleHouseholds && !selection.householdId && !captureHouseholdId)) {
+    if (captureAttachment && (!isImage || attachmentIntent === "document") && !attachmentDocumentType) {
+      setCaptureError("Choose the document type before sending. Invoice and receipt reviews include purchase handling.");
+      return;
+    }
+    if (!destinationHousehold) {
       setCaptureError("Choose the household that should receive this capture.");
       return;
     }
@@ -220,18 +220,20 @@ export function AssistantPage({
     setCapturePending(true);
     setCaptureError(null);
     try {
-      if (session.data?.household?.id !== captureHousehold) {
-        await selectHousehold.mutateAsync(captureHousehold);
+      if (session.data?.household?.id !== destinationHousehold) {
+        await selectHousehold.mutateAsync(destinationHousehold);
       }
-      if (attachment) {
-        const file = documentUploadFile(attachment);
+      if (captureAttachment) {
+        const file = documentUploadFile(captureAttachment);
         const attachmentMeta = { name: file.name, type: documentFileType(file) };
         if (isImage && attachmentIntent === "photo") {
           const form = new FormData();
           form.append("file", file);
           form.append("text", value);
+          form.append("assistant_capture", "true");
           if (selection.propertyId) form.append("property_id", selection.propertyId);
           const recognition = await api.postForm<AiRecognition>("/ai/recognitions", form);
+          selectPhoto(recognition.id);
           recordCapture(
             value || `Inventory photo: ${file.name}`,
             attachmentMeta,
@@ -250,13 +252,8 @@ export function AssistantPage({
         const form = new FormData();
         form.append("file", file);
         form.append("title", file.name.replace(/\.[^.]+$/, "").slice(0, 200));
-        const textLower = value.toLowerCase();
-        const documentType = /invoice/.test(textLower)
-          ? "invoice"
-          : /receipt|proof of purchase/.test(textLower)
-            ? "receipt"
-            : "other";
-        form.append("document_type", documentType);
+        form.append("document_type", attachmentDocumentType);
+        form.append("assistant_capture", "true");
         if (value) form.append("notes", value);
         const document = await api.postForm<DocumentRecord>("/documents", form);
         selectDocument(document.id, true);
@@ -298,7 +295,7 @@ export function AssistantPage({
 
   const submitValue = (value: string, freshRequest = false) => {
     if (pending || tooManyReferences || capturePending) return;
-    if (attachment) {
+    if (attachment && !freshRequest) {
       dictation.stop();
       void submitCapture(value, freshRequest);
       return;
@@ -312,7 +309,7 @@ export function AssistantPage({
       freshRequest
         ? { scopeKey: scopeSignature, turns: [], context: null, record: () => undefined }
         : searchSession,
-      captureItem,
+      freshRequest ? (text) => submitCapture(text, true) : captureItem,
       freshRequest,
     );
   };
@@ -330,6 +327,11 @@ export function AssistantPage({
       handledInitialRequestRef.current === initialRequest.id
     ) return;
     handledInitialRequestRef.current = initialRequest.id;
+    if (initialRequest.file && (attachment || question.trim())) {
+      setCaptureError("Your parked draft is unchanged. Send it or clear its text and attachment before attaching another file.");
+      onInitialRequestHandled?.(initialRequest.id);
+      return;
+    }
     startFreshTopic();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     if (initialRequest.file) {
@@ -408,7 +410,7 @@ export function AssistantPage({
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col animate-fade-up"
+      className={`relative flex h-full min-h-0 flex-col${embedded ? "" : " animate-fade-up"}`}
       onDragOver={(event) => {
         if (!canWrite || !Array.from(event.dataTransfer.types).includes("Files")) return;
         event.preventDefault();
@@ -611,12 +613,20 @@ export function AssistantPage({
                   {message.capture ? (
                     <div className="surface space-y-3 p-4" aria-label="Assistant capture status">
                       <p dir="auto" className="text-sm">{message.text}</p>
-                      {message.capture.kind === "photo" && (
-                        <AssistantPhotoProgress
-                          capture={message.capture}
-                          onChange={(patch) => updateCapture(message.capture!.id, patch)}
-                          onSelectImport={selectImport}
-                        />
+                      {message.capture.documentId && (
+                        <Button size="sm" variant="outline" onClick={() => selectDocument(message.capture!.documentId!)}>
+                          Review {message.capture.filename || "document"}
+                        </Button>
+                      )}
+                      {message.capture.importId && (
+                        <Button size="sm" variant="outline" onClick={() => selectImport(message.capture!.importId!)}>
+                          Review items
+                        </Button>
+                      )}
+                      {message.capture.recognitionId && (
+                        <Button size="sm" variant="outline" onClick={() => selectPhoto(message.capture!.recognitionId!)}>
+                          Review {message.capture.filename || "photo"}
+                        </Button>
                       )}
                     </div>
                   ) : message.action ? (
@@ -897,7 +907,9 @@ export function AssistantPage({
               </div>
             )}
             <AssistantDocumentSlot />
+            <CaptureReviewQueue />
             <AssistantImportSlot />
+            <AssistantPhotoSlot />
             <div ref={endRef} />
           </div>
         </div>
@@ -919,7 +931,7 @@ export function AssistantPage({
         <div className="mx-auto w-full max-w-5xl">
           {messages.length === 0 && !pending && (
             <div
-              className="-mx-1 mb-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto px-1 pb-1"
+              className="-mx-1 mb-2 flex max-h-[10dvh] flex-wrap gap-2 overflow-y-auto px-1 pb-1 sm:max-h-24"
               aria-label="Suggested questions"
             >
               {SUGGESTIONS.map((suggestion) => (
@@ -936,6 +948,7 @@ export function AssistantPage({
             </div>
           )}
           <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3">
+            <div className="max-h-[15dvh] overflow-y-auto">
             {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && (
               <label className="mb-2 block text-xs text-muted-foreground">
                 Destination household
@@ -998,10 +1011,28 @@ export function AssistantPage({
                 </div>
               </fieldset>
             )}
+            {attachment && (!documentFileType(attachment).startsWith("image/") || attachmentIntent === "document") && (
+              <label className="mb-2 block text-xs">
+                Document type
+                <select
+                  className="mt-1 h-11 w-full rounded-lg border border-input bg-card px-3 text-sm"
+                  value={attachmentDocumentType}
+                  onChange={(event) => { setAttachmentDocumentType(event.target.value); setCaptureError(null); }}
+                >
+                  <option value="">Choose a document type…</option>
+                  <option value="invoice">Invoice</option>
+                  <option value="receipt">Receipt</option>
+                  <option value="manual">Manual</option>
+                  <option value="warranty_certificate">Warranty</option>
+                  <option value="other">Other evidence</option>
+                </select>
+              </label>
+            )}
             {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && !captureHouseholdId && (
               <p className="mb-2 text-xs text-brass">Choose a destination household; All my places will not select one automatically.</p>
             )}
             {captureError && <p role="alert" className="mb-2 text-xs text-destructive">{captureError}</p>}
+            </div>
             <form
               onSubmit={submit}
               onPaste={(event) => {
@@ -1039,7 +1070,7 @@ export function AssistantPage({
                   aria-label="Ask the Housetory assistant"
                   rows={1}
                   maxLength={2000}
-                  className="max-h-40 min-h-11 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
+                  className="min-w-0 flex-1 max-h-40 min-h-11 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
                 />
                 <input
                   ref={fileInputRef}
@@ -1081,7 +1112,7 @@ export function AssistantPage({
                     }
                     aria-pressed={dictation.listening}
                     onClick={dictation.toggle}
-                    className={dictation.listening ? "animate-pulse" : undefined}
+                    className={`size-11 shrink-0 ${dictation.listening ? "animate-pulse" : ""}`}
                   >
                     <Mic />
                   </Button>
@@ -1090,6 +1121,7 @@ export function AssistantPage({
                   type="submit"
                   size="icon"
                   aria-label="Send question"
+                  className="size-11 shrink-0"
                   disabled={pending || capturePending || tooManyReferences || (!attachment && question.trim().length < 2)}
                 >
                   {pending || capturePending ? (

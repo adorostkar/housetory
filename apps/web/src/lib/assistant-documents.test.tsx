@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as React from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -10,6 +11,7 @@ import {
 const mockState = vi.hoisted(() => ({ householdId: "house-1", render: vi.fn() }));
 vi.mock("@/lib/queries", () => ({
   useSession: () => ({ data: { household: { id: mockState.householdId } } }),
+  useCaptureReviews: () => ({ data: [], isError: false }),
 }));
 vi.mock("@/components/assistant-document-review", () => ({
   AssistantDocumentReview: ({ id, enabled }: { id: string; enabled: boolean }) => {
@@ -41,7 +43,9 @@ beforeEach(() => {
 });
 
 it("keeps document review mounted without losing edits and clears it on a household change", async () => {
-  const rendered = render(<AssistantDocumentsProvider><Fixture /></AssistantDocumentsProvider>);
+  const client = new QueryClient();
+  const tree = () => <QueryClientProvider client={client}><AssistantDocumentsProvider><Fixture /></AssistantDocumentsProvider></QueryClientProvider>;
+  const rendered = render(tree());
   fireEvent.click(screen.getByText("Select document"));
   expect(await screen.findByText("document-1: active")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Review draft"), { target: { value: "Edited draft" } });
@@ -51,6 +55,6 @@ it("keeps document review mounted without losing edits and clears it on a househ
   expect(await screen.findByText("document-1: active")).toBeVisible();
   expect(screen.getByLabelText("Review draft")).toHaveValue("Edited draft");
   mockState.householdId = "house-2";
-  rendered.rerender(<AssistantDocumentsProvider><Fixture /></AssistantDocumentsProvider>);
+  rendered.rerender(tree());
   expect(screen.queryByLabelText("Review draft")).toBeNull();
 });

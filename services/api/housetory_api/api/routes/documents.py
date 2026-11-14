@@ -195,6 +195,7 @@ def upload_document(
     merchant: Annotated[str | None, Form(max_length=160)] = None,
     document_date: Annotated[date | None, Form()] = None,
     notes: Annotated[str | None, Form(max_length=4000)] = None,
+    assistant_capture: Annotated[bool, Form()] = False,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> DocumentOut:
@@ -209,6 +210,7 @@ def upload_document(
         document_date=document_date,
         notes=notes,
         actor_user_id=auth.user.id,
+        metadata={"assistant_capture": True} if assistant_capture else None,
     )
     return document_out(document)
 

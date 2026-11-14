@@ -45,6 +45,7 @@ export interface AiRecognition {
   width: number;
   height: number;
   result: {
+    _add_items?: { import_batch_id?: string; processing_attempt?: string; assistant_capture?: boolean };
     suggestions?: AiRecognitionSuggestion[];
     warnings?: string[];
     is_document?: boolean;

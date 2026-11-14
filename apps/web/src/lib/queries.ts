@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 
 import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
+import type { CaptureReview } from "@/lib/assistant-task-events";
 import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
@@ -800,6 +801,18 @@ export function useReviewSummary(enabled = true) {
     queryFn: () => api.get<ReviewSummary>("/inventory-review/summary"),
     enabled,
     staleTime: 10_000,
+  });
+}
+
+export function useCaptureReviews() {
+  const session = useSession();
+  const householdId = session.data?.household?.id;
+  return useQuery({
+    queryKey: ["inventory-review", "captures", householdId],
+    queryFn: ({ signal }) => api.get<CaptureReview[]>("/inventory-review/captures", { signal }),
+    enabled: Boolean(householdId),
+    refetchInterval: 1500,
+    retry: false,
   });
 }
 

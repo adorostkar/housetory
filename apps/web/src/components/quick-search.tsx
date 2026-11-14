@@ -112,6 +112,8 @@ export function QuickSearch({
   const assistantButtonRef = React.useRef<HTMLButtonElement>(null);
   const voiceButtonRef = React.useRef<HTMLButtonElement>(null);
   const pendingEditRef = React.useRef<string | null>(null);
+  const pendingEditPathRef = React.useRef(location.pathname);
+  const synchronizedPathRef = React.useRef(location.pathname);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
   const voiceNoticeId = React.useId();
@@ -203,6 +205,7 @@ export function QuickSearch({
         const transcript = voiceNote.transcript.trim();
         const next = query.trim() ? `${query.trimEnd()} ${transcript}` : transcript;
         pendingEditRef.current = next;
+        pendingEditPathRef.current = window.location.pathname;
         setQuery(next);
         setFocused(true);
         setVoiceNotice({
@@ -273,6 +276,7 @@ export function QuickSearch({
   }, [debouncedTerm, results.length]);
 
   React.useEffect(() => {
+    if (pendingEditRef.current !== null && pendingEditPathRef.current === location.pathname) return;
     setFocused(false);
   }, [location.pathname]);
 
@@ -280,6 +284,10 @@ export function QuickSearch({
     ? (searchParams.get("q") ?? "")
     : null;
   React.useLayoutEffect(() => {
+    const navigated = synchronizedPathRef.current !== location.pathname;
+    synchronizedPathRef.current = location.pathname;
+    // Preserve edits made on the incoming page before React commits its navigation.
+    if (navigated && pendingEditRef.current !== null && pendingEditPathRef.current === location.pathname) return;
     pendingEditRef.current = null;
     if (urlQuery === null) return;
     setQuery((current) => (current === urlQuery ? current : urlQuery));
@@ -296,10 +304,10 @@ export function QuickSearch({
     if (trimmed) next.set("q", trimmed);
     else next.delete("q");
     navigate(
-      { pathname: "/items", search: next.size > 0 ? `?${next.toString()}` : "" },
+      { pathname: "/items", search: next.size > 0 ? `?${next.toString()}` : "", hash: location.hash },
       { replace: true },
     );
-  }, [debounced, isItemsPage, navigate, query, searchParams]);
+  }, [debounced, isItemsPage, location.hash, navigate, query, searchParams]);
 
   React.useEffect(() => {
     if (!focused) setActiveIndex(-1);
@@ -701,6 +709,7 @@ export function QuickSearch({
         onFocus={() => setFocused(true)}
         onChange={(event) => {
           pendingEditRef.current = event.target.value;
+          pendingEditPathRef.current = window.location.pathname;
           setQuery(event.target.value);
           setVoiceNotice(null);
           setFocused(true);
@@ -712,8 +721,8 @@ export function QuickSearch({
         className={cn(
           "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-12 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
           variant === "top"
-            ? cn("h-12 text-[1rem] lg:text-[0.95rem]", onAttach ? "pr-36" : "pr-28")
-            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-28" : "pr-20"),
+            ? cn("h-12 text-[1rem] lg:text-[0.95rem]", onAttach ? "pr-36 sm:pr-44" : "pr-28 sm:pr-36")
+            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-36 sm:pr-44" : "pr-28 sm:pr-36"),
         )}
       />
       {onAttach && (
@@ -747,7 +756,7 @@ export function QuickSearch({
             aria-label="Attach a file"
             title="Attach a PDF or image"
             disabled={recorder.recording || voiceProcessing || pendingRecording}
-            className="absolute right-20 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
+            className="absolute right-[5.5rem] top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
             onClick={() => attachInputRef.current?.click()}
           >
             <Paperclip className="size-4" />
@@ -756,7 +765,7 @@ export function QuickSearch({
       )}
       <kbd className={cn(
         "pointer-events-none absolute top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block",
-        onAttach ? "right-[7.25rem]" : "right-20",
+        onAttach ? "right-[8.75rem]" : "right-24",
       )}>
         ⌘K
       </kbd>
@@ -776,7 +785,7 @@ export function QuickSearch({
         aria-describedby={voiceNotice ? voiceNoticeId : undefined}
         disabled={voiceProcessing}
         className={cn(
-          "absolute right-11 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
+          "absolute right-11 top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
           recorder.recording && "animate-pulse bg-primary text-primary-foreground hover:bg-primary",
         )}
         onClick={recorder.recording ? recorder.stop : startRecording}
@@ -789,12 +798,13 @@ export function QuickSearch({
           disabled={recorder.recording || voiceProcessing || pendingRecording}
           onClick={() => {
             pendingEditRef.current = "";
+            pendingEditPathRef.current = window.location.pathname;
             setQuery("");
             setVoiceNotice(null);
             setActiveIndex(-1);
             inputRef.current?.focus();
           }}
-          className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
+          className="absolute right-0 top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
           aria-label="Clear search"
         >
           <X className="size-4" />

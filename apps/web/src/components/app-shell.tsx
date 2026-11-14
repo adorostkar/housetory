@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Link,
   NavLink,
@@ -43,6 +44,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useCanWrite, useReviewSummary } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
@@ -169,8 +171,9 @@ function AppShellLayout() {
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const restoreAssistantFocus = useRef(false);
   const { openAddItems } = useAddItems();
-  const { select: selectDocument, selectImport } = useAssistantDocuments();
-  const reviewCount = reviewSummary.data?.pending_count ?? 0;
+  const { select: selectDocument, selectImport, selectPhoto, pendingReviews } = useAssistantDocuments();
+  const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length;
+  const desktop = useMediaQuery("(min-width: 1024px)");
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;
     setAssistantOpen(false);
@@ -187,9 +190,10 @@ function AppShellLayout() {
   }, [location.hash, location.pathname, location.search, navigate]);
   const openTaskReview = useCallback((task: AssistantTaskCompletion) => {
     if (task.kind === "document") selectDocument(task.id);
+    else if (task.kind === "photo") selectPhoto(task.id);
     else selectImport(task.id);
-    restoreAssistantFocus.current = false;
-    assistantTrigger.current = null;
+    restoreAssistantFocus.current = true;
+    assistantTrigger.current = document.querySelector<HTMLButtonElement>('button[title="Open assistant"]');
     if (location.hash === "#assistant") {
       setAssistantOpen(true);
     } else {
@@ -199,7 +203,7 @@ function AppShellLayout() {
         hash: "#assistant",
       });
     }
-  }, [location.hash, location.pathname, location.search, navigate, selectDocument, selectImport]);
+  }, [location.hash, location.pathname, location.search, navigate, selectDocument, selectImport, selectPhoto]);
   const moreActive = mobileMoreNav.some((item) =>
     navItemActive(item, location.pathname),
   );
@@ -274,22 +278,10 @@ function AppShellLayout() {
   }, [assistantOpen, location.pathname, selectDocument]);
 
   useEffect(() => {
-    if (!assistantOpen) return;
-    assistantHeading.current?.focus();
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeAssistant();
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [assistantOpen, closeAssistant]);
-
-  useEffect(() => {
     const onTaskCompleted = (event: Event) => {
       const task = (event as CustomEvent<AssistantTaskCompletion>).detail;
       if (!task?.id || !task.title || !task.description) return;
-      const key = `${task.kind}:${task.id}`;
+      const key = `${task.householdId}:${task.kind}:${task.id}:${task.generation}`;
       if (notifiedTaskKeys.has(key)) return;
       notifiedTaskKeys.add(key);
       try {
@@ -532,26 +524,33 @@ function AppShellLayout() {
           </nav>
         )}
       </div>
-      {assistantOpen && (
-        <aside
+      <DialogPrimitive.Root open={assistantOpen} modal={!desktop} onOpenChange={(open) => { if (!open) closeAssistant(); }}>
+        <DialogPrimitive.Portal>
+          {!desktop && <DialogPrimitive.Overlay className="fixed inset-0 z-50" />}
+        <DialogPrimitive.Content
           aria-labelledby="assistant-panel-title"
+          aria-describedby={undefined}
           data-testid="assistant-panel"
+          onOpenAutoFocus={(event) => { event.preventDefault(); assistantHeading.current?.focus(); }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); }}
+          onInteractOutside={(event) => { if (desktop) event.preventDefault(); }}
           className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,40vw)] lg:border-l lg:border-border/80"
         >
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <h2
+            <DialogPrimitive.Title asChild><h2
               id="assistant-panel-title"
               ref={assistantHeading}
               tabIndex={-1}
               className="text-sm"
             >
               Assistant
-            </h2>
+            </h2></DialogPrimitive.Title>
             <div className="flex items-center gap-2">
+              <Link to="/review" className="inline-flex min-h-11 items-center text-xs underline">Review queue</Link>
               <button
                 type="button"
                 onClick={closeAssistant}
-                className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
                 aria-label="Close assistant"
               >
                 <X className="size-5" />
@@ -569,8 +568,9 @@ function AppShellLayout() {
               />
             </Suspense>
           </div>
-        </aside>
-      )}
+        </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
     </div>
   );
 }
