@@ -11,8 +11,9 @@ from ..api.errors import ApiError
 from ..domain import ImportSourceType, ImportStatus, RecognitionStatus
 from ..models import AiRecognition, ImportBatch, ImportEntry, Room, StorageLocation
 from .import_matching import build_index, find_duplicates
-from .import_parse import ProposalDraft
+from .import_parse import ProposalDraft, parse_location_phrases
 from .import_pipeline import _apply_context_destination, _context_property, to_proposed_item
+from .query_text import normalize_for_match
 
 
 def create_batch_from_recognition(
@@ -49,9 +50,7 @@ def create_batch_from_recognition(
         )
 
     room = db.get(Room, recognition.room_id) if recognition.room_id else None
-    location = (
-        db.get(StorageLocation, recognition.location_id) if recognition.location_id else None
-    )
+    location = db.get(StorageLocation, recognition.location_id) if recognition.location_id else None
     property_record = room.property if room is not None else None
     context: dict[str, str] = {}
     property_id = add_items.get("property_id") or (
@@ -73,6 +72,7 @@ def create_batch_from_recognition(
         )
 
     suggestions = list((recognition.result or {}).get("suggestions") or [])
+    ai_used = recognition.processing_mode in {"local", "private", "cloud"}
     batch = ImportBatch(
         household_id=household_id,
         title=f"Photo review: {recognition.original_filename}"[:200],
@@ -93,12 +93,41 @@ def create_batch_from_recognition(
             "context": context,
             "hierarchy": False,
             "recognition_id": str(recognition.id),
+            "assistant_capture": bool(add_items.get("assistant_capture")),
+            "ai_used": ai_used,
+            "ai_provider": recognition.model_provider if ai_used else None,
+            "ai_model": recognition.model_name if ai_used else None,
+            "extraction_method": "vision" if ai_used else "ocr",
         },
     )
     db.add(batch)
     db.flush()
     index = build_index(db, household_id, _context_property(db, batch).id)
     context_text = str(add_items.get("text") or "").strip()
+    destination_phrases = (recognition.result or {}).get("destination_phrases")
+    if destination_phrases is None:
+        # Legacy vision results and local OCR retain the existing caption fallback.
+        destination_phrases, preposition = parse_location_phrases(context_text)
+    else:
+        preposition = None
+        caption = normalize_for_match(context_text)
+        grounded = [
+            phrase
+            for phrase in destination_phrases
+            if (normalized := normalize_for_match(phrase)) and normalized in caption
+        ]
+        if len(grounded) != len(destination_phrases):
+            batch.warnings = [
+                *batch.warnings,
+                {
+                    "type": "caption_destination",
+                    "message": (
+                        "An unsupported AI destination was omitted. "
+                        "Choose the destination during review."
+                    ),
+                },
+            ]
+        destination_phrases = grounded
 
     for position, suggestion in enumerate(suggestions):
         review_reason = suggestion.get("review_reason")
@@ -116,6 +145,8 @@ def create_batch_from_recognition(
             category_text=suggestion.get("category"),
             brand=suggestion.get("brand"),
             model=suggestion.get("model"),
+            location_phrases=destination_phrases if not room and not location else [],
+            location_preposition=preposition,
             tags=list(suggestion.get("tags") or []),
             notes=suggestion.get("notes"),
             relationships=relationships,
@@ -123,7 +154,7 @@ def create_batch_from_recognition(
             confidence=suggestion.get("confidence"),
             source_path=recognition.original_filename,
             source_excerpt=context_text or review_reason,
-            note_title="AI photo recognition",
+            note_title="AI photo recognition" if ai_used else "OCR photo recognition",
         )
         proposed = to_proposed_item(draft, index)
         proposed = _apply_context_destination(db, batch, proposed)

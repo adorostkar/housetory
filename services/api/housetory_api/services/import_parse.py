@@ -766,6 +766,20 @@ def _remove_list_marker(line: str) -> str:
     ).strip()
 
 
+def parse_location_phrases(text: str) -> tuple[list[str], str | None]:
+    phrases = re.findall(
+        r"\b(?:in|inside|under|on|at|within|behind|inside of|to|into)\s+"
+        r"(.+?)(?=(?:\s+(?:in|inside|under|on|at|within|behind|to|into)\s+)|[.;|]|$)",
+        text,
+        re.IGNORECASE,
+    )
+    phrases = [_strip_articles(phrase.strip(" .,;|?!؟")) for phrase in phrases if phrase.strip()]
+    prep_match = re.search(
+        r"\b(in|inside|under|on|at|within|behind|to|into)\b", text, re.IGNORECASE
+    )
+    return phrases, prep_match.group(1).lower() if prep_match else None
+
+
 def _parse_detail_line(
     text: str,
     document: ParsedDocument,
@@ -844,20 +858,7 @@ def _parse_detail_line(
         field_sources[f"warranty_{key}"] = "explicit"
     # Prepositional location phrases, preserving order. The last phrase is often
     # the room and the first the storage place.
-    phrases = re.findall(
-        r"\b(?:in|inside|under|on|at|within|behind|inside of|to|into)\s+"
-        r"(.+?)(?=(?:\s+(?:in|inside|under|on|at|within|behind|to|into)\s+)|[.;|]|$)",
-        body,
-        re.IGNORECASE,
-    )
-    phrases = [
-        _strip_articles(phrase.strip(" .,;|?!؟"))
-        for phrase in phrases
-        if phrase.strip()
-    ]
-    prep_match = re.search(
-        r"\b(in|inside|under|on|at|within|behind|to|into)\b", body, re.IGNORECASE
-    )
+    phrases, preposition = parse_location_phrases(body)
     if phrases:
         field_sources["location"] = "explicit"
         body = re.split(
@@ -890,7 +891,7 @@ def _parse_detail_line(
         model=model,
         serial_number=serial,
         location_phrases=phrases,
-        location_preposition=prep_match.group(1).lower() if prep_match else None,
+        location_preposition=preposition,
         purchase_date=purchase_date,
         price_cents=price,
         currency=currency,
@@ -929,8 +930,7 @@ def _sentence_draft(
     )
     if pronoun_destination:
         cleaned = (
-            f"{pronoun_destination.group('item')} in "
-            f"{pronoun_destination.group('destination')}"
+            f"{pronoun_destination.group('item')} in {pronoun_destination.group('destination')}"
         )
     persian_creation = re.match(
         r"^(?:لطفاً\s+)?(?P<item>.+?)\s+را\s+(?:به|در)\s+"
@@ -938,10 +938,7 @@ def _sentence_draft(
         cleaned,
     )
     if persian_creation:
-        cleaned = (
-            f"{persian_creation.group('item')} in "
-            f"{persian_creation.group('destination')}"
-        )
+        cleaned = f"{persian_creation.group('item')} in {persian_creation.group('destination')}"
     else:
         creation = re.match(
             r"^(?:(?:please|could you|can you|would you)\s+)*"
@@ -957,10 +954,7 @@ def _sentence_draft(
                 re.IGNORECASE,
             )
             if destination:
-                cleaned = (
-                    f"{destination.group('item')} in "
-                    f"{destination.group('destination')}"
-                )
+                cleaned = f"{destination.group('item')} in {destination.group('destination')}"
             else:
                 draft = _parse_detail_line(
                     details,

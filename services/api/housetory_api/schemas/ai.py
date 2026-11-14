@@ -115,6 +115,7 @@ class AiRecognitionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     suggestions: list[AiRecognitionSuggestion] = Field(max_length=30)
+    destination_phrases: list[trimmed(1, 200)] | None = Field(default=None, max_length=8)
     warnings: list[str] = Field(default_factory=list)
     is_document: bool = False
     document_type: (

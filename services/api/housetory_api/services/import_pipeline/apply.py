@@ -161,6 +161,10 @@ def _default_currency(db: Session, household_id: uuid.UUID) -> str:
 def _item_create_from_proposal(
     db: Session, household_id: uuid.UUID, proposed: ProposedItem
 ) -> ItemCreate:
+    if proposed.room and proposed.room.status == "ambiguous":
+        raise ValueError("Choose a room to resolve the ambiguous destination before applying.")
+    if proposed.storage_location and proposed.storage_location.status == "ambiguous":
+        raise ValueError("Choose a place to resolve the ambiguous destination before applying.")
     purchase = None
     if proposed.purchase and any(
         value is not None

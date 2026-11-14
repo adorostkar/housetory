@@ -1310,10 +1310,10 @@ test("assistant composer and Send stay inside short desktop and keyboard-sized m
 
   const assertControlsFit = async (height: number) => {
     for (const control of [composer, send]) {
-      const bounds = await control.boundingBox();
-      expect(bounds).not.toBeNull();
-      expect(bounds!.y).toBeGreaterThanOrEqual(0);
-      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+      await expect.poll(async () => {
+        const bounds = await control.boundingBox();
+        return Boolean(bounds && bounds.y >= 0 && bounds.y + bounds.height <= height);
+      }).toBe(true);
     }
   };
   await assertControlsFit(600);
@@ -1699,6 +1699,24 @@ test("multiple captures restore after reload and an older notification opens its
     let converted = false;
     let applied = false;
     let conversions = 0;
+    const caption = "A synthetic test box in Storage.";
+    const roomId = "00000000-0000-0000-0000-000000000040";
+    const photoBatch = {
+      ...importBatch,
+      title: "Recovered photo",
+      metadata: { ai_used: true, extraction_method: "vision", ai_provider: "synthetic", ai_model: "synthetic-vision" },
+      entries: importBatch.entries.map((entry) => ({
+        ...entry,
+        proposed: {
+          ...entry.proposed,
+          name: "Cardboard box",
+          quantity: 1,
+          room: { text: "Storage", entity_type: "room", status: "matched", matched_id: roomId, name: "Storage", room_id: roomId, candidates: [] },
+        },
+      })),
+    };
+    const uploadBodies: string[] = [];
+    const applyBodies: Array<{ entries: Array<{ proposed: { name: string; room: { matched_id: string } } }> }> = [];
     await page.route("**/api/v1/ai/recognitions**", async (route) => {
       if (route.request().method() === "DELETE") {
         exists = false;
@@ -1723,11 +1741,21 @@ test("multiple captures restore after reload and an older notification opens its
     await page.route(`**/api/v1/imports/from-recognition/${photoId}`, (route) => {
       conversions += 1;
       converted = true;
-      return route.fulfill({ json: { ...importBatch, title: "Recovered photo" } });
+      return route.fulfill({ json: photoBatch });
     });
+    await page.route(`**/api/v1/imports/${importBatch.id}`, (route) => route.fulfill({ json: {
+      ...photoBatch, status: applied ? "completed" : "review",
+    } }));
     page.on("request", (request) => {
-      if (request.url().endsWith(`/imports/${importBatch.id}/apply`)) applied = true;
+      if (request.url().endsWith(`/imports/${importBatch.id}/apply`)) {
+        applyBodies.push(request.postDataJSON());
+        applied = true;
+      }
+      if (request.url().endsWith("/ai/recognitions") && request.method() === "POST") {
+        uploadBodies.push(request.postData() ?? "");
+      }
     });
+    await page.getByRole("combobox", { name: "Search or ask about your inventory" }).fill(caption);
     await page.getByTestId("quick-search-attachment-input").setInputFiles({
       name: "photo.jpg", mimeType: "image/jpeg", buffer: Buffer.from("synthetic image"),
     });
@@ -1749,10 +1777,21 @@ test("multiple captures restore after reload and an older notification opens its
     await expect.poll(() => conversions, { timeout: 10_000 }).toBe(1);
     await expect(page.getByText("Recovered photo ready for review", { exact: true })).toHaveCount(1);
     await page.getByRole("button", { name: "Review", exact: true }).click();
-    await panel.getByRole("checkbox", { name: "Include Ethernet cables" }).check();
+    await expect(panel.getByText("AI-assisted", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("region", { name: "Assistant item review" })).toContainText("Storage");
+    expect(applyBodies).toEqual([]);
+    expect(uploadBodies[0]).toContain(caption);
+    await page.reload();
+    await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
+    await panel.getByRole("button", { name: "Review Recovered photo", exact: true }).click();
+    await expect(panel.getByRole("region", { name: "Assistant item review" })).toContainText("Storage");
+    await expect(panel.getByText("AI-assisted", { exact: true })).toBeVisible();
+    await panel.getByRole("checkbox", { name: "Include Cardboard box" }).check();
     await panel.getByRole("button", { name: "Approve selected" }).click();
     await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
     expect(conversions).toBe(1);
+    expect(applyBodies).toHaveLength(1);
+    expect(applyBodies[0].entries[0].proposed).toMatchObject({ name: "Cardboard box", room: { matched_id: roomId } });
     await panel.getByRole("button", { name: "Close assistant" }).click();
     converted = false;
     applied = false;

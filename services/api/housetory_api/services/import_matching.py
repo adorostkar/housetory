@@ -226,6 +226,15 @@ def match_location(
             parent_id=best.parent_id,
             candidates=ranked,
         )
+    if status == "ambiguous":
+        return LocationProposal(
+            text=cleaned,
+            entity_type="storage_location",
+            status=status,
+            name=_display_name(cleaned),
+            room_id=room_id,
+            candidates=ranked,
+        )
     display = _display_name(cleaned)
     if preposition in {"under", "on", "behind"}:
         display = f"{preposition.title()} the {display[:1].lower() + display[1:]}"

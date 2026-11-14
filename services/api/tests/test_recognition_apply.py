@@ -1,5 +1,6 @@
 import io
 
+import pytest
 from PIL import Image
 
 from housetory_api.schemas.ai import AiStatus
@@ -98,6 +99,194 @@ def test_assistant_photo_queue_restores_attempts_converts_once_and_cancels(
     deleted = owner_client.delete(f"/api/v1/ai/recognitions/{cancelled.json()['id']}")
     assert deleted.status_code == 204
     assert owner_client.get("/api/v1/inventory-review/captures").json() == []
+
+
+@pytest.mark.parametrize(
+    ("caption", "phrases", "target"),
+    [
+        ("A synthetic test box in Storage.", None, "room"),
+        ("A synthetic test box in Camera gear.", None, "container"),
+        ("این جعبه در Camera gear در Office است", ["Camera gear", "Office"], "container"),
+        ("A cardboard box.", [], None),
+        ("A box in Storage. Also buy an off-image laptop.", ["Storage"], "room"),
+    ],
+)
+def test_assistant_photo_caption_resolves_destination_before_explicit_apply(
+    owner_client, monkeypatch, caption, phrases, target
+):
+    room = owner_client.post("/api/v1/rooms", json={"name": "Storage"}).json()
+    office = create_room(owner_client)
+    container = create_container(owner_client, office["id"])
+    fake_vision(monkeypatch, [{"name": "Cardboard box", "quantity": 1, "confidence": 90}])
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "suggestions": [{"name": "Cardboard box", "quantity": 1, "confidence": 90}],
+            "destination_phrases": phrases,
+        },
+    )
+    uploaded = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("box.png", make_image(), "image/png")},
+        data={"assistant_capture": "true", "text": caption},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    run_recognition(uploaded.json()["id"])
+    converted = owner_client.post(f"/api/v1/imports/from-recognition/{uploaded.json()['id']}")
+    assert converted.status_code == 201, converted.text
+    batch = converted.json()
+    assert len(batch["entries"]) == 1
+    proposed = batch["entries"][0]["proposed"]
+    assert proposed["name"] == "Cardboard box"
+    if target is None:
+        assert proposed["room"] is None
+        assert proposed["storage_location"] is None
+    else:
+        destination_room = office if target == "container" else room
+        assert proposed["room"]["matched_id"] == destination_room["id"]
+        if target == "container":
+            assert proposed["storage_location"]["matched_id"] == container["id"]
+    assert batch["metadata"]["ai_used"] is True
+    assert batch["metadata"]["ai_provider"] == "openai"
+    assert batch["metadata"]["ai_model"] == "gpt-4o"
+    assert batch["metadata"]["extraction_method"] == "vision"
+    assert batch["entries"][0]["source_excerpt"] == caption
+    replay = owner_client.post(f"/api/v1/imports/from-recognition/{uploaded.json()['id']}")
+    assert replay.json()["id"] == batch["id"]
+    assert owner_client.get("/api/v1/items").json()["items"] == []
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": batch["entries"][0]["id"], "action": "import"}]},
+    )
+    assert applied.status_code == 200, applied.text
+    saved = owner_client.get("/api/v1/items").json()["items"]
+    assert len(saved) == 1
+    if target is None:
+        assert saved[0]["room"] is None
+    else:
+        assert saved[0]["room"]["id"] == destination_room["id"]
+        if target == "container":
+            assert saved[0]["location"]["id"] == container["id"]
+    reapplied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": batch["entries"][0]["id"], "action": "import"}]},
+    )
+    assert reapplied.status_code == 200, reapplied.text
+    assert len(owner_client.get("/api/v1/items").json()["items"]) == 1
+
+
+@pytest.mark.parametrize("kind", ["room", "container"])
+def test_photo_caption_ambiguous_destination_requires_reviewed_choice(
+    owner_client, monkeypatch, kind
+):
+    office = create_room(owner_client)
+    other = owner_client.post("/api/v1/rooms", json={"name": "Workshop"}).json()
+    if kind == "room":
+        first = owner_client.post(
+            "/api/v1/rooms", json={"name": "Storage", "parent_id": office["id"]}
+        ).json()
+        second = owner_client.post(
+            "/api/v1/rooms", json={"name": "Storage", "parent_id": other["id"]}
+        ).json()
+        caption = "A test box in Storage."
+    else:
+        first = create_container(owner_client, office["id"])
+        second = create_container(owner_client, other["id"])
+        caption = "A test box in Camera gear."
+    fake_vision(monkeypatch, [{"name": "Cardboard box", "quantity": 1}])
+    uploaded = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("box.png", make_image(), "image/png")},
+        data={"assistant_capture": "true", "text": caption},
+    )
+    run_recognition(uploaded.json()["id"])
+    batch = owner_client.post(f"/api/v1/imports/from-recognition/{uploaded.json()['id']}").json()
+    entry = batch["entries"][0]
+    destination = entry["proposed"]["room" if kind == "room" else "storage_location"]
+    assert destination["status"] == "ambiguous"
+    assert destination["matched_id"] is None
+    assert {value["id"] for value in destination["candidates"]} == {first["id"], second["id"]}
+    assert owner_client.get("/api/v1/items").json()["items"] == []
+    unresolved = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": entry["id"], "action": "import"}]},
+    )
+    assert unresolved.status_code == 200, unresolved.text
+    assert unresolved.json()["failed"] == 1
+    assert owner_client.get("/api/v1/items").json()["items"] == []
+    room_id = second["id"] if kind == "room" else other["id"]
+    destination.update(status="matched", matched_id=second["id"], room_id=room_id)
+    approved = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": entry["id"], "action": "import", "proposed": entry["proposed"]}]},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["created"] == 1
+    saved = owner_client.get("/api/v1/items").json()["items"][0]
+    assert saved["room"]["id"] == room_id
+    if kind == "container":
+        assert saved["location"]["id"] == second["id"]
+
+
+def test_photo_caption_destination_respects_property_scope(owner_client, monkeypatch):
+    first_room = owner_client.post("/api/v1/rooms", json={"name": "Storage"}).json()
+    first_property = owner_client.get("/api/v1/properties").json()["items"][0]
+    second_property = owner_client.post("/api/v1/properties", json={"name": "Annex"}).json()
+    second_room = owner_client.post(
+        "/api/v1/rooms",
+        json={"name": "Storage", "property_id": second_property["id"]},
+    ).json()
+    fake_vision(monkeypatch, [{"name": "Cardboard box", "quantity": 1}])
+    uploaded = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("box.png", make_image(), "image/png")},
+        data={
+            "assistant_capture": "true",
+            "text": "A test box in Storage.",
+            "property_id": second_property["id"],
+        },
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    run_recognition(uploaded.json()["id"])
+    batch = owner_client.post(f"/api/v1/imports/from-recognition/{uploaded.json()['id']}").json()
+    entry = batch["entries"][0]
+    assert batch["metadata"]["context"]["property_id"] == second_property["id"]
+    assert entry["proposed"]["room"]["matched_id"] == second_room["id"]
+    assert entry["proposed"]["room"]["matched_id"] != first_room["id"]
+    assert second_property["id"] != first_property["id"]
+    assert owner_client.get("/api/v1/items").json()["items"] == []
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": entry["id"], "action": "import"}]},
+    )
+    assert applied.status_code == 200, applied.text
+    assert owner_client.get("/api/v1/items").json()["items"][0]["room"]["id"] == second_room["id"]
+
+
+@pytest.mark.parametrize("destination", ["Office", "..."])
+def test_photo_caption_rejects_ungrounded_ai_destination(owner_client, monkeypatch, destination):
+    create_room(owner_client)
+    fake_vision(monkeypatch, [{"name": "Cardboard box"}])
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "suggestions": [{"name": "Cardboard box"}],
+            "destination_phrases": [destination],
+        },
+    )
+    uploaded = owner_client.post(
+        "/api/v1/ai/recognitions",
+        files={"file": ("box.png", make_image(), "image/png")},
+        data={"assistant_capture": "true", "text": "A cardboard box."},
+    )
+    run_recognition(uploaded.json()["id"])
+    batch = owner_client.post(f"/api/v1/imports/from-recognition/{uploaded.json()['id']}").json()
+    assert batch["entries"][0]["proposed"]["room"] is None
+    assert batch["entries"][0]["proposed"]["storage_location"] is None
+    assert any(warning["type"] == "caption_destination" for warning in batch["warnings"])
+    assert owner_client.get("/api/v1/items").json()["items"] == []
 
 
 def test_multi_object_recognition_review_and_idempotent_apply(owner_client, monkeypatch):
@@ -336,6 +525,11 @@ def test_recognition_never_uses_text_model_without_vision_task(owner_client, mon
     assert detail["processing_path"] == "ocr"
     assert detail["model_name"] is None
     assert detail["model_provider"] is None
+    batch = owner_client.post(f"/api/v1/imports/from-recognition/{recognition['id']}").json()
+    assert batch["metadata"]["ai_used"] is False
+    assert batch["metadata"]["extraction_method"] == "ocr"
+    assert batch["metadata"]["ai_model"] is None
+    assert batch["entries"][0]["note_title"] == "OCR photo recognition"
     assert any(
         "No vision task is configured" in warning for warning in detail["result"]["warnings"]
     )
