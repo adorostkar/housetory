@@ -199,6 +199,25 @@ def test_text_import_extracts_natural_language_and_matches_locations(owner_clien
     assert source.content.decode("utf-8") == text
 
 
+def test_assistant_item_description_keeps_quantity_and_named_destination(owner_client):
+    room = create_room(owner_client, "Utility Room")
+    box = create_location(owner_client, room["id"], "Box 2", "box")
+    batch = upload_text_import(
+        owner_client,
+        "I bought three Ethernet cables; put them in box 2.",
+        title="Assistant item description",
+    )
+    detail = process_import(owner_client, batch["id"])
+    assert detail["status"] == "review"
+    assert len(detail["entries"]) == 1
+    proposed = detail["entries"][0]["proposed"]
+    assert proposed["quantity"] == 3
+    assert proposed["storage_location"]["status"] == "matched"
+    assert proposed["storage_location"]["matched_id"] == box["id"]
+    assert proposed["room"]["matched_id"] == room["id"]
+    assert proposed["purchase"] is None
+
+
 def test_import_duplicate_detection_and_skip(owner_client):
     kitchen = create_room(owner_client, "Kitchen")
     existing = owner_client.post(

@@ -102,14 +102,6 @@ export function ImportsPage() {
         eyebrow: "Intelligence",
         title: "Import",
         description: "Turn notes, spreadsheets, documents, images or an Obsidian ZIP vault into proposed inventory entries for review.",
-        actions: (
-          <Button variant="outline" asChild>
-            <Link to="/assistant">
-              <Sparkles />
-              Ask Housetory
-            </Link>
-          </Button>
-        ),
       }}
     >
       {(roomId || locationId) && (

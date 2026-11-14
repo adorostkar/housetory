@@ -51,8 +51,15 @@ import type {
 import { formatDate, pluralize } from "@/lib/utils";
 import { enhancementLabel, keepManualEdits, proposalValue } from "@/lib/enrichment";
 
-export function ImportDetailPage() {
-  const { batchId = "" } = useParams();
+export function ImportDetailPage({
+  batchId: providedBatchId,
+  embedded = false,
+}: {
+  batchId?: string;
+  embedded?: boolean;
+} = {}) {
+  const { batchId: routeBatchId = "" } = useParams();
+  const batchId = providedBatchId ?? routeBatchId;
   const batchQuery = useImportBatch(batchId);
   const roomsQuery = useRooms();
   const locationsQuery = useLocations();
@@ -323,8 +330,9 @@ export function ImportDetailPage() {
 
   return (
     <PageLayout
+      className={embedded ? "space-y-3" : undefined}
       header={{
-        eyebrow: "Import review",
+        eyebrow: embedded ? "Assistant review" : "Import review",
         title: batch.title,
         description: [
           IMPORT_SOURCE_LABELS[batch.source_type] ?? batch.source_type,
@@ -333,9 +341,8 @@ export function ImportDetailPage() {
         ]
           .filter(Boolean)
           .join(" · "),
-        backTo: "/imports",
-        backLabel: "Imports",
-        actions: (
+        ...(!embedded ? { backTo: "/imports", backLabel: "Imports" } : {}),
+        ...(!embedded ? { actions: (
           <>
             {batch.source_url && (
               <Button variant="outline" asChild>
@@ -351,14 +358,8 @@ export function ImportDetailPage() {
                 Retry
               </Button>
             )}
-            <Button variant="outline" asChild>
-              <Link to="/assistant">
-                <Sparkles />
-                Ask about this home
-              </Link>
-            </Button>
           </>
-        ),
+        ) } : {}),
       }}
     >
       <section className="surface p-5 sm:p-6">

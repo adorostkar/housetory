@@ -208,12 +208,6 @@ export function SearchPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SearchScopeSelect compact />
-          <Button type="button" size="sm" variant="ghost" asChild>
-            <Link to="/assistant">
-              <Sparkles />
-              Assistant
-            </Link>
-          </Button>
           <Button type="button" size="sm" variant="outline" onClick={reset}>
             <RotateCcw />
             New search

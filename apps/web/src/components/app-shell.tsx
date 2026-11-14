@@ -10,7 +10,6 @@ import {
   Search,
   Settings,
   Plus,
-  Sparkles,
   Wallet,
   X,
   type LucideIcon,
@@ -65,7 +64,6 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     label: "Home",
     items: [
       { to: "/", label: "Overview", icon: House, end: true },
-      { to: "/assistant", label: "Assistant", icon: Sparkles },
     ],
   },
   {
@@ -98,10 +96,6 @@ const navGroups: { label: string; items: NavItem[] }[] = [
 const mobileLeftNav: NavItem[] = [
   { to: "/", label: "Home", icon: House, end: true },
   { to: "/items", label: "Items", icon: Package },
-];
-
-const mobileRightNav: NavItem[] = [
-  { to: "/assistant", label: "Assistant", icon: Sparkles },
 ];
 
 const AssistantPage = lazy(() =>
@@ -157,7 +151,12 @@ function AppShellLayout() {
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
   const isAssistant = location.pathname === "/assistant";
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const assistantTrigger = useRef<HTMLButtonElement | null>(null);
+  const [assistantRequest, setAssistantRequest] = useState<{
+    id: string;
+    text: string;
+    file?: File;
+  } | null>(null);
+  const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const { openAddItems } = useAddItems();
   const { select: selectDocument } = useAssistantDocuments();
@@ -202,8 +201,9 @@ function AppShellLayout() {
     if (documentMatch?.[1]) selectDocument(documentMatch[1]);
   }, [assistantOpen, location.pathname, selectDocument]);
 
-  const openAssistant = (trigger: HTMLButtonElement) => {
+  const openAssistant = (text: string, trigger: HTMLElement, file?: File) => {
     assistantTrigger.current = trigger;
+    setAssistantRequest({ id: crypto.randomUUID(), text, ...(file ? { file } : {}) });
     setAssistantOpen(true);
   };
 
@@ -241,16 +241,7 @@ function AppShellLayout() {
 
         <HouseholdSwitcher />
 
-        <AddItemsButton className="mt-4 w-full justify-start pl-4" />
-        <button
-          type="button"
-          className="nav-link mt-2 w-full"
-          onClick={(event) => openAssistant(event.currentTarget)}
-        >
-          <Sparkles className="size-[1.05rem]" />
-          Open assistant panel
-        </button>
-
+        <AddItemsButton className="mt-4 h-11 min-h-11 w-full shrink-0 justify-start px-4 py-2" />
         <nav className="mt-6 space-y-5" aria-label="Primary">
           {navGroups.map((group) => (
             <div key={group.label} className="space-y-1">
@@ -307,13 +298,16 @@ function AppShellLayout() {
           </div>
         </header>
 
-        {location.pathname !== "/assistant" && (
-          <header className="sticky top-0 z-30 hidden border-b border-border/50 bg-background/70 backdrop-blur-xl lg:block">
-            <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-12">
-              <QuickSearch variant="top" className="w-full max-w-2xl" />
-            </div>
-          </header>
-        )}
+        <header className="sticky top-0 z-30 hidden border-b border-border/50 bg-background/70 backdrop-blur-xl lg:block">
+          <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-12">
+            <QuickSearch
+              variant="top"
+              className="w-full max-w-2xl"
+              onAsk={(query, trigger) => openAssistant(query, trigger)}
+              onAttach={canWrite ? (file, trigger) => openAssistant("", trigger, file) : undefined}
+            />
+          </div>
+        </header>
 
         <main
           className={cn(
@@ -328,11 +322,13 @@ function AppShellLayout() {
               : "min-h-[calc(100dvh-4rem)] pb-28 pt-5 sm:pt-7 lg:min-h-dvh lg:pb-20 lg:pt-8",
           )}
         >
-          {location.pathname !== "/assistant" && (
-            <div className="mb-5 lg:hidden">
-              <QuickSearch variant="mobile" />
-            </div>
-          )}
+          <div className="mb-5 lg:hidden">
+            <QuickSearch
+              variant="mobile"
+              onAsk={(query, trigger) => openAssistant(query, trigger)}
+              onAttach={canWrite ? (file, trigger) => openAssistant("", trigger, file) : undefined}
+            />
+          </div>
           {!canWrite && (
             <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
               <span className="font-medium text-brass">Viewer access.</span> You
@@ -374,17 +370,6 @@ function AppShellLayout() {
                   Add
                 </button>
               ) : null}
-              {mobileRightNav.map((item) => (
-                <button
-                  key={item.to}
-                  type="button"
-                  className={mobileTabClass(isAssistant)}
-                  onClick={(event) => openAssistant(event.currentTarget)}
-                >
-                  <item.icon className="size-[1.25rem]" strokeWidth={1.7} />
-                  {item.label}
-                </button>
-              ))}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -452,11 +437,6 @@ function AppShellLayout() {
                 Assistant
               </DialogTitle>
               <div className="flex items-center gap-2">
-                {!isAssistant && (
-                  <Link to="/assistant" className="rounded-lg px-2 py-2 text-xs underline underline-offset-4">
-                    Open full page
-                  </Link>
-                )}
                 <DialogPrimitive.Close className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2" aria-label="Close assistant">
                   <X className="size-5" />
                 </DialogPrimitive.Close>
@@ -464,7 +444,13 @@ function AppShellLayout() {
             </div>
             <div className="min-h-0 flex-1 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
               <Suspense fallback={<PageFallback />}>
-                <AssistantPage embedded />
+                <AssistantPage
+                  embedded
+                  initialRequest={assistantRequest}
+                  onInitialRequestHandled={(id) => {
+                    setAssistantRequest((current) => current?.id === id ? null : current);
+                  }}
+                />
               </Suspense>
             </div>
           </DialogPrimitive.Content>

@@ -21,6 +21,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       ...actual.api,
       get: vi.fn(),
       post: vi.fn(),
+      postForm: vi.fn(),
       patch: vi.fn(),
       delete: vi.fn(),
     },
@@ -29,6 +30,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 vi.mock("@/lib/assistant-intent", () => ({
   classifyAssistantIntent: vi.fn().mockResolvedValue({ intent: "unavailable", form: null }),
+}));
+
+vi.mock("@/components/assistant-document-review", () => ({
+  AssistantDocumentReview: ({ id }: { id: string }) => <div>Document review {id}</div>,
+}));
+
+vi.mock("@/components/assistant-import-review", () => ({
+  AssistantImportReview: ({ id }: { id: string }) => <div>Item review {id}</div>,
 }));
 
 const aiStatus: AiStatus = {
@@ -209,7 +218,10 @@ const sessionState = {
   households: [],
 };
 
-function renderPage(entry: string) {
+function renderPage(
+  entry: string,
+  initialRequest?: { id: string; text: string; file?: File },
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -219,7 +231,11 @@ function renderPage(entry: string) {
         <SearchSessionProvider>
           <AssistantConversationProvider>
             <AddItemsProvider>
-              <AssistantPage />
+              <AssistantPage
+                embedded={Boolean(initialRequest)}
+                initialRequest={initialRequest}
+                onInitialRequestHandled={() => undefined}
+              />
             </AddItemsProvider>
           </AssistantConversationProvider>
         </SearchSessionProvider>
@@ -241,9 +257,115 @@ beforeEach(() => {
   vi.mocked(api.post)
     .mockResolvedValueOnce(firstAnswer)
     .mockResolvedValueOnce(secondAnswer);
+  vi.mocked(api.postForm).mockReset();
 });
 
 describe("AssistantPage", () => {
+  it("replaces header capture buttons with composer attachments and previews", async () => {
+    const user = userEvent.setup();
+    renderPage("/assistant");
+
+    expect(screen.queryByRole("button", { name: "Add items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add document" })).not.toBeInTheDocument();
+    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
+    await user.upload(document.querySelector('input[type="file"]')!, file);
+
+    expect(screen.getByText("invoice.pdf")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remove attachment" }));
+    expect(screen.queryByText("invoice.pdf")).not.toBeInTheDocument();
+  });
+
+  it("asks the image intent before sending and attaches typed context to the photo", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.postForm).mockResolvedValue({ id: "recognition-1" });
+    renderPage("/assistant");
+    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    const file = new File(["photo"], "shelf.jpg", { type: "image/jpeg" });
+    await user.upload(document.querySelector('input[type="file"]')!, file);
+    await user.type(screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "Add these to inventory");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("inventory photo or a document");
+    expect(api.postForm).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("radio", { name: "Inventory photo" }));
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/ai/recognitions", expect.any(FormData)));
+    const form = vi.mocked(api.postForm).mock.calls[0]?.[1] as FormData;
+    expect(form.get("text")).toBe("Add these to inventory");
+    expect(await screen.findByText("Interpreting the inventory photo. Review the item proposal here before applying it.")).toBeVisible();
+  });
+
+  it("routes an item description through the existing import review in the conversation", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.postForm).mockResolvedValue({ id: "batch-1" });
+    renderPage("/assistant");
+    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(
+      screen.getByRole("textbox", { name: "Ask the Housetory assistant" }),
+      "I bought three Ethernet cables; put them in box 2.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/imports", expect.any(FormData)));
+    expect(await screen.findByText("Item review batch-1")).toBeVisible();
+    expect(screen.getByText("Preparing item proposals. Edit the details and destination below, then approve to add them.")).toBeVisible();
+  });
+
+  it("submits a header assistant request through the existing conversation service", async () => {
+    renderPage("/assistant", { id: "header-question", text: "Where is my drill?" });
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/search/query",
+        expect.objectContaining({ query: "Where is my drill?" }),
+        expect.anything(),
+      ),
+    );
+    expect(await screen.findByText("Where is my drill?")).toBeVisible();
+  });
+
+  it("hands a header attachment to the existing assistant composer without sending it", async () => {
+    const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
+    renderPage("/assistant", { id: "header-file", text: "Check this invoice", file });
+    expect(await screen.findByText("invoice.pdf")).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Ask the Housetory assistant" }),
+    ).toHaveValue("Check this invoice");
+    expect(api.postForm).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit household when a capture starts in All my places", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/search/scopes")) {
+        return {
+          items: [
+            { id: "house-1", name: "Home", properties: [] },
+            { id: "house-2", name: "Cabin", properties: [] },
+          ],
+        };
+      }
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    vi.mocked(api.postForm).mockResolvedValue({ id: "doc-1", title: "invoice" });
+    renderPage("/assistant");
+    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.upload(
+      document.querySelector('input[type="file"]')!,
+      new File(["invoice"], "invoice.pdf", { type: "application/pdf" }),
+    );
+    const send = screen.getByRole("button", { name: "Send question" });
+    await user.click(send);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose the household");
+    expect(api.postForm).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Destination household" }), "house-1");
+    await user.click(send);
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/documents", expect.any(FormData)));
+  });
+
   it("explains the selection limit and allows clearing it without submitting a partial selection", async () => {
     function LargeSelection() {
       useRegisterAssistantPageContext(

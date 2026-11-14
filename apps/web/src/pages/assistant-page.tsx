@@ -4,12 +4,12 @@ import {
   Bot,
   Check,
   Copy,
-  FileText,
   HandCoins,
   Info,
   Loader2,
   MapPin,
   Mic,
+  FileText,
   Paperclip,
   RotateCcw,
   Send,
@@ -19,28 +19,34 @@ import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
-import { AddItemsButton } from "@/components/add-items";
 import { AnswerText } from "@/components/answer-text";
-import { DocumentUploadDialog } from "@/components/document-upload-dialog";
+import { AssistantPhotoProgress } from "@/components/assistant-photo-progress";
 import { CONDITIONS } from "@/components/item-form-sections";
 import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { api, getApiErrorMessage } from "@/lib/api";
 import { withHousehold } from "@/lib/household-links";
-import { useAiStatus, useCanWrite } from "@/lib/queries";
+import { useAiStatus, useCanWrite, useSelectHousehold, useSession } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
 import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
-import { AssistantDocumentSlot, useAssistantDocuments } from "@/lib/assistant-documents";
+import { AssistantDocumentSlot, AssistantImportSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
+import type { AiRecognition, DocumentRecord, ImportBatchDetail } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
 import { itemContainer, locationLabel } from "@/lib/utils";
+import { DOCUMENT_FILE_ACCEPT, documentFileError, documentFileType, documentUploadFile } from "@/lib/document-files";
 
 const SUGGESTIONS = [
   "Where is my heavy drill?",
+  "I bought three Ethernet cables; put them in box 2.",
+  "Attach a receipt or photo for review.",
+  "Move the ladder to the garage.",
   "Which items have no purchase information?",
   "What is on loan?",
   "What do I need to return?",
@@ -50,11 +56,44 @@ const SUGGESTIONS = [
   "How many suitcases do I own?",
 ];
 
-export function AssistantPage({ embedded = false }: { embedded?: boolean } = {}) {
+function looksLikeItemDescription(value: string) {
+  return /^\s*(?:(?:i|we)\s+(?:bought|purchased|got|added|found|picked up)\b|add\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b)/i.test(value);
+}
+
+function useObjectUrl(file: File | null) {
+  const [url, setUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!file || typeof URL.createObjectURL !== "function") {
+      setUrl(null);
+      return;
+    }
+    const next = URL.createObjectURL(file);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  return url;
+}
+
+interface AssistantInitialRequest {
+  id: string;
+  text: string;
+  file?: File;
+}
+
+export function AssistantPage({
+  embedded = false,
+  initialRequest,
+  onInitialRequestHandled,
+}: {
+  embedded?: boolean;
+  initialRequest?: AssistantInitialRequest | null;
+  onInitialRequestHandled?: (id: string) => void;
+} = {}) {
   const aiStatus = useAiStatus();
   const canWrite = useCanWrite();
-  const [uploadOpen, setUploadOpen] = React.useState(false);
-  const { select: selectDocument } = useAssistantDocuments();
+  const { select: selectDocument, selectImport } = useAssistantDocuments();
+  const session = useSession();
+  const selectHousehold = useSelectHousehold();
   const { references: pageReferences, setReferences: setPageReferences } = useAssistantPageContext();
   const tooManyReferences = pageReferences.length > 12;
   const scope = useAssistantScope();
@@ -62,11 +101,12 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
-  const { messages, question, setQuestion, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
+  const handledInitialRequestRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (embedded) return;
     const value = searchParams.get("q")?.trim() ?? "";
@@ -90,6 +130,11 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const paneRef = React.useRef<HTMLDivElement>(null);
   const lastAnswerRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = React.useState(false);
+  const attachmentUrl = useObjectUrl(
+    attachment && documentFileType(attachment).startsWith("image/") ? attachment : null,
+  );
   const dictation = useSpeechDictation((text) =>
     setQuestion((current) =>
       current.trim() ? `${current.trimEnd()} ${text}` : text,
@@ -131,12 +176,155 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [question]);
 
-  const submit = (event?: React.FormEvent) => {
-    event?.preventDefault();
-    const value = question.trim();
-    if (value.length < 2 || pending || tooManyReferences) return;
+  const multipleHouseholds = scope.scopes.length > 1 || (session.data?.households?.length ?? 0) > 1;
+  const captureHousehold = selection.householdId
+    || captureHouseholdId
+    || (scope.scopes.length === 1 ? scope.scopes[0]?.id : undefined)
+    || (!multipleHouseholds ? session.data?.household?.id : undefined);
+
+  const submitCapture = async (value: string) => {
+    if (capturePending) return;
+    if (!canWrite) {
+      setCaptureError("You need member access to add items or attach files.");
+      return;
+    }
+    if (attachment && documentFileError(attachment)) {
+      setCaptureError(documentFileError(attachment));
+      return;
+    }
+    const isImage = Boolean(attachment && documentFileType(attachment).startsWith("image/"));
+    if (isImage && !attachmentIntent) {
+      setCaptureError("Is this an inventory photo or a document/evidence image?");
+      return;
+    }
+    if (!captureHousehold || (multipleHouseholds && !selection.householdId && !captureHouseholdId)) {
+      setCaptureError("Choose the household that should receive this capture.");
+      return;
+    }
+
+    setCapturePending(true);
+    setCaptureError(null);
+    try {
+      if (session.data?.household?.id !== captureHousehold) {
+        await selectHousehold.mutateAsync(captureHousehold);
+      }
+      if (attachment) {
+        const file = documentUploadFile(attachment);
+        const attachmentMeta = { name: file.name, type: documentFileType(file) };
+        if (isImage && attachmentIntent === "photo") {
+          const form = new FormData();
+          form.append("file", file);
+          form.append("text", value);
+          if (selection.propertyId) form.append("property_id", selection.propertyId);
+          const recognition = await api.postForm<AiRecognition>("/ai/recognitions", form);
+          recordCapture(
+            value || `Inventory photo: ${file.name}`,
+            attachmentMeta,
+            "Interpreting the inventory photo. Review the item proposal here before applying it.",
+            {
+              id: crypto.randomUUID(),
+              kind: "photo",
+              filename: file.name,
+              recognitionId: recognition.id,
+            },
+          );
+          return;
+        }
+
+        const form = new FormData();
+        form.append("file", file);
+        form.append("title", file.name.replace(/\.[^.]+$/, "").slice(0, 200));
+        const textLower = value.toLowerCase();
+        const documentType = /invoice/.test(textLower)
+          ? "invoice"
+          : /receipt|proof of purchase/.test(textLower)
+            ? "receipt"
+            : "other";
+        form.append("document_type", documentType);
+        if (value) form.append("notes", value);
+        const document = await api.postForm<DocumentRecord>("/documents", form);
+        selectDocument(document.id);
+        setPageReferences([{ kind: "document", id: document.id, name: document.title }]);
+        recordCapture(
+          value || `Attached ${file.name}`,
+          attachmentMeta,
+          "Document attached. Progress, extracted details and review are shown below.",
+          {
+            id: crypto.randomUUID(),
+            kind: "document",
+            filename: file.name,
+            documentId: document.id,
+          },
+        );
+        return;
+      }
+
+      const form = new FormData();
+      form.append("text", value);
+      form.append("title", "Assistant item description");
+      if (selection.propertyId) form.append("property_id", selection.propertyId);
+      const batch = await api.postForm<ImportBatchDetail>("/imports", form);
+      selectImport(batch.id);
+      recordCapture(
+        value,
+        undefined,
+        "Preparing item proposals. Edit the details and destination below, then approve to add them.",
+        { id: crypto.randomUUID(), kind: "items", importId: batch.id },
+      );
+    } catch (error) {
+      setCaptureError(getApiErrorMessage(error));
+      setCapturePending(false);
+    }
+  };
+
+  const submitValue = (value: string) => {
+    if (pending || tooManyReferences || capturePending) return;
+    if (attachment || (canWrite && looksLikeItemDescription(value))) {
+      if (!attachment && value.length < 2) return;
+      dictation.stop();
+      void submitCapture(value);
+      return;
+    }
+    if (value.length < 2) return;
     dictation.stop();
     ask(selection, value, false, searchSession);
+  };
+
+  React.useEffect(() => {
+    if (
+      !embedded ||
+      !initialRequest ||
+      scopesQuery.isPending ||
+      handledInitialRequestRef.current === initialRequest.id
+    ) return;
+    handledInitialRequestRef.current = initialRequest.id;
+    if (initialRequest.file) {
+      setAttachment(initialRequest.file);
+      setAttachmentIntent(
+        documentFileType(initialRequest.file).startsWith("image/") ? null : "document",
+      );
+      setQuestion(initialRequest.text);
+      setCaptureError(null);
+    } else if (initialRequest.text.trim()) {
+      submitValue(initialRequest.text.trim());
+    }
+    onInitialRequestHandled?.(initialRequest.id);
+  }, [
+    embedded,
+    initialRequest,
+    onInitialRequestHandled,
+    scopesQuery.isPending,
+    selection,
+    setAttachment,
+    setAttachmentIntent,
+    setCaptureError,
+    setQuestion,
+    submitValue,
+  ]);
+
+  const submit = (event?: React.FormEvent) => {
+    event?.preventDefault();
+    submitValue(question.trim());
   };
 
   const newConversation = () => {
@@ -149,7 +337,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
   const askSuggestion = (value: string) => {
     if (tooManyReferences) return;
     setQuestion("");
-    ask(selection, value, false, searchSession);
+    submitValue(value);
   };
 
   const regenerateLatest = () => {
@@ -178,7 +366,39 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
     : "AI when needed · grounded in records";
 
   return (
-    <div className="flex h-full min-h-0 flex-col animate-fade-up">
+    <div
+      className="relative flex h-full min-h-0 flex-col animate-fade-up"
+      onDragOver={(event) => {
+        if (!canWrite || !Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        setDragging(false);
+        if (event.dataTransfer.files.length > 1) {
+          setCaptureError("Attach one file at a time. Your draft is unchanged.");
+          return;
+        }
+        const file = event.dataTransfer.files[0] ?? null;
+        const error = file ? documentFileError(file) : null;
+        if (error) {
+          setCaptureError(error);
+          return;
+        }
+        setAttachment(file ? documentUploadFile(file) : null);
+        setAttachmentIntent(file && documentFileType(file).startsWith("image/") ? null : "document");
+      }}
+    >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-2xl border-2 border-dashed border-ring bg-background/80 text-sm font-medium">
+          Drop a supported file to attach it
+        </div>
+      )}
       <div className="shrink-0 pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
@@ -188,13 +408,6 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {!embedded && <AddItemsButton variant="outline" className="hidden lg:inline-flex" />}
-            {canWrite && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
-                <Paperclip />
-                Add document
-              </Button>
-            )}
             <Button
               type="button"
               variant="ghost"
@@ -321,11 +534,12 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
               <div className="flex flex-col items-center px-2 py-10 text-center">
                 <Bot className="size-6 text-brass" strokeWidth={1.6} />
                 <h2 className="mt-2 font-display text-[1.35rem] tracking-[-0.025em]">
-                  Ask your home a question.
+                  What would you like to do?
                 </h2>
                 <p className="mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
-                  Answers come from your current records. Pick a suggestion
-                  below or type your own.
+                  Ask a question, request an inventory change, describe items to
+                  add, or attach a document or photo. You review every change
+                  before it is saved.
                 </p>
               </div>
             )}
@@ -337,6 +551,12 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                     className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-start text-sm leading-relaxed text-primary-foreground"
                   >
                     {message.text}
+                    {message.attachment && (
+                      <span className="mt-2 flex max-w-full items-center gap-2 rounded-lg bg-primary-foreground/10 px-2.5 py-2 text-xs">
+                        <FileText className="size-4 shrink-0" />
+                        <span className="truncate">{message.attachment.name}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -347,7 +567,18 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                   }
                   className="scroll-mt-2"
                 >
-                  {message.action ? (
+                  {message.capture ? (
+                    <div className="surface space-y-3 p-4" aria-label="Assistant capture status">
+                      <p dir="auto" className="text-sm">{message.text}</p>
+                      {message.capture.kind === "photo" && (
+                        <AssistantPhotoProgress
+                          capture={message.capture}
+                          onChange={(patch) => updateCapture(message.capture!.id, patch)}
+                          onSelectImport={selectImport}
+                        />
+                      )}
+                    </div>
+                  ) : message.action ? (
                     <div className="surface space-y-3 p-5" aria-label="Action review">
                       <p dir="auto" className="text-sm">{message.text}</p>
                       <p className="text-xs text-muted-foreground">Original request</p>
@@ -625,6 +856,7 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
               </div>
             )}
             <AssistantDocumentSlot />
+            <AssistantImportSlot />
             <div ref={endRef} />
           </div>
         </div>
@@ -663,7 +895,94 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
             </div>
           )}
           <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3">
-            <form onSubmit={submit}>
+            {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && (
+              <label className="mb-2 block text-xs text-muted-foreground">
+                Destination household
+                <Select
+                  aria-label="Destination household"
+                  className="mt-1 h-11 w-full"
+                  value={captureHouseholdId}
+                  disabled={capturePending}
+                  onChange={(event) => setCaptureHouseholdId(event.target.value)}
+                >
+                  <option value="">Choose a household</option>
+                  {scope.scopes.map((household) => (
+                    <option key={household.id} value={household.id}>{household.name}</option>
+                  ))}
+                </Select>
+              </label>
+            )}
+            {attachment && (
+              <div className="mb-2 flex items-center gap-3 rounded-xl border border-border/80 bg-secondary/30 p-2.5">
+                {attachmentUrl ? (
+                  <img src={attachmentUrl} alt={`Preview of ${attachment.name}`} className="size-12 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-secondary">
+                    <FileText className="size-5 text-muted-foreground" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium">{attachment.name}</p>
+                  <p className="text-2xs text-muted-foreground">{Math.ceil(attachment.size / 1024)} KB</p>
+                </div>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Remove attachment"
+                  className="size-11"
+                  disabled={capturePending}
+                  onClick={() => {
+                    setAttachment(null);
+                    setAttachmentIntent(null);
+                    setCaptureError(null);
+                  }}
+                >
+                  <span aria-hidden="true">×</span>
+                </Button>
+              </div>
+            )}
+            {attachment && documentFileType(attachment).startsWith("image/") && (
+              <fieldset className="mb-2 rounded-xl border border-border/70 px-3 py-2">
+                <legend className="px-1 text-xs text-muted-foreground">How should I use this image?</legend>
+                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  <label className="inline-flex min-h-11 items-center gap-2 text-xs">
+                    <input type="radio" name="assistant-image-intent" checked={attachmentIntent === "photo"} onChange={() => { setAttachmentIntent("photo"); setCaptureError(null); }} />
+                    Inventory photo
+                  </label>
+                  <label className="inline-flex min-h-11 items-center gap-2 text-xs">
+                    <input type="radio" name="assistant-image-intent" checked={attachmentIntent === "document"} onChange={() => { setAttachmentIntent("document"); setCaptureError(null); }} />
+                    Document or evidence
+                  </label>
+                </div>
+              </fieldset>
+            )}
+            {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && !captureHouseholdId && (
+              <p className="mb-2 text-xs text-brass">Choose a destination household; All my places will not select one automatically.</p>
+            )}
+            {captureError && <p role="alert" className="mb-2 text-xs text-destructive">{captureError}</p>}
+            <form
+              onSubmit={submit}
+              onPaste={(event) => {
+                if (attachment || capturePending) return;
+                const files = Array.from(event.clipboardData.files);
+                if (files.length === 0) return;
+                event.preventDefault();
+                if (files.length > 1) {
+                  setCaptureError("Attach one file at a time. Your draft is unchanged.");
+                  return;
+                }
+                const file = files[0]!;
+                const error = documentFileError(file);
+                if (error) {
+                  setCaptureError(error);
+                  return;
+                }
+                setAttachment(documentUploadFile(file));
+                setAttachmentIntent(documentFileType(file).startsWith("image/") ? null : "document");
+                setCaptureError(null);
+              }}
+            >
               <div className="flex items-end gap-2">
                 <Textarea
                   ref={textareaRef}
@@ -675,12 +994,42 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                       submit();
                     }
                   }}
-                  placeholder="Ask about your inventory…"
+                  placeholder="Ask, add items…"
                   aria-label="Ask the Housetory assistant"
                   rows={1}
                   maxLength={2000}
                   className="max-h-40 min-h-11 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
                 />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={DOCUMENT_FILE_ACCEPT}
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    const error = file ? documentFileError(file) : null;
+                    if (error) setCaptureError(error);
+                    else if (file) {
+                      setAttachment(documentUploadFile(file));
+                      setAttachmentIntent(documentFileType(file).startsWith("image/") ? null : "document");
+                    }
+                    event.target.value = "";
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Attach a file"
+                  title="Attach a PDF or image"
+                  className="size-11 shrink-0"
+                  disabled={!canWrite || capturePending}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Paperclip />
+                </Button>
                 {dictation.supported && (
                   <Button
                     type="button"
@@ -700,9 +1049,9 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
                   type="submit"
                   size="icon"
                   aria-label="Send question"
-                  disabled={pending || tooManyReferences || question.trim().length < 2}
+                  disabled={pending || capturePending || tooManyReferences || (!attachment && question.trim().length < 2)}
                 >
-                  {pending ? (
+                  {pending || capturePending ? (
                     <Loader2 className="animate-spin" />
                   ) : (
                     <Send />
@@ -712,14 +1061,6 @@ export function AssistantPage({ embedded = false }: { embedded?: boolean } = {})
             </form>
           </section>
         </div>
-        <DocumentUploadDialog
-          open={uploadOpen}
-          onOpenChange={setUploadOpen}
-          onUploaded={(document) => {
-            selectDocument(document.id);
-            setPageReferences([{ kind: "document", id: document.id, name: document.title }]);
-          }}
-        />
       </div>
     </div>
   );

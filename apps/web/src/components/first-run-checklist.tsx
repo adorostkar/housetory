@@ -53,11 +53,11 @@ export function FirstRunChecklist({
     },
     {
       key: "assistant",
-      title: "Ask the assistant",
-      description: "Once you have items, ask where anything is.",
+      title: "Search or ask",
+      description: "Use the header search for quick matches or a conversation.",
       done: false,
       icon: Bot,
-      action: { label: "Open assistant", to: "/assistant" },
+      action: { label: "Open search", to: "/search" },
     },
   ];
   const completed = steps.filter((step) => step.done).length;

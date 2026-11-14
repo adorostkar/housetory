@@ -6,6 +6,7 @@ import {
   Loader2,
   MapPin,
   Package,
+  Paperclip,
   Search,
   Sparkles,
   X,
@@ -23,6 +24,7 @@ import { withHousehold } from "@/lib/household-links";
 import { useQuickSearch } from "@/lib/queries";
 import type { QuickSearchKind, QuickSearchResult } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
+import { DOCUMENT_FILE_ACCEPT, documentFileError } from "@/lib/document-files";
 
 const GROUPS: Array<{
   kind: QuickSearchKind;
@@ -62,14 +64,20 @@ function contextLine(result: QuickSearchResult) {
 export function QuickSearch({
   variant = "top",
   className,
+  onAsk,
+  onAttach,
 }: {
   variant?: "top" | "mobile";
   className?: string;
+  onAsk?: (query: string, trigger: HTMLElement) => void;
+  onAttach?: (file: File, trigger: HTMLElement) => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const attachInputRef = React.useRef<HTMLInputElement>(null);
+  const attachButtonRef = React.useRef<HTMLButtonElement>(null);
   const pendingEditRef = React.useRef<string | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -79,6 +87,7 @@ export function QuickSearch({
   const [focused, setFocused] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
+  const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const isItemsPage = location.pathname === "/items";
   const debounced = useDebouncedValue(query, 220);
   const term = query.trim();
@@ -225,7 +234,8 @@ export function QuickSearch({
 
   const askAssistant = () => {
     setFocused(false);
-    navigate(`/assistant?q=${encodeURIComponent(term)}`);
+    if (onAsk && inputRef.current) onAsk(term, inputRef.current);
+    else navigate(`/assistant?q=${encodeURIComponent(term)}`);
   };
 
   const choose = (result: QuickSearchResult) => {
@@ -489,13 +499,53 @@ export function QuickSearch({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-11 pr-16 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
+          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-11 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
           variant === "top"
-            ? "h-12 text-[0.95rem]"
-            : "h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft",
+            ? cn("h-12 text-[0.95rem]", onAttach ? "pr-24" : "pr-16")
+            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-20" : "pr-16"),
         )}
       />
-      <kbd className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block">
+      {onAttach && (
+        <>
+          <input
+            ref={attachInputRef}
+            type="file"
+            accept={DOCUMENT_FILE_ACCEPT}
+            data-testid="quick-search-attachment-input"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (!file) return;
+              const error = documentFileError(file);
+              if (error) {
+                setAttachmentError(error);
+                setFocused(true);
+                return;
+              }
+              setAttachmentError(null);
+              setFocused(false);
+              if (attachButtonRef.current) onAttach(file, attachButtonRef.current);
+            }}
+          />
+          <button
+            ref={attachButtonRef}
+            type="button"
+            aria-label="Attach a file"
+            title="Attach a PDF or image"
+            className="absolute right-10 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => attachInputRef.current?.click()}
+          >
+            <Paperclip className="size-4" />
+          </button>
+        </>
+      )}
+      <kbd className={cn(
+        "pointer-events-none absolute top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block",
+        onAttach ? "right-20" : "right-11",
+      )}>
         ⌘K
       </kbd>
       {query ? (
@@ -513,6 +563,11 @@ export function QuickSearch({
           <X className="size-4" />
         </button>
       ) : null}
+      {attachmentError && (
+        <p role="alert" className="mt-1 px-2 text-2xs text-destructive">
+          {attachmentError}
+        </p>
+      )}
       {panel}
     </div>
   );

@@ -1,5 +1,6 @@
 export const DOCUMENT_FILE_ACCEPT =
   "application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,text/plain";
+export const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const extensions: Record<string, string> = {
   pdf: "application/pdf",
@@ -21,6 +22,9 @@ export function documentFileError(file: File): string | null {
     return "Choose a PDF, JPEG, PNG, WebP, HEIC/HEIF image or plain-text document.";
   }
   if (file.size === 0) return "This file is empty. Choose a file with content.";
+  if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) {
+    return "This file is larger than the 25 MB upload limit. Choose a smaller file.";
+  }
   return null;
 }
 

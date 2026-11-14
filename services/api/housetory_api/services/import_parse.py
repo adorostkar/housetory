@@ -767,6 +767,12 @@ def _parse_detail_line(
     if re.match(r"^(?:todo|to do|remember|buy|call|email|schedule)\b", original, re.I):
         return None
     body = original
+    body = re.sub(
+        r"^(?:I|we)\s+(?:have\s+)?(?:bought|purchased|acquired)\s+",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
     quantity, body = parse_quantity(body)
     price, currency, body = parse_price(body)
     serial, body = parse_serial(body)

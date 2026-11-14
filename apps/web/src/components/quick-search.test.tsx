@@ -57,15 +57,22 @@ function BookmarkedSearchButton() {
   );
 }
 
-function renderSearch(initialEntry = "/", responsive = false) {
+function renderSearch(
+  initialEntry = "/",
+  responsive = false,
+  callbacks: {
+    onAsk?: (query: string, trigger: HTMLElement) => void;
+    onAttach?: (file: File, trigger: HTMLElement) => void;
+  } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <div hidden={responsive}><QuickSearch /></div>
-        {responsive && <QuickSearch variant="mobile" />}
+        <div hidden={responsive}><QuickSearch {...callbacks} /></div>
+        {responsive && <QuickSearch variant="mobile" {...callbacks} />}
         {responsive && <BookmarkedSearchButton />}
         <LocationProbe maxChanges={responsive ? 10 : Infinity} />
       </MemoryRouter>
@@ -255,6 +262,48 @@ describe("QuickSearch", () => {
         "/assistant?q=heavy%20drill%3F",
       ),
     );
+  });
+
+  it("hands an assistant submission to the conversational panel when provided", async () => {
+    const onAsk = vi.fn();
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), []),
+    );
+    renderSearch("/", false, { onAsk });
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "Where is my camera?");
+    await userEvent.click(
+      await screen.findByRole("option", { name: /Ask the assistant:/ }),
+    );
+    expect(onAsk).toHaveBeenCalledWith("Where is my camera?", input);
+    expect(screen.getByTestId("location")).toHaveTextContent("/");
+  });
+
+  it("hands a validated attachment to the capture panel", async () => {
+    const onAttach = vi.fn();
+    renderSearch("/", false, { onAttach });
+    const button = screen.getByRole("button", { name: "Attach a file" });
+    await userEvent.click(button);
+    const file = new File(["invoice"], "invoice.pdf", { type: "application/pdf" });
+    await userEvent.upload(document.querySelector('input[type="file"]')!, file);
+    expect(onAttach).toHaveBeenCalledWith(file, button);
+    expect(screen.getByTestId("location")).toHaveTextContent("/");
+  });
+
+  it("rejects unsupported attachments before opening capture", async () => {
+    const onAttach = vi.fn();
+    renderSearch("/", false, { onAttach });
+    const button = screen.getByRole("button", { name: "Attach a file" });
+    await userEvent.click(button);
+    await userEvent.upload(
+      document.querySelector('input[type="file"]')!,
+      new File(["script"], "payload.exe", { type: "application/octet-stream" }),
+      { applyAccept: false },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF");
+    expect(onAttach).not.toHaveBeenCalled();
   });
 
   it("opens all results with Enter before selecting a result and preserves the query", async () => {

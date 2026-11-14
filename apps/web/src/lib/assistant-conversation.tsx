@@ -19,11 +19,26 @@ import { classifyAssistantIntent } from "@/lib/assistant-intent";
 export interface AssistantMessage {
   role: "user" | "assistant";
   text: string;
+  attachment?: { name: string; type: string };
+  capture?: AssistantCaptureState;
   response?: SearchQueryResponse;
   pageReferences?: AssistantPageReference[];
   fallback?: { href: string; label: string };
   action?: AssistantActionState;
   clarification?: ActionClarification;
+}
+
+export interface AssistantCaptureState {
+  id: string;
+  kind: "items" | "document" | "photo";
+  filename?: string;
+  documentId?: string;
+  recognitionId?: string;
+  importId?: string;
+  importing?: boolean;
+  importError?: string;
+  file?: File;
+  error?: string;
 }
 
 interface ActionClarification {
@@ -109,6 +124,11 @@ interface AssistantActionInterpretResult {
 interface Conversation {
   messages: AssistantMessage[];
   draft: string;
+  attachment: File | null;
+  attachmentIntent: "photo" | "document" | null;
+  captureHouseholdId: string;
+  capturePending: boolean;
+  captureError: string | null;
   turns: SearchTurn[];
   context: SearchConversationContext | null;
   actionItemIds: string[] | null;
@@ -129,6 +149,19 @@ interface AssistantConversationContextValue {
   setSelection: (selection: SearchScopeSelection) => void;
   conversations: Record<string, Conversation>;
   setDraft: (scope: string, value: Updater<string>) => void;
+  setAttachment: (scope: string, file: File | null) => void;
+  setAttachmentIntent: (scope: string, value: "photo" | "document" | null) => void;
+  setCaptureHouseholdId: (scope: string, value: string) => void;
+  setCapturePending: (scope: string, value: boolean) => void;
+  setCaptureError: (scope: string, value: string | null) => void;
+  recordCapture: (
+    scope: string,
+    userText: string,
+    attachment: AssistantMessage["attachment"],
+    assistantText: string,
+    capture: AssistantCaptureState,
+  ) => void;
+  updateCapture: (scope: string, captureId: string, patch: Partial<AssistantCaptureState>) => void;
   reset: (scope: string) => void;
   ask: (scope: string, selection: SearchScopeSelection, value: string, regenerate: boolean, session: SessionSnapshot, references: AssistantPageReference[]) => void;
   clarifyAction: (scope: string, clarificationId: string, reply: ClarificationReply) => void;
@@ -152,6 +185,11 @@ interface AssistantConversationContextValue {
 const EMPTY: Conversation = {
   messages: [],
   draft: "",
+  attachment: null,
+  attachmentIntent: null,
+  captureHouseholdId: "",
+  capturePending: false,
+  captureError: null,
   turns: [],
   context: null,
   actionItemIds: null,
@@ -198,6 +236,71 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     update(scope, (current) => ({
       ...current,
       draft: typeof value === "function" ? value(current.draft) : value,
+    }));
+  }, [update]);
+
+  const setAttachment = React.useCallback((scope: string, file: File | null) => {
+    update(scope, (current) => ({ ...current, attachment: file, captureError: null }));
+  }, [update]);
+
+  const setAttachmentIntent = React.useCallback((
+    scope: string,
+    value: "photo" | "document" | null,
+  ) => {
+    update(scope, (current) => ({ ...current, attachmentIntent: value }));
+  }, [update]);
+
+  const setCaptureHouseholdId = React.useCallback((scope: string, value: string) => {
+    update(scope, (current) => ({ ...current, captureHouseholdId: value }));
+  }, [update]);
+
+  const setCapturePending = React.useCallback((scope: string, value: boolean) => {
+    update(scope, (current) => ({ ...current, capturePending: value }));
+  }, [update]);
+
+  const setCaptureError = React.useCallback((scope: string, value: string | null) => {
+    update(scope, (current) => ({ ...current, captureError: value }));
+  }, [update]);
+
+  const recordCapture = React.useCallback((
+    scope: string,
+    userText: string,
+    attachment: AssistantMessage["attachment"],
+    assistantText: string,
+    capture: AssistantCaptureState,
+  ) => {
+    update(scope, (current) => ({
+      ...current,
+      messages: [
+        ...current.messages,
+        { role: "user", text: userText, ...(attachment ? { attachment } : {}) },
+        { role: "assistant", text: assistantText, capture },
+      ],
+      draft: "",
+      attachment: null,
+      attachmentIntent: null,
+      captureError: null,
+      capturePending: false,
+      turns: [
+        ...current.turns,
+        { role: "user" as const, content: userText.slice(0, 1200) },
+        { role: "assistant" as const, content: assistantText.slice(0, 1200) },
+      ].slice(-8),
+    }));
+  }, [update]);
+
+  const updateCapture = React.useCallback((
+    scope: string,
+    captureId: string,
+    patch: Partial<AssistantCaptureState>,
+  ) => {
+    update(scope, (current) => ({
+      ...current,
+      messages: current.messages.map((message) =>
+        message.capture?.id === captureId
+          ? { ...message, capture: { ...message.capture, ...patch } }
+          : message,
+      ),
     }));
   }, [update]);
 
@@ -855,8 +958,20 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   }, [setNameState]);
 
   const value = React.useMemo(
-    () => ({ selection, setSelection, conversations, setDraft, reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn }),
-    [selection, conversations, setDraft, reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn],
+    () => ({
+      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
+      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
+      reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
+      saveLoan, editReturn, setReturnDraft, saveReturn,
+    }),
+    [
+      selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
+      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
+      reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
+      saveLoan, editReturn, setReturnDraft, saveReturn,
+    ],
   );
   return (
     <AssistantConversationContext.Provider value={value}>
@@ -878,10 +993,27 @@ export function useAssistantConversation(scope: string) {
   const { references } = useAssistantPageContext();
   if (!store) throw new Error("AssistantConversationProvider is required");
   const conversation = store.conversations[scope] ?? EMPTY;
+  const updateCapture = React.useCallback(
+    (captureId: string, patch: Partial<AssistantCaptureState>) =>
+      store.updateCapture(scope, captureId, patch),
+    [scope, store.updateCapture],
+  );
   return {
     ...conversation,
     question: conversation.draft,
     setQuestion: (value: Updater<string>) => store.setDraft(scope, value),
+    setAttachment: (file: File | null) => store.setAttachment(scope, file),
+    setAttachmentIntent: (value: "photo" | "document" | null) => store.setAttachmentIntent(scope, value),
+    setCaptureHouseholdId: (value: string) => store.setCaptureHouseholdId(scope, value),
+    setCapturePending: (value: boolean) => store.setCapturePending(scope, value),
+    setCaptureError: (value: string | null) => store.setCaptureError(scope, value),
+    recordCapture: (
+      userText: string,
+      attachment: AssistantMessage["attachment"],
+      assistantText: string,
+      capture: AssistantCaptureState,
+    ) => store.recordCapture(scope, userText, attachment, assistantText, capture),
+    updateCapture,
     reset: () => store.reset(scope),
     clarifyAction: (clarificationId: string, itemId: string, text: string) => store.clarifyAction(scope, clarificationId, { itemId, text }),
     applyAction: (proposalId: string) => store.applyAction(scope, proposalId),

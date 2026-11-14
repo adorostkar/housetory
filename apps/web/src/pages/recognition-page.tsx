@@ -6,7 +6,6 @@ import {
   Loader2,
   Package,
   RefreshCw,
-  Sparkles,
   Upload,
 } from "lucide-react";
 import * as React from "react";
@@ -229,14 +228,6 @@ export function RecognitionPage() {
         eyebrow="Intelligence"
         title="Recognise an item"
         description="Photograph a possession, review suggested details, then create a new item or apply the changes to an existing one."
-        actions={
-          <Button variant="outline" asChild>
-            <Link to="/assistant">
-              <Sparkles />
-              Ask Housetory
-            </Link>
-          </Button>
-        }
       />
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(330px,1fr)]">
