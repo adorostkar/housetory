@@ -160,9 +160,11 @@ interface AssistantConversationContextValue {
     attachment: AssistantMessage["attachment"],
     assistantText: string,
     capture: AssistantCaptureState,
+    freshTopic?: boolean,
   ) => void;
   updateCapture: (scope: string, captureId: string, patch: Partial<AssistantCaptureState>) => void;
   reset: (scope: string) => void;
+  startFreshTopic: (scope: string) => void;
   ask: (
     scope: string,
     selection: SearchScopeSelection,
@@ -171,6 +173,7 @@ interface AssistantConversationContextValue {
     session: SessionSnapshot,
     references: AssistantPageReference[],
     onCreateItem: (value: string) => void | Promise<void>,
+    freshTopic?: boolean,
   ) => void;
   clarifyAction: (scope: string, clarificationId: string, reply: ClarificationReply) => void;
   applyAction: (scope: string, proposalId: string) => void;
@@ -276,6 +279,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     attachment: AssistantMessage["attachment"],
     assistantText: string,
     capture: AssistantCaptureState,
+    freshTopic = false,
   ) => {
     update(scope, (current) => ({
       ...current,
@@ -289,8 +293,10 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       attachmentIntent: null,
       captureError: null,
       capturePending: false,
+      context: freshTopic ? null : current.context,
+      actionItemIds: freshTopic ? null : current.actionItemIds,
       turns: [
-        ...current.turns,
+        ...(freshTopic ? [] : current.turns),
         { role: "user" as const, content: userText.slice(0, 1200) },
         { role: "assistant" as const, content: assistantText.slice(0, 1200) },
       ].slice(-8),
@@ -318,6 +324,15 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     );
   }, [update]);
 
+  const startFreshTopic = React.useCallback((scope: string) => {
+    update(scope, (current) => ({
+      ...current,
+      turns: [],
+      context: null,
+      actionItemIds: null,
+    }));
+  }, [update]);
+
   const ask = React.useCallback((
     scope: string,
     selection: SearchScopeSelection,
@@ -326,6 +341,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     session: SessionSnapshot,
     references: AssistantPageReference[],
     onCreateItem: (value: string) => void | Promise<void>,
+    freshTopic = false,
   ) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
     if (current.pending) return;
@@ -336,8 +352,8 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       ? current.messages[current.messages.length - 2]?.pageReferences ?? []
       : references;
     const seededSession = current.messages.length === 0 && session.scopeKey === scope;
-    const history = seededSession ? session.turns : previousTurns;
-    const context = regenerate ? previousAnswer?.response?.context : (
+    const history = freshTopic ? [] : seededSession ? session.turns : previousTurns;
+    const context = freshTopic ? null : regenerate ? previousAnswer?.response?.context : (
       seededSession ? session.context : current.context
     );
     const actionText = value.replace(/^\s*(?:(?:please|can you|could you|would you|i want to|i need to)\s+)*/i, "");
@@ -404,7 +420,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       || /^\s*نام\s.+\sبه\s.+\sتغییر\s+بده\s*[.!?؟]?\s*$/u.test(value);
     const runAction = () => {
       const localDate = localDateISO();
-      const conversationItemIds = !regenerate && current.actionItemIds !== null
+      const conversationItemIds = !freshTopic && !regenerate && current.actionItemIds !== null
         ? current.actionItemIds
         : context?.resolved_items.map(({ id }) => id) ?? [];
       return api.post<AssistantActionInterpretResult>(
@@ -986,14 +1002,14 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     () => ({
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
-      reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     }),
     [
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
-      reset, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     ],
@@ -1037,9 +1053,11 @@ export function useAssistantConversation(scope: string) {
       attachment: AssistantMessage["attachment"],
       assistantText: string,
       capture: AssistantCaptureState,
-    ) => store.recordCapture(scope, userText, attachment, assistantText, capture),
+      freshTopic?: boolean,
+    ) => store.recordCapture(scope, userText, attachment, assistantText, capture, freshTopic),
     updateCapture,
     reset: () => store.reset(scope),
+    startFreshTopic: () => store.startFreshTopic(scope),
     clarifyAction: (clarificationId: string, itemId: string, text: string) => store.clarifyAction(scope, clarificationId, { itemId, text }),
     applyAction: (proposalId: string) => store.applyAction(scope, proposalId),
     cancelAction: (proposalId: string) => store.cancelAction(scope, proposalId),
@@ -1062,14 +1080,15 @@ export function useAssistantConversation(scope: string) {
       regenerate: boolean,
       session: SessionSnapshot,
       onCreateItem: (value: string) => void | Promise<void>,
+      freshTopic = false,
     ) => {
       const last = conversation.messages[conversation.messages.length - 1];
       const match = value.trim().match(/^(?:the one (?:in|at)|in|at|(?:اون|اونی|آن|اینی)\s+(?:توی|در)|(?:توی|در))\s+(.+?)\s*[.!?؟]?\s*$/iu);
-      if (!regenerate && last?.clarification && !last.clarification.resolved && match?.[1]) {
+      if (!freshTopic && !regenerate && last?.clarification && !last.clarification.resolved && match?.[1]) {
         store.clarifyAction(scope, last.clarification.id, { location: match[1], text: value });
         return;
       }
-      store.ask(scope, selection, value, regenerate, session, references, onCreateItem);
+      store.ask(scope, selection, value, regenerate, session, references, onCreateItem, freshTopic);
     },
   };
 }

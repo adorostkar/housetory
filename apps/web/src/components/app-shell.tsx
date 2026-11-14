@@ -7,14 +7,13 @@ import {
   House,
   MoreHorizontal,
   Package,
-  Search,
   Settings,
   Plus,
   Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -34,6 +33,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
+import { toast } from "sonner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   DropdownMenu,
@@ -43,10 +43,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
-import { useCanWrite } from "@/lib/queries";
+import { useCanWrite, useReviewSummary } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useAssistantDocuments } from "@/lib/assistant-documents";
+import {
+  ASSISTANT_TASK_COMPLETED_EVENT,
+  type AssistantTaskCompletion,
+} from "@/lib/assistant-task-events";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -118,9 +122,10 @@ const mobileMoreNav: NavItem[] = [
     match: isFinancialsPath,
   },
   { to: "/review", label: "Review", icon: ClipboardCheck },
-  { to: "/search", label: "Search", icon: Search },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
+
+const notifiedTaskKeys = new Set<string>();
 
 function navItemActive(item: NavItem, pathname: string) {
   if (item.match) return item.match(pathname);
@@ -152,8 +157,8 @@ function AppShellLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
+  const reviewSummary = useReviewSummary();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
-  const isAssistant = location.pathname === "/assistant";
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantRequest, setAssistantRequest] = useState<{
     id: string;
@@ -164,7 +169,37 @@ function AppShellLayout() {
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const restoreAssistantFocus = useRef(false);
   const { openAddItems } = useAddItems();
-  const { select: selectDocument } = useAssistantDocuments();
+  const { select: selectDocument, selectImport } = useAssistantDocuments();
+  const reviewCount = reviewSummary.data?.pending_count ?? 0;
+  const closeAssistant = useCallback(() => {
+    restoreAssistantFocus.current = true;
+    setAssistantOpen(false);
+    if (location.hash === "#assistant") {
+      navigate(
+        {
+          pathname: location.pathname,
+          search: location.search,
+          hash: "",
+        },
+        { replace: true },
+      );
+    }
+  }, [location.hash, location.pathname, location.search, navigate]);
+  const openTaskReview = useCallback((task: AssistantTaskCompletion) => {
+    if (task.kind === "document") selectDocument(task.id);
+    else selectImport(task.id);
+    restoreAssistantFocus.current = false;
+    assistantTrigger.current = null;
+    if (location.hash === "#assistant") {
+      setAssistantOpen(true);
+    } else {
+      navigate({
+        pathname: location.pathname,
+        search: location.search,
+        hash: "#assistant",
+      });
+    }
+  }, [location.hash, location.pathname, location.search, navigate, selectDocument, selectImport]);
   const moreActive = mobileMoreNav.some((item) =>
     navItemActive(item, location.pathname),
   );
@@ -186,9 +221,7 @@ function AppShellLayout() {
         if (input) {
           input.focus();
           input.select();
-        } else {
-          navigate("/search");
-        }
+        } else navigate("/");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -202,33 +235,104 @@ function AppShellLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (location.hash !== "#assistant") {
+      setAssistantOpen(false);
+      if (restoreAssistantFocus.current) {
+        window.requestAnimationFrame(() => {
+          if (window.location.hash !== "#assistant") {
+            assistantTrigger.current?.focus();
+            restoreAssistantFocus.current = false;
+          }
+        });
+      }
+      return;
+    }
+
+    setAssistantOpen(true);
+    const params = new URLSearchParams(location.search);
+    if (params.get("__assistant_legacy") !== "1") return;
+    const text = params.get("q")?.trim() ?? "";
+    if (text) setAssistantRequest({ id: crypto.randomUUID(), text });
+    params.delete("__assistant_legacy");
+    params.delete("q");
+    params.delete("ask");
+    params.delete("r");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: params.size ? `?${params.toString()}` : "",
+        hash: location.hash,
+      },
+      { replace: true },
+    );
+  }, [location.hash, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
     if (!assistantOpen) return;
     const documentMatch = location.pathname.match(/^\/documents\/([^/]+)$/);
     if (documentMatch?.[1]) selectDocument(documentMatch[1]);
   }, [assistantOpen, location.pathname, selectDocument]);
 
   useEffect(() => {
-    if (!assistantOpen) {
-      if (restoreAssistantFocus.current) assistantTrigger.current?.focus();
-      restoreAssistantFocus.current = false;
-      return;
-    }
+    if (!assistantOpen) return;
     assistantHeading.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        restoreAssistantFocus.current = true;
-        setAssistantOpen(false);
+        closeAssistant();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [assistantOpen]);
+  }, [assistantOpen, closeAssistant]);
+
+  useEffect(() => {
+    const onTaskCompleted = (event: Event) => {
+      const task = (event as CustomEvent<AssistantTaskCompletion>).detail;
+      if (!task?.id || !task.title || !task.description) return;
+      const key = `${task.kind}:${task.id}`;
+      if (notifiedTaskKeys.has(key)) return;
+      notifiedTaskKeys.add(key);
+      try {
+        if (window.sessionStorage.getItem(`housetory-assistant-task:${key}`)) return;
+        window.sessionStorage.setItem(`housetory-assistant-task:${key}`, "shown");
+      } catch {
+        // The in-memory key still prevents repeat toasts in this page session.
+      }
+      toast.success(task.title, {
+        description: task.description,
+        action: {
+          label: "Review",
+          onClick: () => openTaskReview(task),
+        },
+      });
+    };
+    window.addEventListener(ASSISTANT_TASK_COMPLETED_EVENT, onTaskCompleted);
+    return () => window.removeEventListener(ASSISTANT_TASK_COMPLETED_EVENT, onTaskCompleted);
+  }, [openTaskReview]);
 
   const openAssistant = (text: string, trigger: HTMLElement, file?: File) => {
     restoreAssistantFocus.current = true;
     assistantTrigger.current = trigger;
     setAssistantRequest({ id: crypto.randomUUID(), text, ...(file ? { file } : {}) });
-    setAssistantOpen(true);
+    if (location.hash !== "#assistant") {
+      navigate({
+        pathname: location.pathname,
+        search: location.search,
+        hash: "#assistant",
+      });
+    }
+  };
+
+  const openAssistantPanel = (trigger: HTMLElement) => {
+    restoreAssistantFocus.current = true;
+    assistantTrigger.current = trigger;
+    if (location.hash !== "#assistant") {
+      navigate({
+        pathname: location.pathname,
+        search: location.search,
+        hash: "#assistant",
+      });
+    }
   };
 
   const renderMobileTab = (item: NavItem) => {
@@ -302,9 +406,9 @@ function AppShellLayout() {
         </div>
       </aside>
 
-      <div className="min-w-0">
-        <header className="glass safe-top sticky top-0 z-40 border-b border-border/60 lg:hidden">
-          <div className="flex h-16 items-center justify-between px-5">
+      <div className={cn("min-w-0", assistantOpen && "lg:pr-[min(34rem,40vw)]")}>
+        <header className="glass safe-top sticky top-0 z-30 border-b border-border/60">
+          <div className="flex h-14 items-center justify-between px-5 lg:hidden">
             <Link
               to="/"
               aria-label="Housetory home"
@@ -320,15 +424,14 @@ function AppShellLayout() {
               <AccountMenu compact />
             </div>
           </div>
-        </header>
-
-        <header className="sticky top-0 z-30 hidden border-b border-border/50 bg-background/70 backdrop-blur-xl lg:block">
-          <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-12">
+          <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-3 sm:px-5 lg:px-12">
             <QuickSearch
               variant="top"
               className="w-full max-w-2xl"
               onAsk={(query, trigger) => openAssistant(query, trigger)}
               onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
+              onOpenAssistant={openAssistantPanel}
+              reviewCount={reviewCount}
             />
           </div>
         </header>
@@ -336,23 +439,9 @@ function AppShellLayout() {
         <main
           className={cn(
             "mx-auto w-full max-w-[1320px] px-5 sm:px-8 lg:px-12",
-            isAssistant
-              ? cn(
-                  "flex flex-col overflow-hidden pb-3 pt-3 lg:h-dvh lg:pb-6 lg:pt-6",
-                  softwareKeyboardOpen
-                    ? "h-[calc(100dvh-4rem)]"
-                    : "h-[calc(100dvh-4rem-4.75rem-env(safe-area-inset-bottom))]",
-                )
-              : "min-h-[calc(100dvh-4rem)] pb-28 pt-5 sm:pt-7 lg:min-h-dvh lg:pb-20 lg:pt-8",
+            "min-h-[calc(100dvh-7.5rem)] pb-28 pt-5 sm:pt-7 lg:min-h-dvh lg:pb-20 lg:pt-8",
           )}
         >
-          <div className="mb-5 lg:hidden">
-            <QuickSearch
-              variant="mobile"
-              onAsk={(query, trigger) => openAssistant(query, trigger)}
-              onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
-            />
-          </div>
           {!canWrite && (
             <div className="mb-5 rounded-xl border border-brass/25 bg-brass-soft/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
               <span className="font-medium text-brass">Viewer access.</span> You
@@ -363,10 +452,10 @@ function AppShellLayout() {
           )}
           <div
             key={location.pathname}
-            className={cn("animate-fade-in", isAssistant && "min-h-0 flex-1")}
+            className="animate-fade-in"
           >
             <Suspense fallback={<PageFallback />}>
-              {!(isAssistant && assistantOpen) && <Outlet />}
+              <Outlet />
             </Suspense>
           </div>
         </main>
@@ -447,7 +536,7 @@ function AppShellLayout() {
         <aside
           aria-labelledby="assistant-panel-title"
           data-testid="assistant-panel"
-          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,100vw)] lg:border-l lg:border-border/80"
+          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,40vw)] lg:border-l lg:border-border/80"
         >
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <h2
@@ -461,7 +550,7 @@ function AppShellLayout() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setAssistantOpen(false)}
+                onClick={closeAssistant}
                 className="rounded-lg p-2 text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
                 aria-label="Close assistant"
               >

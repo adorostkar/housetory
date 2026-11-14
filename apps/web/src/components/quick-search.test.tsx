@@ -155,7 +155,7 @@ describe("QuickSearch", () => {
     await screen.findByRole("option", { name: /Camera Body/ });
     await userEvent.click(screen.getByRole("button", { name: /View all results/ }));
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/search?q=Camera"),
+      expect(screen.getByTestId("location")).toHaveTextContent("/items?q=Camera"),
     );
   });
 
@@ -213,7 +213,7 @@ describe("QuickSearch", () => {
         screen.getByTestId("location").textContent ?? "/",
         "http://localhost",
       );
-      expect(url.pathname).toBe("/search");
+      expect(url.pathname).toBe("/items");
       expect(url.searchParams.get("q")).toBe("where is my heavy drill");
       expect(url.searchParams.get("ask")).toBeNull();
     });
@@ -252,9 +252,8 @@ describe("QuickSearch", () => {
         screen.getByTestId("location").textContent ?? "/",
         "http://localhost",
       );
-      expect(url.pathname).toBe("/search");
+      expect(url.pathname).toBe("/assistant");
       expect(url.searchParams.get("q")).toBe("where is my heavy drill");
-      expect(url.searchParams.get("ask")).toBe("1");
     });
   });
 
@@ -343,7 +342,7 @@ describe("QuickSearch", () => {
         screen.getByTestId("location").textContent ?? "/",
         "http://localhost",
       );
-      expect(url.pathname).toBe("/search");
+      expect(url.pathname).toBe("/items");
       expect(url.searchParams.get("q")).toBe("Blue box");
     });
   });

@@ -4,8 +4,17 @@ import { Link } from "react-router-dom";
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
 import { DocumentProcessingStatus } from "@/components/document-processing-status";
 import { useDocument } from "@/lib/queries";
+import { dispatchAssistantTaskCompletion } from "@/lib/assistant-task-events";
 
-export function AssistantDocumentReview({ id, enabled }: { id: string; enabled: boolean }) {
+export function AssistantDocumentReview({
+  id,
+  enabled,
+  notifyOnReady = false,
+}: {
+  id: string;
+  enabled: boolean;
+  notifyOnReady?: boolean;
+}) {
   const documentQuery = useDocument(id, enabled);
   const [manualRequest, setManualRequest] = React.useState(0);
   const document = documentQuery.data;
@@ -19,7 +28,22 @@ export function AssistantDocumentReview({ id, enabled }: { id: string; enabled: 
         <h2 className="min-w-0 break-words text-sm font-medium">Document review: {document.title}</h2>
         <Link to={`/documents/${document.id}`} className="text-xs underline underline-offset-4">Open document</Link>
       </div>
-      <DocumentProcessingStatus documentId={document.id} enabled={enabled} onManualReview={() => setManualRequest((value) => value + 1)} />
+      <DocumentProcessingStatus
+        documentId={document.id}
+        enabled={enabled}
+        onManualReview={() => setManualRequest((value) => value + 1)}
+        onTaskComplete={notifyOnReady ? (snapshot) => {
+          const ready = snapshot.stage === "ready";
+          dispatchAssistantTaskCompletion({
+            id: document.id,
+            kind: "document",
+            title: ready ? `${document.title} ready for review` : "Document needs attention",
+            description: ready
+              ? "Review the extracted details before applying."
+              : "Document processing finished with an issue. Review the available details or retry.",
+          });
+        } : undefined}
+      />
       <div className="surface p-4">
         <DocumentExtractionReview document={document} enabled={enabled} manualReviewRequest={manualRequest} />
       </div>

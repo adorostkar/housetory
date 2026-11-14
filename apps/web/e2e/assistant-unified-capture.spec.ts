@@ -69,6 +69,110 @@ const importBatch = {
   metadata: {},
 };
 
+const assistantDocumentId = "00000000-0000-0000-0000-000000000013";
+const extractionItemId = "00000000-0000-0000-0000-000000000005";
+const assistantDocument = {
+  id: assistantDocumentId,
+  title: "Validation invoice",
+  document_type: "invoice",
+  original_filename: "invoice.pdf",
+  content_type: "application/pdf",
+  original_content_type: "application/pdf",
+  byte_size: 1024,
+  original_byte_size: 1024,
+  document_date: null,
+  merchant: null,
+  notes: "Invoice for the kitchen fridge",
+  ocr_status: "succeeded",
+  ocr_error: null,
+  ocr_confidence: 0.96,
+  ocr_processed_at: "2026-01-01T00:00:00Z",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  items: [],
+  item_count: 0,
+  page_count: 1,
+  url: "/documents/assistant-document.pdf",
+  original_url: "/documents/assistant-document.pdf",
+  extracted_text: "Cordless drill 12.99",
+  extracted_metadata: {},
+  pages: [],
+};
+const assistantExtraction = {
+  document_id: assistantDocumentId,
+  version: "synthetic-extraction-v1",
+  source_artifact: "synthetic-local-ocr",
+  document_type: "invoice",
+  generated_at: "2026-01-01T00:00:00Z",
+  purchase_eligible: false,
+  fields: {
+    merchant: null,
+    purchase_date: null,
+    document_date: null,
+    currency: "USD",
+    total_cents: 1299,
+    subtotal_cents: 1299,
+    tax_cents: 0,
+    discount_cents: 0,
+    shipping_cents: 0,
+    order_number: null,
+    brand: "Acme",
+    model: null,
+    serial_numbers: [],
+    warranty_provider: null,
+    warranty_start: null,
+    warranty_end: null,
+    warranty_months: null,
+    field_sources: {},
+    uncertain_fields: [],
+  },
+  lines: [{
+    id: "synthetic-invoice-line-1",
+    line_number: 1,
+    kind: "product",
+    description: "Cordless drill",
+    quantity: 1,
+    unit_price_cents: 1299,
+    line_total_cents: 1299,
+    evidence: { page: 1, line_number: 1, text: "Cordless drill 12.99" },
+    warnings: [],
+    purchase_eligible: false,
+  }],
+  warnings: [],
+  matches: [{
+    line_id: "synthetic-invoice-line-1",
+    candidates: [{
+      id: extractionItemId,
+      name: "Cordless drill",
+      brand: "Acme",
+      model: "D-1",
+      serial_number: null,
+      quantity: 1,
+      on_loan_quantity: 0,
+      room_name: "Garage",
+      location_name: "Box 2",
+      purchase: null,
+      warranty: null,
+      reasons: ["Matching item"],
+      match_quality: "strong",
+      exact_identifier: false,
+    }],
+    quality: "strong",
+    reasons: ["Matching item"],
+  }],
+  duplicate_documents: [],
+  applied: [],
+  ai_status: {
+    configured: false,
+    available: false,
+    mode: "disabled",
+    provider: "none",
+    provider_label: null,
+    cloud_consent: false,
+    error: null,
+  },
+};
+
 async function fakeMicrophone(page: Page) {
   await page.addInitScript(() => {
     const getUserMedia = async () => {
@@ -92,11 +196,13 @@ async function fixture(
   onSearchQuery?: (body: Record<string, unknown>) => void,
   aiAvailable = false,
   simulateImportRecovery = false,
+  simulateImportCompletion = false,
 ) {
   const errors: string[] = [];
   let creationQuery = "";
   let activeImportBatch = importBatch;
   let recoveryPolls = 0;
+  let importCompletionPolls = 0;
   let voiceReads = 0;
   let recoveryBatch = {
     ...importBatch,
@@ -135,6 +241,67 @@ async function fixture(
     }
     if (url.pathname === "/api/v1/search/scopes") {
       return route.fulfill({ json: { items: [{ id: household.id, name: household.name, properties: [] }] } });
+    }
+    if (url.pathname === "/api/v1/inventory-review/summary") {
+      return route.fulfill({
+        json: {
+          pending_count: 3,
+          status_counts: { pending: 3 },
+          type_counts: {},
+          last_run: null,
+          schedule: null,
+        },
+      });
+    }
+    if (url.pathname === "/api/v1/documents" && route.request().method() === "POST") {
+      return route.fulfill({ status: 201, json: assistantDocument });
+    }
+    if (url.pathname === `/api/v1/documents/${assistantDocumentId}`) {
+      return route.fulfill({ json: assistantDocument });
+    }
+    if (url.pathname === `/api/v1/documents/${assistantDocumentId}/processing`) {
+      return route.fulfill({
+        json: {
+          correlation_id: "synthetic-document-processing",
+          stage: "ready",
+          started_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:01Z",
+          elapsed_ms: 1000,
+          local_available: true,
+          can_cancel: false,
+          can_retry: false,
+          worker_available: true,
+          reason: null,
+          timings: {
+            local_queue_ms: 0,
+            local_processing_ms: 500,
+            ai_queue_ms: null,
+            provider_ms: null,
+            validation_ms: 0,
+          },
+        },
+      });
+    }
+    if (url.pathname === `/api/v1/documents/${assistantDocumentId}/extraction/apply`) {
+      const body = route.request().postDataJSON() as { request_id: string };
+      return route.fulfill({
+        json: {
+          document: assistantDocument,
+          request_id: body.request_id,
+          created_item_ids: [],
+          updated_item_ids: [],
+          linked_item_ids: [extractionItemId],
+          skipped_line_ids: [],
+          purchase_id: null,
+          warranty_item_ids: [],
+          warnings: [],
+          applied_at: "2026-01-01T00:00:02Z",
+          items: [{ id: extractionItemId, name: "Cordless drill" }],
+        },
+      });
+    }
+    if (url.pathname === `/api/v1/documents/${assistantDocumentId}/extraction`) {
+      return route.fulfill({ json: assistantExtraction });
     }
     if (url.pathname === "/api/v1/ai/status") {
       return route.fulfill({ json: { configured: aiAvailable, available: aiAvailable, data_leaves_server: false, privacy_note: aiAvailable ? "Synthetic AI" : "AI off" } });
@@ -322,6 +489,7 @@ async function fixture(
       const destinationName = /box 2/i.test(creationQuery) ? "Box 2" : "Storage";
       activeImportBatch = {
         ...importBatch,
+        status: simulateImportCompletion ? "processing" : "review",
         entries: importBatch.entries.map((entry) => ({
           ...entry,
           source_excerpt: creationQuery,
@@ -409,6 +577,13 @@ async function fixture(
       return route.fulfill({ json: recoveryBatch });
     }
     if (url.pathname === `/api/v1/imports/${activeImportBatch.id}`) {
+      if (simulateImportCompletion) {
+        importCompletionPolls += 1;
+        if (importCompletionPolls > 1) {
+          activeImportBatch = { ...activeImportBatch, status: "review" };
+        }
+        return route.fulfill({ json: activeImportBatch });
+      }
       if (simulateImportRecovery) {
         recoveryPolls += 1;
         if (recoveryPolls === 1) {
@@ -636,7 +811,7 @@ test("mobile header keeps microphone and attachment controls inside the search b
   await fixture(page, "/");
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const input = page.locator('input[data-quick-search-variant="mobile"]');
+  const input = page.locator('input[data-quick-search-input="true"]');
   const attach = page.getByRole("button", { name: "Attach a file" });
   const mic = page.getByRole("button", { name: "Record voice search" });
   await expect(input).toBeVisible();
@@ -671,11 +846,161 @@ test("the header entry opens the assistant panel without separate assistant navi
   await intentRequest;
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/#assistant$/);
   await headerSearch.fill("What is in my garage?");
   await expect(headerSearch).toHaveValue("What is in my garage?");
   await panel.getByRole("button", { name: "Close assistant" }).click();
   await expect(headerSearch).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("assistant launcher resumes without typing, shows unresolved reviews, and closes with browser Back", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  let interpreted = 0;
+  let searches = 0;
+  let reviewWrites = 0;
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/assistant/actions/intent") interpreted += 1;
+    if (path === "/api/v1/search/query") searches += 1;
+    if (path.startsWith("/api/v1/inventory-review/suggestions") && request.method() !== "GET") reviewWrites += 1;
+  });
+
+  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await expect(page).toHaveURL(/\/items$/);
+  const launcher = page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" });
+  await expect(launcher).toBeVisible();
+  await expect(launcher).toContainText("3");
+  await launcher.click();
+  await expect(page.getByTestId("assistant-panel")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(page).toHaveURL(/\/items#assistant$/);
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await expect(headerSearch).toBeVisible();
+  await headerSearch.fill("record player");
+  await expect(headerSearch).toHaveValue("record player");
+  await expect(page.getByTestId("assistant-panel")).toBeVisible();
+  await headerSearch.fill("");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/items$/);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  await expect(launcher).toBeFocused();
+  await expect(launcher).toContainText("3");
+  expect(interpreted).toBe(0);
+  expect(searches).toBe(0);
+  expect(reviewWrites).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("legacy Search and Assistant URLs redirect into the unified shell", async ({ page }) => {
+  const errors = await fixture(page, "/search?q=drill");
+  await expect(page).toHaveURL(/\/items\?q=drill$/);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+
+  await page.goto("/assistant?q=Where%20is%20my%20drill%3F");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
+  await expect(page).toHaveURL(/\/#assistant$/);
+  await expect(page.getByTestId("assistant-panel")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("mobile search entry stays reachable while scrolling and the assistant sheet fits a resized viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = await fixture(page, "/");
+  const input = page.locator('input[data-quick-search-input="true"]');
+  const launcher = page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" });
+  await expect(input).toBeVisible();
+  await expect(launcher).toBeVisible();
+  await page.getByRole("button", { name: "More destinations" }).click();
+  await expect(page.getByRole("menuitem", { name: "Search", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.evaluate(() => window.scrollTo(0, 900));
+  await expect(input).toBeInViewport();
+  await launcher.click();
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 430 });
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  const send = panel.getByRole("button", { name: "Send question" });
+  await expect.poll(async () => {
+    const box = await composer.boundingBox();
+    return box ? box.y + box.height : Number.POSITIVE_INFINITY;
+  }).toBeLessThanOrEqual(430);
+  await expect.poll(async () => {
+    const box = await send.boundingBox();
+    return box ? box.y + box.height : Number.POSITIVE_INFINITY;
+  }).toBeLessThanOrEqual(430);
+  await expect(panel.getByRole("button", { name: "Close assistant" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("completed item capture notifies once and opens its review without resolving it", async ({ page }) => {
+  const errors = await fixture(page, "/", undefined, true, false, true);
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("Add a Validation Monitor to Storage");
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByText(/Preparing item proposals/)).toBeVisible();
+  await panel.getByRole("button", { name: "Close assistant" }).click();
+  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await expect(page).toHaveURL(/\/items$/);
+
+  await expect(page.getByText("Items ready for review")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Items ready for review")).toHaveCount(1);
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("region", { name: "Assistant item review" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
+  await expect(page.getByText("Items ready for review")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("attached invoice flows through extraction, notification, and explicit approval", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  let applyRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === `/api/v1/documents/${assistantDocumentId}/extraction/apply`) {
+      applyRequests += 1;
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("This invoice is for the kitchen fridge");
+  await page.getByTestId("quick-search-attachment-input").setInputFiles({
+    name: "invoice.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 synthetic invoice"),
+  });
+  const panel = page.getByTestId("assistant-panel");
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(panel.getByText("invoice.pdf")).toBeVisible();
+  await panel.getByRole("button", { name: "Send question" }).click();
+
+  await expect(panel.getByText("Document attached. Progress, extracted details and review are shown below.")).toBeVisible();
+  await expect(page.getByText("Validation invoice ready for review")).toHaveCount(1);
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await expect(panel.getByRole("region", { name: "Assistant document review" })).toContainText("Validation invoice");
+  await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
+  await panel.getByRole("button", { name: "Review extraction" }).click();
+  await expect(panel.getByLabel("Description")).toHaveValue("Cordless drill");
+  expect(applyRequests).toBe(0);
+  await panel.getByRole("button", { name: "Apply reviewed changes" }).click();
+  await expect.poll(() => applyRequests).toBe(1);
+  await expect(page.getByText("Reviewed extraction applied")).toBeVisible();
+
+  await page.reload();
+  await page.evaluate(() => {
+    const detail = {
+      id: "00000000-0000-0000-0000-000000000013",
+      kind: "document",
+      title: "Validation invoice ready for review",
+      description: "Review the extracted details before applying.",
+    };
+    window.dispatchEvent(new CustomEvent("housetory:assistant-task-completed", { detail }));
+  });
+  await expect(page.getByText("Validation invoice ready for review")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -686,7 +1011,7 @@ test("normal header submission opens the assistant without selecting its prompt"
   await headerSearch.press("Enter");
   await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(headerSearch).toBeVisible();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/#assistant$/);
   expect(errors).toEqual([]);
 });
 
@@ -703,12 +1028,33 @@ test("ordinary lookup submitted from Items stays on the lightweight item search"
 
 test("ordinary lookup submitted from Overview uses results without opening conversation", async ({ page }) => {
   const errors = await fixture(page, "/");
+  let interpreted = 0;
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/search/query" || path === "/api/v1/assistant/actions/intent") interpreted += 1;
+  });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("drill");
   await expect(page.getByRole("option", { name: /Cordless drill/ })).toBeVisible();
   await headerSearch.press("Enter");
-  await expect(page).toHaveURL(/\/search\?q=drill/);
+  await expect(page).toHaveURL(/\/items\?q=drill/);
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
+  expect(interpreted).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("selecting a quick match opens its item record without assistant interpretation", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  let interpreted = 0;
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/search/query" || path === "/api/v1/assistant/actions/intent") interpreted += 1;
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("drill");
+  await page.getByRole("option", { name: /Cordless drill/ }).click();
+  await expect(page).toHaveURL(/\/items\/00000000-0000-0000-0000-000000000005$/);
+  expect(interpreted).toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -731,7 +1077,7 @@ test("question submitted from Items enters conversation on ordinary Enter", asyn
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
-  await expect(page).toHaveURL(/\/items(?:\?|$)/);
+  await expect(page).toHaveURL(/\/items(?:\?|#)/);
   expect(errors).toEqual([]);
 });
 
@@ -974,7 +1320,7 @@ test("Shift paraphrase submitted from Overview uses the same reviewed action flo
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
   await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/#assistant$/);
   expect(intentQueries).toEqual([query]);
   expect(errors).toEqual([]);
 });
@@ -1034,7 +1380,7 @@ test("record player remains a lightweight lookup from Overview", async ({ page }
   await headerSearch.press("Enter");
 
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
-  await expect(page).toHaveURL(/\/search\?/);
+  await expect(page).toHaveURL(/\/items\?/);
   expect(intentQueries).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -1066,6 +1412,7 @@ test("fresh header requests start without prior turns while panel follow-ups ret
   await composer.press("Enter");
   await followUpSearch;
   await expect(panel.getByText(`Synthetic answer for ${followUp}`)).toBeVisible();
+  await composer.fill("I still need to add the extension cord.");
   expect(searchBodies[1]?.history).toEqual([
     { role: "user", content: firstQuestion },
     { role: "assistant", content: `Synthetic answer for ${firstQuestion}` },
@@ -1080,6 +1427,9 @@ test("fresh header requests start without prior turns while panel follow-ups ret
   await headerSearch.press("Enter");
   await freshSearch;
   await expect(panel.getByText(`Synthetic answer for ${freshQuestion}`)).toBeVisible();
+  await expect(panel.getByText(`Synthetic answer for ${firstQuestion}`)).toBeVisible();
+  await expect(panel.getByText(`Synthetic answer for ${followUp}`)).toBeVisible();
+  await expect(composer).toHaveValue("I still need to add the extension cord.");
   expect(searchBodies[2]).toMatchObject({ query: freshQuestion, history: [] });
   expect(searchBodies[2]).not.toHaveProperty("context");
   expect(errors).toEqual([]);
@@ -1139,6 +1489,34 @@ test("attaching from the header keeps the accompanying text in the capture compo
   const composer = page.getByRole("textbox", { name: "Ask the Housetory assistant" });
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
   await expect(page.getByText("invoice.pdf")).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("unsent attachment and context survive panel closure and navigation", async ({ page }) => {
+  const errors = await fixture(page, "/");
+  let documentUploads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/documents" && request.method() === "POST") {
+      documentUploads += 1;
+    }
+  });
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill("This invoice is for the kitchen fridge");
+  await page.getByTestId("quick-search-attachment-input").setInputFiles({
+    name: "invoice.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4 synthetic invoice"),
+  });
+  const panel = page.getByTestId("assistant-panel");
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(panel.getByText("invoice.pdf")).toBeVisible();
+  await panel.getByRole("button", { name: "Close assistant" }).click();
+  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" }).click();
+  await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
+  await expect(panel.getByText("invoice.pdf")).toBeVisible();
+  expect(documentUploads).toBe(0);
   expect(errors).toEqual([]);
 });
 

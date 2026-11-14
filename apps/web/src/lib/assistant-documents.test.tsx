@@ -40,13 +40,13 @@ beforeEach(() => {
   mockState.render.mockClear();
 });
 
-it("pauses inactive document review without losing edits and clears it on a household change", async () => {
+it("keeps document review mounted without losing edits and clears it on a household change", async () => {
   const rendered = render(<AssistantDocumentsProvider><Fixture /></AssistantDocumentsProvider>);
   fireEvent.click(screen.getByText("Select document"));
   expect(await screen.findByText("document-1: active")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Review draft"), { target: { value: "Edited draft" } });
   fireEvent.click(screen.getByText("Toggle slot"));
-  expect(mockState.render).toHaveBeenLastCalledWith("document-1", false);
+  expect(mockState.render).toHaveBeenLastCalledWith("document-1", true);
   fireEvent.click(screen.getByText("Toggle slot"));
   expect(await screen.findByText("document-1: active")).toBeVisible();
   expect(screen.getByLabelText("Review draft")).toHaveValue("Edited draft");

@@ -18,13 +18,13 @@ const AssistantImportReview = React.lazy(() =>
 
 interface DocumentReviewContext {
   activeId: string | null;
-  select: (id: string) => void;
+  select: (id: string, userInitiated?: boolean) => void;
   node: HTMLDivElement;
-  setVisible: (visible: boolean) => void;
   activeImportId: string | null;
-  selectImport: (id: string) => void;
+  selectImport: (id: string, userInitiated?: boolean) => void;
   importNode: HTMLDivElement;
-  setImportVisible: (visible: boolean) => void;
+  taskDocumentIds: string[];
+  taskImportIds: string[];
   getImportReviewDraft: (id: string) => ImportReviewDraft | undefined;
   saveImportReviewDraft: (id: string, draft: ImportReviewDraft) => void;
 }
@@ -43,11 +43,15 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
   const [state, setState] = React.useState<{ householdId: string; activeId: string | null; ids: string[] }>({
     householdId, activeId: null, ids: [],
   });
-  const [visible, setVisible] = React.useState(false);
+  const [taskDocumentState, setTaskDocumentState] = React.useState<{ householdId: string; ids: string[] }>({
+    householdId, ids: [],
+  });
   const [importState, setImportState] = React.useState<{ householdId: string; activeId: string | null; ids: string[] }>({
     householdId, activeId: null, ids: [],
   });
-  const [importVisible, setImportVisible] = React.useState(false);
+  const [taskImportState, setTaskImportState] = React.useState<{ householdId: string; ids: string[] }>({
+    householdId, ids: [],
+  });
   const [reviewDraftState, setReviewDraftState] = React.useState<{
     householdId: string;
     drafts: Record<string, ImportReviewDraft>;
@@ -56,7 +60,16 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
   const ids = state.householdId === householdId ? state.ids : [];
   const activeImportId = importState.householdId === householdId ? importState.activeId : null;
   const importIds = importState.householdId === householdId ? importState.ids : [];
-  const select = React.useCallback((id: string) => {
+  const taskDocumentIds = taskDocumentState.householdId === householdId ? taskDocumentState.ids : [];
+  const taskImportIds = taskImportState.householdId === householdId ? taskImportState.ids : [];
+  const select = React.useCallback((id: string, userInitiated = false) => {
+    if (userInitiated) setTaskDocumentState((current) => {
+      const currentIds = current.householdId === householdId ? current.ids : [];
+      return {
+        householdId,
+        ids: currentIds.includes(id) ? currentIds : [...currentIds, id],
+      };
+    });
     setState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
       return {
@@ -66,7 +79,14 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       };
     });
   }, [householdId]);
-  const selectImport = React.useCallback((id: string) => {
+  const selectImport = React.useCallback((id: string, userInitiated = false) => {
+    if (userInitiated) setTaskImportState((current) => {
+      const currentIds = current.householdId === householdId ? current.ids : [];
+      return {
+        householdId,
+        ids: currentIds.includes(id) ? currentIds : [...currentIds, id],
+      };
+    });
     setImportState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
       return {
@@ -91,10 +111,12 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     }));
   }, [householdId]);
   const value = React.useMemo(() => ({
-    activeId, select, node, setVisible, activeImportId, selectImport, importNode, setImportVisible,
+    activeId, select, node, activeImportId, selectImport, importNode,
+    taskDocumentIds, taskImportIds,
     getImportReviewDraft, saveImportReviewDraft,
   }), [
     activeId, select, node, activeImportId, selectImport, importNode,
+    taskDocumentIds, taskImportIds,
     getImportReviewDraft, saveImportReviewDraft,
   ]);
   return (
@@ -103,14 +125,22 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       {createPortal(ids.map((id) => (
         <div key={id} hidden={id !== activeId}>
           <React.Suspense fallback={<p role="status">Loading document review…</p>}>
-            <AssistantDocumentReview id={id} enabled={visible && id === activeId} />
+            <AssistantDocumentReview
+              id={id}
+              enabled
+              notifyOnReady={taskDocumentIds.includes(id)}
+            />
           </React.Suspense>
         </div>
       )), node)}
       {createPortal(importIds.map((id) => (
         <div key={id} hidden={id !== activeImportId}>
           <React.Suspense fallback={<p role="status">Loading item review…</p>}>
-            <AssistantImportReview id={id} enabled={importVisible && id === activeImportId} />
+            <AssistantImportReview
+              id={id}
+              enabled
+              notifyOnReady={taskImportIds.includes(id)}
+            />
           </React.Suspense>
         </div>
       )), importNode)}
@@ -125,33 +155,29 @@ export function useAssistantDocuments() {
 }
 
 export function AssistantDocumentSlot() {
-  const { activeId, node, setVisible } = useAssistantDocuments();
+  const { activeId, node } = useAssistantDocuments();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const slot = ref.current;
     if (!slot) return;
     slot.appendChild(node);
-    setVisible(true);
     return () => {
-      setVisible(false);
       if (node.parentNode === slot) slot.removeChild(node);
     };
-  }, [node, setVisible]);
+  }, [node]);
   return <div ref={ref} className={activeId ? "pt-2" : undefined} />;
 }
 
 export function AssistantImportSlot() {
-  const { activeImportId, importNode, setImportVisible } = useAssistantDocuments();
+  const { activeImportId, importNode } = useAssistantDocuments();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const slot = ref.current;
     if (!slot) return;
     slot.appendChild(importNode);
-    setImportVisible(true);
     return () => {
-      setImportVisible(false);
       if (importNode.parentNode === slot) slot.removeChild(importNode);
     };
-  }, [importNode, setImportVisible]);
+  }, [importNode]);
   return <div ref={ref} className={activeImportId ? "pt-2" : undefined} />;
 }

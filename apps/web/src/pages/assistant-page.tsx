@@ -107,7 +107,7 @@ export function AssistantPage({
     if (!submitCaptureRef.current) throw new Error("The item capture handler is not ready.");
     return submitCaptureRef.current(value);
   }, []);
-  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
   const retainedImportId = [...messages]
@@ -197,7 +197,7 @@ export function AssistantPage({
     || (scope.scopes.length === 1 ? scope.scopes[0]?.id : undefined)
     || (!multipleHouseholds ? session.data?.household?.id : undefined);
 
-  const submitCapture = async (value: string) => {
+  const submitCapture = async (value: string, freshTopic = false) => {
     if (capturePending) return;
     if (!canWrite) {
       setCaptureError("You need member access to add items or attach files.");
@@ -242,6 +242,7 @@ export function AssistantPage({
               filename: file.name,
               recognitionId: recognition.id,
             },
+            freshTopic,
           );
           return;
         }
@@ -258,7 +259,7 @@ export function AssistantPage({
         form.append("document_type", documentType);
         if (value) form.append("notes", value);
         const document = await api.postForm<DocumentRecord>("/documents", form);
-        selectDocument(document.id);
+        selectDocument(document.id, true);
         setPageReferences([{ kind: "document", id: document.id, name: document.title }]);
         recordCapture(
           value || `Attached ${file.name}`,
@@ -270,6 +271,7 @@ export function AssistantPage({
             filename: file.name,
             documentId: document.id,
           },
+          freshTopic,
         );
         return;
       }
@@ -280,12 +282,13 @@ export function AssistantPage({
       form.append("assistant_capture", "true");
       if (selection.propertyId) form.append("property_id", selection.propertyId);
       const batch = await api.postForm<ImportBatchDetail>("/imports", form);
-      selectImport(batch.id);
+      selectImport(batch.id, true);
       recordCapture(
         value,
         undefined,
         "Preparing item proposals. Edit the details and destination below, then approve to add them.",
         { id: crypto.randomUUID(), kind: "items", importId: batch.id },
+        freshTopic,
       );
     } catch (error) {
       setCaptureError(getApiErrorMessage(error));
@@ -297,7 +300,7 @@ export function AssistantPage({
     if (pending || tooManyReferences || capturePending) return;
     if (attachment) {
       dictation.stop();
-      void submitCapture(value);
+      void submitCapture(value, freshRequest);
       return;
     }
     if (value.length < 2) return;
@@ -310,6 +313,7 @@ export function AssistantPage({
         ? { scopeKey: scopeSignature, turns: [], context: null, record: () => undefined }
         : searchSession,
       captureItem,
+      freshRequest,
     );
   };
 
@@ -326,7 +330,7 @@ export function AssistantPage({
       handledInitialRequestRef.current === initialRequest.id
     ) return;
     handledInitialRequestRef.current = initialRequest.id;
-    reset();
+    startFreshTopic();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     if (initialRequest.file) {
       setAttachment(initialRequest.file);
@@ -346,8 +350,8 @@ export function AssistantPage({
     initialRequest,
     onInitialRequestHandled,
     pending,
-    reset,
     scopeSignature,
+    startFreshTopic,
     searchSession.reset,
     searchSession.scopeKey,
     scopesQuery.isPending,

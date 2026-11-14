@@ -21,9 +21,10 @@ const stageLabels: Record<DocumentProcessing["stage"], string> = {
   cancelled: "Processing cancelled",
 };
 
-export function DocumentProcessingStatus({ documentId, onManualReview, enabled = true }: {
+export function DocumentProcessingStatus({ documentId, onManualReview, onTaskComplete, enabled = true }: {
   documentId: string;
   onManualReview: () => void;
+  onTaskComplete?: (snapshot: DocumentProcessing) => void;
   enabled?: boolean;
 }) {
   const canWrite = useCanWrite();
@@ -49,6 +50,7 @@ export function DocumentProcessingStatus({ documentId, onManualReview, enabled =
   });
   const snapshot = processing.data;
   const previous = React.useRef<string | null>(null);
+  const announcedCorrelation = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!snapshot) return;
     const identity = `${snapshot.correlation_id}:${snapshot.stage}`;
@@ -58,6 +60,12 @@ export function DocumentProcessingStatus({ documentId, onManualReview, enabled =
       void client.invalidateQueries({ queryKey: [...queryKeys.document(documentId), "extraction"] });
     }
   }, [snapshot, client, documentId]);
+  React.useEffect(() => {
+    if (!snapshot || !onTaskComplete || activeStages.has(snapshot.stage)) return;
+    if (announcedCorrelation.current === snapshot.correlation_id) return;
+    announcedCorrelation.current = snapshot.correlation_id;
+    onTaskComplete(snapshot);
+  }, [onTaskComplete, snapshot?.correlation_id, snapshot?.stage]);
 
   if (!snapshot) {
     return (

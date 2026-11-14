@@ -57,7 +57,7 @@ export function FirstRunChecklist({
       description: "Use the header search for quick matches or a conversation.",
       done: false,
       icon: Bot,
-      action: { label: "Open search", to: "/search" },
+      action: { label: "Open items", to: "/items" },
     },
   ];
   const completed = steps.filter((step) => step.done).length;

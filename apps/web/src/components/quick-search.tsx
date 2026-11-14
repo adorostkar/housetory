@@ -2,6 +2,7 @@ import {
   AlertCircle,
   ArrowRight,
   Boxes,
+  Bot,
   HandCoins,
   Loader2,
   MapPin,
@@ -92,11 +93,15 @@ export function QuickSearch({
   className,
   onAsk,
   onAttach,
+  onOpenAssistant,
+  reviewCount = 0,
 }: {
   variant?: "top" | "mobile";
   className?: string;
   onAsk?: (query: string, trigger: HTMLElement) => void;
   onAttach?: (file: File, trigger: HTMLElement, query: string) => void;
+  onOpenAssistant?: (trigger: HTMLElement) => void;
+  reviewCount?: number;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -104,6 +109,7 @@ export function QuickSearch({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const attachInputRef = React.useRef<HTMLInputElement>(null);
   const attachButtonRef = React.useRef<HTMLButtonElement>(null);
+  const assistantButtonRef = React.useRef<HTMLButtonElement>(null);
   const voiceButtonRef = React.useRef<HTMLButtonElement>(null);
   const pendingEditRef = React.useRef<string | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
@@ -203,7 +209,6 @@ export function QuickSearch({
           kind: "ready",
           message: "Transcript ready. Review or edit it, then press Enter to search or ask.",
         });
-        window.requestAnimationFrame(() => inputRef.current?.focus());
       }
       setVoiceNoteId(null);
     } else if (voiceNote.status === "failed" || voiceNote.status === "cancelled") {
@@ -214,6 +219,12 @@ export function QuickSearch({
       setVoiceNoteId(null);
     }
   }, [query, voiceNote, voiceNoteId]);
+
+  React.useEffect(() => {
+    if (voiceNotice?.kind === "ready" && !voiceProcessing) {
+      inputRef.current?.focus();
+    }
+  }, [voiceNotice?.kind, voiceProcessing]);
 
   React.useEffect(() => {
     if (!voiceNoteId || !voiceNoteQuery.isError) return;
@@ -376,22 +387,22 @@ export function QuickSearch({
   const submitToResults = (explicitAsk: boolean) => {
     if (!term) return;
     setFocused(false);
-    if (isItemsPage && !explicitAsk) {
+    if (explicitAsk) {
+      askAssistant();
+      return;
+    }
+    if (isItemsPage) {
       const next = new URLSearchParams(searchParams);
       next.set("q", term);
       navigate(`/items?${next.toString()}`, { replace: true });
       return;
     }
-    const params = new URLSearchParams({
-      q: term,
-      r: Date.now().toString(),
-    });
-    if (explicitAsk) params.set("ask", "1");
-    navigate(`/search?${params.toString()}`);
+    navigate(`/items?q=${encodeURIComponent(term)}`);
   };
 
   const askAssistant = () => {
     setFocused(false);
+    pendingEditRef.current = null;
     if (onAsk && inputRef.current) onAsk(term, inputRef.current);
     else navigate(`/assistant?q=${encodeURIComponent(term)}`);
   };
@@ -526,8 +537,8 @@ export function QuickSearch({
                   No quick matches for “{term}”.
                 </p>
                 <p className="text-2xs leading-relaxed">
-                  Press Enter to search all records. Housetory will interpret the
-                  question with the configured assistant when needed.
+                  Press Enter to ask Housetory. Straightforward item searches
+                  stay local and open a match directly.
                 </p>
                 <Button
                   type="button"
@@ -640,7 +651,31 @@ export function QuickSearch({
 
   return (
     <div ref={wrapperRef} className={cn("relative", className)}>
-      <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <button
+        ref={assistantButtonRef}
+        type="button"
+        aria-label={`Open assistant${reviewCount > 0 ? `, ${reviewCount} unresolved reviews` : ""}`}
+        title="Open assistant"
+        className="absolute left-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        onClick={() => {
+          setFocused(false);
+          if (onOpenAssistant && assistantButtonRef.current) {
+            onOpenAssistant(assistantButtonRef.current);
+          } else {
+            navigate("/assistant");
+          }
+        }}
+      >
+        <Bot className="size-[1.05rem]" />
+        {reviewCount > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute right-0 top-0 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-brass px-1 text-[9px] font-semibold leading-none text-brass-foreground"
+          >
+            {reviewCount > 99 ? "99+" : reviewCount}
+          </span>
+        )}
+      </button>
       <input
         ref={inputRef}
         type="search"
@@ -651,7 +686,7 @@ export function QuickSearch({
         autoComplete="off"
         spellCheck={false}
         dir="auto"
-        placeholder="Search or ask about your inventory…"
+        placeholder="Search or ask…"
         aria-label="Search or ask about your inventory"
         aria-keyshortcuts="Meta+K Control+K"
         role="combobox"
@@ -675,9 +710,9 @@ export function QuickSearch({
         disabled={recorder.recording || voiceProcessing || pendingRecording}
         aria-describedby={voiceNotice ? voiceNoticeId : undefined}
         className={cn(
-          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-11 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
+          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-12 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
           variant === "top"
-            ? cn("h-12 text-[0.95rem]", onAttach ? "pr-36" : "pr-28")
+            ? cn("h-12 text-[1rem] lg:text-[0.95rem]", onAttach ? "pr-36" : "pr-28")
             : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-28" : "pr-20"),
         )}
       />

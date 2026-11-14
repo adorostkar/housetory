@@ -111,11 +111,6 @@ const WarrantiesPage = React.lazy(() =>
     default: module.WarrantiesPage,
   })),
 );
-const SearchPage = React.lazy(() =>
-  import("@/pages/search-page").then((module) => ({
-    default: module.SearchPage,
-  })),
-);
 const ImportsPage = React.lazy(() =>
   import("@/pages/imports-page").then((module) => ({
     default: module.ImportsPage,
@@ -124,11 +119,6 @@ const ImportsPage = React.lazy(() =>
 const ImportDetailPage = React.lazy(() =>
   import("@/pages/import-detail-page").then((module) => ({
     default: module.ImportDetailPage,
-  })),
-);
-const AssistantPage = React.lazy(() =>
-  import("@/pages/assistant-page").then((module) => ({
-    default: module.AssistantPage,
   })),
 );
 const ScanPage = React.lazy(() =>
@@ -363,7 +353,7 @@ export default function App() {
               <Route path="imports" element={<ImportsPage />} />
               <Route path="imports/:batchId" element={<ImportDetailPage />} />
             </Route>
-            <Route path="assistant" element={<AssistantPage />} />
+            <Route path="assistant" element={<LegacyAssistantRedirect />} />
             <Route element={<RequireWriter />}>
               <Route path="scan" element={<ScanPage />} />
               <Route path="recognize" element={<RecognitionPage />} />
@@ -377,7 +367,7 @@ export default function App() {
             <Route element={<RequireWriter />}>
               <Route path="labels" element={<LabelsPage />} />
             </Route>
-            <Route path="search" element={<SearchPage />} />
+            <Route path="search" element={<LegacySearchRedirect />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="settings/account" element={<AccountSettingsPage />} />
             <Route path="settings/members" element={<MembersSettingsPage />} />
@@ -392,6 +382,57 @@ export default function App() {
       </Routes>
       <Toaster />
     </>
+  );
+}
+
+function LegacyAssistantRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("__assistant_legacy", "1");
+  return (
+    <Navigate
+      replace
+      to={{
+        pathname: "/",
+        search: params.size ? `?${params.toString()}` : "",
+        hash: "#assistant",
+      }}
+    />
+  );
+}
+
+function LegacySearchRedirect() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const query = params.get("q")?.trim() ?? "";
+  const ask = params.get("ask") === "1";
+  const next = new URLSearchParams();
+  if (query) next.set("q", query);
+  for (const key of ["household_id", "property_id"]) {
+    const value = params.get(key);
+    if (value) next.set(key, value);
+  }
+  if (ask && query) {
+    next.set("__assistant_legacy", "1");
+    return (
+      <Navigate
+        replace
+        to={{
+          pathname: "/",
+          search: `?${next.toString()}`,
+          hash: "#assistant",
+        }}
+      />
+    );
+  }
+  return (
+    <Navigate
+      replace
+      to={{
+        pathname: "/items",
+        search: next.size ? `?${next.toString()}` : "",
+      }}
+    />
   );
 }
 
