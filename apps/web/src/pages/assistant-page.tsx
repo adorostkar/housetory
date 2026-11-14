@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { looksLikeItemDescription } from "@/lib/assistant-intent";
 import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useCanWrite, useSelectHousehold, useSession } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
@@ -55,10 +56,6 @@ const SUGGESTIONS = [
   "Which warranties are expiring soon?",
   "How many suitcases do I own?",
 ];
-
-function looksLikeItemDescription(value: string) {
-  return /^\s*(?:(?:i|we)\s+(?:bought|purchased|got|added|found|picked up)\b|add\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b)/i.test(value);
-}
 
 function useObjectUrl(file: File | null) {
   const [url, setUrl] = React.useState<string | null>(null);
@@ -105,6 +102,11 @@ export function AssistantPage({
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
+  const submitCaptureRef = React.useRef<((value: string) => Promise<void>) | null>(null);
+  const captureItem = React.useCallback((value: string) => {
+    if (!submitCaptureRef.current) throw new Error("The item capture handler is not ready.");
+    return submitCaptureRef.current(value);
+  }, []);
   const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, updateCapture, pending, ask, reset, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
@@ -126,7 +128,7 @@ export function AssistantPage({
     if (scopesQuery.isPending) return;
     if (value.length < 2 || autoAskedRef.current === value) return;
     autoAskedRef.current = value;
-    ask(selection, value, false, searchSession);
+    ask(selection, value, false, searchSession, captureItem);
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -138,7 +140,7 @@ export function AssistantPage({
     // The URL is the handoff trigger; ask uses the current messages at
     // the moment the handoff occurs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams, scopesQuery.isPending, embedded]);
+  }, [searchParams, setSearchParams, scopesQuery.isPending, embedded, captureItem]);
 
   const paneRef = React.useRef<HTMLDivElement>(null);
   const lastAnswerRef = React.useRef<HTMLDivElement>(null);
@@ -292,8 +294,7 @@ export function AssistantPage({
 
   const submitValue = (value: string, freshRequest = false) => {
     if (pending || tooManyReferences || capturePending) return;
-    if (attachment || (canWrite && looksLikeItemDescription(value))) {
-      if (!attachment && value.length < 2) return;
+    if (attachment) {
       dictation.stop();
       void submitCapture(value);
       return;
@@ -307,8 +308,11 @@ export function AssistantPage({
       freshRequest
         ? { scopeKey: scopeSignature, turns: [], context: null, record: () => undefined }
         : searchSession,
+      captureItem,
     );
   };
+
+  submitCaptureRef.current = submitCapture;
 
   React.useEffect(() => {
     if (
@@ -377,7 +381,7 @@ export function AssistantPage({
     const last = messages[messages.length - 1];
     const previous = messages[messages.length - 2];
     if (last?.role !== "assistant" || previous?.role !== "user") return;
-    ask(selection, previous.text, true, searchSession);
+    ask(selection, previous.text, true, searchSession, captureItem);
   };
 
   const status = aiStatus.data;

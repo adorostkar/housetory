@@ -34,7 +34,7 @@ const importBatch = {
     source_excerpt: "three Ethernet cables",
     note_title: null,
     proposed: {
-      name: "Ethernet cable",
+      name: "Ethernet cables",
       description: null,
       quantity: 3,
       category: null,
@@ -73,8 +73,11 @@ async function fixture(
   page: Page,
   path = "/assistant",
   onSearchQuery?: (body: Record<string, unknown>) => void,
+  aiAvailable = false,
 ) {
   const errors: string[] = [];
+  let creationQuery = "";
+  let activeImportBatch = importBatch;
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -92,10 +95,18 @@ async function fixture(
       return route.fulfill({ json: { items: [{ id: household.id, name: household.name, properties: [] }] } });
     }
     if (url.pathname === "/api/v1/ai/status") {
-      return route.fulfill({ json: { configured: false, available: false, data_leaves_server: false, privacy_note: "AI off" } });
+      return route.fulfill({ json: { configured: aiAvailable, available: aiAvailable, data_leaves_server: false, privacy_note: aiAvailable ? "Synthetic AI" : "AI off" } });
     }
     if (url.pathname === "/api/v1/assistant/actions/intent") {
       const { query } = route.request().postDataJSON() as { query: string };
+      if (/^(?:(?:please|could you|can you|would you)\s+)*(?:add|create)\b|(?:bought|purchased)\b|اضافه\s+کن/u.test(query)) {
+        creationQuery = query;
+        return route.fulfill({
+          json: aiAvailable
+            ? { intent: "create_item", form: null }
+            : { intent: "unavailable", form: null },
+        });
+      }
       return route.fulfill({
         json: /^(?:Transfer|Shift)\b|دریل را به انبار منتقل کن/u.test(query)
           ? { intent: "supported_action", form: null }
@@ -226,10 +237,79 @@ async function fixture(
       url.pathname === "/api/v1/imports" &&
       route.request().method() === "POST"
     ) {
-      return route.fulfill({ json: importBatch });
+      const name = /Ethernet/i.test(creationQuery)
+        ? "Ethernet cables"
+        : /کابل اترنت/u.test(creationQuery)
+          ? "کابل اترنت"
+          : "Validation Monitor";
+      const quantity = /(?:three|3|سه)\s+/iu.test(creationQuery) ? 3 : 1;
+      const destinationName = /box 2/i.test(creationQuery) ? "Box 2" : "Storage";
+      activeImportBatch = {
+        ...importBatch,
+        entries: importBatch.entries.map((entry) => ({
+          ...entry,
+          source_excerpt: creationQuery,
+          proposed: {
+            ...entry.proposed,
+            name,
+            quantity,
+            room: {
+              text: "Utility Room",
+              entity_type: "room",
+              identifier: null,
+              status: "matched",
+              matched_id: "00000000-0000-0000-0000-000000000010",
+              name: "Utility Room",
+              room_id: "00000000-0000-0000-0000-000000000010",
+              parent_id: null,
+              suggested_parent_id: null,
+              candidates: [],
+            },
+            storage_location: {
+              text: destinationName,
+              entity_type: "storage_location",
+              identifier: null,
+              status: "matched",
+              matched_id: "00000000-0000-0000-0000-000000000011",
+              name: destinationName,
+              room_id: "00000000-0000-0000-0000-000000000010",
+              parent_id: null,
+              suggested_parent_id: null,
+              candidates: [],
+            },
+            purchase: null,
+          },
+        })),
+      };
+      return route.fulfill({ json: activeImportBatch });
     }
-    if (url.pathname === `/api/v1/imports/${importBatch.id}`) {
-      return route.fulfill({ json: importBatch });
+    if (url.pathname === `/api/v1/imports/${activeImportBatch.id}/apply`) {
+      const body = route.request().postDataJSON() as {
+        entries: Array<{ action: string }>;
+      };
+      const created = body.entries.filter((entry) => entry.action === "import").length;
+      const skipped = body.entries.filter((entry) => entry.action === "skip").length;
+      activeImportBatch = {
+        ...activeImportBatch,
+        status: "completed",
+        imported_entries: created,
+        skipped_entries: skipped,
+        completed_at: "2026-01-01T00:01:00Z",
+      };
+      return route.fulfill({
+        json: {
+          batch: activeImportBatch,
+          created,
+          merged: 0,
+          skipped,
+          rejected: 0,
+          failed: 0,
+          failures: [],
+        },
+      });
+    }
+    if (url.pathname === `/api/v1/imports/${activeImportBatch.id}`) {
+      return route.fulfill({ json: activeImportBatch });
     }
     if (["/api/v1/items", "/api/v1/properties", "/api/v1/rooms", "/api/v1/storage-locations", "/api/v1/categories", "/api/v1/tags"].includes(url.pathname)) {
       return route.fulfill({ json: { items: [], total: 0, limit: 24, offset: 0 } });
@@ -361,7 +441,8 @@ test("creation request submitted from Overview enters the reviewed conversation 
   await headerSearch.press("Enter");
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cable");
+  await panel.getByRole("button", { name: "Review fields" }).click();
+  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cables");
   expect(errors).toEqual([]);
 });
 
@@ -372,7 +453,110 @@ test("creation request submitted from Items enters the reviewed conversation flo
   await headerSearch.press("Enter");
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cable");
+  await panel.getByRole("button", { name: "Review fields" }).click();
+  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cables");
+  expect(errors).toEqual([]);
+});
+
+const creationJourneys = [
+  {
+    query: "Add a Validation Monitor to Storage",
+    name: "Validation Monitor",
+    quantity: 1,
+    destination: "Storage",
+  },
+  {
+    query: "Add one Validation Monitor to Storage",
+    name: "Validation Monitor",
+    quantity: 1,
+    destination: "Storage",
+  },
+  {
+    query: "Could you add a Validation Monitor to Storage?",
+    name: "Validation Monitor",
+    quantity: 1,
+    destination: "Storage",
+  },
+  {
+    query: "Create a Validation Monitor in Storage.",
+    name: "Validation Monitor",
+    quantity: 1,
+    destination: "Storage",
+  },
+  {
+    query: "I bought three Ethernet cables; put them in box 2.",
+    name: "Ethernet cables",
+    quantity: 3,
+    destination: "Box 2",
+  },
+  {
+    query: "سه کابل اترنت را به Storage اضافه کن",
+    name: "کابل اترنت",
+    quantity: 3,
+    destination: "Storage",
+  },
+];
+
+for (const journey of creationJourneys) {
+  test(`natural creation proposes and explicitly applies ${journey.query}`, async ({ page }) => {
+    const errors = await fixture(page, "/", undefined, true);
+    const intentQueries: string[] = [];
+    const applyBodies: Array<{ entries: Array<{ action: string; proposed: { name: string; quantity: number } }> }> = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/v1/assistant/actions/intent") {
+        intentQueries.push(request.postDataJSON().query);
+      }
+      if (/\/api\/v1\/imports\/[^/]+\/apply$/.test(url.pathname)) {
+        applyBodies.push(request.postDataJSON());
+      }
+    });
+
+    const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+    await headerSearch.fill(journey.query);
+    expect(intentQueries).toEqual([]);
+    await headerSearch.press("Enter");
+
+    const panel = page.getByTestId("assistant-panel");
+    const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    await expect(composer).toBeVisible();
+    await panel.getByRole("button", { name: "Review fields" }).click();
+    const itemName = panel.getByLabel("Item name");
+    await expect(itemName).toHaveValue(journey.name);
+    await expect(panel.getByLabel("Quantity")).toHaveValue(String(journey.quantity));
+    await expect(panel.getByText(new RegExp(`Utility Room.*${journey.destination}`))).toBeVisible();
+    expect(intentQueries).toEqual([journey.query]);
+    expect(applyBodies).toEqual([]);
+
+    const reviewedName = `Reviewed ${journey.name}`;
+    await itemName.fill(reviewedName);
+    await panel.getByRole("checkbox", { name: `Include ${reviewedName}` }).check();
+    await panel.getByRole("button", { name: "Approve selected" }).click();
+    await expect(page.getByText("1 imported · 0 skipped · 0 failed", { exact: true })).toBeVisible();
+    expect(applyBodies).toHaveLength(1);
+    expect(applyBodies[0].entries[0]).toMatchObject({
+      action: "import",
+      proposed: { name: reviewedName, quantity: journey.quantity },
+    });
+    expect(errors).toEqual([]);
+  });
+}
+
+test("manual creation fallback still reaches review when intent AI is unavailable", async ({ page }) => {
+  const errors = await fixture(page, "/", undefined, false);
+  const intentQueries: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
+      intentQueries.push(request.postDataJSON().query);
+    }
+  });
+  const query = "Add one Validation Monitor to Storage";
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill(query);
+  await headerSearch.press("Enter");
+  const panel = page.getByTestId("assistant-panel");
+  await expect(panel.getByRole("button", { name: "Review fields" })).toBeVisible();
+  expect(intentQueries).toEqual([query]);
   expect(errors).toEqual([]);
 });
 
@@ -574,7 +758,8 @@ test("item review edits survive closing the panel and switching views", async ({
 
   const panel = page.getByTestId("assistant-panel");
   const itemName = panel.getByLabel("Item name");
-  await expect(itemName).toHaveValue("Ethernet cable");
+  await panel.getByRole("button", { name: "Review fields" }).click();
+  await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("Blue Ethernet cable");
   await panel.getByRole("checkbox", { name: "Include Blue Ethernet cable" }).uncheck();
 

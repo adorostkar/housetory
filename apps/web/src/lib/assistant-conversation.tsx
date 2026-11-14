@@ -14,7 +14,7 @@ import type { SearchTurn } from "@/lib/search-session";
 import type { SearchConversationContext, SearchQueryResponse } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
-import { classifyAssistantIntent } from "@/lib/assistant-intent";
+import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
 
 export interface AssistantMessage {
   role: "user" | "assistant";
@@ -163,7 +163,15 @@ interface AssistantConversationContextValue {
   ) => void;
   updateCapture: (scope: string, captureId: string, patch: Partial<AssistantCaptureState>) => void;
   reset: (scope: string) => void;
-  ask: (scope: string, selection: SearchScopeSelection, value: string, regenerate: boolean, session: SessionSnapshot, references: AssistantPageReference[]) => void;
+  ask: (
+    scope: string,
+    selection: SearchScopeSelection,
+    value: string,
+    regenerate: boolean,
+    session: SessionSnapshot,
+    references: AssistantPageReference[],
+    onCreateItem: (value: string) => void | Promise<void>,
+  ) => void;
   clarifyAction: (scope: string, clarificationId: string, reply: ClarificationReply) => void;
   applyAction: (scope: string, proposalId: string) => void;
   cancelAction: (scope: string, proposalId: string) => void;
@@ -317,6 +325,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     regenerate: boolean,
     session: SessionSnapshot,
     references: AssistantPageReference[],
+    onCreateItem: (value: string) => void | Promise<void>,
   ) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
     if (current.pending) return;
@@ -481,9 +490,25 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       throw error;
     }).then((intent) => {
       if (controller.signal.aborted) return;
+      const captureItem = () => {
+        update(scope, (entry) => ({
+          ...entry,
+          draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+          pending: false,
+        }));
+        void onCreateItem(value);
+      };
+      if (intent.intent === "create_item") {
+        captureItem();
+        return;
+      }
       if (intent.intent === "unavailable") {
         if (isUnsupported) {
           respondUnsupported();
+          return;
+        }
+        if (looksLikeItemDescription(value)) {
+          captureItem();
           return;
         }
         return isAction ? runAction() : runSearch();
@@ -1031,14 +1056,20 @@ export function useAssistantConversation(scope: string) {
     editReturn: (proposalId: string) => store.editReturn(scope, proposalId),
     setReturnDraft: (proposalId: string, changes: Partial<ReturnDraft>) => store.setReturnDraft(scope, proposalId, changes),
     saveReturn: (proposalId: string) => store.saveReturn(scope, proposalId),
-    ask: (selection: SearchScopeSelection, value: string, regenerate: boolean, session: SessionSnapshot) => {
+    ask: (
+      selection: SearchScopeSelection,
+      value: string,
+      regenerate: boolean,
+      session: SessionSnapshot,
+      onCreateItem: (value: string) => void | Promise<void>,
+    ) => {
       const last = conversation.messages[conversation.messages.length - 1];
       const match = value.trim().match(/^(?:the one (?:in|at)|in|at|(?:اون|اونی|آن|اینی)\s+(?:توی|در)|(?:توی|در))\s+(.+?)\s*[.!?؟]?\s*$/iu);
       if (!regenerate && last?.clarification && !last.clarification.resolved && match?.[1]) {
         store.clarifyAction(scope, last.clarification.id, { location: match[1], text: value });
         return;
       }
-      store.ask(scope, selection, value, regenerate, session, references);
+      store.ask(scope, selection, value, regenerate, session, references, onCreateItem);
     },
   };
 }

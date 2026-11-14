@@ -66,6 +66,18 @@ NUMBER_WORDS = {
     "dozen": 12,
     "twenty": 20,
 }
+PERSIAN_NUMBER_WORDS = {
+    "یک": 1,
+    "دو": 2,
+    "سه": 3,
+    "چهار": 4,
+    "پنج": 5,
+    "شش": 6,
+    "هفت": 7,
+    "هشت": 8,
+    "نه": 9,
+    "ده": 10,
+}
 HEADER_SYNONYMS = {
     "name": {
         "name",
@@ -264,16 +276,20 @@ def parse_quantity(text: str) -> tuple[int, str]:
     pair = re.match(r"^\s*(?:a\s+)?pair\s+of\s+(?P<rest>.+)$", text, re.IGNORECASE)
     if pair:
         return 2, pair.group("rest").strip()
+    quantity_words = {**NUMBER_WORDS, **PERSIAN_NUMBER_WORDS}
+    number_pattern = "|".join(
+        re.escape(word) for word in sorted(quantity_words, key=len, reverse=True)
+    )
     match = re.match(
-        r"^\s*(?:x\s*)?(?P<number>\d{1,4}|" + "|".join(NUMBER_WORDS) + r")\s+"
+        r"^\s*(?:x\s*)?(?P<number>\d{1,4}|" + number_pattern + r")\s+"
         r"(?P<rest>.+)$",
         text,
         re.IGNORECASE,
     )
     if not match:
         return 1, text.strip()
-    raw = match.group("number").lower()
-    quantity = int(raw) if raw.isdigit() else NUMBER_WORDS.get(raw, 1)
+    raw = match.group("number").casefold()
+    quantity = int(raw) if raw.isdigit() else quantity_words.get(raw, 1)
     return max(0, quantity), match.group("rest").strip()
 
 
@@ -760,7 +776,7 @@ def _parse_detail_line(
     original = text.strip()
     if not original or len(original) > 2000:
         return None
-    if not re.search(r"[A-Za-z]{2,}", original):
+    if not re.search(r"\w{2,}", original, re.UNICODE):
         return None
     if re.match(r"^(?:https?://|www\.)|\]\(|^#+$", original, re.I):
         return None
@@ -829,17 +845,23 @@ def _parse_detail_line(
     # Prepositional location phrases, preserving order. The last phrase is often
     # the room and the first the storage place.
     phrases = re.findall(
-        r"\b(?:in|inside|under|on|at|within|behind|inside of)\s+"
-        r"(.+?)(?=(?:\s+(?:in|inside|under|on|at|within|behind)\s+)|[.;|]|$)",
+        r"\b(?:in|inside|under|on|at|within|behind|inside of|to|into)\s+"
+        r"(.+?)(?=(?:\s+(?:in|inside|under|on|at|within|behind|to|into)\s+)|[.;|]|$)",
         body,
         re.IGNORECASE,
     )
-    phrases = [_strip_articles(phrase.strip(" .,;|")) for phrase in phrases if phrase.strip()]
-    prep_match = re.search(r"\b(in|inside|under|on|at|within|behind)\b", body, re.IGNORECASE)
+    phrases = [
+        _strip_articles(phrase.strip(" .,;|?!؟"))
+        for phrase in phrases
+        if phrase.strip()
+    ]
+    prep_match = re.search(
+        r"\b(in|inside|under|on|at|within|behind|to|into)\b", body, re.IGNORECASE
+    )
     if phrases:
         field_sources["location"] = "explicit"
         body = re.split(
-            r"\b(?:in|inside|under|on|at|within|behind)\b",
+            r"\b(?:in|inside|under|on|at|within|behind|to|into)\b",
             body,
             maxsplit=1,
             flags=re.IGNORECASE,
@@ -899,6 +921,56 @@ def _sentence_draft(
     cleaned = sentence.strip()
     if not cleaned:
         return None
+    pronoun_destination = re.match(
+        r"^(?P<item>.+?);\s*(?:put|place|store|keep)\s+"
+        r"(?:them|it|this|that)\s+(?:in|into|at)\s+(?P<destination>.+)$",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if pronoun_destination:
+        cleaned = (
+            f"{pronoun_destination.group('item')} in "
+            f"{pronoun_destination.group('destination')}"
+        )
+    persian_creation = re.match(
+        r"^(?:لطفاً\s+)?(?P<item>.+?)\s+را\s+(?:به|در)\s+"
+        r"(?P<destination>.+?)\s+اضافه\s+کن(?:ید)?[.!?؟]*$",
+        cleaned,
+    )
+    if persian_creation:
+        cleaned = (
+            f"{persian_creation.group('item')} in "
+            f"{persian_creation.group('destination')}"
+        )
+    else:
+        creation = re.match(
+            r"^(?:(?:please|could you|can you|would you)\s+)*"
+            r"(?:add|create)\s+(?P<details>.+)$",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if creation:
+            details = creation.group("details").strip()
+            destination = re.match(
+                r"^(?P<item>.+)\s+(?:to|into|in)\s+(?P<destination>.+)$",
+                details,
+                re.IGNORECASE,
+            )
+            if destination:
+                cleaned = (
+                    f"{destination.group('item')} in "
+                    f"{destination.group('destination')}"
+                )
+            else:
+                draft = _parse_detail_line(
+                    details,
+                    document,
+                    collection=collection,
+                    confidence=68,
+                )
+                if draft is not None:
+                    draft.source_excerpt = sentence.strip()[:2000]
+                return draft
     match = re.match(
         r"^(?P<subject>.+?)\s+(?:is|are|was|were|sits?|lives?|stored|kept|belongs?)\s+"
         r"(?P<rest>.+)$",

@@ -375,7 +375,11 @@ def resolve_locations(
             if (
                 phrase_location
                 and phrase_location.status in {"matched", "ambiguous"}
-                and len(_strip_article(phrase).split()) > 1
+                and (
+                    len(_strip_article(phrase).split()) > 1
+                    or phrase_room is None
+                    or phrase_room.status not in {"matched", "ambiguous"}
+                )
             ):
                 location_match = phrase_location
                 if location_match.room_id:

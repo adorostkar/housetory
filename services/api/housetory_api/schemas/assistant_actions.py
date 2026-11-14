@@ -225,7 +225,12 @@ class AssistantIntentOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: Literal[
-        "question", "supported_action", "unsupported_action", "ambiguous", "unavailable"
+        "question",
+        "supported_action",
+        "unsupported_action",
+        "ambiguous",
+        "create_item",
+        "unavailable",
     ]
     form: Literal["items", "rooms", "loans", "documents", "account"] | None = None
 

@@ -1,6 +1,7 @@
 import io
 import zipfile
 
+import pytest
 from PIL import Image
 
 from housetory_api.services.import_pipeline import process_import_batch
@@ -216,6 +217,124 @@ def test_assistant_item_description_keeps_quantity_and_named_destination(owner_c
     assert proposed["storage_location"]["matched_id"] == box["id"]
     assert proposed["room"]["matched_id"] == room["id"]
     assert proposed["purchase"] is None
+
+
+@pytest.mark.parametrize(
+    ("text", "quantity"),
+    [
+        ("Add a Validation Monitor to Storage", 1),
+        ("Add one Validation Monitor to Storage", 1),
+        ("Could you add a Validation Monitor to Storage?", 1),
+        ("Create a Validation Monitor in Storage.", 1),
+        ("یک Validation Monitor را به Storage اضافه کن", 1),
+        ("سه کابل اترنت را به Storage اضافه کن", 3),
+        ("I bought three Ethernet cables; put them in box 2.", 3),
+    ],
+)
+def test_natural_creation_text_produces_reviewable_item_and_saves_explicitly(
+    owner_client, text, quantity
+):
+    room = create_room(owner_client, "Utility Room")
+    location_name = "Box 2" if "Ethernet" in text else "Storage"
+    location = create_location(owner_client, room["id"], location_name)
+    batch = upload_text_import(owner_client, text, title="Assistant item description")
+    detail = process_import(owner_client, batch["id"])
+
+    assert detail["status"] == "review"
+    assert detail["ignored_notes"] == []
+    assert len(detail["entries"]) == 1
+    entry = detail["entries"][0]
+    proposed = entry["proposed"]
+    expected_name = (
+        "Ethernet cables"
+        if "Ethernet" in text
+        else "کابل اترنت"
+        if "کابل اترنت" in text
+        else "Validation Monitor"
+    )
+    assert proposed["name"] == expected_name
+    assert proposed["quantity"] == quantity
+    assert proposed["purchase"] is None
+    assert proposed["storage_location"]["status"] == "matched"
+    assert proposed["storage_location"]["matched_id"] == location["id"]
+    assert proposed["room"]["matched_id"] == room["id"]
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+    apply_payload = {
+        "entries": [
+            {
+                "id": entry["id"],
+                "action": "import",
+                "proposed": proposed,
+            }
+        ]
+    }
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply", json=apply_payload
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 1
+
+    items = owner_client.get("/api/v1/items").json()
+    assert items["total"] == 1
+    created = items["items"][0]
+    assert created["name"] == expected_name
+    assert created["quantity"] == quantity
+    assert created["location"]["id"] == location["id"]
+
+    replay = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply", json=apply_payload
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["created"] == 0
+    assert replay.json()["skipped"] == 1
+    assert owner_client.get("/api/v1/items").json()["total"] == 1
+
+
+def test_natural_creation_with_duplicate_place_name_requires_resolution(owner_client):
+    house = create_room(owner_client, "House")
+    annex = create_room(owner_client, "Annex")
+    first_room = create_room(owner_client, "Storage", house["id"])
+    second_room = create_room(owner_client, "Storage", annex["id"])
+    batch = upload_text_import(owner_client, "Add a Validation Monitor to Storage")
+
+    detail = process_import(owner_client, batch["id"])
+
+    assert detail["ignored_notes"] == []
+    assert len(detail["entries"]) == 1
+    proposed = detail["entries"][0]["proposed"]
+    destination = proposed["room"]
+    assert destination["status"] == "ambiguous"
+    assert destination["matched_id"] is None
+    assert {candidate["id"] for candidate in destination["candidates"]} == {
+        first_room["id"],
+        second_room["id"],
+    }
+
+
+def test_natural_creation_duplicate_can_be_skipped_without_creating_another_item(
+    owner_client,
+):
+    room = create_room(owner_client, "Utility Room")
+    existing = owner_client.post(
+        "/api/v1/items",
+        json={"name": "Validation Monitor", "room_id": room["id"]},
+    ).json()["item"]
+    batch = upload_text_import(owner_client, "Add a Validation Monitor to Utility Room")
+    detail = process_import(owner_client, batch["id"])
+
+    assert len(detail["entries"]) == 1
+    entry = detail["entries"][0]
+    assert entry["duplicate_candidates"][0]["item_id"] == existing["id"]
+
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={"entries": [{"id": entry["id"], "action": "skip"}]},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 0
+    assert applied.json()["skipped"] == 1
+    assert owner_client.get("/api/v1/items").json()["total"] == 1
 
 
 def test_import_duplicate_detection_and_skip(owner_client):

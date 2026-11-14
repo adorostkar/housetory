@@ -700,6 +700,38 @@ def test_ai_classifies_an_unsupported_request_without_executing_it(
     assert owner_client.get("/api/v1/rooms").json()["items"] == []
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Add a Validation Monitor to Storage",
+        "Add one Validation Monitor to Storage",
+        "Could you add a Validation Monitor to Storage?",
+        "Create a Validation Monitor in Storage.",
+        "یک Validation Monitor را به Storage اضافه کن",
+        "سه کابل اترنت را به Storage اضافه کن",
+    ],
+)
+def test_ai_classifies_natural_item_creation_as_supported(
+    owner_client, configured_ai, monkeypatch, query
+):
+    from housetory_api.services import ai
+
+    prompts = []
+
+    def complete(system, user, *, config):
+        prompts.append(system)
+        assert user == query
+        return {"intent": "create_item", "form": None}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    response = owner_client.post(
+        "/api/v1/assistant/actions/intent", json={"query": query}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"intent": "create_item", "form": None}
+    assert "requests to add or create inventory items are create_item" in prompts[0].lower()
+
+
 def test_ai_interprets_place_as_a_reviewed_move(owner_client, configured_ai, monkeypatch):
     from housetory_api.services import ai
 

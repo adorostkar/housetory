@@ -30,6 +30,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 vi.mock("@/lib/assistant-intent", () => ({
   classifyAssistantIntent: vi.fn().mockResolvedValue({ intent: "unavailable", form: null }),
+  looksLikeItemDescription: vi.fn((value: string) => /bought|add/i.test(value)),
 }));
 
 vi.mock("@/components/assistant-document-review", () => ({
