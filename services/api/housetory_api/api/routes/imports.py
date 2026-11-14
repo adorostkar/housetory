@@ -114,6 +114,7 @@ def create_import(
     property_id: Annotated[uuid.UUID | None, Form()] = None,
     room_id: Annotated[uuid.UUID | None, Form()] = None,
     location_id: Annotated[uuid.UUID | None, Form()] = None,
+    assistant_capture: Annotated[bool, Form()] = False,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ImportBatchDetail:
@@ -125,6 +126,12 @@ def create_import(
             422,
             "import_source_required",
             "Choose exactly one source: a file, a ZIP vault, pasted text, or one product URL.",
+        )
+    if assistant_capture and not has_text:
+        raise ApiError(
+            422,
+            "assistant_capture_requires_text",
+            "Assistant item capture requires a text description.",
         )
     if purchase_date is not None and not has_product_url:
         raise ApiError(
@@ -239,6 +246,7 @@ def create_import(
         warnings=[],
         metadata_json={
             **({"context": context} if context else {}),
+            **({"assistant_capture": True} if assistant_capture else {}),
             **(
                 {
                     "product_url": product_url.strip(),

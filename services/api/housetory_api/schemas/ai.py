@@ -57,7 +57,7 @@ class AiImportItem(BaseModel):
 
     name: trimmed(1, 200)
     description: Description | None = None
-    quantity: int = Field(default=1, ge=0, le=1_000_000)
+    quantity: int = Field(default=1, ge=1, le=1_000_000)
     category: trimmed(1, 80) | None = None
     brand: trimmed(1, 120) | None = None
     model: trimmed(1, 120) | None = None

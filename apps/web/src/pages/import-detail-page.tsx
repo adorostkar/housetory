@@ -476,9 +476,25 @@ export function ImportDetailPage({
           </div>
         )}
         {batch.status === "queued" || batch.status === "processing" ? (
-          <div className="mt-4 flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/30 px-4 py-5 text-xs text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            {progress.message || "Processing this source in the background…"}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-secondary/30 px-4 py-5 text-xs text-muted-foreground">
+            <span className="flex items-center gap-2">
+              <Loader2 className="size-4 animate-spin" />
+              {progress.message || "Processing this source in the background…"}
+            </span>
+            {batch.status === "processing" &&
+              batch.metadata.assistant_capture === true &&
+              batch.enhancement &&
+              ["queued", "running"].includes(batch.enhancement.status) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => retryEnhancement.mutate("cancel")}
+                  disabled={retryEnhancement.isPending}
+                >
+                  {retryEnhancement.isPending ? <Spinner /> : null}
+                  Use local fallback
+                </Button>
+              )}
           </div>
         ) : batch.status === "failed" ? (
           <div className="mt-4 rounded-xl border border-destructive/25 bg-destructive/5 p-4">

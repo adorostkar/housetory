@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..db import SessionLocal
-from ..domain import AiTask
+from ..domain import AiTask, ImportStatus
 from ..jobs import enqueue
 from ..models import Document, ImportBatch, ImportEntry, ImportSourceFile, Job
 from ..schemas.extraction import LineMatch
@@ -179,6 +179,29 @@ def cancel_enhancement(db: Session, source: Document | ImportBatch) -> None:
                 dict.fromkeys([*invalidated, *sorted(remove)])
             )[-50:]
         source.extracted_metadata = metadata
+    elif (
+        isinstance(source, ImportBatch)
+        and (source.metadata_json or {}).get("assistant_capture")
+        and source.status == ImportStatus.PROCESSING.value
+    ):
+        metadata = _metadata(source)
+        metadata.update(
+            ai_used=False,
+            ai_error="AI extraction was cancelled; deterministic results are shown.",
+            progress={
+                "stage": "review",
+                "message": "Review the deterministic item description fallback",
+            },
+        )
+        source.metadata_json = metadata
+        source.status = ImportStatus.REVIEW.value
+        source.warnings = [
+            *source.warnings,
+            {
+                "type": "ai_fallback",
+                "message": "AI extraction was cancelled; deterministic results are shown.",
+            },
+        ]
     job = db.get(Job, uuid.UUID(state["job_id"])) if state.get("job_id") else None
     if job is not None and job.status == "queued":
         job.status = "cancelled"
@@ -383,7 +406,12 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
                 )
             )
     else:
-        drafts = TypeAdapter(list[ProposalDraft]).validate_python(inputs["drafts"])
+        primary_extraction = bool(inputs.get("primary_extraction"))
+        drafts = (
+            []
+            if primary_extraction
+            else TypeAdapter(list[ProposalDraft]).validate_python(inputs["drafts"])
+        )
         files = {
             file.relative_path: file.id
             for file in db.scalars(
@@ -400,6 +428,8 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
             single_subject=bool((batch.metadata_json or {}).get("product_url")),
             config=config,
             chunks=[(document.relative_path, document.text) for document in bundle.documents],
+            primary_extraction=primary_extraction,
+            authorized_places=inputs.get("authorized_places"),
         )
         for position, draft in enumerate(drafts):
             proposed = to_proposed_item(draft, index)
@@ -478,6 +508,56 @@ def _document_match_proposal(db: Session, source: Document) -> dict:
         ai_status=status,
         ai_used=ai_used,
     ).model_dump(mode="json")
+
+
+def _publish_primary_import(db: Session, batch: ImportBatch, proposals: list[dict]) -> None:
+    from .import_matching import find_duplicates
+
+    parsed = [ImportEnhancementEntry.model_validate(item) for item in proposals]
+    if not parsed or any(item.entity_type != "item" for item in parsed):
+        raise ValueError("AI extraction did not return valid item proposals.")
+    for entry in db.scalars(select(ImportEntry).where(ImportEntry.batch_id == batch.id)).all():
+        db.delete(entry)
+    db.flush()
+    for position, proposal in enumerate(parsed):
+        duplicates = find_duplicates(db, batch.household_id, proposal.proposed)
+        db.add(
+            ImportEntry(
+                batch_id=batch.id,
+                source_file_id=proposal.source_file_id,
+                source_path=proposal.source_path,
+                source_excerpt=proposal.source_excerpt,
+                proposed=proposal.proposed.model_dump(mode="json"),
+                field_sources=proposal.proposed.field_sources,
+                confidence=proposal.proposed.confidence,
+                duplicate_candidates=[
+                    candidate.model_dump(mode="json") for candidate in duplicates
+                ],
+                entity_type="item",
+                position=position,
+            )
+        )
+    metadata = _metadata(batch)
+    metadata.pop("enhancement", None)
+    metadata.pop("_enhancement_snapshot", None)
+    metadata.update(
+        ai_used=True,
+        ai_error=None,
+        ignored_notes=[],
+        progress={"stage": "review", "message": "AI item proposals are ready for review"},
+    )
+    batch.metadata_json = metadata
+    batch.warnings = [
+        warning
+        for warning in batch.warnings
+        if warning.get("type") not in {"no_entries", "ai_fallback"}
+    ]
+    batch.total_entries = len(parsed)
+    batch.imported_entries = 0
+    batch.skipped_entries = 0
+    batch.failed_entries = 0
+    batch.status = ImportStatus.REVIEW.value
+    batch.completed_at = None
 
 
 def run_enhancement(payload: dict) -> dict:
@@ -593,6 +673,64 @@ def run_enhancement(payload: dict) -> dict:
                 error = "refinement_version_invalidated"
                 result = None
         reason = _guard(db, source, payload)
+        primary_capture = (
+            isinstance(source, ImportBatch)
+            and bool((source.metadata_json or {}).get("assistant_capture"))
+            and source.status == ImportStatus.PROCESSING.value
+        )
+        if primary_capture and reason is None:
+            if error is None and result:
+                try:
+                    _publish_primary_import(db, source, result)
+                except ValueError:
+                    error = "invalid_output"
+                else:
+                    db.commit()
+                    logger.info(
+                        "Primary assistant extraction provider=%s status=ready duration_ms=%d",
+                        config.provider,
+                        (time.monotonic() - started) * 1000,
+                    )
+                    return {"status": "ready", "reason": None}
+            elif error is None:
+                error = "no_items"
+            metadata = _metadata(source)
+            metadata.update(
+                ai_used=False,
+                ai_error=(
+                    "AI extraction did not produce item proposals; deterministic results are shown."
+                ),
+                progress={
+                    "stage": "review",
+                    "message": "Review the deterministic item description fallback",
+                },
+            )
+            source.metadata_json = metadata
+            source.warnings = [
+                *source.warnings,
+                {
+                    "type": "ai_fallback",
+                    "message": (
+                        "AI extraction did not produce item proposals; "
+                        "deterministic results are shown."
+                    ),
+                },
+            ]
+            source.status = ImportStatus.REVIEW.value
+            state = {
+                **current,
+                "status": "failed",
+                "reason": error,
+                "ai_attempted": True,
+                "ai_succeeded": False,
+                "error": (
+                    "AI extraction did not produce a valid proposal. "
+                    "Deterministic results are unchanged."
+                ),
+            }
+            _write(source, state)
+            db.commit()
+            return {"status": "failed", "reason": error}
         state = {
             **current,
             "status": "skipped" if reason else "failed" if error else "ready",

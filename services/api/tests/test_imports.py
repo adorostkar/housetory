@@ -24,10 +24,13 @@ def create_location(client, room_id, name, kind="box"):
     return response.json()
 
 
-def upload_text_import(client, text, title="Notes"):
+def upload_text_import(client, text, title="Notes", assistant_capture=False):
+    data = {"text": text, "title": title}
+    if assistant_capture:
+        data["assistant_capture"] = "true"
     response = client.post(
         "/api/v1/imports",
-        data={"text": text, "title": title},
+        data=data,
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -48,6 +51,16 @@ def process_import(client, batch_id):
     response = client.get(f"/api/v1/imports/{batch_id}")
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def run_import_enhancement(batch):
+    from housetory_api.db import SessionLocal
+    from housetory_api.models import Job
+    from housetory_api.services.enrichment import run_enhancement
+
+    with SessionLocal() as db:
+        payload = db.get(Job, batch["enhancement"]["job_id"]).payload
+    return run_enhancement(payload)
 
 
 def jpeg_bytes():
@@ -289,6 +302,464 @@ def test_natural_creation_text_produces_reviewable_item_and_saves_explicitly(
     assert replay.json()["created"] == 0
     assert replay.json()["skipped"] == 1
     assert owner_client.get("/api/v1/items").json()["total"] == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "quantity", "room_name"),
+    [
+        (
+            "Please register two Validation Headphones in Kitchen",
+            "Validation Headphones",
+            2,
+            "Kitchen",
+        ),
+        (
+            "Could you record three Game Controllers in Office?",
+            "Game Controllers",
+            3,
+            "Office",
+        ),
+        (
+            "لطفاً دو هدفون ولیدیشن را در آشپزخانه ثبت کن",
+            "هدفون ولیدیشن",
+            2,
+            "آشپزخانه",
+        ),
+        (
+            "سه کابل اترنت را در آشپزخانه ثبت کن",
+            "کابل اترنت",
+            3,
+            "آشپزخانه",
+        ),
+    ],
+)
+def test_semantic_creation_commands_produce_clean_reviewable_and_saved_items(
+    owner_client, monkeypatch, configured_ai, text, name, quantity, room_name
+):
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, room_name)
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [{"name": name, "quantity": quantity, "room": room_name}],
+            "refinements": [],
+            "warnings": [],
+        },
+    )
+    batch = upload_text_import(
+        owner_client,
+        text,
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert run_import_enhancement(initial)["status"] == "ready"
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+
+    assert detail["ignored_notes"] == []
+    assert len(detail["entries"]) == 1
+    entry = detail["entries"][0]
+    proposed = entry["proposed"]
+    assert (proposed["name"], proposed["quantity"]) == (name, quantity)
+    assert proposed["room"]["matched_id"] == room["id"]
+    assert proposed["purchase"] is None
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={
+            "entries": [
+                {"id": entry["id"], "action": "import", "proposed": proposed}
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 1
+    items = owner_client.get("/api/v1/items").json()
+    assert items["total"] == 1
+    assert items["items"][0]["name"] == name
+    assert items["items"][0]["quantity"] == quantity
+    assert items["items"][0]["room"]["id"] == room["id"]
+
+
+def test_multiple_semantic_creation_commands_keep_distinct_items_and_destinations(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import ai
+
+    kitchen = create_room(owner_client, "Kitchen")
+    office = create_room(owner_client, "Office")
+    text = (
+        "Please register two Validation Headphones in Kitchen.\n\n"
+        "Please add three Game Controllers to Office."
+    )
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {"name": "Validation Headphones", "quantity": 2, "room": "Kitchen"},
+                {"name": "Game Controllers", "quantity": 3, "room": "Office"},
+            ],
+            "refinements": [],
+            "warnings": [],
+        },
+    )
+    batch = upload_text_import(
+        owner_client,
+        text,
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert run_import_enhancement(initial)["status"] == "ready"
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+
+    assert detail["ignored_notes"] == []
+    assert len(detail["entries"]) == 2
+    proposals = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    assert set(proposals) == {"Validation Headphones", "Game Controllers"}
+    assert proposals["Validation Headphones"]["proposed"]["quantity"] == 2
+    assert proposals["Validation Headphones"]["proposed"]["room"]["matched_id"] == kitchen["id"]
+    assert proposals["Game Controllers"]["proposed"]["quantity"] == 3
+    assert proposals["Game Controllers"]["proposed"]["room"]["matched_id"] == office["id"]
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={
+            "entries": [
+                {"id": entry["id"], "action": "import", "proposed": entry["proposed"]}
+                for entry in detail["entries"]
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 2
+    items = owner_client.get("/api/v1/items").json()
+    assert items["total"] == 2
+    saved = {item["name"]: item for item in items["items"]}
+    assert saved["Validation Headphones"]["quantity"] == 2
+    assert saved["Validation Headphones"]["room"]["id"] == kitchen["id"]
+    assert saved["Game Controllers"]["quantity"] == 3
+    assert saved["Game Controllers"]["room"]["id"] == office["id"]
+
+
+@pytest.mark.parametrize(
+    ("text", "items"),
+    [
+        (
+            "Please register two Validation Headphones in Kitchen",
+            [("Validation Headphones", 2, "Kitchen")],
+        ),
+        (
+            "Could you record three Game Controllers in Office?",
+            [("Game Controllers", 3, "Office")],
+        ),
+        (
+            "لطفاً دو هدفون ولیدیشن را در آشپزخانه ثبت کن",
+            [("هدفون ولیدیشن", 2, "آشپزخانه")],
+        ),
+        (
+            "سه کابل اترنت را در آشپزخانه ثبت کن",
+            [("کابل اترنت", 3, "آشپزخانه")],
+        ),
+        (
+            "Please register two Validation Headphones, then two more in Kitchen",
+            [("Validation Headphones", 4, "Kitchen")],
+        ),
+        (
+            "Register two Validation Headphones in Kitchen and one Game Controller in Office",
+            [
+                ("Validation Headphones", 2, "Kitchen"),
+                ("Game Controller", 1, "Office"),
+            ],
+        ),
+    ],
+)
+def test_assistant_creation_uses_one_ai_extraction_for_the_review_and_apply(
+    owner_client, monkeypatch, configured_ai, text, items
+):
+    from housetory_api.services import ai
+
+    rooms = {name: create_room(owner_client, name) for _, _, name in items}
+    calls = []
+
+    def complete_json(system, prompt, *, config):
+        calls.append((system, prompt, config))
+        return {
+            "refinements": [],
+            "items": [
+                {"name": name, "quantity": quantity, "room": room}
+                for name, quantity, room in items
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete_json)
+    batch = upload_text_import(
+        owner_client,
+        text,
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert initial["status"] == "processing"
+    assert initial["metadata"]["progress"]["stage"] == "interpreting"
+    assert calls == []
+
+    assert run_import_enhancement(initial)["status"] == "ready"
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert detail["status"] == "review"
+    assert detail["metadata"]["ai_used"] is True
+    assert len(calls) == 1
+    assert "untrusted" in calls[0][0].lower()
+    assert text in calls[0][1]
+    authorized_context = calls[0][1].split("<untrusted_source", 1)[0]
+    for _, _, room_name in items:
+        assert f'"name": "{room_name}"' in authorized_context
+    assert len(detail["entries"]) == len(items)
+    proposals = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    assert set(proposals) == {name for name, _, _ in items}
+    for name, quantity, room_name in items:
+        proposed = proposals[name]["proposed"]
+        assert proposed["quantity"] == quantity
+        assert proposed["room"]["matched_id"] == rooms[room_name]["id"]
+        assert proposed["field_sources"]["name"] == "inferred"
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={
+            "entries": [
+                {
+                    "id": entry["id"],
+                    "action": "import",
+                    "proposed": entry["proposed"],
+                }
+                for entry in detail["entries"]
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == len(items)
+    saved = {item["name"]: item for item in owner_client.get("/api/v1/items").json()["items"]}
+    assert set(saved) == {name for name, _, _ in items}
+    for name, quantity, room_name in items:
+        assert saved[name]["quantity"] == quantity
+        assert saved[name]["room"]["id"] == rooms[room_name]["id"]
+
+
+def test_primary_ai_combines_repeated_items_but_preserves_model_differences(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, "Storage")
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {
+                    "name": "Validation Headphones",
+                    "quantity": 2,
+                    "room": "Storage",
+                    "model": "VH-1",
+                },
+                {
+                    "name": "Validation Headphones",
+                    "quantity": 3,
+                    "room": "Storage",
+                    "model": "VH-1",
+                },
+                {
+                    "name": "Validation Headphones",
+                    "quantity": 1,
+                    "room": "Storage",
+                    "model": "VH-2",
+                },
+            ],
+            "warnings": [],
+        },
+    )
+    batch = upload_text_import(
+        owner_client,
+        "Two Validation Headphones VH-1 and three more VH-1; one VH-2 in Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert run_import_enhancement(initial)["status"] == "ready"
+
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert detail["status"] == "review"
+    proposals = {entry["proposed"]["model"]: entry["proposed"] for entry in detail["entries"]}
+    assert set(proposals) == {"VH-1", "VH-2"}
+    assert proposals["VH-1"]["quantity"] == 5
+    assert proposals["VH-2"]["quantity"] == 1
+    assert all(proposal["room"]["matched_id"] == room["id"] for proposal in proposals.values())
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+def test_primary_ai_keeps_duplicate_destinations_ambiguous(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import ai
+
+    first_parent = create_room(owner_client, "House")
+    second_parent = create_room(owner_client, "Annex")
+    first_kitchen = create_room(owner_client, "Kitchen", first_parent["id"])
+    second_kitchen = create_room(owner_client, "Kitchen", second_parent["id"])
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: {
+            "items": [
+                {"name": "Validation Headphones", "quantity": 2, "room": "Kitchen"}
+            ],
+            "warnings": [],
+        },
+    )
+    batch = upload_text_import(
+        owner_client,
+        "Please register two Validation Headphones in Kitchen",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert run_import_enhancement(initial)["status"] == "ready"
+
+    detail = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    destination = detail["entries"][0]["proposed"]["room"]
+    assert destination["status"] == "ambiguous"
+    assert destination["matched_id"] is None
+    assert {candidate["id"] for candidate in destination["candidates"]} == {
+        first_kitchen["id"],
+        second_kitchen["id"],
+    }
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+def test_primary_ai_cancel_returns_deterministic_fallback_and_ignores_late_result(
+    owner_client, monkeypatch, configured_ai
+):
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, "Storage")
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: pytest.fail("A cancelled extraction must not call the provider"),
+    )
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert initial["status"] == "processing"
+    response = owner_client.post(f"/api/v1/imports/{batch['id']}/enhancement/cancel")
+    assert response.status_code == 200, response.text
+    fallback = response.json()
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert "cancelled" in fallback["metadata"]["ai_error"]
+    assert fallback["entries"][0]["proposed"]["name"] == "Validation Monitor"
+    assert fallback["entries"][0]["proposed"]["room"]["matched_id"] == room["id"]
+    assert run_import_enhancement(initial) == {"status": "skipped", "reason": "superseded"}
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"unexpected": True},
+        {"items": [], "refinements": [], "warnings": []},
+    ],
+)
+def test_primary_ai_failure_keeps_labeled_local_fallback(
+    owner_client, monkeypatch, configured_ai, output
+):
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, "Storage")
+    monkeypatch.setattr(ai, "complete_json", lambda *args, **kwargs: output)
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+    initial = process_import(owner_client, batch["id"])
+    assert run_import_enhancement(initial)["status"] == "failed"
+
+    fallback = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    assert fallback["status"] == "review"
+    assert fallback["metadata"]["ai_used"] is False
+    assert "deterministic results are shown" in fallback["metadata"]["ai_error"]
+    assert fallback["entries"][0]["proposed"]["name"] == "Validation Monitor"
+    assert fallback["entries"][0]["proposed"]["room"]["matched_id"] == room["id"]
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+
+
+def test_assistant_creation_without_ai_is_reviewable_and_savable(
+    owner_client, monkeypatch, configured_ai
+):
+    from dataclasses import replace
+
+    from housetory_api.services import ai
+
+    room = create_room(owner_client, "Storage")
+    disabled_config = replace(
+        configured_ai,
+        model=None,
+        mode="disabled",
+        enabled=False,
+        configured=False,
+    )
+    monkeypatch.setattr(ai, "config_for", lambda *args, **kwargs: disabled_config)
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *args, **kwargs: pytest.fail("Disabled AI must not call the provider"),
+    )
+    batch = upload_text_import(
+        owner_client,
+        "Add one Validation Monitor to Storage",
+        title="Assistant item description",
+        assistant_capture=True,
+    )
+
+    detail = process_import(owner_client, batch["id"])
+
+    assert detail["status"] == "review"
+    assert detail["metadata"]["ai_used"] is False
+    assert "unavailable" in detail["metadata"]["ai_error"]
+    proposed = detail["entries"][0]["proposed"]
+    assert proposed["name"] == "Validation Monitor"
+    assert proposed["room"]["matched_id"] == room["id"]
+    assert owner_client.get("/api/v1/items").json()["total"] == 0
+    applied = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/apply",
+        json={
+            "entries": [
+                {
+                    "id": detail["entries"][0]["id"],
+                    "action": "import",
+                    "proposed": proposed,
+                }
+            ]
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    saved = owner_client.get("/api/v1/items").json()["items"]
+    assert len(saved) == 1
+    assert saved[0]["name"] == "Validation Monitor"
+    assert saved[0]["quantity"] == 1
 
 
 def test_natural_creation_with_duplicate_place_name_requires_resolution(owner_client):

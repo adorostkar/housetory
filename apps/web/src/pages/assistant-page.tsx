@@ -277,6 +277,7 @@ export function AssistantPage({
       const form = new FormData();
       form.append("text", value);
       form.append("title", "Assistant item description");
+      form.append("assistant_capture", "true");
       if (selection.propertyId) form.append("property_id", selection.propertyId);
       const batch = await api.postForm<ImportBatchDetail>("/imports", form);
       selectImport(batch.id);

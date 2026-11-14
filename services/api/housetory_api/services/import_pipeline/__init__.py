@@ -216,13 +216,34 @@ def process_import_batch(
             file_mapping = _store_vault_files(db, batch, bundle)
             property_record = _context_property(db, batch)
             index = build_index(db, batch.household_id, property_record.id)
+            room_names = {room.id: room.name for room in index.rooms}
+            authorized_places = {
+                "rooms": [
+                    {
+                        "name": room.name,
+                        "parent": room_names.get(room.parent_id),
+                    }
+                    for room in index.rooms[:100]
+                ],
+                "storage_locations": [
+                    {
+                        "name": location.name,
+                        "identifier": location.identifier,
+                        "room": room_names.get(location.room_id),
+                    }
+                    for location in index.locations[:100]
+                ],
+            }
             hierarchy = parse_hierarchy(bundle)
+            assistant_capture = bool((batch.metadata_json or {}).get("assistant_capture"))
             ai_metadata: dict[str, Any] = {
                 "ai_used": False,
                 "ai_consulted": False,
                 "ai_error": None,
             }
-            hierarchy_mode = hierarchy.active and bool(hierarchy.items)
+            hierarchy_mode = (
+                not assistant_capture and hierarchy.active and bool(hierarchy.items)
+            )
             if hierarchy_mode:
                 entry_count = _create_hierarchy_entries(
                     db, batch, hierarchy, bundle, file_mapping, index
@@ -295,13 +316,22 @@ def process_import_batch(
                 "vault_tree": bundle.vault_tree,
                 "ignored_notes": ignored_notes,
                 "broken_links": bundle.broken_links,
-                "progress": {"stage": "review", "message": "Ready for review"},
+                "progress": (
+                    {
+                        "stage": "interpreting",
+                        "message": "Interpreting your item description",
+                    }
+                    if assistant_capture
+                    else {"stage": "review", "message": "Ready for review"}
+                ),
             }
             batch.total_entries = entry_count
             batch.imported_entries = 0
             batch.skipped_entries = 0
             batch.failed_entries = 0
-            batch.status = ImportStatus.REVIEW.value
+            batch.status = (
+                ImportStatus.PROCESSING.value if assistant_capture else ImportStatus.REVIEW.value
+            )
             batch.completed_at = None
             db.flush()
             from ..enrichment import schedule_enhancement
@@ -333,15 +363,46 @@ def process_import_batch(
                 kind="import",
                 inputs={
                     "documents": source_documents,
-                    "drafts": TypeAdapter(list[ProposalDraft]).dump_python(drafts, mode="json"),
+                    "drafts": (
+                        []
+                        if assistant_capture
+                        else TypeAdapter(list[ProposalDraft]).dump_python(drafts, mode="json")
+                    ),
                     "hierarchy": (
                         TypeAdapter(type(hierarchy)).dump_python(hierarchy, mode="json")
                         if hierarchy_mode
                         else None
                     ),
-                    "entry_ids": [str(entry.id) for entry in entries],
+                    "entry_ids": (
+                        [] if assistant_capture else [str(entry.id) for entry in entries]
+                    ),
+                    "primary_extraction": assistant_capture,
+                    "authorized_places": authorized_places,
                 },
             )
+            if assistant_capture:
+                enhancement = (batch.metadata_json or {}).get("enhancement") or {}
+                if enhancement.get("status") != "queued":
+                    batch.status = ImportStatus.REVIEW.value
+                    batch.metadata_json = {
+                        **(batch.metadata_json or {}),
+                        "ai_error": (
+                            "AI extraction is unavailable; deterministic results are shown."
+                        ),
+                        "progress": {
+                            "stage": "review",
+                            "message": "Review the deterministic item description fallback",
+                        },
+                    }
+                    batch.warnings = [
+                        *batch.warnings,
+                        {
+                            "type": "ai_fallback",
+                            "message": (
+                                "AI extraction is unavailable; deterministic results are shown."
+                            ),
+                        },
+                    ]
             db.commit()
             return {"batch_id": str(batch.id), "entries": entry_count}
         except Exception as exc:  # noqa: BLE001 - persisted for recovery

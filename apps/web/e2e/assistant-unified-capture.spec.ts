@@ -501,11 +501,15 @@ for (const journey of creationJourneys) {
   test(`natural creation proposes and explicitly applies ${journey.query}`, async ({ page }) => {
     const errors = await fixture(page, "/", undefined, true);
     const intentQueries: string[] = [];
+    const captureBodies: string[] = [];
     const applyBodies: Array<{ entries: Array<{ action: string; proposed: { name: string; quantity: number } }> }> = [];
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (url.pathname === "/api/v1/assistant/actions/intent") {
         intentQueries.push(request.postDataJSON().query);
+      }
+      if (url.pathname === "/api/v1/imports" && request.method() === "POST") {
+        captureBodies.push(request.postData() ?? "");
       }
       if (/\/api\/v1\/imports\/[^/]+\/apply$/.test(url.pathname)) {
         applyBodies.push(request.postDataJSON());
@@ -526,6 +530,9 @@ for (const journey of creationJourneys) {
     await expect(panel.getByLabel("Quantity")).toHaveValue(String(journey.quantity));
     await expect(panel.getByText(new RegExp(`Utility Room.*${journey.destination}`))).toBeVisible();
     expect(intentQueries).toEqual([journey.query]);
+    expect(captureBodies).toHaveLength(1);
+    expect(captureBodies[0]).toContain('name="assistant_capture"');
+    expect(captureBodies[0]).toContain("\r\n\r\ntrue\r\n");
     expect(applyBodies).toEqual([]);
 
     const reviewedName = `Reviewed ${journey.name}`;
@@ -770,6 +777,7 @@ test("item review edits survive closing the panel and switching views", async ({
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, `/imports/${importBatch.id}`);
+  await page.getByRole("button", { name: "Review fields" }).click();
   const fullPageReview = page.getByLabel("Item name");
   await expect(fullPageReview).toHaveValue("Blue Ethernet cable");
   await expect(
