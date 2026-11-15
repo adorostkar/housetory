@@ -3,8 +3,9 @@ import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useCaptureReviews, useSession } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-keys";
 import { AssistantPhotoProgress } from "@/components/assistant-photo-progress";
-import { dispatchAssistantTaskCompletion, type CaptureReview } from "@/lib/assistant-task-events";
+import { assistantTaskKey, dispatchAssistantTaskCompletion, type CaptureReview } from "@/lib/assistant-task-events";
 import type { AssistantCaptureState } from "@/lib/assistant-conversation";
 import type { AiRecognition, ImportDecision, ProposedItem } from "@/lib/types";
 import { api, getApiErrorMessage } from "@/lib/api";
@@ -30,9 +31,14 @@ interface DocumentReviewContext {
   selectImport: (id: string, userInitiated?: boolean) => void;
   importNode: HTMLDivElement;
   activePhotoId: string | null;
-  selectPhoto: (id: string) => void;
+  selectPhoto: (id: string, userInitiated?: boolean) => void;
   photoNode: HTMLDivElement;
   pendingReviews: CaptureReview[];
+  dismissedReviews: CaptureReview[];
+  dismissReview: (review: CaptureReview) => Promise<void>;
+  undoReview: (review: CaptureReview) => Promise<void>;
+  retryReview: (review: CaptureReview) => Promise<void>;
+  reviewMutationPending: boolean;
   reviewsError: boolean;
   getImportReviewDraft: (id: string) => ImportReviewDraft | undefined;
   saveImportReviewDraft: (id: string, draft: ImportReviewDraft) => void;
@@ -52,7 +58,17 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
   const [activePhotoId, setActivePhotoId] = React.useState<string | null>(null);
   const client = useQueryClient();
   const reviews = useCaptureReviews();
+  const dismissed = useCaptureReviews(true);
   const pendingReviews = reviews.data ?? [];
+  const dismissedReviews = dismissed.data ?? [];
+  const mutationRunning = React.useRef(false);
+  const [reviewMutationPending, setReviewMutationPending] = React.useState(false);
+  const notificationSnapshot = React.useRef<{
+    householdId: string;
+    attempts: Map<string, string>;
+  } | null>(null);
+  const baselineAfter = React.useRef(0);
+  const createdCaptures = React.useRef(new Set<string>());
   const householdId = useSession().data?.household?.id ?? "";
   const selection = React.useRef<{ householdId: string; version: number; photoId: string | null }>({
     householdId, version: 0, photoId: null,
@@ -81,10 +97,17 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     ...pendingReviews.filter((review) => review.kind === "import").map((review) => review.id),
   ])];
   const select = React.useCallback((id: string, userInitiated = false) => {
+    if (dismissedReviews.some((review) => review.kind === "document" && review.id === id)) {
+      toast.info("This review is dismissed. Use Undo in Dismissed reviews to restore it.");
+      return;
+    }
     selection.current = { householdId, version: selection.current.version + 1, photoId: null };
     setActivePhotoId(null);
     setImportState((current) => ({ ...current, activeId: null }));
-    if (userInitiated) void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    if (userInitiated) {
+      createdCaptures.current.add(`${householdId}:document:${id}`);
+      void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    }
     setState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
       return {
@@ -93,12 +116,19 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         ids: currentIds.includes(id) ? currentIds : [...currentIds, id],
       };
     });
-  }, [client, householdId]);
+  }, [client, householdId, dismissed.data]);
   const selectImport = React.useCallback((id: string, userInitiated = false) => {
+    if (dismissedReviews.some((review) => review.kind === "import" && review.id === id)) {
+      toast.info("This review is dismissed. Use Undo in Dismissed reviews to restore it.");
+      return;
+    }
     selection.current = { householdId, version: selection.current.version + 1, photoId: null };
     setActivePhotoId(null);
     setState((current) => ({ ...current, activeId: null }));
-    if (userInitiated) void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    if (userInitiated) {
+      createdCaptures.current.add(`${householdId}:import:${id}`);
+      void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    }
     setImportState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
       return {
@@ -107,23 +137,132 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         ids: currentIds.includes(id) ? currentIds : [...currentIds, id],
       };
     });
-  }, [client, householdId]);
-  const selectPhoto = React.useCallback((id: string) => {
+  }, [client, householdId, dismissed.data]);
+  const selectPhoto = React.useCallback((id: string, userInitiated = false) => {
+    if (dismissedReviews.some((review) => review.kind === "photo" && review.id === id)) {
+      toast.info("This review is dismissed. Use Undo in Dismissed reviews to restore it.");
+      return;
+    }
     const version = selection.current.version + 1;
     selection.current = { householdId, version, photoId: id };
     setActivePhotoId(id);
     setState((current) => ({ ...current, activeId: null }));
     setImportState((current) => ({ ...current, activeId: null }));
+    if (userInitiated) createdCaptures.current.add(`${householdId}:photo:${id}`);
     void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
     void api.get<AiRecognition>(`/ai/recognitions/${id}`).then((recognition) => {
       if (selection.current.householdId !== householdId || selection.current.version !== version) return;
       const importId = recognition.result?._add_items?.import_batch_id;
       if (typeof importId === "string") selectImport(importId);
     }).catch((error: unknown) => toast.error(getApiErrorMessage(error)));
-  }, [client, householdId, selectImport]);
+  }, [client, householdId, selectImport, dismissed.data]);
+  const undoReview = React.useCallback(async (review: CaptureReview) => {
+    if (mutationRunning.current) return;
+    mutationRunning.current = true;
+    setReviewMutationPending(true);
+    try {
+      await api.post(`/inventory-review/captures/${review.kind}/${review.id}/undo`, {
+        dismissal_id: review.dismissal_id ?? null,
+      });
+      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      toast.success("Review restored");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error));
+    } finally {
+      mutationRunning.current = false;
+      setReviewMutationPending(false);
+    }
+  }, [client]);
+  const dismissReview = React.useCallback(async (review: CaptureReview) => {
+    if (mutationRunning.current) return;
+    mutationRunning.current = true;
+    setReviewMutationPending(true);
+    try {
+      const result = await api.post<CaptureReview>(
+        `/inventory-review/captures/${review.kind}/${review.id}/dismiss`,
+        { generation: review.generation },
+      );
+      await client.cancelQueries({ queryKey: ["inventory-review", "captures"] });
+      client.setQueryData<CaptureReview[]>(["inventory-review", "captures", householdId],
+        (current) => current?.filter((entry) => entry.kind !== review.kind || entry.id !== review.id));
+      if (review.kind === "document") setState((current) => ({
+        ...current, activeId: current.activeId === review.id ? null : current.activeId,
+      }));
+      if (review.kind === "import") setImportState((current) => ({
+        ...current, activeId: current.activeId === review.id ? null : current.activeId,
+      }));
+      if (review.kind === "photo" && selection.current.photoId === review.id) {
+        selection.current = { householdId, version: selection.current.version + 1, photoId: null };
+        setActivePhotoId(null);
+      }
+      toast.dismiss(assistantTaskKey({ ...review, householdId }));
+      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      toast.success("Review dismissed", {
+        description: "Source files, history and inventory are unchanged.",
+        action: { label: "Undo", onClick: () => void undoReview(result) },
+      });
+    } catch (error) {
+      toast.error(getApiErrorMessage(error));
+      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    } finally {
+      mutationRunning.current = false;
+      setReviewMutationPending(false);
+    }
+  }, [client, householdId, undoReview]);
+  const retryReview = React.useCallback(async (review: CaptureReview) => {
+    if (mutationRunning.current) return;
+    mutationRunning.current = true;
+    setReviewMutationPending(true);
+    try {
+      const path = review.kind === "document" ? `/documents/${review.id}/processing/retry`
+        : review.kind === "photo" ? `/ai/recognitions/${review.id}/retry`
+        : `/imports/${review.id}/${review.retry === "enhancement" ? "enhancement/retry" : "retry"}`;
+      await api.post(path);
+      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      await client.invalidateQueries({ queryKey: review.kind === "photo" ? queryKeys.recognition(review.id)
+        : review.kind === "document" ? queryKeys.document(review.id) : queryKeys.importBatch(review.id) });
+      toast.success("New review attempt started");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error));
+    } finally {
+      mutationRunning.current = false;
+      setReviewMutationPending(false);
+    }
+  }, [client]);
   React.useEffect(() => {
+    const restoreSilently = () => {
+      notificationSnapshot.current = null;
+      createdCaptures.current.clear();
+      baselineAfter.current = Date.now();
+      if (document.visibilityState === "visible") {
+        void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      }
+    };
+    window.addEventListener("focus", restoreSilently);
+    document.addEventListener("visibilitychange", restoreSilently);
+    return () => {
+      window.removeEventListener("focus", restoreSilently);
+      document.removeEventListener("visibilitychange", restoreSilently);
+    };
+  }, [client]);
+  React.useEffect(() => {
+    if (!reviews.data || reviews.isFetching || document.visibilityState !== "visible") return;
+    if (reviews.dataUpdatedAt < baselineAfter.current) return;
+    const previous = notificationSnapshot.current?.householdId === householdId
+      ? notificationSnapshot.current.attempts : null;
+    notificationSnapshot.current = {
+      householdId,
+      attempts: new Map(pendingReviews.map((review) => [assistantTaskKey({ ...review, householdId }), review.status])),
+    };
+    const created = createdCaptures.current;
+    createdCaptures.current = new Set();
+    // Restore silently, except tasks explicitly created here during initial loading.
+    const terminal = ["review", "ready", "failed", "needs_attention", "cancelled"];
     for (const review of pendingReviews) {
-      if (!["review", "ready", "failed", "needs_attention", "cancelled"].includes(review.status)) continue;
+      if (review.notify === false) continue;
+      if (!previous && !created.has(`${householdId}:${review.kind}:${review.id}`)) continue;
+      if (!terminal.includes(review.status)) continue;
+      if (terminal.includes(previous?.get(assistantTaskKey({ ...review, householdId })) ?? "")) continue;
       const ready = review.status === "review" || review.status === "ready";
       dispatchAssistantTaskCompletion({
         ...review,
@@ -132,7 +271,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         description: ready ? "Review the proposals before applying." : "Review available evidence or retry processing.",
       });
     }
-  }, [reviews.data, householdId]);
+  }, [reviews.data, reviews.dataUpdatedAt, reviews.isFetching, householdId]);
   const getImportReviewDraft = React.useCallback((id: string) =>
     reviewDraftState.householdId === householdId
       ? reviewDraftState.drafts[id]
@@ -149,11 +288,13 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
   }, [householdId]);
   const value = React.useMemo(() => ({
     activeId, select, node, activeImportId, selectImport, importNode,
-    activePhotoId, selectPhoto, photoNode, pendingReviews, reviewsError: reviews.isError,
+    activePhotoId, selectPhoto, photoNode, pendingReviews, reviewsError: reviews.isError || dismissed.isError,
+    dismissedReviews, dismissReview, undoReview, retryReview, reviewMutationPending,
     getImportReviewDraft, saveImportReviewDraft,
   }), [
     activeId, select, node, activeImportId, selectImport, importNode,
     activePhotoId, selectPhoto, photoNode, reviews.data, reviews.isError,
+    dismissed.data, dismissed.isError, dismissReview, undoReview, retryReview, reviewMutationPending,
     getImportReviewDraft, saveImportReviewDraft,
   ]);
   return (

@@ -129,6 +129,10 @@ def _processing_path(recognition: AiRecognition) -> str:
 
 
 def enqueue_recognition(db, recognition: AiRecognition) -> Any:
+    db.refresh(recognition, with_for_update=True)
+    from .capture_reviews import reset_review_dismissal
+
+    reset_review_dismissal(recognition)
     recognition.status = RecognitionStatus.QUEUED.value
     recognition.error = None
     use_ai = ai.status_for(
@@ -146,6 +150,7 @@ def enqueue_recognition(db, recognition: AiRecognition) -> Any:
         priority=4,
         queue="ai" if use_ai else "default",
     )
+    job.payload = {**job.payload, "processing_attempt": str(job.id)}
     if (recognition.result or {}).get("_add_items") is not None:
         recognition.result = {
             **(recognition.result or {}),
@@ -297,11 +302,17 @@ def run_recognition(
     recognition_id: uuid.UUID | str,
     *,
     use_ai: bool = True,
+    processing_attempt: str | None = None,
 ) -> dict[str, Any] | None:
     with SessionLocal() as db:
         recognition = db.get(AiRecognition, recognition_id)
         if recognition is None:
             return None
+        db.refresh(recognition, with_for_update=True)
+        add_items = (recognition.result or {}).get("_add_items") or {}
+        attempt = processing_attempt or add_items.get("processing_attempt")
+        if processing_attempt and add_items.get("processing_attempt") != processing_attempt:
+            return {"recognition_id": str(recognition.id), "skipped": True, "reason": "superseded"}
         if recognition.status == RecognitionStatus.SUCCEEDED.value:
             return {"recognition_id": str(recognition.id), "skipped": True}
         recognition.status = RecognitionStatus.PROCESSING.value
@@ -311,7 +322,6 @@ def run_recognition(
         recognition.processing_mode = "unavailable"
         db.commit()
         source_path = None
-        add_items = (recognition.result or {}).get("_add_items") or {}
         try:
             source_path = storage.resolve_key(
                 recognition.original_storage_key or recognition.storage_key
@@ -381,8 +391,22 @@ def run_recognition(
                 if vision_error:
                     result.warnings.append(vision_error)
             result_json = result.model_dump(mode="json")
-            if add_items:
-                result_json["_add_items"] = add_items
+            db.rollback()
+            recognition = db.get(AiRecognition, recognition_id)
+            if recognition is None:
+                return None
+            db.refresh(recognition, with_for_update=True)
+            current_context = (recognition.result or {}).get("_add_items") or {}
+            if current_context.get("processing_attempt") != attempt:
+                return {
+                    "recognition_id": str(recognition.id),
+                    "skipped": True,
+                    "reason": "superseded",
+                }
+            if current_context:
+                result_json["_add_items"] = current_context
+            recognition.model_provider = status.provider if status.configured and use_ai else None
+            recognition.model_name = status.model if status.configured and use_ai else None
             recognition.result = result_json
             recognition.field_sources = (
                 result.suggestions[0].field_sources if result.suggestions else {}
@@ -399,6 +423,15 @@ def run_recognition(
             recognition = db.get(AiRecognition, recognition_id)
             logger.error("Recognition %s failed (%s)", recognition_id, type(exc).__name__)
             if recognition is not None:
+                db.refresh(recognition, with_for_update=True)
+                if ((recognition.result or {}).get("_add_items") or {}).get(
+                    "processing_attempt"
+                ) != attempt:
+                    return {
+                        "recognition_id": str(recognition.id),
+                        "skipped": True,
+                        "reason": "superseded",
+                    }
                 recognition.status = RecognitionStatus.FAILED.value
                 recognition.error = (
                     str(exc)
@@ -614,4 +647,8 @@ def run_job(payload: dict[str, Any]) -> dict[str, Any] | None:
     recognition_id = payload.get("recognition_id")
     if not recognition_id:
         raise ValueError("Recognition job payload is missing recognition_id.")
-    return run_recognition(recognition_id, use_ai=payload.get("ai_enabled", True))
+    return run_recognition(
+        recognition_id,
+        use_ai=payload.get("ai_enabled", True),
+        processing_attempt=payload.get("processing_attempt"),
+    )

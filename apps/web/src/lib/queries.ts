@@ -804,12 +804,12 @@ export function useReviewSummary(enabled = true) {
   });
 }
 
-export function useCaptureReviews() {
+export function useCaptureReviews(dismissed = false) {
   const session = useSession();
   const householdId = session.data?.household?.id;
   return useQuery({
-    queryKey: ["inventory-review", "captures", householdId],
-    queryFn: ({ signal }) => api.get<CaptureReview[]>("/inventory-review/captures", { signal }),
+    queryKey: dismissed ? ["inventory-review", "captures", householdId, "dismissed"] : ["inventory-review", "captures", householdId],
+    queryFn: ({ signal }) => api.get<CaptureReview[]>(`/inventory-review/captures${dismissed ? "?dismissed=true" : ""}`, { signal }),
     enabled: Boolean(householdId),
     refetchInterval: 1500,
     retry: false,

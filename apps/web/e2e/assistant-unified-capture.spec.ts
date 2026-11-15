@@ -259,6 +259,7 @@ async function fixture(
       });
     }
     if (url.pathname === "/api/v1/inventory-review/captures") {
+      if (url.searchParams.get("dismissed") === "true") return route.fulfill({ json: [] });
       return route.fulfill({ json: [
         ...[...capturedBatches.values()].filter((batch) => batch.status !== "completed").map((batch) => ({
           id: batch.id, kind: "import", title: batch.title, status: batch.status,

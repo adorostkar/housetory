@@ -233,7 +233,7 @@ export function AssistantPage({
           form.append("assistant_capture", "true");
           if (selection.propertyId) form.append("property_id", selection.propertyId);
           const recognition = await api.postForm<AiRecognition>("/ai/recognitions", form);
-          selectPhoto(recognition.id);
+          selectPhoto(recognition.id, true);
           recordCapture(
             value || `Inventory photo: ${file.name}`,
             attachmentMeta,

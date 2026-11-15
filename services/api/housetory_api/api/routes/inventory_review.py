@@ -1,12 +1,14 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...schemas.inventory_review import (
+    CaptureReviewDismissRequest,
     CaptureReviewOut,
+    CaptureReviewUndoRequest,
     ReviewAcceptRequest,
     ReviewBulkAcceptOut,
     ReviewBulkAcceptRequest,
@@ -21,8 +23,8 @@ from ...schemas.inventory_review import (
     ReviewSummaryOut,
 )
 from ...services import inventory_review, inventory_review_schedule
-from ...services.capture_reviews import pending_captures
-from ..deps import AuthContext, require_auth, require_owner
+from ...services.capture_reviews import change_capture_review, pending_captures
+from ..deps import AuthContext, require_auth, require_owner, require_writer
 from ..errors import ApiError
 
 router = APIRouter(prefix="/inventory-review", tags=["inventory-review"])
@@ -30,10 +32,48 @@ router = APIRouter(prefix="/inventory-review", tags=["inventory-review"])
 
 @router.get("/captures", response_model=list[CaptureReviewOut])
 def read_capture_reviews(
+    dismissed: bool = False,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> list[CaptureReviewOut]:
-    return pending_captures(db, auth.household.id)
+    return pending_captures(db, auth.household.id, dismissed=dismissed)
+
+
+@router.post("/captures/{kind}/{capture_id}/dismiss", response_model=CaptureReviewOut)
+def dismiss_capture_review(
+    kind: Literal["import", "document", "photo"],
+    capture_id: uuid.UUID,
+    payload: CaptureReviewDismissRequest,
+    auth: AuthContext = Depends(require_writer),
+    db: Session = Depends(get_db),
+) -> CaptureReviewOut:
+    return change_capture_review(
+        db,
+        auth.household.id,
+        kind,
+        capture_id,
+        actor_user_id=auth.user.id,
+        generation=payload.generation,
+    )
+
+
+@router.post("/captures/{kind}/{capture_id}/undo", response_model=CaptureReviewOut)
+def undo_capture_review(
+    kind: Literal["import", "document", "photo"],
+    capture_id: uuid.UUID,
+    payload: CaptureReviewUndoRequest,
+    auth: AuthContext = Depends(require_writer),
+    db: Session = Depends(get_db),
+) -> CaptureReviewOut:
+    return change_capture_review(
+        db,
+        auth.household.id,
+        kind,
+        capture_id,
+        actor_user_id=auth.user.id,
+        dismissal_id=payload.dismissal_id,
+        undo=True,
+    )
 
 
 @router.get("/schedule", response_model=ReviewScheduleOut | None)

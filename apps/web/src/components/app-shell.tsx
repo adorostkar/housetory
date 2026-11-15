@@ -291,6 +291,7 @@ function AppShellLayout() {
         // The in-memory key still prevents repeat toasts in this page session.
       }
       toast.success(task.title, {
+        id: key,
         description: task.description,
         action: {
           label: "Review",

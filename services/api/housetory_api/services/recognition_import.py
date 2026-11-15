@@ -28,10 +28,15 @@ def create_batch_from_recognition(
             AiRecognition.household_id == household_id,
         )
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if recognition is None:
         raise ApiError(404, "recognition_not_found", "Recognition not found.")
     add_items = (recognition.result or {}).get("_add_items") or {}
+    if add_items.get("review_dismissed"):
+        raise ApiError(
+            409, "capture_dismissed", "This photo review was dismissed. Undo to review it."
+        )
     existing_id = add_items.get("import_batch_id")
     if existing_id:
         existing = db.scalar(
@@ -94,6 +99,8 @@ def create_batch_from_recognition(
             "hierarchy": False,
             "recognition_id": str(recognition.id),
             "assistant_capture": bool(add_items.get("assistant_capture")),
+            "processing_attempt": add_items.get("processing_attempt"),
+            "review_notification_suppressed": bool(add_items.get("review_notification_suppressed")),
             "ai_used": ai_used,
             "ai_provider": recognition.model_provider if ai_used else None,
             "ai_model": recognition.model_name if ai_used else None,

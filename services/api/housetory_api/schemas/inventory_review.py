@@ -14,6 +14,17 @@ class CaptureReviewOut(BaseModel):
     title: str
     status: str
     generation: str
+    dismissal_id: uuid.UUID | None = None
+    notify: bool = True
+    retry: Literal["processing", "enhancement"] | None = None
+
+
+class CaptureReviewDismissRequest(BaseModel):
+    generation: trimmed(1, 200)
+
+
+class CaptureReviewUndoRequest(BaseModel):
+    dismissal_id: uuid.UUID | None = None
 
 
 ReviewScopeType = Literal["items", "room", "container", "property", "household"]

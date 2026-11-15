@@ -289,8 +289,7 @@ def cancel_enhancement(db: Session, source: Document | ImportBatch) -> None:
             state,
             reason="cancelled",
             message=(
-                "AI extraction was cancelled; deterministic proposals are ready "
-                "to review or retry."
+                "AI extraction was cancelled; deterministic proposals are ready to review or retry."
             ),
             status="skipped",
         )
@@ -423,6 +422,11 @@ def retry_enhancement(
                 ).all()
             ]
             inputs["primary_extraction"] = True
+    from .capture_reviews import reset_review_dismissal
+
+    reset_review_dismissal(source)
+    if isinstance(source, ImportBatch):
+        source.metadata_json = {**_metadata(source), "processing_attempt": uuid.uuid4().hex}
     schedule_enhancement(
         db,
         source,
@@ -718,7 +722,6 @@ def run_enhancement(payload: dict) -> dict:
         state = {**state, "status": "running", "reason": None}
         _write(source, state)
         config = ai.config_for(db, source.household_id, _task(source))
-        db.commit()
         if isinstance(source, Document) and processing:
             from .document_processing import update_processing
 

@@ -222,6 +222,9 @@ def enqueue_ocr(
         "mode": state.get("mode", "interactive"),
         "force": force,
     }
+    from .capture_reviews import reset_review_dismissal
+
+    reset_review_dismissal(document)
     if commit:
         db.commit()
     return job

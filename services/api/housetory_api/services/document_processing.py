@@ -124,6 +124,7 @@ def _worker_available(db: Session, queue: str | None) -> bool | None:
 
 
 def processing_snapshot(db: Session, document: Document) -> DocumentProcessingSnapshot:
+    db.refresh(document, with_for_update=True)
     state = _processing(document)
     if not state:
         state = initialize_processing(document)
@@ -242,7 +243,8 @@ def processing_snapshot(db: Session, document: Document) -> DocumentProcessingSn
         local_available=True,
         can_cancel=stage in {"waiting", "reading", "interpreting"},
         can_retry=bool(
-            state.get("can_retry", stage == "failed") and stage in {"needs_attention", "failed"}
+            state.get("can_retry", stage == "failed")
+            and stage in {"needs_attention", "failed", "cancelled"}
         ),
         worker_available=_worker_available(db, queue),
         reason=state.get("reason"),
@@ -322,7 +324,7 @@ def cancel_processing(db: Session, document: Document) -> Document:
     state.update(
         stage="cancelled",
         reason="cancelled",
-        can_retry=False,
+        can_retry=True,
         updated_at=_iso(now),
     )
     state["cancelled_refinement_versions"] = refinement_versions
@@ -378,6 +380,9 @@ def retry_processing(
         for key in ("upload_ms", "local_preprocess_ms", "local_queue_ms", "local_processing_ms"):
             timings[key] = previous_timings.get(key)
         update_processing(document, timings=timings)
+        from .capture_reviews import reset_review_dismissal
+
+        reset_review_dismissal(document)
         schedule_enhancement(
             db, document, kind="document", actor_user_id=actor_user_id, operation=operation
         )
@@ -388,7 +393,7 @@ def retry_processing(
         db.refresh(document)
         return document
 
-    if state.get("stage") not in {"needs_attention", "failed"} or not state.get(
+    if state.get("stage") not in {"needs_attention", "failed", "cancelled"} or not state.get(
         "can_retry", state.get("stage") == "failed"
     ):
         raise ApiError(409, "processing_not_retryable", "This document cannot be retried yet.")

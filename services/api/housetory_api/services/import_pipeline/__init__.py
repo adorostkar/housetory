@@ -23,6 +23,7 @@ from ...schemas.imports import (
 )
 from .. import ai as ai
 from .. import storage
+from ..capture_reviews import reset_review_dismissal
 from ..import_hierarchy import parse_hierarchy
 from ..import_matching import build_index, find_duplicates, to_proposed_item
 from ..import_parse import ProposalDraft, parse_documents
@@ -39,6 +40,9 @@ IMPORT_TASK = "imports.process"
 
 
 def enqueue_import(db: Session, batch: ImportBatch) -> Any:
+    db.flush()
+    db.refresh(batch, with_for_update=True)
+    reset_review_dismissal(batch)
     batch.status = ImportStatus.QUEUED.value
     batch.error = None
     job = enqueue(
@@ -179,6 +183,7 @@ def process_import_batch(
         if batch.status in {ImportStatus.REVIEW.value, ImportStatus.COMPLETED.value} and not force:
             return {"batch_id": str(batch.id), "skipped": True}
         _clear_previous_attempt(db, batch)
+        db.refresh(batch, with_for_update=True)
         batch.status = ImportStatus.PROCESSING.value
         batch.error = None
         batch.metadata_json = {
@@ -191,18 +196,21 @@ def process_import_batch(
                 from ..product_import import refresh_product_source
 
                 refresh_product_source(db, batch)
+                db.flush()
             if not batch.storage_key:
                 raise ValueError("This import has no source file.")
             path = storage.resolve_import_key(batch.storage_key)
             bundle = read_source_bundle(
                 path, batch.original_filename or "import.txt", batch.content_type
             )
+            db.refresh(batch, with_for_update=True)
             batch.metadata_json = {
                 **(batch.metadata_json or {}),
                 "progress": {"stage": "extracting", "message": "Extracting inventory entries"},
             }
             db.commit()
             parsed = parse_documents(bundle)
+            db.refresh(batch, with_for_update=True)
             if (batch.metadata_json or {}).get("product_url") and not parsed.drafts:
                 parsed.drafts = [
                     ProposalDraft(
@@ -242,9 +250,7 @@ def process_import_batch(
                 "ai_consulted": False,
                 "ai_error": None,
             }
-            hierarchy_mode = (
-                not assistant_capture and hierarchy.active and bool(hierarchy.items)
-            )
+            hierarchy_mode = not assistant_capture and hierarchy.active and bool(hierarchy.items)
             if hierarchy_mode:
                 entry_count = _create_hierarchy_entries(
                     db, batch, hierarchy, bundle, file_mapping, index
@@ -415,6 +421,7 @@ def process_import_batch(
                 exc_info=exc.__cause__,
             )
             if batch is not None:
+                db.refresh(batch, with_for_update=True)
                 batch.status = ImportStatus.FAILED.value
                 batch.error = _safe_error(exc)
                 batch.metadata_json = {
