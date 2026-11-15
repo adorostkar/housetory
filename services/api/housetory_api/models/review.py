@@ -82,6 +82,24 @@ class InventoryReviewRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     ai_eligible_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     ai_reviewed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    ai_reused_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
+class InventoryReviewCoverage(Base):
+    __tablename__ = "inventory_review_coverage"
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    capability: Mapped[str] = mapped_column(String(40), primary_key=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_review_runs.id", ondelete="SET NULL")
+    )
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class InventoryReviewSuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):

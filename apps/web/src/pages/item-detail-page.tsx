@@ -70,7 +70,7 @@ import {
   WARRANTY_STATUS_TONE,
   warrantyRemainingLabel,
 } from "@/lib/labels";
-import { appendOrigin, readOrigin } from "@/lib/navigation";
+import { appendOrigin, itemOrigin, readOrigin } from "@/lib/navigation";
 import {
   CONDITION_LABELS,
   formatCurrency,
@@ -250,6 +250,17 @@ export function ItemDetailPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {!item.is_archived && (
+                      <DropdownMenuItem asChild>
+                        <Link to={appendOrigin(
+                          `/review?scope_type=items&item_ids=${item.id}`,
+                          itemOrigin(`/items/${item.id}?${searchParams.toString()}`, "item"),
+                        )}>
+                          <ClipboardCheck />
+                          Review this item
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
                     {!item.is_archived && (
                       <DropdownMenuItem asChild>
                         <Link

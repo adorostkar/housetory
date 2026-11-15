@@ -118,6 +118,7 @@ def list_review_suggestions(
     scope_type: str | None = None,
     scope_id: uuid.UUID | None = None,
     q: Annotated[str | None, Query(max_length=160)] = None,
+    item_ids: Annotated[list[uuid.UUID] | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     auth: AuthContext = Depends(require_auth),
@@ -131,6 +132,7 @@ def list_review_suggestions(
         scope_type=scope_type,
         scope_id=scope_id,
         q=q,
+        item_ids=item_ids,
         limit=limit,
         offset=offset,
     )

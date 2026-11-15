@@ -111,6 +111,7 @@ for (const mobile of [false, true]) {
     await page.goto("/");
     const hide = page.getByRole("button", { name: "Hide purchase values", exact: true });
     await expect(hide).toBeVisible();
+    await hide.click({ trial: true });
     const box = await hide.boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);

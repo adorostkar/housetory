@@ -29,6 +29,7 @@ from ...schemas.inventory_review import (
 )
 from .. import ai, history, lending
 from ..serializers import item_load_options, item_summary
+from . import coverage
 from .candidates import (
     _advisory_candidates,
     _ai_organisation_candidates,
@@ -38,12 +39,21 @@ from .candidates import (
     _create_suggestion,
     _duplicate_candidates,
     _name_candidates,
+    _stored_candidate,
 )
 from .decisions import accept_suggestion as accept_suggestion
 from .decisions import bulk_accept as bulk_accept
 from .decisions import dismiss_suggestion as dismiss_suggestion
 from .decisions import undo_suggestion as undo_suggestion
-from .scope import MAX_ADVISORY_SUGGESTIONS, MAX_SCAN_ITEMS, _hash, _load_scope, _normalized, _Scope
+from .scope import (
+    MAX_ADVISORY_SUGGESTIONS,
+    MAX_SCAN_ITEMS,
+    _hash,
+    _item_evidence,
+    _load_scope,
+    _normalized,
+    _Scope,
+)
 from .scope import _scope_conditions as _scope_conditions
 from .suggestion_out import serialize_suggestion
 
@@ -55,6 +65,8 @@ def _request_fingerprint(payload: ReviewRunRequest) -> str:
             "scope_id": str(payload.scope_id) if payload.scope_id else None,
             "item_ids": sorted(str(value) for value in (payload.item_ids or [])),
             "include_ai": payload.include_ai,
+            **({"review_again": True} if payload.review_again else {}),
+            **({"reconsider_dismissed": True} if payload.reconsider_dismissed else {}),
         }
     )
 
@@ -159,7 +171,8 @@ def run_review(
     eligible_ids = [
         str(item.id)
         for item in scope.items
-        if (item.category_id is None or not item.tags) and item.id not in existing_targets
+        if (payload.review_again or item.category_id is None or not item.tags)
+        and item.id not in existing_targets
     ]
     eligible_count = len(eligible_ids)
     run.progress_json = {"ai_eligible_ids": eligible_ids}
@@ -185,7 +198,11 @@ def run_review(
                 if candidate.type == "category" and candidate.item_id
             }
             ai_candidates, ai_meta, ai_partial, ai_error = _ai_organisation_candidates(
-                db, household_id, scope, already_targeted
+                db,
+                household_id,
+                scope,
+                already_targeted,
+                review_again=payload.review_again,
             )
             ai_used = bool(ai_meta.get("attempted"))
             candidates.extend(ai_candidates)
@@ -201,34 +218,95 @@ def run_review(
     run.ai_item_count = int(ai_meta.get("item_count", 0))
     run.ai_eligible_count = eligible_count
     run.ai_reviewed_count = int(ai_meta.get("reviewed_count", 0))
+    run.ai_reused_count = len(ai_meta.get("reused_ids", []))
+    successful_inputs = ai_meta.get("reviewed_inputs", {})
+    coverage.remember(db, household_id, run.id, successful_inputs)
+    run.progress_json = {
+        **run.progress_json,
+        "ai_successful_inputs": successful_inputs,
+        "ai_eligible_ids": ai_meta.get("eligible_ids", eligible_ids),
+    }
     run.ai_provider_label = ai_meta.get("provider")
     run.ai_model = ai_meta.get("model")
 
+    existing_rows = list(
+        db.scalars(
+            select(InventoryReviewSuggestion)
+            .where(
+                InventoryReviewSuggestion.household_id == household_id,
+                or_(
+                    InventoryReviewSuggestion.item_id.in_(targets),
+                    InventoryReviewSuggestion.secondary_item_id.in_(targets),
+                ),
+            )
+            .order_by(InventoryReviewSuggestion.created_at.desc(), InventoryReviewSuggestion.id)
+        ).all()
+    )
+    current_items = {item.id: item for item in scope.items}
+    for row in existing_rows:
+        if row.status != "pending" or row.source != "ai":
+            continue
+        if str(row.item_id) not in ai_meta.get("reused_ids", []):
+            continue
+        item = current_items.get(row.item_id)
+        if item is None or row.evidence_json.get("review_input") != coverage.item_input(item):
+            continue
+        before = row.before_json
+        if before.get("category_id") != (str(item.category_id) if item.category_id else None):
+            continue
+        if sorted(before.get("tag_ids", [])) != sorted(str(tag.id) for tag in item.tags):
+            continue
+        candidate = _stored_candidate(row)
+        candidate.before = {**before, "item_updated_at": item.updated_at.isoformat()}
+        candidate.evidence = {**row.evidence_json, "item": _item_evidence(item)}
+        candidates.append(candidate)
     fingerprints: dict[str, _Candidate] = {}
     for candidate in candidates:
         fingerprints[_candidate_fingerprint(candidate)] = candidate
-    existing_rows = list(
-        db.scalars(
-            select(InventoryReviewSuggestion).where(
-                InventoryReviewSuggestion.household_id == household_id,
-                InventoryReviewSuggestion.fingerprint.in_(fingerprints),
-            )
-        ).all()
-    )
-    existing_by_fingerprint = {row.fingerprint: row for row in existing_rows}
+    existing_by_fingerprint: dict[str, list[InventoryReviewSuggestion]] = {}
+    legacy_by_fingerprint: dict[str, list[InventoryReviewSuggestion]] = {}
+    for row in existing_rows:
+        stored = _stored_candidate(row)
+        existing_by_fingerprint.setdefault(_candidate_fingerprint(stored), []).append(row)
+        if row.source == "ai" and "review_input" not in row.evidence_json:
+            # Older evidence omitted descriptions. Preserve its decisions conservatively.
+            legacy_by_fingerprint.setdefault(
+                _candidate_fingerprint(stored, include_description=False), []
+            ).append(row)
     created = 0
     existing_count = 0
     suppressed = 0
     pending_fingerprints = []
+    matched_rows = set()
+    refreshed_stale = 0
     for fingerprint, candidate in fingerprints.items():
-        prior = existing_by_fingerprint.get(fingerprint)
+        prior_rows = existing_by_fingerprint.get(fingerprint, []) or legacy_by_fingerprint.get(
+            _candidate_fingerprint(candidate, include_description=False), []
+        )
+        prior = min(
+            prior_rows,
+            key=lambda row: {"pending": 0, "accepted": 1, "dismissed": 2}.get(row.status, 3),
+            default=None,
+        )
         if prior is not None:
             if prior.status == "pending":
-                existing_count += 1
-                pending_fingerprints.append(fingerprint)
-            else:
+                if candidate.action_kind != "advisory" and (
+                    prior.before_json.get("item_updated_at")
+                    != (candidate.before or {}).get("item_updated_at")
+                ):
+                    prior.status = "stale"
+                    prior.status_changed_at = datetime.now(UTC)
+                    refreshed_stale += 1
+                else:
+                    existing_count += 1
+                    pending_fingerprints.append(fingerprint)
+                    matched_rows.add(prior.id)
+                    continue
+            if prior.status == "accepted" or (
+                prior.status == "dismissed" and not payload.reconsider_dismissed
+            ):
                 suppressed += 1
-            continue
+                continue
         _create_suggestion(db, household_id, run, candidate, fingerprint)
         pending_fingerprints.append(fingerprint)
         created += 1
@@ -243,11 +321,19 @@ def run_review(
             )
         ).all()
     )
-    stale = 0
+    stale = refreshed_stale
     for row in pending_rows:
+        if row.status != "pending":
+            continue
+        if row.id in matched_rows:
+            continue
         if (row.source == "ai" and (ai_error or not payload.include_ai)) or (
             row.source != "ai" and not local_checks
         ):
+            continue
+        if row.source == "ai" and str(row.item_id) in ai_meta.get("reused_ids", []):
+            existing_count += 1
+            pending_fingerprints.append(row.fingerprint)
             continue
         if row.fingerprint in fingerprints:
             continue
@@ -320,6 +406,7 @@ def list_suggestions(
     q: str | None,
     limit: int,
     offset: int,
+    item_ids: list[uuid.UUID] | None = None,
 ) -> ReviewSuggestionListOut:
     conditions = [InventoryReviewSuggestion.household_id == household_id]
     if status:
@@ -330,6 +417,13 @@ def list_suggestions(
         conditions.append(InventoryReviewSuggestion.scope_type == scope_type)
     if scope_id:
         conditions.append(InventoryReviewSuggestion.scope_id == scope_id)
+    if item_ids:
+        conditions.append(
+            or_(
+                InventoryReviewSuggestion.item_id.in_(item_ids),
+                InventoryReviewSuggestion.secondary_item_id.in_(item_ids),
+            )
+        )
     term = (q or "").strip()
     if term:
         search = f"%{term}%"

@@ -25,6 +25,7 @@ from ...models import (
     Tag,
 )
 from .. import ai
+from . import coverage
 from .scope import (
     MAX_ADVISORY_SUGGESTIONS,
     MAX_AI_ITEMS,
@@ -130,6 +131,7 @@ def _category_candidates(scope: _Scope) -> list[_Candidate]:
             if item.category_id is not None:
                 continue
             evidence = {
+                "subject_name": item.name,
                 "item_ids": [str(sibling.id) for sibling in group if sibling.id != item.id],
                 "items": [_item_evidence(sibling) for sibling in group if sibling.id != item.id][
                     :MAX_EVIDENCE_ITEMS
@@ -391,11 +393,14 @@ def _ai_organisation_candidates(
     household_id: uuid.UUID,
     scope: _Scope,
     existing_targets: set[uuid.UUID],
+    *,
+    review_again: bool = False,
 ) -> tuple[list[_Candidate], dict[str, Any], str | None, str | None]:
     eligible = [
         item
         for item in scope.items
-        if (item.category_id is None or not item.tags) and item.id not in existing_targets
+        if (review_again or item.category_id is None or not item.tags)
+        and item.id not in existing_targets
     ]
     if not eligible:
         return [], {}, None, None
@@ -430,16 +435,24 @@ def _ai_organisation_candidates(
             .limit(200)
         ).all()
     )
-    selected = eligible[:MAX_AI_ITEMS]
+    inputs = coverage.fingerprints(eligible, categories, tags, status)
+    reused = coverage.matching(db, household_id, inputs) if not review_again else set()
+    remaining = [item for item in eligible if item.id not in reused]
+    meta = {
+        "provider": provider_label,
+        "model": status.model,
+        "item_count": 0,
+        "eligible_count": len(eligible),
+        "reused_ids": [str(value) for value in reused],
+        "eligible_ids": [str(item.id) for item in remaining],
+    }
+    if not remaining:
+        return [], meta, None, None
+    selected = remaining[:MAX_AI_ITEMS]
     payload_items = [
         {
             "index": index,
-            "name": item.name[:200],
-            "description": (item.description or "")[:300],
-            "brand": (item.brand or "")[:120],
-            "model": (item.model or "")[:120],
-            "current_category": item.category.name if item.category else None,
-            "current_tags": sorted(tag.name for tag in item.tags),
+            **coverage.item_input(item),
         }
         for index, item in enumerate(selected)
     ]
@@ -455,13 +468,12 @@ def _ai_organisation_candidates(
         '"tags":[{"id":"uuid"} or {"name":"new tag"}],"confidence":"high|medium",'
         '"reason":"short evidence"}]}'
     )
-    meta = {
-        "provider": provider_label,
-        "model": status.model,
-        "item_count": len(selected),
-        "attempted": True,
-        "eligible_count": len(eligible),
-    }
+    meta.update(
+        {
+            "item_count": len(selected),
+            "attempted": True,
+        }
+    )
     try:
         raw = ai.complete_json(
             AI_REVIEW_SYSTEM, prompt, config=ai.config_for(db, household_id, AiTask.ASSISTANT.value)
@@ -478,7 +490,7 @@ def _ai_organisation_candidates(
                 continue
             seen_indexes.add(entry.index)
             if entry.index >= len(selected):
-                continue
+                raise ValueError("AI returned an unknown item index.")
             item = selected[entry.index]
             category = None
             category_is_new = False
@@ -567,6 +579,7 @@ def _ai_organisation_candidates(
                     },
                     evidence={
                         "item": _item_evidence(item),
+                        "review_input": coverage.item_input(item),
                         "category_name": category_name,
                         "tag_names": [tag["name"] for tag in proposed_tags],
                         "ai_reason": entry.reason,
@@ -584,10 +597,11 @@ def _ai_organisation_candidates(
         )
     partial = (
         f"Only the first {MAX_AI_ITEMS} items needing organisation were sent for AI review."
-        if len(eligible) > MAX_AI_ITEMS
+        if len(remaining) > MAX_AI_ITEMS
         else None
     )
     meta["reviewed_count"] = len(selected)
+    meta["reviewed_inputs"] = {str(item.id): inputs[item.id] for item in selected}
     return output, meta, partial, None
 
 
@@ -604,22 +618,78 @@ def _canonical_fingerprint_value(value: Any) -> Any:
     return value
 
 
-def _candidate_fingerprint(candidate: _Candidate) -> str:
+def _candidate_fingerprint(candidate: _Candidate, *, include_description: bool = True) -> str:
     item_ids = sorted(
         str(value)
         for value in (candidate.item_id, candidate.secondary_item_id)
         if value is not None
     )
+    before = candidate.before or {}
+    after = candidate.after or {}
+    evidence = candidate.evidence or {}
+
+    def taxonomy(value):
+        return _normalized(value.get("name")) or value.get("id")
+
+    if candidate.type == "organisation":
+        source = evidence.get("review_input") or evidence.get("item") or {}
+        context = {key: _normalized(source.get(key)) for key in ("name", "brand", "model")}
+        if include_description:
+            context["description"] = _normalized(source.get("description"))
+        before = {key: before.get(key) for key in ("category_id", "tag_ids")}
+        after = {
+            "category": _normalized(after.get("category_name")) or after.get("category_id"),
+            "tags": [taxonomy(tag) for tag in after.get("tags", [])],
+        }
+    elif candidate.type == "category":
+        siblings = evidence.get("items") or [{}]
+        context = {"name": _normalized(evidence.get("subject_name") or siblings[0].get("name"))}
+        before = {"category_id": before.get("category_id")}
+        after = {"category": _normalized(after.get("category_name")) or after.get("category_id")}
+    elif candidate.type == "possible_duplicate":
+        context = {
+            "serial_match": evidence.get("serial_match"),
+            "items": [
+                {
+                    key: item.get(key)
+                    for key in ("id", "name", "brand", "model", "serial_number", "quantity")
+                }
+                for item in evidence.get("items", [])
+            ],
+        }
+    elif candidate.type == "missing_detail":
+        context = {"missing_fields": evidence.get("missing_fields")}
+    elif candidate.type == "location_conflict":
+        context = {key: evidence.get(key) for key in ("assigned_room", "mentioned_room")}
+    else:
+        context = {}
+        before = {key: value for key, value in before.items() if key != "item_updated_at"}
     return _hash(
         {
             "type": candidate.type,
             "item_id": item_ids[0] if item_ids else None,
             "secondary_item_id": item_ids[1] if len(item_ids) > 1 else None,
-            "category_id": str(candidate.category_id) if candidate.category_id else None,
-            "before": _canonical_fingerprint_value(candidate.before or {}),
-            "after": _canonical_fingerprint_value(candidate.after or {}),
-            "evidence": _canonical_fingerprint_value(candidate.evidence or {}),
+            "before": _canonical_fingerprint_value(before),
+            "after": _canonical_fingerprint_value(after),
+            "context": _canonical_fingerprint_value(context),
         }
+    )
+
+
+def _stored_candidate(row: InventoryReviewSuggestion) -> _Candidate:
+    return _Candidate(
+        type=row.type,
+        action_kind=row.action_kind,
+        title=row.title,
+        explanation=row.explanation,
+        priority=row.priority,
+        item_id=row.item_id,
+        secondary_item_id=row.secondary_item_id,
+        category_id=row.category_id,
+        before=row.before_json,
+        after=row.after_json,
+        evidence=row.evidence_json,
+        source=row.source,
     )
 
 

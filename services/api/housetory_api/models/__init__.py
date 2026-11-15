@@ -51,6 +51,7 @@ from .jobs import Job, WorkerHeartbeat
 from .online_search import HouseholdOnlineSearchSettings
 from .property import Property
 from .review import (
+    InventoryReviewCoverage,
     InventoryReviewRun,
     InventoryReviewSchedule,
     InventoryReviewSuggestion,
@@ -105,6 +106,7 @@ __all__ = [
     "ImportSourceFile",
     "InventoryEvidenceExport",
     "InventoryReviewRun",
+    "InventoryReviewCoverage",
     "InventoryReviewSchedule",
     "InventoryReviewSuggestion",
     "ItemImage",

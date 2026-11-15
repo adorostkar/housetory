@@ -368,6 +368,48 @@ beforeEach(() => {
 });
 
 describe("ReviewPage", () => {
+  it("keeps explicit re-review and reconsideration separate and off by default", async () => {
+    renderPage();
+    const reconsider = screen.getByRole("checkbox", { name: /Reconsider dismissed suggestions/ });
+    expect(reconsider).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "Review again" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/inventory-review/runs", expect.objectContaining({
+        review_again: true, reconsider_dismissed: false, include_ai: false,
+      }),
+    ));
+    await waitFor(() => expect(reconsider).toBeEnabled());
+    await userEvent.click(reconsider);
+    await userEvent.click(screen.getByRole("button", { name: "Find suggestions" }));
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith(
+      "/inventory-review/runs", expect.objectContaining({
+        review_again: false, reconsider_dismissed: false,
+      }),
+    ));
+    await waitFor(() => expect(reconsider).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Review again" }));
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith(
+      "/inventory-review/runs", expect.objectContaining({
+        review_again: true, reconsider_dismissed: true,
+      }),
+    ));
+  });
+
+  it("closes AI confirmation while the first batch is running and exposes cancellation", async () => {
+    let finish!: (run: ReviewRun) => void;
+    vi.mocked(api.post).mockImplementationOnce(
+      () => new Promise<ReviewRun>((resolve) => { finish = resolve; }),
+    );
+    renderPage();
+    await userEvent.click(screen.getByRole("checkbox", { name: /Include AI suggestions/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Review with AI" }));
+    await userEvent.click(screen.getByRole("button", { name: "Run review with AI" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Cancel after current batch" }));
+    finish(reviewRun());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review with AI" })).toBeEnabled());
+  });
+
   it("can resume an unfinished manual review after a newer scheduled review", async () => {
     const paused = reviewRun({
       id: "paused-manual", include_ai: false, status: "partial", resumable: true,

@@ -41,6 +41,440 @@ def seed_review_items(client, count):
     return room
 
 
+def test_successful_ai_coverage_reuses_unchanged_inputs_but_not_relevant_edits(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    item = create_item(client, "Coverage tent", room["id"], description="Two-person tent")
+    create_item(client, "Unchanged camera", room["id"])
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(args)
+        return {"suggestions": []}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    first = run_review(client, include_ai=True).json()
+    assert first["ai_reviewed_count"] == 2
+    second = run_review(client, include_ai=True).json()
+    assert len(calls) == 1
+    assert second["ai_reused_count"] == 2
+    assert second["ai_reviewed_count"] == 0
+    assert client.patch(f"/api/v1/items/{item['id']}", json={"quantity": 3}).status_code == 200
+    run_review(client, include_ai=True)
+    assert len(calls) == 1
+    assert (
+        client.patch(
+            f"/api/v1/items/{item['id']}", json={"description": "Portable camping stove"}
+        ).status_code
+        == 200
+    )
+    changed = run_review(client, include_ai=True).json()
+    assert len(calls) == 2
+    assert changed["ai_reviewed_count"] == 1
+    assert changed["ai_reused_count"] == 1
+    records = json.loads(calls[-1][1].split("Items: ", 1)[1].split("\nReturn ", 1)[0])
+    assert [row["name"] for row in records] == ["Coverage tent"]
+
+
+def test_review_again_preserves_semantic_decisions_and_explicit_reconsideration_history(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    item = create_item(client, "Camping kit", room["id"])
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(args)
+        tags = [{"name": "camping"}, {"name": "outdoors"}]
+        return {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": tags if len(calls) % 2 else list(reversed(tags)),
+                    "confidence": "high" if len(calls) % 2 else "medium",
+                    "reason": f"Different explanation wording number {len(calls)}",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    assert run_review(client, include_ai=True).status_code == 200
+    original = organisation_suggestions(client)[0]
+    assert (
+        client.post(f"/api/v1/inventory-review/suggestions/{original['id']}/dismiss").status_code
+        == 200
+    )
+    run_review(client, include_ai=True)
+    assert len(calls) == 1
+    assert organisation_suggestions(client) == []
+
+    again = run_review(client, include_ai=True, review_again=True).json()
+    assert len(calls) == 2
+    assert again["suppressed_suggestion_count"] == 1
+    assert organisation_suggestions(client) == []
+    assert suggestions(client, "dismissed")["items"][0]["id"] == original["id"]
+
+    create_tag(client, "camping")
+    create_tag(client, "outdoors")
+    run_review(client, include_ai=True, review_again=True)
+    assert organisation_suggestions(client) == []
+
+    reconsidered = run_review(
+        client,
+        include_ai=True,
+        review_again=True,
+        reconsider_dismissed=True,
+    )
+    assert reconsidered.status_code == 200
+    pending = organisation_suggestions(client)
+    assert len(pending) == 1
+    assert pending[0]["id"] != original["id"]
+    run_review(client, include_ai=True, review_again=True, reconsider_dismissed=True)
+    assert [row["id"] for row in organisation_suggestions(client)] == [pending[0]["id"]]
+    assert suggestions(client, "dismissed")["items"][0]["id"] == original["id"]
+    assert item_state(client, item["id"])["tags"] == []
+    approved = client.post(
+        f"/api/v1/inventory-review/suggestions/{pending[0]['id']}/accept", json={}
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "applied"
+    assert {tag["name"] for tag in item_state(client, item["id"])["tags"]} == {
+        "camping",
+        "outdoors",
+    }
+    assert suggestions(client, "accepted")["items"][0]["id"] == pending[0]["id"]
+
+
+def test_legacy_dismissal_survives_incidental_evidence_but_new_proposals_remain_eligible(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    item = create_item(client, "Legacy tent", room["id"], description="Portable shelter")
+    proposed = "camping"
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": proposed}],
+                    "confidence": "high",
+                    "reason": "Synthetic evidence",
+                }
+            ]
+        },
+    )
+    run_review(client, include_ai=True)
+    original = organisation_suggestions(client)[0]
+    client.post(f"/api/v1/inventory-review/suggestions/{original['id']}/dismiss")
+    with SessionLocal() as db:
+        legacy = db.get(InventoryReviewSuggestion, uuid.UUID(original["id"]))
+        legacy.evidence_json = {
+            key: value for key, value in legacy.evidence_json.items() if key != "review_input"
+        }
+        legacy.fingerprint = "a" * 64
+        db.commit()
+    assert client.patch(f"/api/v1/items/{item['id']}", json={"quantity": 4}).status_code == 200
+    run_review(client, include_ai=True, review_again=True)
+    assert organisation_suggestions(client) == []
+    proposed = "travel"
+    run_review(client, include_ai=True, review_again=True)
+    assert len(organisation_suggestions(client)) == 1
+    assert suggestions(client, "dismissed")["items"][0]["id"] == original["id"]
+
+
+def test_cached_pending_proposal_can_be_reviewed_and_applied_after_unrelated_edit(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    item = create_item(client, "Cached tent", room["id"])
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(args)
+        return {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": "camping"}],
+                    "confidence": "high",
+                    "reason": "Synthetic shelter",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run_review(client, include_ai=True)
+    original = organisation_suggestions(client)[0]
+    client.patch(f"/api/v1/items/{item['id']}", json={"quantity": 3})
+    reused = run_review(client, include_ai=True).json()
+    assert reused["ai_reused_count"] == 1
+    assert len(calls) == 1
+    pending = organisation_suggestions(client)
+    assert len(pending) == 1
+    assert pending[0]["id"] != original["id"]
+    assert suggestions(client, "stale")["items"][0]["id"] == original["id"]
+    approved = client.post(
+        f"/api/v1/inventory-review/suggestions/{pending[0]['id']}/accept", json={}
+    )
+    assert approved.json()["status"] == "applied"
+    saved = item_state(client, item["id"])
+    assert saved["quantity"] == 3
+    assert saved["tags"][0]["name"] == "camping"
+
+
+def test_dismissal_does_not_block_other_review_types_or_meaningfully_new_evidence(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    item = create_item(client, "Portable tent", room["id"], description="Two-person shelter")
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": "camping"}],
+                    "confidence": "high",
+                    "reason": "Synthetic shelter",
+                }
+            ]
+        },
+    )
+    run_review(client, include_ai=True)
+    original = organisation_suggestions(client)[0]
+    client.post(f"/api/v1/inventory-review/suggestions/{original['id']}/dismiss")
+    create_item(client, "Portable tent", room["id"])
+    new_type = run_review(client, include_ai=True).json()
+    assert new_type["ai_reused_count"] == new_type["ai_reviewed_count"] == 1
+    assert any(
+        row["type"] == "possible_duplicate"
+        and item["id"] in (row["item_id"], row["secondary_item_id"])
+        for row in suggestions(client)["items"]
+    )
+    client.patch(
+        f"/api/v1/items/{item['id']}", json={"description": "Lightweight emergency shelter"}
+    )
+    changed = run_review(client, include_ai=True).json()
+    assert changed["ai_reviewed_count"] == 1
+    assert any(row["item_id"] == item["id"] for row in organisation_suggestions(client))
+    assert suggestions(client, "dismissed")["items"][0]["id"] == original["id"]
+    assert item_state(client, item["id"])["tags"] == []
+
+
+def test_capability_changes_and_failures_do_not_reuse_incomplete_coverage(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+    from housetory_api.services.inventory_review import coverage
+
+    client = owner_client
+    seed_review_items(client, 1)
+    calls = []
+    fail = True
+
+    def complete(*args, **kwargs):
+        calls.append(args)
+        if fail:
+            raise ai.AiError("Synthetic incomplete review")
+        return {"suggestions": []}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    first = run_review(client, include_ai=True).json()
+    assert first["ai_reviewed_count"] == first["ai_reused_count"] == 0
+    assert first["remaining_item_count"] == 1
+    fail = False
+    resumed = advance_review(client, first)
+    assert resumed["ai_reviewed_count"] == 1
+    run_review(client, include_ai=True)
+    assert len(calls) == 2
+    monkeypatch.setattr(coverage, "CAPABILITY_VERSION", coverage.CAPABILITY_VERSION + 1)
+    upgraded = run_review(client, include_ai=True).json()
+    assert upgraded["ai_reviewed_count"] == 1
+    assert upgraded["ai_reused_count"] == 0
+    assert len(calls) == 3
+    run_review(client, include_ai=False, review_again=True)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("indexes", [[39], [-1]])
+def test_invalid_item_references_never_record_successful_coverage(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+    indexes,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 1)
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "suggestions": [
+                {
+                    "index": index,
+                    "tags": [{"name": "camping"}],
+                    "confidence": "high",
+                    "reason": "Synthetic invalid reference",
+                }
+                for index in indexes
+            ]
+        },
+    )
+    failed = run_review(owner_client, include_ai=True).json()
+    assert failed["ai_reviewed_count"] == failed["ai_reused_count"] == 0
+    assert failed["ai_error"]
+    assert organisation_suggestions(owner_client) == []
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    retry = advance_review(owner_client, failed)
+    assert retry["ai_reviewed_count"] == 1
+    assert retry["ai_reused_count"] == 0
+
+
+def test_capability_upgrade_preserves_completed_batches_but_requires_current_review(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+    from housetory_api.services.inventory_review import coverage
+
+    seed_review_items(owner_client, 41)
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    partial = run_review(owner_client, include_ai=True).json()
+    assert partial["ai_reviewed_count"] == 40
+    monkeypatch.setattr(coverage, "CAPABILITY_VERSION", coverage.CAPABILITY_VERSION + 1)
+    refused = owner_client.post(
+        f"/api/v1/inventory-review/runs/{partial['id']}/continue",
+        json={"version": partial["batch_version"], "resume": True},
+    )
+    assert refused.status_code == 409
+    restored = owner_client.get("/api/v1/inventory-review/summary").json()["last_run"]
+    assert restored["ai_reviewed_count"] == 40
+    assert restored["remaining_item_count"] == 1
+    current = run_review(owner_client, include_ai=True).json()
+    assert current["ai_reviewed_count"] == 40
+    assert current["ai_reused_count"] == 0
+    current = advance_review(owner_client, current)
+    assert current["ai_reviewed_count"] == 41
+
+
+def test_normal_review_prioritises_unfinished_inputs_over_unchanged_covered_items(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 41)
+    calls = []
+
+    def complete(*args, **kwargs):
+        calls.append(args)
+        return {"suggestions": []}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    first = run_review(owner_client, include_ai=True).json()
+    assert first["ai_reviewed_count"] == 40
+    cancelled = owner_client.post(
+        f"/api/v1/inventory-review/runs/{first['id']}/cancel",
+        json={"version": first["batch_version"]},
+    )
+    assert cancelled.status_code == 200
+    normal = run_review(owner_client, include_ai=True).json()
+    assert normal["ai_reviewed_count"] == 1
+    assert normal["ai_reused_count"] == 39
+    normal = advance_review(owner_client, normal)
+    assert normal["ai_reused_count"] == 40
+    assert normal["ai_reviewed_count"] == 1
+    assert len(calls) == 2
+
+
+def test_single_item_review_uses_authorised_context_and_filters_results_without_writes(
+    owner_client,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = create_room(client)
+    category = create_category(client, "Tools")
+    target = create_item(client, "Scoped drill", room["id"])
+    sibling = create_item(client, "Scoped drill", room["id"], category_id=category["id"])
+    create_item(client, "Other category pair", room["id"])
+    create_item(client, "Other category pair", room["id"], category_id=category["id"])
+    monkeypatch.setattr(
+        ai, "complete_json", lambda *a, **k: pytest.fail("Local item review called AI")
+    )
+    first = run_review(client, scope_type="items", item_ids=[target["id"]]).json()
+    assert first["item_count_scanned"] == first["total_item_count"] == 1
+    pending = suggestions(client)["items"]
+    assert any(row["type"] == "category" and row["item_id"] == target["id"] for row in pending)
+    assert all(target["id"] in (row["item_id"], row["secondary_item_id"]) for row in pending)
+    assert item_state(client, target["id"])["category"] is None
+    category_proposal = next(row for row in pending if row["type"] == "category")
+    client.post(f"/api/v1/inventory-review/suggestions/{category_proposal['id']}/dismiss")
+    normal = run_review(client, scope_type="items", item_ids=[target["id"]]).json()
+    assert normal["suppressed_suggestion_count"] == 1
+    again = run_review(
+        client, scope_type="items", item_ids=[target["id"]], review_again=True
+    ).json()
+    assert again["suppressed_suggestion_count"] == 1
+    reconsidered = run_review(
+        client,
+        scope_type="items",
+        item_ids=[target["id"]],
+        review_again=True,
+        reconsider_dismissed=True,
+    )
+    assert reconsidered.status_code == 200
+    run_review(client)  # populate findings for other items, without changing selected-item results
+    filtered = client.get(
+        "/api/v1/inventory-review/suggestions",
+        params={"status": "pending", "item_ids": target["id"]},
+    ).json()["items"]
+    assert all(target["id"] in (row["item_id"], row["secondary_item_id"]) for row in filtered)
+    proposal = next(row for row in filtered if row["type"] == "category")
+    approved = client.post(f"/api/v1/inventory-review/suggestions/{proposal['id']}/accept", json={})
+    assert approved.json()["status"] == "applied"
+    assert item_state(client, target["id"])["category"]["id"] == category["id"]
+    assert item_state(client, sibling["id"])["category"]["id"] == category["id"]
+    assert run_review(client, scope_type="items", item_ids=[str(uuid.uuid4())]).status_code == 404
+    invalid = run_review(client, reconsider_dismissed=True)
+    assert invalid.status_code == 422
+
+
 def advance_review(client, run, *, resume=False):
     response = client.post(
         f"/api/v1/inventory-review/runs/{run['id']}/continue",
@@ -143,6 +577,12 @@ def test_hundreds_ai_batches_cancel_reload_failure_retry_and_duplicate_preventio
     assert all(proposal["run_id"] == run["id"] for proposal in proposals)
     inventory = client.get("/api/v1/items", params={"limit": 100}).json()["items"]
     assert all(not item["tags"] for item in inventory)  # analysis never writes inventory
+    repeated = run_review(client, include_ai=True).json()
+    while repeated["remaining_item_count"]:
+        repeated = advance_review(client, repeated)
+    assert repeated["ai_reused_count"] == 205
+    assert repeated["ai_reviewed_count"] == 0
+    assert len(calls) == 7
 
 
 @pytest.mark.parametrize("count", [39, 40, 41, 501])
@@ -378,6 +818,8 @@ def run_review(
     item_ids=None,
     include_ai=False,
     request_id=None,
+    review_again=False,
+    reconsider_dismissed=False,
 ):
     return client.post(
         "/api/v1/inventory-review/runs",
@@ -386,6 +828,8 @@ def run_review(
             "scope_id": scope_id,
             "item_ids": item_ids,
             "include_ai": include_ai,
+            "review_again": review_again,
+            "reconsider_dismissed": reconsider_dismissed,
             "request_id": request_id or str(uuid.uuid4()),
         },
     )
@@ -901,7 +1345,7 @@ def test_ai_organisation_output_is_validated_and_offline_runs_never_call_ai(
             ]
         },
     )
-    invalid = run_review(client, include_ai=True)
+    invalid = run_review(client, include_ai=True, review_again=True)
     assert invalid.status_code == 200, invalid.text
     assert invalid.json()["status"] == "partial"
     assert invalid.json()["ai_error"]

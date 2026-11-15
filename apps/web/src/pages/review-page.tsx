@@ -35,10 +35,11 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { api, getApiErrorMessage } from "@/lib/api";
+import { api, ApiError, getApiErrorMessage } from "@/lib/api";
 import {
   appendOrigin,
   itemOrigin,
+  readOrigin,
   rememberListScroll,
   useRestoreListScroll,
 } from "@/lib/navigation";
@@ -122,6 +123,8 @@ export function ReviewPage() {
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [includeAi, setIncludeAi] = React.useState(false);
   const [aiConfirmOpen, setAiConfirmOpen] = React.useState(false);
+  const [reviewAgain, setReviewAgain] = React.useState(false);
+  const [reconsiderDismissed, setReconsiderDismissed] = React.useState(false);
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [lastRun, setLastRun] = React.useState<ReviewRun | null>(null);
   const [runError, setRunError] = React.useState<string | null>(null);
@@ -178,7 +181,7 @@ export function ReviewPage() {
     setSuggestionSearch(qParam);
   }, [qParam]);
 
-  const queueFilterSignature = `${statusFilter}|${typeFilter}|${qParam}`;
+  const queueFilterSignature = `${statusFilter}|${typeFilter}|${qParam}|${scopeType}|${selectedItemIds.join(",")}`;
   const previousQueueFilterSignature = React.useRef(queueFilterSignature);
   React.useEffect(() => {
     if (previousQueueFilterSignature.current === queueFilterSignature) return;
@@ -193,6 +196,7 @@ export function ReviewPage() {
     q: debouncedQuery.trim() || undefined,
     limit: 50,
     offset: suggestionOffset,
+    item_ids: scopeType === "items" ? selectedItemIds : undefined,
   });
   const scopeItemsQuery = useReviewScopeItems(
     selectedItemIds,
@@ -218,6 +222,11 @@ export function ReviewPage() {
     selectedCount: selectedItemIds.length,
   });
   const originParams = new URLSearchParams();
+  const returnOrigin = readOrigin(searchParams);
+  if (returnOrigin) {
+    originParams.set("from", returnOrigin.path);
+    originParams.set("from_label", returnOrigin.label);
+  }
   originParams.set("scope_type", scopeType);
   originParams.set("status", statusFilter);
   if (typeFilter) originParams.set("suggestion_type", typeFilter);
@@ -279,10 +288,11 @@ export function ReviewPage() {
   };
 
   const runReview = useMutation({
-    mutationFn: async (resume: ReviewRun | null) => {
+    mutationFn: async (request: { resume?: ReviewRun; reviewAgain?: boolean }) => {
       if (!canWrite) throw new Error("Review changes require write access.");
       stopReview.current = false;
       setCancelRequested(false);
+      const resume = request.resume;
       let run = resume ? await api.post<ReviewRun>(`/inventory-review/runs/${resume.id}/continue`, {
         version: resume.batch_version, resume: true,
       }) : await api.post<ReviewRun>("/inventory-review/runs", {
@@ -290,6 +300,8 @@ export function ReviewPage() {
         scope_id: scopeType === "items" || scopeType === "household" ? null : scopeId,
         item_ids: scopeType === "items" ? selectedItemIds : null,
         include_ai: includeAi,
+        review_again: Boolean(request.reviewAgain),
+        reconsider_dismissed: Boolean(request.reviewAgain && reconsiderDismissed),
         request_id: requestId,
       });
       while (true) {
@@ -322,6 +334,11 @@ export function ReviewPage() {
     },
     onError: (error) => {
       setRunError(getApiErrorMessage(error));
+      if (error instanceof ApiError &&
+          ["review_provider_changed", "review_capability_changed", "review_request_reused"].includes(error.code)) {
+        setRequestId(crypto.randomUUID());
+      }
+      refreshReview();
       toast.error(getApiErrorMessage(error));
     },
   });
@@ -450,13 +467,14 @@ export function ReviewPage() {
     });
   };
 
-  const startRun = () => {
+  const startRun = (again = false) => {
     setRunError(null);
+    setReviewAgain(again);
     if (includeAi) {
       setAiConfirmOpen(true);
       return;
     }
-    runReview.mutate(null);
+    runReview.mutate({ reviewAgain: again });
   };
 
   const openEdit = (suggestion: ReviewSuggestion) => {
@@ -547,6 +565,8 @@ export function ReviewPage() {
       <PageHeader
         eyebrow="Inventory care"
         title="Review"
+        backTo={returnOrigin?.path}
+        backLabel={returnOrigin ? `Back to ${returnOrigin.label}` : undefined}
         description="On-demand inventory suggestions. Rule-based checks work offline; optional AI review is explicit, bounded and never changes inventory automatically."
         actions={
           <Badge variant="outline">
@@ -607,7 +627,7 @@ export function ReviewPage() {
           <Button
             type="button"
             disabled={!canRun || runReview.isPending}
-            onClick={startRun}
+            onClick={() => startRun()}
           >
             {runReview.isPending ? <Spinner /> : <ClipboardCheck />}
             {runReview.isPending
@@ -617,11 +637,37 @@ export function ReviewPage() {
                 : "Find suggestions"}
           </Button>
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button type="button" variant="outline" className="min-h-11"
+            disabled={!canRun || runReview.isPending} onClick={() => startRun(true)}>
+            Review again
+          </Button>
+          <p className="text-2xs text-muted-foreground">
+            Normal reviews reuse successful AI coverage for unchanged information.
+            Review again reassesses this scope without deleting past decisions.
+          </p>
+        </div>
+        <label className="mt-3 flex items-start gap-2.5 text-xs">
+          <input type="checkbox" className="mt-0.5 size-4 accent-primary"
+            checked={reconsiderDismissed} disabled={!canWrite || runReview.isPending}
+            onChange={(event) => setReconsiderDismissed(event.target.checked)} />
+          <span>Reconsider dismissed suggestions
+            <span className="mt-0.5 block text-2xs text-muted-foreground">
+              Only with Review again. May create new proposals for dismissed findings;
+              original decisions stay in history. Accepted changes are not reopened.
+            </span>
+          </span>
+        </label>
         {runReview.isPending && (
-          <Button variant="outline" className="mt-3 min-h-11" disabled={cancelRequested}
+          <div className="mt-3">
+          <p className="text-2xs text-muted-foreground" aria-live="polite">
+            Reviewing a bounded batch. Completed work is saved.
+          </p>
+          <Button variant="outline" className="mt-2 min-h-11" disabled={cancelRequested}
             onClick={() => { stopReview.current = true; setCancelRequested(true); }}>
             {cancelRequested ? "Cancelling after current batch…" : "Cancel after current batch"}
           </Button>
+          </div>
         )}
 
         {scopeType === "items" && scopeItems.length > 0 && (
@@ -661,6 +707,7 @@ export function ReviewPage() {
               eligible items: names, descriptions (up to 300 characters), brand/model,
               current category/tag names, and the names and internal IDs of up to
               200 household categories and 200 tags.
+              Review again also includes already organised items.
               Descriptions may contain personal information you entered. No photo files,
               receipts, purchase amounts, location fields, loans, private-note fields,
               borrower records or other households are included. Provider policies apply.
@@ -724,7 +771,9 @@ export function ReviewPage() {
           <p className="mt-1 text-2xs text-muted-foreground">
             {displayedRun.include_ai
               ? displayedRun.ai_coverage_recorded
-                ? `AI reviewed ${displayedRun.ai_reviewed_count} of ${displayedRun.ai_eligible_count} eligible items scanned so far.`
+                ? displayedRun.ai_reused_count
+                  ? `AI coverage: ${(displayedRun.ai_reviewed_count ?? 0) + displayedRun.ai_reused_count} of ${displayedRun.ai_eligible_count} eligible items scanned so far; ${displayedRun.ai_reused_count} unchanged, previously reviewed; ${displayedRun.ai_reviewed_count} reviewed now.`
+                  : `AI reviewed ${displayedRun.ai_reviewed_count} of ${displayedRun.ai_eligible_count} eligible items scanned so far.`
                 : `AI reviewed ${displayedRun.ai_reviewed_count ?? (displayedRun.ai_error ? 0 : displayedRun.ai_item_count)} items. Full AI eligibility was not recorded for this older run.`
               : "AI not included. Local checks only."}
           </p>
@@ -741,7 +790,7 @@ export function ReviewPage() {
               {!runReview.isPending && Boolean(displayedRun.remaining_item_count) && (
                 <Button variant="outline" className="min-h-11"
                   disabled={!canWrite || (displayedRun.include_ai && !isOwner)}
-                  onClick={() => runReview.mutate(displayedRun)}>Resume review</Button>
+                  onClick={() => runReview.mutate({ resume: displayedRun })}>Resume review</Button>
               )}
             </div>
           )}
@@ -778,7 +827,7 @@ export function ReviewPage() {
             <div key={run.id} className="flex flex-wrap items-center justify-between gap-2 text-2xs">
               <span>{run.scope_label} · {run.item_count_scanned} of {run.total_item_count} scanned locally</span>
               <Button variant="outline" className="min-h-11" disabled={runReview.isPending || !canWrite || (run.include_ai && !isOwner)}
-                onClick={() => runReview.mutate(run)}>Resume review</Button>
+                onClick={() => runReview.mutate({ resume: run })}>Resume review</Button>
             </div>
           ))}
         </section>
@@ -816,6 +865,11 @@ export function ReviewPage() {
       </div>
 
       <section id="review-suggestions" className="surface scroll-mt-32 p-4 sm:p-5">
+        {scopeType === "items" && selectedItemIds.length > 0 && (
+          <p className="mb-3 text-2xs text-muted-foreground">
+            Showing suggestions only for the selected {pluralize(selectedItemIds.length, "item")}.
+          </p>
+        )}
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1.5 text-2xs">
             <span className="field-label">Status</span>
@@ -1192,10 +1246,10 @@ export function ReviewPage() {
         open={aiConfirmOpen}
         onOpenChange={setAiConfirmOpen}
         title="Include AI suggestions?"
-        description={`Review ${scopeLabel} with your configured provider, ${aiProvider}, in batches of up to 40 eligible items. Usage charges may apply for each batch. You can cancel after the current batch and resume later. Nothing changes until you approve a suggestion.`}
+        description={`${reviewAgain ? "Review again" : "Review"} ${scopeLabel} with your configured provider, ${aiProvider}, in batches of up to 40 eligible items. ${reviewAgain ? "Unchanged items will be reassessed. " : ""}${reviewAgain && reconsiderDismissed ? "Previously dismissed findings may return as new proposals; original decisions remain. " : ""}Usage charges may apply for each batch. You can cancel after the current batch and resume later. Nothing changes until you approve a suggestion.`}
         confirmLabel="Run review with AI"
         onConfirm={async () => {
-          await runReview.mutateAsync(null);
+          runReview.mutate({ reviewAgain });
         }}
       />
 

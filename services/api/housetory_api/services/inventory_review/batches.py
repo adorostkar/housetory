@@ -2,14 +2,20 @@
 
 import uuid
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from ...api.errors import ApiError
-from ...models import Household, InventoryReviewRun, InventoryReviewSuggestion, Item
+from ...models import (
+    Household,
+    InventoryReviewCoverage,
+    InventoryReviewRun,
+    InventoryReviewSuggestion,
+    Item,
+)
 from ...schemas.inventory_review import ReviewRunRequest
 from ..serializers import item_load_options
-from . import _request_fingerprint, _run_out, run_review
+from . import _request_fingerprint, _run_out, coverage, run_review
 from .scope import MAX_AI_ITEMS, _normalized, _Scope, _scope_conditions
 
 
@@ -26,9 +32,23 @@ def start(db: Session, household_id: uuid.UUID, payload: ReviewRunRequest, actor
             raise ApiError(409, "review_request_reused", "This request was used for another scope.")
         return _run_out(existing)
     conditions, label, scope_id = _scope_conditions(db, household_id, payload)
-    ids = list(
-        db.scalars(select(Item.id).where(*conditions).order_by(Item.updated_at.desc(), Item.id))
-    )
+    statement = select(Item.id).where(*conditions)
+    if payload.include_ai and not payload.review_again:
+        # Queue unfinished/edited items first; exact inputs are checked within each batch.
+        statement = statement.outerjoin(
+            InventoryReviewCoverage,
+            and_(
+                InventoryReviewCoverage.item_id == Item.id,
+                InventoryReviewCoverage.household_id == household_id,
+                InventoryReviewCoverage.capability == coverage.CAPABILITY,
+            ),
+        ).order_by(
+            or_(
+                InventoryReviewCoverage.item_id.is_(None),
+                Item.updated_at > InventoryReviewCoverage.reviewed_at,
+            ).desc()
+        )
+    ids = list(db.scalars(statement.order_by(Item.updated_at.desc(), Item.id)))
     from ..inventory_review_schedule import _assistant_route
 
     route = _assistant_route(db, household_id)[1] if payload.include_ai else None
@@ -52,6 +72,7 @@ def start(db: Session, household_id: uuid.UUID, payload: ReviewRunRequest, actor
             "unavailable": 0,
             "payload": payload.model_dump(mode="json"),
             "ai_route": route,
+            "capability_version": coverage.CAPABILITY_VERSION,
         },
     )
     db.add(run)
@@ -106,6 +127,16 @@ def advance(
     if run.include_ai:
         from ..inventory_review_schedule import _assistant_route
 
+        if (
+            progress.get("capability_version", coverage.CAPABILITY_VERSION)
+            != coverage.CAPABILITY_VERSION
+        ):
+            raise ApiError(
+                409,
+                "review_capability_changed",
+                "Review capabilities changed. Start a new review; "
+                "completed work and decisions are preserved.",
+            )
         if progress["ai_route"] != _assistant_route(db, household_id)[1]:
             raise ApiError(
                 409,
@@ -136,12 +167,17 @@ def advance(
     if items and not retry:
         names = {_normalized(item.name) for item in items}
         serials = {_normalized(item.serial_number) for item in items if item.serial_number}
+        comparison_conditions = (
+            [Item.household_id == household_id, Item.is_archived.is_(False)]
+            if payload.scope_type == "items"
+            else conditions
+        )
         matches = list(
             db.scalars(
                 select(Item)
                 .options(*item_load_options())
                 .where(
-                    *conditions,
+                    *comparison_conditions,
                     or_(
                         func.lower(func.regexp_replace(func.trim(Item.name), r"\s+", " ", "g")).in_(
                             names
@@ -191,7 +227,7 @@ def advance(
     seen = set(progress.get("pending_fingerprints", []))
     repeated = len(pending & seen)
     progress["pending_fingerprints"] = sorted(seen | pending)
-    child.progress_json = {"parent_id": str(run.id)}
+    child.progress_json = {**child.progress_json, "parent_id": str(run.id)}
     for field in (
         "created_suggestion_count",
         "existing_suggestion_count",
@@ -199,6 +235,7 @@ def advance(
         "suppressed_suggestion_count",
         "ai_item_count",
         "ai_reviewed_count",
+        "ai_reused_count",
     ):
         setattr(run, field, getattr(run, field) + getattr(result, field))
     run.existing_suggestion_count -= repeated

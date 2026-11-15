@@ -832,6 +832,7 @@ export function useReviewSuggestions(
     q?: string;
     limit?: number;
     offset?: number;
+    item_ids?: string[];
   },
   enabled = true,
 ) {
@@ -841,19 +842,21 @@ export function useReviewSuggestions(
     q: filters.q ?? "",
     limit: String(filters.limit ?? 50),
     offset: String(filters.offset ?? 0),
+    item_ids: filters.item_ids?.join(",") ?? "",
   };
   return useQuery({
     queryKey: queryKeys.reviewSuggestions(params),
-    queryFn: () =>
-      api.get<ReviewSuggestionList>(
-        `/inventory-review/suggestions${buildQuery({
+    queryFn: () => {
+      const query = new URLSearchParams(buildQuery({
           status: filters.status || undefined,
           suggestion_type: filters.suggestion_type || undefined,
           q: filters.q || undefined,
           limit: filters.limit ?? 50,
           offset: filters.offset ?? 0,
-        })}`,
-      ),
+      }).replace(/^\?/, ""));
+      for (const id of filters.item_ids ?? []) query.append("item_ids", id);
+      return api.get<ReviewSuggestionList>(`/inventory-review/suggestions?${query}`);
+    },
     enabled,
     staleTime: 5_000,
   });

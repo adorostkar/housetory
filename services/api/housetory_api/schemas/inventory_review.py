@@ -66,10 +66,14 @@ class ReviewRunRequest(BaseModel):
     scope_id: uuid.UUID | None = None
     item_ids: list[uuid.UUID] | None = Field(default=None, max_length=100)
     include_ai: bool = False
+    review_again: bool = False
+    reconsider_dismissed: bool = False
     request_id: uuid.UUID
 
     @model_validator(mode="after")
     def _scope_shape(self) -> "ReviewRunRequest":
+        if self.reconsider_dismissed and not self.review_again:
+            raise ValueError("Reconsidering dismissed suggestions requires Review again.")
         if self.scope_type == "items":
             if not self.item_ids:
                 raise ValueError("Select at least one item to review.")
@@ -108,6 +112,7 @@ class ReviewRunOut(BaseModel):
     ai_item_count: int = 0
     ai_eligible_count: int = 0
     ai_reviewed_count: int = 0
+    ai_reused_count: int = 0
     ai_coverage_recorded: bool = False
     resumable: bool = False
     batch_state: Literal["paused", "running", "cancelled", "completed"] | None = None

@@ -90,6 +90,9 @@ export function aiRunSummary(run: ReviewRun) {
     return `AI failed${route} · ${run.ai_item_count} items selected for AI · offline suggestions kept`;
   }
   if (run.ai_error) return `AI skipped${route} · 0 items selected for AI`;
+  if (!run.ai_used && run.ai_reused_count) {
+    return `AI coverage reused${route} · ${run.ai_reused_count} unchanged items · no new AI request`;
+  }
   if (!run.ai_used) return "AI skipped · no eligible items need organisation · 0 items selected for AI";
   const provider = run.ai_provider_label ?? "Assistant";
   return `AI used via ${provider}${run.ai_model ? ` · ${run.ai_model}` : ""} · ${run.ai_item_count} items selected for AI`;
