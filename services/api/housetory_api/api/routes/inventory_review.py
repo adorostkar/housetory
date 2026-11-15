@@ -10,6 +10,7 @@ from ...schemas.inventory_review import (
     CaptureReviewOut,
     CaptureReviewUndoRequest,
     ReviewAcceptRequest,
+    ReviewBatchRequest,
     ReviewBulkAcceptOut,
     ReviewBulkAcceptRequest,
     ReviewDecisionOut,
@@ -147,7 +148,7 @@ def read_review_scope_items(
 @router.post("/runs", response_model=ReviewRunOut)
 def create_review_run(
     payload: ReviewRunRequest,
-    auth: AuthContext = Depends(require_auth),
+    auth: AuthContext = Depends(require_writer),
     db: Session = Depends(get_db),
 ) -> ReviewRunOut:
     if payload.include_ai and auth.role != "owner":
@@ -157,18 +158,71 @@ def create_review_run(
             "Only the household owner can run the optional AI review pass.",
         )
     try:
-        result = inventory_review.run_review(
-            db,
-            auth.household.id,
-            payload,
-            actor_user_id=auth.user.id,
-            actor_name=auth.user.name,
-            allow_ai=auth.role == "owner",
-        )
+        from ...services.inventory_review import batches
+
+        result = batches.start(db, auth.household.id, payload, auth.user.id)
+        # Persist the snapshot before inference so interrupted requests can resume.
+        db.commit()
+        if result.batch_version == 0:
+            result = batches.advance(
+                db,
+                auth.household.id,
+                result.id,
+                result.batch_version,
+                actor_id=auth.user.id,
+                actor_name=auth.user.name,
+                allow_ai=auth.role == "owner",
+            )
         db.commit()
     except Exception:
         db.rollback()
         raise
+    return result
+
+
+@router.post("/runs/{run_id}/continue", response_model=ReviewRunOut)
+def continue_review_run(
+    run_id: uuid.UUID,
+    payload: ReviewBatchRequest,
+    auth: AuthContext = Depends(require_writer),
+    db: Session = Depends(get_db),
+) -> ReviewRunOut:
+    from ...services.inventory_review import batches
+
+    result = batches.advance(
+        db,
+        auth.household.id,
+        run_id,
+        payload.version,
+        actor_id=auth.user.id,
+        actor_name=auth.user.name,
+        allow_ai=auth.role == "owner",
+        resume=payload.resume,
+    )
+    db.commit()
+    return result
+
+
+@router.post("/runs/{run_id}/cancel", response_model=ReviewRunOut)
+def cancel_review_run(
+    run_id: uuid.UUID,
+    payload: ReviewBatchRequest,
+    auth: AuthContext = Depends(require_writer),
+    db: Session = Depends(get_db),
+) -> ReviewRunOut:
+    from ...services.inventory_review import batches
+
+    result = batches.advance(
+        db,
+        auth.household.id,
+        run_id,
+        payload.version,
+        actor_id=auth.user.id,
+        actor_name=auth.user.name,
+        allow_ai=auth.role == "owner",
+        cancel=True,
+    )
+    db.commit()
     return result
 
 

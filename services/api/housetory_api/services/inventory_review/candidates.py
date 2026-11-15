@@ -210,7 +210,9 @@ def _name_candidates(scope: _Scope) -> list[_Candidate]:
     return candidates
 
 
-def _duplicate_candidates(scope: _Scope) -> list[_Candidate]:
+def _duplicate_candidates(
+    scope: _Scope, target_ids: set[uuid.UUID] | None = None
+) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     seen_pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
     serial_groups: dict[str, list[Item]] = defaultdict(list)
@@ -222,6 +224,12 @@ def _duplicate_candidates(scope: _Scope) -> list[_Candidate]:
         if len(group) < 2:
             continue
         for first, second in combinations(group, 2):
+            if (
+                target_ids is not None
+                and first.id not in target_ids
+                and second.id not in target_ids
+            ):
+                continue
             pair = tuple(sorted((first.id, second.id)))
             if pair in seen_pairs:
                 continue
@@ -238,6 +246,12 @@ def _duplicate_candidates(scope: _Scope) -> list[_Candidate]:
         if len(group) < 2:
             continue
         for first, second in combinations(group, 2):
+            if (
+                target_ids is not None
+                and first.id not in target_ids
+                and second.id not in target_ids
+            ):
+                continue
             pair = tuple(sorted((first.id, second.id)))
             if pair in seen_pairs:
                 continue
@@ -277,7 +291,13 @@ def _duplicate_candidate(first: Item, second: Item, *, serial_match: bool) -> _C
     )
 
 
-def _advisory_candidates(scope: _Scope, db: Session, household_id: uuid.UUID) -> list[_Candidate]:
+def _advisory_candidates(
+    scope: _Scope,
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    limit: int | None = MAX_ADVISORY_SUGGESTIONS,
+) -> list[_Candidate]:
     candidates: list[_Candidate] = []
     purchase_items = [
         item
@@ -286,7 +306,7 @@ def _advisory_candidates(scope: _Scope, db: Session, household_id: uuid.UUID) ->
         and item.purchase_info_status not in {"unknown", "not_applicable"}
         and (item.purchase.purchase_date is None or item.purchase.price_cents is None)
     ]
-    for item in purchase_items[:MAX_ADVISORY_SUGGESTIONS]:
+    for item in purchase_items[:limit]:
         missing = []
         if item.purchase and item.purchase.purchase_date is None:
             missing.append("purchase date")
@@ -311,7 +331,7 @@ def _advisory_candidates(scope: _Scope, db: Session, household_id: uuid.UUID) ->
                 },
             )
         )
-    if len(candidates) >= MAX_ADVISORY_SUGGESTIONS:
+    if limit is not None and len(candidates) >= limit:
         return candidates
 
     room_rows = db.execute(
@@ -352,7 +372,7 @@ def _advisory_candidates(scope: _Scope, db: Session, household_id: uuid.UUID) ->
                     },
                 )
             )
-        if len(candidates) >= MAX_ADVISORY_SUGGESTIONS:
+        if limit is not None and len(candidates) >= limit:
             break
     return candidates
 
@@ -384,7 +404,12 @@ def _ai_organisation_candidates(
     if not status.configured:
         return (
             [],
-            {"provider": provider_label, "model": status.model, "item_count": 0},
+            {
+                "provider": provider_label,
+                "model": status.model,
+                "item_count": 0,
+                "eligible_count": len(eligible),
+            },
             None,
             "The Assistant task is not configured; AI was skipped and offline "
             "rule-based suggestions were kept.",
@@ -435,6 +460,7 @@ def _ai_organisation_candidates(
         "model": status.model,
         "item_count": len(selected),
         "attempted": True,
+        "eligible_count": len(eligible),
     }
     try:
         raw = ai.complete_json(
@@ -561,6 +587,7 @@ def _ai_organisation_candidates(
         if len(eligible) > MAX_AI_ITEMS
         else None
     )
+    meta["reviewed_count"] = len(selected)
     return output, meta, partial, None
 
 

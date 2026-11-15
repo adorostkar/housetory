@@ -191,6 +191,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   state.overview = sparseOverview;
   state.financial = sparseFinancial;
 });
@@ -210,11 +211,50 @@ describe("OverviewPage sparse and populated states", () => {
     expect(screen.getByText("1 unit")).toBeVisible();
     expect(screen.getByText(/on loan across/)).toBeVisible();
     expect(screen.getByText("No purchase values yet.")).toBeVisible();
-    expect(screen.getByText(/No warranties recorded/)).toBeVisible();
+    expect(screen.getAllByText(/No warranties recorded/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Expiring soon")).not.toBeInTheDocument();
     expect(screen.queryByText("Purchase value")).not.toBeInTheDocument();
     expect(screen.queryByText("Current value")).not.toBeInTheDocument();
     expect(screen.getByText("Recently added")).toBeVisible();
+  });
+
+  it("masks every currency and financial breakdown before the first loaded render after remount", async () => {
+    state.overview = {
+      ...populatedOverview,
+      value_by_currency: [
+        { currency: "USD", total_cents: 49900 },
+        { currency: "EUR", total_cents: 87000 },
+      ],
+    };
+    state.financial = populatedFinancial;
+    const view = renderPage();
+    const toggle = screen.getByRole("button", { name: "Hide purchase values" });
+    expect(toggle.closest("a")).toBeNull();
+    await userEvent.click(toggle);
+    expect(screen.queryAllByText(/\$499/)).toHaveLength(0);
+    expect(screen.queryAllByText(/€870/)).toHaveLength(0);
+    expect(screen.getByText("EUR")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Show purchase values" })).toHaveAttribute("aria-pressed", "true");
+    view.unmount();
+    renderPage();
+    expect(screen.queryAllByText(/\$499/)).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Show purchase values" }));
+    expect(screen.getAllByText(/\$499/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /Purchase value/ })).toHaveAttribute("href", "/purchases");
+  });
+
+  it.each([
+    { active: 3, expiring: 0, expired: 2, count: "3", detail: "None expiring soon · 2 expired" },
+    { active: 3, expiring: 2, expired: 1, count: "5", detail: "2 expiring soon · 1 expired" },
+    { active: 0, expiring: 0, expired: 4, count: "0", detail: "None expiring soon · 4 expired" },
+  ])("counts unexpired warranties and retains all-warranty access: $detail", ({ active, expiring, expired, count, detail }) => {
+    state.overview = { ...sparseOverview, warranties: {
+      ...sparseOverview.warranties, active_count: active, expiring_count: expiring, expired_count: expired,
+    } };
+    renderPage();
+    const card = screen.getByRole("link", { name: new RegExp(`Active warranties ${count}`) });
+    expect(card).toHaveAttribute("href", "/warranties");
+    expect(card).toHaveTextContent(detail);
   });
 
   it("restores value cards and warranty groups when useful data exists", () => {

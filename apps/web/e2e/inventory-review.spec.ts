@@ -112,11 +112,11 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   await expect(page.getByRole("heading", { name: "Review", level: 1 })).toBeVisible();
   await expect(
     page.getByRole("checkbox", {
-      name: /Include optional AI-assisted organisation suggestions/,
+      name: /Include AI suggestions/,
     }),
   ).not.toBeChecked();
   await clickFindSuggestions(page);
-  await expect(page.getByText(/offline rules only/)).toBeVisible();
+  await expect(page.getByText("AI not included. Local checks only.")).toBeVisible();
   await expect(page.getByText(/Review complete:/)).toBeHidden({ timeout: 10_000 });
 
   const categoryCard = page
@@ -153,6 +153,8 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   });
 
   await page.getByLabel("Filter suggestions by status").selectOption("pending");
+  await expect(categoryCard.getByRole("button", { name: "Accept", exact: true })).toBeVisible();
+  await page.getByLabel("Search suggestions").fill(id);
   const duplicateCard = page
     .locator("li")
     .filter({ hasText: `Possible duplicate: Review camera ${id}` })

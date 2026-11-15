@@ -363,10 +363,80 @@ beforeEach(() => {
   owner = true;
   suggestions = [categorySuggestion, duplicateSuggestion];
   summary.last_run = null;
+  summary.unfinished_runs = [];
   vi.mocked(api.post).mockClear();
 });
 
 describe("ReviewPage", () => {
+  it("can resume an unfinished manual review after a newer scheduled review", async () => {
+    const paused = reviewRun({
+      id: "paused-manual", include_ai: false, status: "partial", resumable: true,
+      batch_state: "cancelled", batch_version: 2, remaining_item_count: 40,
+      total_item_count: 80, item_count_scanned: 40,
+    });
+    summary.last_run = reviewRun({ trigger_type: "scheduled", resumable: false });
+    summary.unfinished_runs = [paused];
+    vi.mocked(api.post).mockResolvedValueOnce({
+      ...paused, status: "completed", batch_state: "completed", remaining_item_count: 0,
+      item_count_scanned: 80, batch_version: 3,
+    });
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Resume review" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/inventory-review/runs/paused-manual/continue", { version: 2, resume: true },
+    ));
+    expect(await screen.findByRole("status")).toHaveTextContent("Reviewed 80 items locally");
+  });
+
+  it("cancels after the in-flight batch and resumes saved progress without starting a new run", async () => {
+    let finishBatch!: (run: ReviewRun) => void;
+    const first = reviewRun({
+      include_ai: false, status: "partial", resumable: true, batch_state: "paused",
+      total_item_count: 120, item_count_scanned: 40, batch_version: 1,
+      completed_batch_count: 1, remaining_item_count: 80,
+    });
+    const second = { ...first, item_count_scanned: 80, batch_version: 2,
+      completed_batch_count: 2, remaining_item_count: 40 };
+    const cancelled = { ...second, batch_state: "cancelled" as const, batch_version: 3 };
+    const completed = { ...second, status: "completed" as const, batch_state: "completed" as const,
+      item_count_scanned: 120, batch_version: 4, completed_batch_count: 3, remaining_item_count: 0 };
+    vi.mocked(api.post)
+      .mockResolvedValueOnce(first)
+      .mockImplementationOnce(() => new Promise<ReviewRun>((resolve) => { finishBatch = resolve; }))
+      .mockResolvedValueOnce(cancelled)
+      .mockResolvedValueOnce(completed);
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Find suggestions" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel after current batch" }));
+    expect(screen.getByRole("button", { name: /Cancelling after current batch/ })).toBeDisabled();
+    finishBatch(second);
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      `/inventory-review/runs/${first.id}/cancel`, { version: 2 },
+    ));
+    await userEvent.click(await screen.findByRole("button", { name: "Resume review" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Reviewed 120 items locally"));
+    expect(api.post).toHaveBeenLastCalledWith(
+      `/inventory-review/runs/${first.id}/continue`, { version: 3, resume: true },
+    );
+    expect(api.post).toHaveBeenCalledTimes(4);
+  });
+
+  it("restores unfinished coverage silently and makes data sharing expandable", async () => {
+    summary.last_run = reviewRun({
+      status: "partial", resumable: true, batch_state: "paused", total_item_count: 240,
+      item_count_scanned: 80, ai_coverage_recorded: true, ai_eligible_count: 65,
+      ai_reviewed_count: 40, ai_item_count: 65, remaining_item_count: 160, batch_version: 2,
+    });
+    renderPage();
+    expect(screen.getByText("AI reviewed 40 of 65 eligible items scanned so far.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Resume review" })).toBeVisible();
+    expect(api.post).not.toHaveBeenCalled();
+    expect(screen.getByText(/Descriptions may contain personal information/)).not.toBeVisible();
+    await userEvent.click(screen.getByText("What gets sent?"));
+    expect(screen.getByText(/Descriptions may contain personal information/)).toBeVisible();
+  });
+
   it("keeps the optional schedule behind Advanced when none is configured", () => {
     renderPage();
     expect(screen.getByText("Advanced · Scheduled review")).toBeVisible();
@@ -414,13 +484,12 @@ describe("ReviewPage", () => {
     renderPage();
     await userEvent.click(
       screen.getByRole("checkbox", {
-        name: /Include optional AI-assisted organisation suggestions/,
+        name: /Include AI suggestions/,
       }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Review with AI" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(/may charge usage/i)).toBeVisible();
-    expect(within(dialog).getByText(/never sends photos, locations, receipts, prices, loans/i)).toBeVisible();
+    expect(within(dialog).getByText(/Usage charges may apply/i)).toBeVisible();
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Run review with AI" }),
     );
@@ -435,8 +504,9 @@ describe("ReviewPage", () => {
         }),
       ),
     );
+    await userEvent.click(screen.getByText("Review details"));
     expect(
-      await screen.findByText(/AI completed via OpenAI household · gpt-test · 2 items sent/),
+      await screen.findByText(/AI used via OpenAI household · gpt-test · 2 items selected for AI/),
     ).toBeVisible();
   });
 
@@ -548,7 +618,7 @@ describe("ReviewPage", () => {
     expect(screen.getByRole("button", { name: "Find suggestions" })).toBeDisabled();
     expect(
       screen.getByRole("checkbox", {
-        name: /Include optional AI-assisted organisation suggestions/,
+        name: /Include AI suggestions/,
       }),
     ).toBeDisabled();
   });
@@ -577,7 +647,7 @@ describe("ReviewPage", () => {
     );
   });
 
-  it("shows failed AI provider, model, sent item count and retained suggestions", () => {
+  it("shows failed AI coverage plainly and keeps provider diagnostics expandable", async () => {
     summary.last_run = reviewRun({
       status: "partial",
       ai_item_count: 5,
@@ -585,16 +655,18 @@ describe("ReviewPage", () => {
       partial_reason: "AI provider access failed.",
     });
     renderPage();
+    expect(screen.getByText(/AI reviewed 0 items. Full AI eligibility was not recorded/)).toBeVisible();
+    await userEvent.click(screen.getByText("Review details"));
     expect(
       screen.getByText(
-        /AI failed via OpenAI household · gpt-test · 5 items sent · offline suggestions kept/,
+        /AI failed via OpenAI household · gpt-test · 5 items selected for AI · offline suggestions kept/,
       ),
     ).toBeVisible();
     expect(screen.getByText(/Suggestions: 3 new · 2 already queued/)).toBeVisible();
     expect(screen.getByText(/AI review: .*provider timed out/)).toBeVisible();
   });
 
-  it("distinguishes an AI skip with no eligible items from a completed request", () => {
+  it("distinguishes an AI skip with no eligible items from a completed request", async () => {
     summary.last_run = reviewRun({
       ai_used: false,
       ai_item_count: 0,
@@ -602,9 +674,10 @@ describe("ReviewPage", () => {
       ai_model: null,
     });
     renderPage();
+    await userEvent.click(screen.getByText("Review details"));
     expect(
-      screen.getByText(/AI skipped · no eligible items need organisation · 0 items sent/),
+      screen.getByText(/AI skipped · no eligible items need organisation · 0 items selected for AI/),
     ).toBeVisible();
-    expect(screen.queryByText(/AI completed via/)).toBeNull();
+    expect(screen.queryByText(/AI used via/)).toBeNull();
   });
 });

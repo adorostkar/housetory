@@ -125,6 +125,13 @@ export function ReviewPage() {
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [lastRun, setLastRun] = React.useState<ReviewRun | null>(null);
   const [runError, setRunError] = React.useState<string | null>(null);
+  const stopReview = React.useRef(false);
+  const [cancelRequested, setCancelRequested] = React.useState(false);
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; stopReview.current = true; };
+  }, []);
   const rawStatusFilter = searchParams.get("status");
   const statusFilter: ReviewSuggestionStatus = STATUS_VALUES.includes(
     rawStatusFilter as ReviewSuggestionStatus,
@@ -138,6 +145,7 @@ export function ReviewPage() {
       : "";
   const qParam = (searchParams.get("q") ?? "").slice(0, 160);
   const [suggestionSearch, setSuggestionSearch] = React.useState(qParam);
+  const [suggestionOffset, setSuggestionOffset] = React.useState(0);
   const debouncedQuery = useDebouncedValue(qParam, 250);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<Set<string>>(
     new Set(),
@@ -176,13 +184,15 @@ export function ReviewPage() {
     if (previousQueueFilterSignature.current === queueFilterSignature) return;
     previousQueueFilterSignature.current = queueFilterSignature;
     setSelectedSuggestionIds(new Set());
+    setSuggestionOffset(0);
   }, [queueFilterSignature]);
 
   const suggestionsQuery = useReviewSuggestions({
     status: statusFilter,
     suggestion_type: typeFilter || undefined,
     q: debouncedQuery.trim() || undefined,
-    limit: 75,
+    limit: 50,
+    offset: suggestionOffset,
   });
   const scopeItemsQuery = useReviewScopeItems(
     selectedItemIds,
@@ -269,15 +279,35 @@ export function ReviewPage() {
   };
 
   const runReview = useMutation({
-    mutationFn: () => {
+    mutationFn: async (resume: ReviewRun | null) => {
       if (!canWrite) throw new Error("Review changes require write access.");
-      return api.post<ReviewRun>("/inventory-review/runs", {
+      stopReview.current = false;
+      setCancelRequested(false);
+      let run = resume ? await api.post<ReviewRun>(`/inventory-review/runs/${resume.id}/continue`, {
+        version: resume.batch_version, resume: true,
+      }) : await api.post<ReviewRun>("/inventory-review/runs", {
         scope_type: scopeType,
         scope_id: scopeType === "items" || scopeType === "household" ? null : scopeId,
         item_ids: scopeType === "items" ? selectedItemIds : null,
         include_ai: includeAi,
         request_id: requestId,
       });
+      while (true) {
+        if (mounted.current) setLastRun(run);
+        refreshReview();
+        if (!run.resumable || !run.remaining_item_count || run.ai_error ||
+            run.batch_state === "cancelled" || !mounted.current) break;
+        if (stopReview.current) {
+          run = await api.post<ReviewRun>(`/inventory-review/runs/${run.id}/cancel`, {
+            version: run.batch_version,
+          });
+          break;
+        }
+        run = await api.post<ReviewRun>(`/inventory-review/runs/${run.id}/continue`, {
+          version: run.batch_version,
+        });
+      }
+      return run;
     },
     onSuccess: (run) => {
       setLastRun(run);
@@ -285,7 +315,7 @@ export function ReviewPage() {
       setRequestId(crypto.randomUUID());
       setSelectedSuggestionIds(new Set());
       refreshReview();
-      const prefix = run.status === "partial" ? "Partial review complete" : "Review complete";
+      const prefix = run.status === "partial" ? "Review paused" : "Review complete";
       toast.success(
         `${prefix}: ${pluralize(run.created_suggestion_count, "new suggestion")}, ${run.existing_suggestion_count} already queued.`,
       );
@@ -426,7 +456,7 @@ export function ReviewPage() {
       setAiConfirmOpen(true);
       return;
     }
-    runReview.mutate();
+    runReview.mutate(null);
   };
 
   const openEdit = (suggestion: ReviewSuggestion) => {
@@ -587,6 +617,12 @@ export function ReviewPage() {
                 : "Find suggestions"}
           </Button>
         </div>
+        {runReview.isPending && (
+          <Button variant="outline" className="mt-3 min-h-11" disabled={cancelRequested}
+            onClick={() => { stopReview.current = true; setCancelRequested(true); }}>
+            {cancelRequested ? "Cancelling after current batch…" : "Cancel after current batch"}
+          </Button>
+        )}
 
         {scopeType === "items" && scopeItems.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -611,21 +647,27 @@ export function ReviewPage() {
               onChange={(event) => setIncludeAi(event.target.checked)}
             />
             <span className="min-w-0 break-words">
-              Include optional AI-assisted organisation suggestions
+              Include AI suggestions
               <span className="mt-0.5 block text-2xs leading-relaxed text-muted-foreground">
-                Owner only. Uses the existing household Assistant task via{" "}
-                <strong className="break-all font-medium text-foreground/80">
-                  {aiProvider}
-                </strong>.
-                Sends at most {40} items missing a category or tags. Only names,
-                descriptions, brand/model, current category/tag names and existing
-                household category/tag names are included. No photos, locations,
-                receipts, prices, loans, private notes, borrower data or other households
-                are sent. One bounded provider request may incur usage or cost. Opening
-                Review never calls AI.
+                Uses your configured provider; usage charges may apply.
               </span>
             </span>
           </label>
+          <details className="mt-2 text-2xs leading-relaxed text-muted-foreground">
+            <summary className="min-h-11 cursor-pointer py-3">What gets sent?</summary>
+            <p>Uses the household Assistant task via {aiProvider}. AI checks items missing
+              a category or tags that do not already have a local category proposal.
+              Each request includes up to 40
+              eligible items: names, descriptions (up to 300 characters), brand/model,
+              current category/tag names, and the names and internal IDs of up to
+              200 household categories and 200 tags.
+              Descriptions may contain personal information you entered. No photo files,
+              receipts, purchase amounts, location fields, loans, private-note fields,
+              borrower records or other households are included. Provider policies apply.
+              Whole-scope review makes multiple paid requests as needed; cancellation stops
+              after the current batch. Opening Review sends nothing. Only the owner can
+              enable AI; configured cloud consent still applies.</p>
+          </details>
           {!aiReady && isOwner && (
             <p className="mt-2 text-2xs text-muted-foreground">
               The Assistant task is not configured for this household. Offline checks
@@ -673,16 +715,49 @@ export function ReviewPage() {
               {displayedRun.status}
             </Badge>
           </div>
-          <p className="mt-2 text-2xs text-muted-foreground">
-            Scanned {displayedRun.item_count_scanned} of {displayedRun.total_item_count} items ·{" "}
-            {aiRunSummary(displayedRun)}.
+          <p className="mt-3 text-sm font-medium" role="status">
+            Reviewed {displayedRun.item_count_scanned}
+            {displayedRun.item_count_scanned < displayedRun.total_item_count
+              ? ` of ${displayedRun.total_item_count}` : ""} items locally ·{" "}
+            {displayedRun.created_suggestion_count + displayedRun.existing_suggestion_count} suggestions
           </p>
           <p className="mt-1 text-2xs text-muted-foreground">
+            {displayedRun.include_ai
+              ? displayedRun.ai_coverage_recorded
+                ? `AI reviewed ${displayedRun.ai_reviewed_count} of ${displayedRun.ai_eligible_count} eligible items scanned so far.`
+                : `AI reviewed ${displayedRun.ai_reviewed_count ?? (displayedRun.ai_error ? 0 : displayedRun.ai_item_count)} items. Full AI eligibility was not recorded for this older run.`
+              : "AI not included. Local checks only."}
+          </p>
+          {displayedRun.resumable && (
+            <div className="mt-3 space-y-2">
+              <progress className="h-2 w-full" aria-label="Local review coverage"
+                max={Math.max(1, displayedRun.total_item_count)}
+                value={displayedRun.item_count_scanned} />
+              <p className="text-2xs text-muted-foreground">
+                {displayedRun.completed_batch_count ?? 0} batches completed ·{" "}
+                {displayedRun.remaining_item_count ?? 0} items unfinished.
+                {" "}Progress is saved. Leaving this page pauses after the current batch.
+              </p>
+              {!runReview.isPending && Boolean(displayedRun.remaining_item_count) && (
+                <Button variant="outline" className="min-h-11"
+                  disabled={!canWrite || (displayedRun.include_ai && !isOwner)}
+                  onClick={() => runReview.mutate(displayedRun)}>Resume review</Button>
+              )}
+            </div>
+          )}
+          <details className="mt-2 text-2xs text-muted-foreground">
+            <summary className="min-h-11 cursor-pointer py-3">Review details</summary>
+            <p>{aiRunSummary(displayedRun)}.</p>
+            <p>
             Suggestions: {displayedRun.created_suggestion_count} new ·{" "}
             {displayedRun.existing_suggestion_count} already queued ·{" "}
             {displayedRun.suppressed_suggestion_count} previously resolved ·{" "}
             {displayedRun.stale_suggestion_count} marked stale.
-          </p>
+            </p>
+            <p>{displayedRun.ai_item_count} input records selected across AI batch attempts,
+              including failed or retried batches.
+              {" "}{displayedRun.unavailable_item_count ?? 0} items became unavailable.</p>
+          </details>
           {displayedRun.partial_reason && (
             <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
               Partial scan: {displayedRun.partial_reason}
@@ -693,6 +768,19 @@ export function ReviewPage() {
               AI review: {displayedRun.ai_error}
             </p>
           )}
+        </section>
+      )}
+
+      {summaryQuery.data?.unfinished_runs?.some((run) => run.id !== displayedRun?.id) && (
+        <section className="surface mb-5 space-y-3 p-4 sm:p-5" aria-label="Unfinished reviews">
+          <h2 className="text-sm font-medium">Unfinished reviews</h2>
+          {summaryQuery.data.unfinished_runs.filter((run) => run.id !== displayedRun?.id).map((run) => (
+            <div key={run.id} className="flex flex-wrap items-center justify-between gap-2 text-2xs">
+              <span>{run.scope_label} · {run.item_count_scanned} of {run.total_item_count} scanned locally</span>
+              <Button variant="outline" className="min-h-11" disabled={runReview.isPending || !canWrite || (run.include_ai && !isOwner)}
+                onClick={() => runReview.mutate(run)}>Resume review</Button>
+            </div>
+          ))}
         </section>
       )}
 
@@ -1082,6 +1170,20 @@ export function ReviewPage() {
                 );
               })}
             </ul>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-2xs text-muted-foreground">
+              <span>{suggestionOffset + 1}–{suggestionOffset + suggestions.length} of {suggestionsQuery.data?.total ?? suggestions.length} suggestions</span>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" className="min-h-11" disabled={suggestionOffset === 0 || suggestionsQuery.isFetching}
+                  onClick={() => { setSuggestionOffset((value) => Math.max(0, value - 50)); setSelectedSuggestionIds(new Set()); }}>
+                  Previous suggestions
+                </Button>
+                <Button variant="outline" className="min-h-11"
+                  disabled={suggestionOffset + suggestions.length >= (suggestionsQuery.data?.total ?? 0) || suggestionsQuery.isFetching}
+                  onClick={() => { setSuggestionOffset((value) => value + 50); setSelectedSuggestionIds(new Set()); }}>
+                  Next suggestions
+                </Button>
+              </div>
+            </div>
           </>
         )}
       </section>
@@ -1089,11 +1191,11 @@ export function ReviewPage() {
       <ConfirmDialog
         open={aiConfirmOpen}
         onOpenChange={setAiConfirmOpen}
-        title="Run the optional AI review pass?"
-        description={`This runs one bounded Assistant request for ${scopeLabel} via ${aiProvider}. It sends at most 40 items missing a category or tags, and only their names, descriptions, brand/model, current category/tag names plus existing household category/tag vocabularies. It never sends photos, locations, receipts, prices, loans, private notes, borrower data or other households. The provider may charge usage, and its output is validated as suggestions only; no inventory changes happen during analysis.`}
+        title="Include AI suggestions?"
+        description={`Review ${scopeLabel} with your configured provider, ${aiProvider}, in batches of up to 40 eligible items. Usage charges may apply for each batch. You can cancel after the current batch and resume later. Nothing changes until you approve a suggestion.`}
         confirmLabel="Run review with AI"
         onConfirm={async () => {
-          await runReview.mutateAsync();
+          await runReview.mutateAsync(null);
         }}
       />
 

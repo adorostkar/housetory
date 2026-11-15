@@ -1,6 +1,8 @@
 import {
   DoorOpen,
   Download,
+  Eye,
+  EyeOff,
   FileText,
   HandCoins,
   MoreHorizontal,
@@ -12,6 +14,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { AddItemsButton, useAddItems } from "@/components/add-items";
 import { FirstRunChecklist } from "@/components/first-run-checklist";
@@ -67,6 +70,22 @@ export function OverviewPage() {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const { openAddItems } = useAddItems();
   const canWrite = useCanWrite();
+  const [valuesHidden, setValuesHidden] = useState(() => {
+    try {
+      return localStorage.getItem("housetory.overview.values-hidden") === "true";
+    } catch {
+      return true;
+    }
+  });
+  const toggleValues = () => {
+    const hidden = !valuesHidden;
+    setValuesHidden(hidden);
+    try {
+      localStorage.setItem("housetory.overview.values-hidden", String(hidden));
+    } catch {
+      toast.error("Your browser could not save this privacy preference. It applies until you leave.");
+    }
+  };
 
   if (overview.isPending) return <OverviewSkeleton />;
   if (overview.isError) {
@@ -90,10 +109,6 @@ export function OverviewPage() {
     day: "numeric",
   }).format(new Date());
 
-  const purchaseValue = data.value_by_currency[0];
-  const purchaseLabel = purchaseValue
-    ? formatCurrency(purchaseValue.total_cents, purchaseValue.currency, { compact: true })
-    : "—";
   const warrantyCounts = data.warranties;
   const hasWarranties =
     warrantyCounts.active_count +
@@ -102,7 +117,7 @@ export function OverviewPage() {
       warrantyCounts.unknown_count >
     0;
   const hasPurchaseValues = data.value_by_currency.length > 0;
-  const statCount = 2 + (hasPurchaseValues ? 1 : 0) + (hasWarranties ? 1 : 0);
+  const statCount = 3 + (hasPurchaseValues ? 1 : 0);
   const statGridClass =
     statCount >= 5
       ? "xl:grid-cols-5"
@@ -204,13 +219,15 @@ export function OverviewPage() {
           <StatCard
             label="Purchase value"
             value={
-              <span>
-                {purchaseLabel}
-                {data.value_by_currency.length > 1 && (
-                  <span className="ml-1.5 align-middle font-sans text-base font-medium text-muted-foreground">
-                    +{data.value_by_currency.length - 1}
+              <span className="block space-y-2 break-words text-[1.65rem] sm:text-[2rem]">
+                {data.value_by_currency.map((entry) => (
+                  <span key={entry.currency} className="block">
+                    {valuesHidden ? "••••••" : formatCurrency(entry.total_cents, entry.currency, { compact: true })}
+                    {data.value_by_currency.length > 1 && (
+                      <span className="ml-1.5 font-sans text-xs text-muted-foreground">{entry.currency}</span>
+                    )}
                   </span>
-                )}
+                ))}
               </span>
             }
             detail={
@@ -220,17 +237,25 @@ export function OverviewPage() {
             }
             icon={Wallet}
             to="/purchases"
+            action={<Button variant="ghost" size="icon" className="size-11 shrink-0"
+              aria-label={valuesHidden ? "Show purchase values" : "Hide purchase values"}
+              aria-pressed={valuesHidden} onClick={toggleValues}>
+              {valuesHidden ? <EyeOff /> : <Eye />}
+            </Button>}
           />
         )}
-        {hasWarranties && (
           <StatCard
-            label="Warranties"
-            value={warrantyCounts.expiring_count}
-            detail={`${warrantyCounts.active_count} active · ${warrantyCounts.expired_count} expired`}
+            label="Active warranties"
+            value={warrantyCounts.active_count + warrantyCounts.expiring_count}
+            detail={hasWarranties
+              ? `${warrantyCounts.expiring_count > 0
+                  ? `${warrantyCounts.expiring_count} expiring soon`
+                  : "None expiring soon"} · ${warrantyCounts.expired_count} expired${
+                    warrantyCounts.unknown_count ? ` · ${warrantyCounts.unknown_count} without dates` : ""}`
+              : "No warranties recorded"}
             icon={ShieldCheck}
             to="/warranties"
           />
-        )}
       </div>
 
       {data.outstanding_loan_count > 0 && (
@@ -308,13 +333,13 @@ export function OverviewPage() {
               recentView === "list" ? (
                 <div className="surface divide-y divide-border/60 overflow-hidden p-1.5">
                   {data.recent_items.slice(0, 5).map((item) => (
-                    <ItemRow key={item.id} item={item} />
+                    <ItemRow key={item.id} item={item} hidePurchaseValue={valuesHidden} />
                   ))}
                 </div>
               ) : (
                 <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
                   {data.recent_items.slice(0, 6).map((item) => (
-                    <ItemCard key={item.id} item={item} />
+                    <ItemCard key={item.id} item={item} hidePurchaseValue={valuesHidden} />
                   ))}
                 </div>
               )
@@ -369,6 +394,7 @@ export function OverviewPage() {
           <OwnershipSection
             financial={data.financial ?? undefined}
             loading={false}
+            valuesHidden={valuesHidden}
           />
 
           <section className="mt-8">
@@ -430,9 +456,11 @@ export function OverviewPage() {
 function OwnershipSection({
   financial,
   loading,
+  valuesHidden,
 }: {
   financial: FinancialOverview | undefined;
   loading: boolean;
+  valuesHidden: boolean;
 }) {
   const hasValues = Boolean(
     financial &&
@@ -490,7 +518,7 @@ function OwnershipSection({
                     Purchase
                   </p>
                   <p className="mt-1 font-display text-[1.55rem] leading-none tracking-[-0.03em] tabular-nums">
-                    {formatCurrency(entry.purchase_total_cents, entry.currency, {
+                    {valuesHidden ? "••••••" : formatCurrency(entry.purchase_total_cents, entry.currency, {
                       compact: true,
                     })}
                   </p>
@@ -532,10 +560,10 @@ function OwnershipSection({
             financial.value_by_room.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2">
               {financial.value_by_category.length > 0 && (
-                <BreakdownTable title="Purchases by category" rows={financial.value_by_category} />
+                <BreakdownTable title="Purchases by category" rows={financial.value_by_category} valuesHidden={valuesHidden} />
               )}
               {financial.value_by_room.length > 0 && (
-                <BreakdownTable title="Purchases by room" rows={financial.value_by_room} />
+                <BreakdownTable title="Purchases by room" rows={financial.value_by_room} valuesHidden={valuesHidden} />
               )}
             </div>
           )}
@@ -549,9 +577,11 @@ function OwnershipSection({
 function BreakdownTable({
   title,
   rows,
+  valuesHidden,
 }: {
   title: string;
   rows: FinancialOverview["value_by_category"];
+  valuesHidden: boolean;
 }) {
   return (
     <div className="surface overflow-hidden">
@@ -584,7 +614,7 @@ function BreakdownTable({
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">{row.currency}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums xl:px-5">
-                    {formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
+                    {valuesHidden ? "••••••" : formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}
                   </td>
                 </tr>
               ))}

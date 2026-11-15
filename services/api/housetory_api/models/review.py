@@ -77,6 +77,11 @@ class InventoryReviewRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    progress_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    ai_eligible_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    ai_reviewed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
 
 class InventoryReviewSuggestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):

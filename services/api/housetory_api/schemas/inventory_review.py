@@ -106,12 +106,26 @@ class ReviewRunOut(BaseModel):
     suppressed_suggestion_count: int
     ai_used: bool
     ai_item_count: int = 0
+    ai_eligible_count: int = 0
+    ai_reviewed_count: int = 0
+    ai_coverage_recorded: bool = False
+    resumable: bool = False
+    batch_state: Literal["paused", "running", "cancelled", "completed"] | None = None
+    batch_version: int = 0
+    completed_batch_count: int = 0
+    remaining_item_count: int = 0
+    unavailable_item_count: int = 0
     ai_provider_label: str | None = None
     ai_model: str | None = None
     ai_error: str | None = None
     partial_reason: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
+
+
+class ReviewBatchRequest(BaseModel):
+    version: int = Field(ge=0)
+    resume: bool = False
 
 
 class ReviewSuggestionOut(BaseModel):
@@ -184,6 +198,7 @@ class ReviewSummaryOut(BaseModel):
     status_counts: dict[str, int] = Field(default_factory=dict)
     type_counts: dict[str, int] = Field(default_factory=dict)
     last_run: ReviewRunOut | None = None
+    unfinished_runs: list[ReviewRunOut] = Field(default_factory=list)
     schedule: ReviewScheduleSummaryOut | None = None
 
 

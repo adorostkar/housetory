@@ -831,6 +831,7 @@ export function useReviewSuggestions(
     suggestion_type?: string;
     q?: string;
     limit?: number;
+    offset?: number;
   },
   enabled = true,
 ) {
@@ -839,6 +840,7 @@ export function useReviewSuggestions(
     suggestion_type: filters.suggestion_type ?? "",
     q: filters.q ?? "",
     limit: String(filters.limit ?? 50),
+    offset: String(filters.offset ?? 0),
   };
   return useQuery({
     queryKey: queryKeys.reviewSuggestions(params),
@@ -849,6 +851,7 @@ export function useReviewSuggestions(
           suggestion_type: filters.suggestion_type || undefined,
           q: filters.q || undefined,
           limit: filters.limit ?? 50,
+          offset: filters.offset ?? 0,
         })}`,
       ),
     enabled,

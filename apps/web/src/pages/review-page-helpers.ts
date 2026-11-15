@@ -87,12 +87,12 @@ export function aiRunSummary(run: ReviewRun) {
     ? ` via ${run.ai_provider_label}${run.ai_model ? ` · ${run.ai_model}` : ""}`
     : "";
   if (run.ai_error && run.ai_used) {
-    return `AI failed${route} · ${run.ai_item_count} items sent · offline suggestions kept`;
+    return `AI failed${route} · ${run.ai_item_count} items selected for AI · offline suggestions kept`;
   }
-  if (run.ai_error) return `AI skipped${route} · 0 items sent`;
-  if (!run.ai_used) return "AI skipped · no eligible items need organisation · 0 items sent";
+  if (run.ai_error) return `AI skipped${route} · 0 items selected for AI`;
+  if (!run.ai_used) return "AI skipped · no eligible items need organisation · 0 items selected for AI";
   const provider = run.ai_provider_label ?? "Assistant";
-  return `AI completed via ${provider}${run.ai_model ? ` · ${run.ai_model}` : ""} · ${run.ai_item_count} items sent`;
+  return `AI used via ${provider}${run.ai_model ? ` · ${run.ai_model}` : ""} · ${run.ai_item_count} items selected for AI`;
 }
 
 export function reviewScopeLabel({

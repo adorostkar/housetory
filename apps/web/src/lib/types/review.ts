@@ -71,6 +71,15 @@ export interface ReviewRun {
   suppressed_suggestion_count: number;
   ai_used: boolean;
   ai_item_count: number;
+  ai_eligible_count?: number;
+  ai_reviewed_count?: number;
+  ai_coverage_recorded?: boolean;
+  resumable?: boolean;
+  batch_state?: "paused" | "running" | "cancelled" | "completed" | null;
+  batch_version?: number;
+  completed_batch_count?: number;
+  remaining_item_count?: number;
+  unavailable_item_count?: number;
   ai_provider_label: string | null;
   ai_model: string | null;
   ai_error: string | null;
@@ -168,6 +177,7 @@ export interface ReviewSummary {
   status_counts: Record<string, number>;
   type_counts: Record<string, number>;
   last_run: ReviewRun | null;
+  unfinished_runs?: ReviewRun[];
   schedule: ReviewScheduleSummary | null;
 }
 

@@ -26,11 +26,13 @@ export function ItemCard({
   className,
   selection,
   origin,
+  hidePurchaseValue = false,
 }: {
   item: ItemListEntry;
   className?: string;
   selection?: ItemSelection;
   origin?: ItemOrigin | null;
+  hidePurchaseValue?: boolean;
 }) {
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
@@ -154,7 +156,7 @@ export function ItemCard({
               className="shrink-0 text-right text-xs font-medium tabular-nums text-foreground/75"
               title={item.purchase?.is_shared ? "Shared purchase transaction total" : "Purchase transaction total"}
             >
-              {formatCurrency(price, item.purchase?.currency)}
+              {hidePurchaseValue ? "••••••" : formatCurrency(price, item.purchase?.currency)}
               {item.purchase?.is_shared && (
                 <span className="block text-2xs font-normal text-muted-foreground">
                   shared
@@ -261,10 +263,12 @@ export function ItemRow({
   item,
   selection,
   origin,
+  hidePurchaseValue = false,
 }: {
   item: ItemListEntry;
   selection?: ItemSelection;
   origin?: ItemOrigin | null;
+  hidePurchaseValue?: boolean;
 }) {
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
@@ -347,7 +351,7 @@ export function ItemRow({
           {item.category ? ` · ${item.category.name}` : ""}{" "}
           {item.purchase?.price_cents != null && (
             <span className="text-muted-foreground">
-              · {formatCurrency(item.purchase.price_cents, item.purchase.currency)}
+              · {hidePurchaseValue ? "••••••" : formatCurrency(item.purchase.price_cents, item.purchase.currency)}
               {item.purchase.is_shared ? " shared" : ""}
             </span>
           )}

@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ...api.errors import ApiError
@@ -43,7 +43,7 @@ from .decisions import accept_suggestion as accept_suggestion
 from .decisions import bulk_accept as bulk_accept
 from .decisions import dismiss_suggestion as dismiss_suggestion
 from .decisions import undo_suggestion as undo_suggestion
-from .scope import MAX_SCAN_ITEMS, _hash, _load_scope
+from .scope import MAX_ADVISORY_SUGGESTIONS, MAX_SCAN_ITEMS, _hash, _load_scope, _normalized, _Scope
 from .scope import _scope_conditions as _scope_conditions
 from .suggestion_out import serialize_suggestion
 
@@ -60,7 +60,21 @@ def _request_fingerprint(payload: ReviewRunRequest) -> str:
 
 
 def _run_out(run: InventoryReviewRun) -> ReviewRunOut:
-    return ReviewRunOut.model_validate(run, from_attributes=True)
+    result = ReviewRunOut.model_validate(run, from_attributes=True)
+    progress = run.progress_json or {}
+    result.ai_coverage_recorded = "remaining" in progress or "ai_eligible_ids" in progress
+    if not result.ai_coverage_recorded and run.ai_used and not run.ai_error:
+        result.ai_reviewed_count = run.ai_item_count
+    if "remaining" in progress:
+        result.resumable = True
+        result.batch_state = progress["state"]
+        result.batch_version = progress["version"]
+        result.completed_batch_count = progress.get("completed_batches", 0)
+        result.remaining_item_count = len(progress["remaining"]) + len(
+            progress.get("retry_ids", [])
+        )
+        result.unavailable_item_count = progress.get("unavailable", 0)
+    return result
 
 
 def run_review(
@@ -77,7 +91,14 @@ def run_review(
     trigger_type: str = "manual",
     schedule_id: uuid.UUID | None = None,
     ai_skip_note: str | None = None,
+    scope_override: _Scope | None = None,
+    local_checks: bool = True,
+    comparison_scope: _Scope | None = None,
 ) -> ReviewRunOut:
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"inventory-review:{household_id}"},
+    )
     request_fingerprint = _request_fingerprint(payload)
     existing = db.scalar(
         select(InventoryReviewRun).where(
@@ -93,7 +114,7 @@ def run_review(
                 "That review request id was used for a different scope.",
             )
         return _run_out(existing)
-    scope = _load_scope(
+    scope = scope_override or _load_scope(
         db,
         household_id,
         payload,
@@ -117,12 +138,31 @@ def run_review(
     )
     db.add(run)
     db.flush()
-    candidates = [
-        *_category_candidates(scope),
-        *_name_candidates(scope),
-        *_duplicate_candidates(scope),
-        *_advisory_candidates(scope, db, household_id),
+    targets = {item.id for item in scope.items}
+    comparisons = comparison_scope or scope
+    candidates = (
+        [
+            *[c for c in _category_candidates(comparisons) if c.item_id in targets],
+            *[c for c in _name_candidates(comparisons) if c.item_id in targets],
+            *_duplicate_candidates(comparisons, targets),
+            *_advisory_candidates(
+                scope,
+                db,
+                household_id,
+                limit=None if scope_override is not None else MAX_ADVISORY_SUGGESTIONS,
+            ),
+        ]
+        if local_checks
+        else []
+    )
+    existing_targets = {c.item_id for c in candidates if c.type == "category"}
+    eligible_ids = [
+        str(item.id)
+        for item in scope.items
+        if (item.category_id is None or not item.tags) and item.id not in existing_targets
     ]
+    eligible_count = len(eligible_ids)
+    run.progress_json = {"ai_eligible_ids": eligible_ids}
     ai_meta: dict[str, Any] = {}
     ai_error = None
     ai_partial = None
@@ -159,6 +199,8 @@ def run_review(
     run.ai_error = ai_error
     run.ai_used = ai_used
     run.ai_item_count = int(ai_meta.get("item_count", 0))
+    run.ai_eligible_count = eligible_count
+    run.ai_reviewed_count = int(ai_meta.get("reviewed_count", 0))
     run.ai_provider_label = ai_meta.get("provider")
     run.ai_model = ai_meta.get("model")
 
@@ -177,15 +219,18 @@ def run_review(
     created = 0
     existing_count = 0
     suppressed = 0
+    pending_fingerprints = []
     for fingerprint, candidate in fingerprints.items():
         prior = existing_by_fingerprint.get(fingerprint)
         if prior is not None:
             if prior.status == "pending":
                 existing_count += 1
+                pending_fingerprints.append(fingerprint)
             else:
                 suppressed += 1
             continue
         _create_suggestion(db, household_id, run, candidate, fingerprint)
+        pending_fingerprints.append(fingerprint)
         created += 1
 
     scanned_ids = [item.id for item in scope.items]
@@ -200,8 +245,26 @@ def run_review(
     )
     stale = 0
     for row in pending_rows:
+        if (row.source == "ai" and (ai_error or not payload.include_ai)) or (
+            row.source != "ai" and not local_checks
+        ):
+            continue
         if row.fingerprint in fingerprints:
             continue
+        if row.type == "possible_duplicate":
+            first = db.get(Item, row.item_id) if row.item_id else None
+            second = db.get(Item, row.secondary_item_id) if row.secondary_item_id else None
+            if first and second and not first.is_archived and not second.is_archived:
+                serial_match = bool(_normalized(first.serial_number)) and (
+                    _normalized(first.serial_number) == _normalized(second.serial_number)
+                )
+                identity_match = all(
+                    _normalized(getattr(first, field)) == _normalized(getattr(second, field))
+                    for field in ("name", "brand", "model")
+                )
+                # A bounded candidate list must not invalidate an unchanged pair.
+                if serial_match or identity_match:
+                    continue
         row.status = "stale"
         row.status_changed_at = datetime.now(UTC)
         stale += 1
@@ -209,6 +272,7 @@ def run_review(
     run.existing_suggestion_count = existing_count
     run.stale_suggestion_count = stale
     run.suppressed_suggestion_count = suppressed
+    run.progress_json = {**run.progress_json, "pending_fingerprints": pending_fingerprints}
     run.status = "partial" if run.partial_reason or run.ai_error else "completed"
     run.completed_at = datetime.now(UTC)
     history.record_event(
@@ -284,6 +348,7 @@ def list_suggestions(
                 case((InventoryReviewSuggestion.status == "pending", 0), else_=1),
                 InventoryReviewSuggestion.priority.desc(),
                 InventoryReviewSuggestion.created_at.desc(),
+                InventoryReviewSuggestion.id,
             )
             .limit(limit)
             .offset(offset)
@@ -334,6 +399,7 @@ def review_summary(db: Session, household_id: uuid.UUID) -> ReviewSummaryOut:
     last_run = db.scalar(
         select(InventoryReviewRun)
         .where(InventoryReviewRun.household_id == household_id)
+        .where(InventoryReviewRun.progress_json["parent_id"].as_string().is_(None))
         .order_by(InventoryReviewRun.created_at.desc())
         .limit(1)
     )
@@ -344,6 +410,19 @@ def review_summary(db: Session, household_id: uuid.UUID) -> ReviewSummaryOut:
         status_counts=status_counts,
         type_counts=type_counts,
         last_run=_run_out(last_run) if last_run else None,
+        unfinished_runs=[
+            _run_out(run)
+            for run in db.scalars(
+                select(InventoryReviewRun)
+                .where(
+                    InventoryReviewRun.household_id == household_id,
+                    InventoryReviewRun.progress_json["state"]
+                    .as_string()
+                    .in_(["paused", "cancelled"]),
+                )
+                .order_by(InventoryReviewRun.created_at.desc())
+            )
+        ],
         schedule=schedule_summary(db, household_id),
     )
 

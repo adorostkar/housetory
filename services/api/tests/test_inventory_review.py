@@ -1,6 +1,9 @@
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
+import pytest
 from sqlalchemy import select
 
 from housetory_api.config import get_settings
@@ -10,12 +13,283 @@ from housetory_api.models import (
     Category,
     HouseholdMember,
     InventoryReviewSuggestion,
+    Item,
     Tag,
     User,
 )
 from housetory_api.security import hash_password
 from housetory_api.services import inventory_review
 from housetory_api.services.auth import create_session
+
+
+def seed_review_items(client, count):
+    room = create_room(client, "Batch room")
+    household = client.get("/api/v1/auth/session").json()["household"]["id"]
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                Item(
+                    household_id=uuid.UUID(household),
+                    room_id=uuid.UUID(room["id"]),
+                    name=f"Batch object {index:04}",
+                    quantity=1,
+                )
+                for index in range(count)
+            ]
+        )
+        db.commit()
+    return room
+
+
+def advance_review(client, run, *, resume=False):
+    response = client.post(
+        f"/api/v1/inventory-review/runs/{run['id']}/continue",
+        json={"version": run["batch_version"], "resume": resume},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_hundreds_ai_batches_cancel_reload_failure_retry_and_duplicate_prevention(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    seed_review_items(client, 205)
+    calls = []
+    fail = False
+
+    def complete(_system, prompt, **_kwargs):
+        records = json.loads(prompt.split("Items: ", 1)[1].split("\nReturn ", 1)[0])
+        calls.append([row["name"] for row in records])
+        assert 1 <= len(records) <= 40
+        if fail:
+            raise ai.AiError("Synthetic provider outage")
+        return {
+            "suggestions": [
+                {
+                    "index": row["index"],
+                    "tags": [{"name": "organised"}],
+                    "confidence": "high",
+                    "reason": "Synthetic review fixture",
+                }
+                for row in records
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = run_review(client, include_ai=True).json()
+    assert (run["item_count_scanned"], run["ai_reviewed_count"], run["remaining_item_count"]) == (
+        40,
+        40,
+        165,
+    )
+    cancelled = client.post(
+        f"/api/v1/inventory-review/runs/{run['id']}/cancel", json={"version": run["batch_version"]}
+    )
+    assert cancelled.status_code == 200
+    run = cancelled.json()
+    assert run["batch_state"] == "cancelled"
+    restored = client.get("/api/v1/inventory-review/summary").json()["last_run"]
+    assert restored == run
+    replayed = advance_review(client, run)
+    assert replayed["batch_version"] == run["batch_version"]
+    assert replayed["ai_reviewed_count"] == run["ai_reviewed_count"]
+    assert len(calls) == 1
+    fail = True
+    run = advance_review(client, run, resume=True)
+    assert run["status"] == "partial"
+    assert run["ai_error"]
+    assert (run["item_count_scanned"], run["ai_eligible_count"], run["ai_reviewed_count"]) == (
+        80,
+        80,
+        40,
+    )
+    failed_version = run["batch_version"] - 1
+    replay = {**run, "batch_version": failed_version}
+    assert advance_review(client, replay) == run
+    assert len(calls) == 2
+    fail = False
+    run = advance_review(client, run)
+    assert calls[1] == calls[2]
+    assert set(calls[0]).isdisjoint(calls[2])
+    assert (run["item_count_scanned"], run["ai_reviewed_count"]) == (80, 80)
+    while run["remaining_item_count"]:
+        run = advance_review(client, run)
+    assert run["status"] == "completed"
+    assert (
+        run["total_item_count"],
+        run["item_count_scanned"],
+        run["ai_eligible_count"],
+        run["ai_reviewed_count"],
+    ) == (205, 205, 205, 205)
+    assert run["ai_item_count"] == 245  # failed provider batch was sent, not reviewed
+    assert run["created_suggestion_count"] == 205
+    assert len(calls) == 7
+    replayed = advance_review(client, run)
+    assert replayed["batch_version"] == run["batch_version"]
+    assert replayed["ai_reviewed_count"] == run["ai_reviewed_count"]
+    pages = [
+        client.get(
+            "/api/v1/inventory-review/suggestions", params={"limit": 100, "offset": offset}
+        ).json()["items"]
+        for offset in (0, 100, 200)
+    ]
+    proposals = [proposal for page in pages for proposal in page]
+    assert len({proposal["fingerprint"] for proposal in proposals}) == 205
+    assert all(proposal["run_id"] == run["id"] for proposal in proposals)
+    inventory = client.get("/api/v1/items", params={"limit": 100}).json()["items"]
+    assert all(not item["tags"] for item in inventory)  # analysis never writes inventory
+
+
+@pytest.mark.parametrize("count", [39, 40, 41, 501])
+def test_offline_review_covers_every_item_and_exact_batch_boundaries(
+    owner_client, monkeypatch, count
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, count)
+    monkeypatch.setattr(
+        ai, "complete_json", lambda *a, **k: pytest.fail("Offline review called AI")
+    )
+    run = run_review(owner_client).json()
+    while run["remaining_item_count"]:
+        run = advance_review(owner_client, run)
+    assert run["status"] == "completed"
+    assert run["item_count_scanned"] == run["total_item_count"] == count
+    assert run["ai_eligible_count"] == count
+    assert run["ai_reviewed_count"] == run["ai_item_count"] == 0
+    assert run["completed_batch_count"] == (count + 39) // 40
+
+
+def test_review_resume_rechecks_provider_consent_and_handles_interrupted_batch(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 41)
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    run = run_review(owner_client, include_ai=True).json()
+    monkeypatch.setattr(
+        ai, "config_for", lambda *a, **k: replace(configured_ai, model="changed-after-consent")
+    )
+    rejected = owner_client.post(
+        f"/api/v1/inventory-review/runs/{run['id']}/continue",
+        json={"version": run["batch_version"]},
+    )
+    assert rejected.status_code == 409
+    monkeypatch.setattr(ai, "config_for", lambda *a, **k: configured_ai)
+
+    def interrupt(*args, **kwargs):
+        raise RuntimeError("Simulated interrupted request")
+
+    monkeypatch.setattr(ai, "complete_json", interrupt)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        advance_review(owner_client, run)
+    restored = owner_client.get("/api/v1/inventory-review/summary").json()["last_run"]
+    assert restored["batch_version"] == run["batch_version"]
+    assert restored["ai_reviewed_count"] == 40
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    resumed = advance_review(owner_client, restored)
+    assert resumed["ai_reviewed_count"] == 41
+
+
+def test_provider_change_during_inference_does_not_publish_batch(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 2)
+
+    def changed(*args, **kwargs):
+        monkeypatch.setattr(
+            ai,
+            "config_for",
+            lambda *a, **k: replace(configured_ai, model="changed-during-inference"),
+        )
+        return {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": "must not publish"}],
+                    "confidence": "high",
+                    "reason": "Synthetic stale output",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", changed)
+    response = run_review(owner_client, include_ai=True)
+    assert response.status_code == 409
+    assert suggestions(owner_client)["total"] == 0
+    restored = owner_client.get("/api/v1/inventory-review/summary").json()["last_run"]
+    assert restored["item_count_scanned"] == restored["ai_reviewed_count"] == 0
+    assert restored["remaining_item_count"] == 2
+
+
+def test_concurrent_review_runs_do_not_duplicate_suggestions(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 1)
+    monkeypatch.setattr(
+        ai,
+        "complete_json",
+        lambda *a, **k: {
+            "suggestions": [
+                {
+                    "index": 0,
+                    "tags": [{"name": "concurrent review"}],
+                    "confidence": "high",
+                    "reason": "Synthetic concurrent fixture",
+                }
+            ],
+        },
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: run_review(owner_client, include_ai=True), range(2)))
+    assert all(result.status_code == 200 for result in results)
+    assert suggestions(owner_client)["total"] == 1
+    assert sorted(result.json()["created_suggestion_count"] for result in results) == [0, 1]
+
+
+def test_ai_eligibility_excludes_organised_items_and_no_eligible_batch_is_sent(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    client = owner_client
+    room = seed_review_items(client, 40)
+    category = create_category(client, "Already organised")
+    tag = create_tag(client, "Already tagged")
+    create_item(
+        client, "Organised record", room["id"], category_id=category["id"], tag_ids=[tag["id"]]
+    )
+    sent = []
+
+    def complete(_system, prompt, **_kwargs):
+        sent.extend(json.loads(prompt.split("Items: ", 1)[1].split("\nReturn ", 1)[0]))
+        return {"suggestions": []}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = run_review(client, include_ai=True).json()
+    while run["remaining_item_count"]:
+        run = advance_review(client, run)
+    assert (run["item_count_scanned"], run["ai_eligible_count"], run["ai_reviewed_count"]) == (
+        41,
+        40,
+        40,
+    )
+    assert len(sent) == 40
+    assert "Organised record" not in {record["name"] for record in sent}
 
 
 def create_room(client, name="Workshop"):
