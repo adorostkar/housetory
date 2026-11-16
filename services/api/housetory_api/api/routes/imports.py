@@ -25,6 +25,7 @@ from ...services import properties as property_service
 from ...services import storage
 from ...services.import_pipeline import (
     apply_import,
+    create_assistant_text_capture,
     enqueue_import,
     serialize_batch,
 )
@@ -236,6 +237,15 @@ def create_import(
     if has_product_url and not clean_title:
         clean_title = "Product link"
 
+    if assistant_capture:
+        batch = create_assistant_text_capture(
+            db,
+            auth.household.id,
+            text or "",
+            context=context,
+            title=clean_title,
+        )
+        return serialize_batch(db, batch)
     batch = ImportBatch(
         household_id=auth.household.id,
         title=clean_title[:200],

@@ -1154,7 +1154,12 @@ def borrowed_summary(
 
 
 def find_owned_items_matching(
-    db: Session, household_id: uuid.UUID, q: str, *, limit: int = 5
+    db: Session,
+    household_id: uuid.UUID,
+    q: str,
+    *,
+    limit: int = 5,
+    property_id: uuid.UUID | None = None,
 ) -> list[Item]:
     term = q.strip()
     if not term:
@@ -1166,6 +1171,18 @@ def find_owned_items_matching(
             .where(
                 Item.household_id == household_id,
                 Item.is_archived.is_(False),
+                *(
+                    [
+                        or_(
+                            Item.room.has(Room.property_id == property_id),
+                            Item.storage_location.has(
+                                StorageLocation.room.has(Room.property_id == property_id)
+                            ),
+                        )
+                    ]
+                    if property_id
+                    else []
+                ),
                 or_(
                     Item.name.ilike(search),
                     Item.brand.ilike(search),

@@ -119,6 +119,7 @@ def list_review_suggestions(
     scope_id: uuid.UUID | None = None,
     q: Annotated[str | None, Query(max_length=160)] = None,
     item_ids: Annotated[list[uuid.UUID] | None, Query(max_length=100)] = None,
+    review_run_id: uuid.UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     auth: AuthContext = Depends(require_auth),
@@ -133,6 +134,7 @@ def list_review_suggestions(
         scope_id=scope_id,
         q=q,
         item_ids=item_ids,
+        review_run_id=review_run_id,
         limit=limit,
         offset=offset,
     )
@@ -159,6 +161,10 @@ def create_review_run(
             "owner_required",
             "Only the household owner can run the optional AI review pass.",
         )
+    if payload.background:
+        from ...services.assistant_tools.review_jobs import start_review
+
+        return start_review(db, auth, payload)
     try:
         from ...services.inventory_review import batches
 
@@ -166,7 +172,7 @@ def create_review_run(
         # Persist the snapshot before inference so interrupted requests can resume.
         db.commit()
         if result.batch_version == 0:
-            result = batches.advance(
+            result = batches.advance_detached(
                 db,
                 auth.household.id,
                 result.id,
@@ -191,7 +197,11 @@ def continue_review_run(
 ) -> ReviewRunOut:
     from ...services.inventory_review import batches
 
-    result = batches.advance(
+    if payload.background:
+        from ...services.assistant_tools.review_jobs import resume_review
+
+        return resume_review(db, auth, run_id, payload.version)
+    result = batches.advance_detached(
         db,
         auth.household.id,
         run_id,
@@ -203,6 +213,20 @@ def continue_review_run(
     )
     db.commit()
     return result
+
+
+@router.get("/runs/{run_id}", response_model=ReviewRunOut)
+def read_review_run(
+    run_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ReviewRunOut:
+    from ...services.assistant_tools.review_jobs import recover
+    from ...services.inventory_review import _run_out, batches
+
+    run = batches._locked(db, auth.household.id, run_id)
+    recover(db, run)
+    return _run_out(run)
 
 
 @router.post("/runs/{run_id}/cancel", response_model=ReviewRunOut)

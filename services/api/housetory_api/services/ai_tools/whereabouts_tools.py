@@ -110,7 +110,13 @@ def tool_find_borrowed_owner(
         else []
     )
     owned_matches = (
-        borrowed_service.find_owned_items_matching(db, household_id, subject, limit=5)
+        borrowed_service.find_owned_items_matching(
+            db,
+            household_id,
+            subject,
+            limit=5,
+            property_id=args.get("property_id"),
+        )
         if subject
         else []
     )
@@ -298,9 +304,7 @@ def _locate_candidates(
         .order_by(func.lower(Item.name))
         .limit(400)
     ).all()
-    normalized_exact = [
-        item for item in exact_candidates if normalize_label(item.name) == target
-    ]
+    normalized_exact = [item for item in exact_candidates if normalize_label(item.name) == target]
     if normalized_exact:
         return normalized_exact[:12]
 
@@ -388,9 +392,7 @@ def tool_locate_item(
             ).all()
         )
         if not candidates:
-            candidates = _locate_candidates(
-                db, household_id, query, property_id=property_id
-            )
+            candidates = _locate_candidates(db, household_id, query, property_id=property_id)
     else:
         candidates = _locate_candidates(
             db, household_id, query, property_id=args.get("property_id")
@@ -615,9 +617,7 @@ def tool_get_loan_history(
     borrower_filter = normalize_for_match(str(args.get("borrower_name") or ""))
     if borrower_filter:
         loans = [
-            loan
-            for loan in loans
-            if borrower_filter in normalize_for_match(loan.borrower_name)
+            loan for loan in loans if borrower_filter in normalize_for_match(loan.borrower_name)
         ]
 
     item_by_id = {item.id: item for item in items}
@@ -661,10 +661,8 @@ def tool_get_loan_history(
                 "status": loan.status,
                 "lent_on": loan.lent_on.isoformat(),
                 "returned_on": (
-                None
-                if is_open
-                else (latest_return.isoformat() if latest_return else None)
-            ),
+                    None if is_open else (latest_return.isoformat() if latest_return else None)
+                ),
                 "due_on": loan.due_on.isoformat() if loan.due_on else None,
                 "open": is_open,
                 "duration_days": duration_days,
@@ -679,9 +677,7 @@ def tool_get_loan_history(
         or (bool(borrower_filter) and len(history) > 1)
     )
     if not history:
-        borrower_text = (
-            f" with borrower “{args.get('borrower_name')}”" if borrower_filter else ""
-        )
+        borrower_text = f" with borrower “{args.get('borrower_name')}”" if borrower_filter else ""
         summary = (
             f"No loan history{borrower_text} was found for "
             f"{', '.join(item.name for item in items[:6])}."
@@ -768,8 +764,6 @@ def tool_get_loan_history(
             "total": len(history),
             "ambiguous": ambiguous,
             "loan_history": history,
-            "candidates": [
-                {"id": str(item.id), "name": item.name} for item in items[:12]
-            ],
+            "candidates": [{"id": str(item.id), "name": item.name} for item in items[:12]],
         },
     )

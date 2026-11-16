@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
@@ -10,7 +10,7 @@ import {
   Undo2,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { createSearchParams, Link, useSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -89,8 +89,17 @@ import {
 } from "@/pages/review-page-helpers";
 import { ItemPickerDialog, ItemReference, SuggestionStatusBadge } from "@/pages/review-page-parts";
 
-export function ReviewPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+export function ReviewPage({
+  embedded = false, initialParams = "", initialRunId, assistantRunId,
+}: { embedded?: boolean; initialParams?: string; initialRunId?: string; assistantRunId?: string } = {}) {
+  const [urlParams, setUrlParams] = useSearchParams();
+  const [localParams, setLocalParams] = React.useState(() => new URLSearchParams(initialParams));
+  const searchParams = embedded ? localParams : urlParams;
+  const setSearchParams: SetURLSearchParams = embedded
+    ? (next) => setLocalParams((previous) => createSearchParams(
+        typeof next === "function" ? next(previous) : next,
+      ))
+    : setUrlParams;
   const canWrite = useCanWrite();
   const session = useSession();
   const isOwner = session.data?.role === "owner";
@@ -127,6 +136,19 @@ export function ReviewPage() {
   const [reconsiderDismissed, setReconsiderDismissed] = React.useState(false);
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
   const [lastRun, setLastRun] = React.useState<ReviewRun | null>(null);
+  const selectedRunId = lastRun?.id ?? initialRunId;
+  const runQuery = useQuery({
+    queryKey: ["inventory-review", "run", selectedRunId],
+    queryFn: () => api.get<ReviewRun>(`/inventory-review/runs/${selectedRunId}`),
+    enabled: embedded && Boolean(selectedRunId),
+    refetchInterval: (query) => query.state.data?.background_active ? 1000 : false,
+  });
+  React.useEffect(() => {
+    if (embedded && runQuery.data) {
+      void queryClient.invalidateQueries({ queryKey: ["inventory-review", "suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSummary });
+    }
+  }, [embedded, runQuery.data, queryClient]);
   const [runError, setRunError] = React.useState<string | null>(null);
   const stopReview = React.useRef(false);
   const [cancelRequested, setCancelRequested] = React.useState(false);
@@ -197,6 +219,7 @@ export function ReviewPage() {
     limit: 50,
     offset: suggestionOffset,
     item_ids: scopeType === "items" ? selectedItemIds : undefined,
+    review_run_id: embedded ? selectedRunId : undefined,
   });
   const scopeItemsQuery = useReviewScopeItems(
     selectedItemIds,
@@ -294,7 +317,7 @@ export function ReviewPage() {
       setCancelRequested(false);
       const resume = request.resume;
       let run = resume ? await api.post<ReviewRun>(`/inventory-review/runs/${resume.id}/continue`, {
-        version: resume.batch_version, resume: true,
+        version: resume.batch_version, resume: true, ...(embedded ? { background: true } : {}),
       }) : await api.post<ReviewRun>("/inventory-review/runs", {
         scope_type: scopeType,
         scope_id: scopeType === "items" || scopeType === "household" ? null : scopeId,
@@ -303,7 +326,10 @@ export function ReviewPage() {
         review_again: Boolean(request.reviewAgain),
         reconsider_dismissed: Boolean(request.reviewAgain && reconsiderDismissed),
         request_id: requestId,
+        ...(assistantRunId ? { assistant_run_id: assistantRunId, assistant_review_id: initialRunId } : {}),
+        ...(embedded ? { background: true } : {}),
       });
+      if (embedded) return run;
       while (true) {
         if (mounted.current) setLastRun(run);
         refreshReview();
@@ -327,7 +353,8 @@ export function ReviewPage() {
       setRequestId(crypto.randomUUID());
       setSelectedSuggestionIds(new Set());
       refreshReview();
-      const prefix = run.status === "partial" ? "Review paused" : "Review complete";
+      if (assistantRunId) void queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+      const prefix = run.background_active ? "Review queued" : run.status === "partial" ? "Review paused" : "Review complete";
       toast.success(
         `${prefix}: ${pluralize(run.created_suggestion_count, "new suggestion")}, ${run.existing_suggestion_count} already queued.`,
       );
@@ -450,7 +477,23 @@ export function ReviewPage() {
     actionableSuggestions.every((suggestion) =>
       selectedSuggestionIds.has(suggestion.id),
     );
-  const displayedRun = lastRun ?? summaryQuery.data?.last_run ?? null;
+  const displayedRun = (embedded ? runQuery.data : null) ?? lastRun ?? summaryQuery.data?.last_run ?? null;
+  const cancelBackground = async () => {
+    if (!displayedRun) return;
+    setCancelRequested(true);
+    try {
+      const result = await api.post<ReviewRun>(`/inventory-review/runs/${displayedRun.id}/cancel`, {
+        version: displayedRun.batch_version,
+      });
+      setLastRun(result);
+      queryClient.setQueryData(["inventory-review", "run", result.id], result);
+      refreshReview();
+    } catch (error) {
+      setRunError(getApiErrorMessage(error));
+    } finally {
+      setCancelRequested(false);
+    }
+  };
   const scopeMissing =
     scopeType !== "household" &&
     scopeType !== "items" &&
@@ -562,6 +605,7 @@ export function ReviewPage() {
 
   return (
     <div className="animate-fade-up">
+      {!embedded && <>
       <PageHeader
         eyebrow="Inventory care"
         title="Review"
@@ -587,7 +631,8 @@ export function ReviewPage() {
         ]}
       />
 
-      <section id="review-scope" className="surface mb-5 scroll-mt-32 p-5 sm:p-6">
+      </>}
+      <section id={embedded ? undefined : "review-scope"} className="surface mb-5 scroll-mt-32 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
@@ -626,7 +671,7 @@ export function ReviewPage() {
           </div>
           <Button
             type="button"
-            disabled={!canRun || runReview.isPending}
+            disabled={!canRun || runReview.isPending || displayedRun?.background_active}
             onClick={() => startRun()}
           >
             {runReview.isPending ? <Spinner /> : <ClipboardCheck />}
@@ -639,7 +684,7 @@ export function ReviewPage() {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button type="button" variant="outline" className="min-h-11"
-            disabled={!canRun || runReview.isPending} onClick={() => startRun(true)}>
+            disabled={!canRun || runReview.isPending || displayedRun?.background_active} onClick={() => startRun(true)}>
             Review again
           </Button>
           <p className="text-2xs text-muted-foreground">
@@ -658,14 +703,19 @@ export function ReviewPage() {
             </span>
           </span>
         </label>
-        {runReview.isPending && (
+        {(runReview.isPending || displayedRun?.background_active) && (
           <div className="mt-3">
           <p className="text-2xs text-muted-foreground" aria-live="polite">
-            Reviewing a bounded batch. Completed work is saved.
+            {displayedRun?.background_active ? "Review queued or processing in the background. Completed work is saved." : "Reviewing a bounded batch. Completed work is saved."}
           </p>
           <Button variant="outline" className="mt-2 min-h-11" disabled={cancelRequested}
-            onClick={() => { stopReview.current = true; setCancelRequested(true); }}>
-            {cancelRequested ? "Cancelling after current batch…" : "Cancel after current batch"}
+            onClick={() => {
+              if (displayedRun?.background_active) void cancelBackground();
+              else { stopReview.current = true; setCancelRequested(true); }
+            }}>
+            {displayedRun?.background_active
+              ? cancelRequested ? "Cancelling review…" : "Cancel review"
+              : cancelRequested ? "Cancelling after current batch…" : "Cancel after current batch"}
           </Button>
           </div>
         )}
@@ -785,9 +835,11 @@ export function ReviewPage() {
               <p className="text-2xs text-muted-foreground">
                 {displayedRun.completed_batch_count ?? 0} batches completed ·{" "}
                 {displayedRun.remaining_item_count ?? 0} items unfinished.
-                {" "}Progress is saved. Leaving this page pauses after the current batch.
+                {" "}Progress is saved. {embedded
+                  ? "Background review continues when you leave."
+                  : "Leaving this page pauses after the current batch."}
               </p>
-              {!runReview.isPending && Boolean(displayedRun.remaining_item_count) && (
+              {!runReview.isPending && !displayedRun.background_active && Boolean(displayedRun.remaining_item_count) && (
                 <Button variant="outline" className="min-h-11"
                   disabled={!canWrite || (displayedRun.include_ai && !isOwner)}
                   onClick={() => runReview.mutate({ resume: displayedRun })}>Resume review</Button>
@@ -820,7 +872,7 @@ export function ReviewPage() {
         </section>
       )}
 
-      {summaryQuery.data?.unfinished_runs?.some((run) => run.id !== displayedRun?.id) && (
+      {!embedded && summaryQuery.data?.unfinished_runs?.some((run) => run.id !== displayedRun?.id) && (
         <section className="surface mb-5 space-y-3 p-4 sm:p-5" aria-label="Unfinished reviews">
           <h2 className="text-sm font-medium">Unfinished reviews</h2>
           {summaryQuery.data.unfinished_runs.filter((run) => run.id !== displayedRun?.id).map((run) => (
@@ -833,7 +885,7 @@ export function ReviewPage() {
         </section>
       )}
 
-      <div id="review-schedule" className="scroll-mt-32">
+      {!embedded && <div id="review-schedule" className="scroll-mt-32">
       {summaryQuery.isPending || summaryQuery.data?.schedule?.configured ? (
         <ReviewSchedulePanel
           isOwner={isOwner}
@@ -862,9 +914,8 @@ export function ReviewPage() {
           </div>
         </details>
       )}
-      </div>
-
-      <section id="review-suggestions" className="surface scroll-mt-32 p-4 sm:p-5">
+      </div>}
+      <section id={embedded ? undefined : "review-suggestions"} className="surface scroll-mt-32 p-4 sm:p-5">
         {scopeType === "items" && selectedItemIds.length > 0 && (
           <p className="mb-3 text-2xs text-muted-foreground">
             Showing suggestions only for the selected {pluralize(selectedItemIds.length, "item")}.

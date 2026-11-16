@@ -20,6 +20,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AnswerText } from "@/components/answer-text";
+import { AssistantToolStatus } from "@/components/assistant-tool-status";
 import { CONDITIONS } from "@/components/item-form-sections";
 import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
@@ -610,7 +611,9 @@ export function AssistantPage({
                   }
                   className="scroll-mt-2"
                 >
-                  {message.capture ? (
+                  {message.toolRun ? (
+                    <AssistantToolStatus run={message.toolRun} />
+                  ) : message.capture ? (
                     <div className="surface space-y-3 p-4" aria-label="Assistant capture status">
                       <p dir="auto" className="text-sm">{message.text}</p>
                       {message.capture.documentId && (

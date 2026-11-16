@@ -1,9 +1,149 @@
 # Integrated assistant rework
 
-Status: Stages A and B implemented on `feature/integrated-assistant`, not deployed.
-See the [Stage A report](ASSISTANT_STAGE_A_REPORT.md) and
-[Stage B report](ASSISTANT_STAGE_B_REPORT.md). Stage B awaits review;
-Stage C has not started. The remaining specification below is unchanged.
+## Current direction: shared application tools
+
+The historical A-D reports below describe earlier milestones, not the current
+architecture or a deployment approval. The current correction replaces the
+configured-AI intent classifier/action interpreter chain with:
+
+```
+AI assistant -> registered application tools -> shared domain logic -> actions
+Offline UI / deterministic controls ---------> shared domain logic -> actions
+```
+
+### Audit and supported scope
+
+Existing reusable interfaces: `ai_tools.execute_tool` (16 bounded inventory,
+location, document, purchase, warranty and lending reads), `history_for_item`,
+the persisted assistant proposal/edit/apply contract (edit, move, lend, borrow,
+both return directions), assistant text imports, document/photo jobs and their
+editable review, and `inventory_review.batches` with coverage/decision memory.
+The existing header lookup and offline forms remain independent of inference.
+
+The old `/intent` -> `/interpret` -> one read path is not a general tool loop.
+Its phrase/fragment checks can reject supported semantics before domain
+validation. It remains a compatibility/offline path, not the AI routing gate.
+The assistant does not support deletion, archive/disposition, inventory merge,
+account administration, arbitrary web browsing, SQL or arbitrary HTTP.
+Location search and reviewed item moves are supported; creating/deleting places
+is not advertised as an assistant capability in this stage.
+
+### Coherent implementation stages
+
+1. **Registry and execution.** Publish the executable registry at
+   `GET /assistant/tools`, including strict input/output JSON schemas, frozen
+   household/property scope, role, side effects and confirmation policy.
+   The model requests one registered tool, inspects its result, and continues.
+   Validate every request in application code. Reads need no confirmation.
+   Mutations only prepare the existing editable proposals; no model-facing
+   apply tool exists. Adding a capability normally registers another adapter,
+   not a conversational intent or another saving pipeline.
+2. **Durable bounded work.** Persist requests, parent references, tool results,
+   generation, budgets and recovery state. Execute in the existing job queue,
+   with cancellation, a deadline, bounded model/tool calls and explicit retry.
+   Release database transactions before model calls; recheck route, consent,
+   authorization and generation afterwards. Tool receipts/idempotent domain
+   keys protect retries. Failed/invalid outputs preserve usable work.
+3. **Conversation and review.** Header requests have no parent; panel follow-ups
+   carry a server-verified parent and compact relevant results, not an inventory
+   dump. Re-fetch authoritative targets before preparing changes and again at
+   Apply. Show existing action/capture reviews and the shared Review workspace
+   in the conversation. “Do a review and categorise the items” starts local
+   review and exposes normal AI consent, progress, resume/cancel and approval
+   without requiring navigation. Re-review and reconsideration remain separate.
+4. **Verification and publication.** Exercise registry/schema/permission
+   failures, injection, multiple tool steps, reference resolution, duplicates,
+   stale approval, cancellation/retry/reload and desktop/mobile journeys with
+   isolated data. Distinguish controlled-provider evidence from real inference.
+   Commit/push the feature branch only; no merge or deployment.
+
+### Authority, data and recovery
+
+- The registry, not a model's claimed capability, is authoritative. Unknown tools
+  and invalid arguments return structured recoverable errors, never HTTP/SQL.
+- Household and property come from the authorized request, never tool arguments.
+  Multiple households require an explicit choice for a tool conversation; no
+  household's provider may receive another household's records.
+- Uploaded/OCR/inventory text and tool results are untrusted evidence. Only
+  authenticated UI approval of the exact reviewed proposal authorizes writes.
+  Existing permissions, stale checks, frozen targets and idempotent Apply remain.
+- Successful tool work and pending proposals survive reload. Interrupted jobs
+  expose retry; cancellation fences late output, not already completed actions.
+  Cost/deadline limits are real bounds, not progress estimates.
+- Local review can run directly. External AI organisation retains the normal
+  explicit owner consent and batch cost notice. Normal runs preserve successful
+  relevant-input coverage and decisions; force/reconsider options do not erase
+  history. Scheduled external processing remains independently opt-in/bounded.
+- When AI is disabled/unreachable/incompatible, retain ordinary local search,
+  manual forms and local capture; explain fallback and preserve the request.
+
+### Implemented contract and operating limits
+
+The registry currently exposes **22 tools**: the 16 audited reads, item history,
+editable action preparation, AI-first text capture, starting/polling inventory
+review, and capture status. The schemas are executable Pydantic contracts in
+`services/assistant_tools/registry.py`, published through `/api/v1/assistant/tools`.
+Tool use is structured JSON over the existing provider interface; native
+function-calling support or a recommended-model label is not required.
+
+`POST /assistant/runs` freezes scope and an optional authorized parent.
+`GET /assistant/runs/{id}` restores authoritative proposal revisions and task
+state; `/cancel` fences late results and `/retry` starts another generation.
+Each planning attempt has at most eight model calls, a 90-second deadline
+(including queued time), and a 100,000-character prompt. Existing capture and
+review jobs keep their own bounded processing and explicit consent contracts;
+the planning budget is not a promise of eight total downstream extraction calls.
+Receipts reuse exact action proposals and one original-source text capture per
+request, including after interrupted delivery. Approval uses the existing
+proposal/version checks and idempotent application interfaces.
+
+The conversation store polls outside the mounted panel, merges monotonic task
+generations, and restores older tasks before newer requests. Fresh header
+requests omit the parent and parked capture context. Follow-ups include up to
+six authorized capture references and four same-scope parents with three recent
+observations each. No complete inventory is sent by default. History restoration
+currently shows the latest 30 scoped tasks; older records remain stored and
+addressable by ID, but older-history pagination is not implemented.
+
+The embedded Review workspace uses the same successful-input coverage,
+accepted/dismissed history, re-review/reconsideration controls and approval
+interfaces as the full page. Its background batches continue across navigation.
+Cancel preserves committed batches and fences any unfinished inference; resume
+uses the saved remaining work. The foreground Review page retains its existing
+after-current-batch cancellation behavior. Review inference releases its
+transaction, then revalidates the prompt, configuration, permissions and lease
+before publishing results.
+
+### Verification evidence and remaining gaps
+
+- Twenty new isolated backend cases cover multi-step retrieval and follow-ups,
+  bounded execution, unknown/invalid tools, worker/provider/configuration failure,
+  cancellation and late output, scoped authorization, proposal revisions,
+  duplicate action/capture requests, AI-first English/Persian capture, and actual
+  reviewed saves. Detached review also checks configuration/item/permission
+  changes and overlapping inference. No transaction is held during either
+  planning or review inference.
+- A combined isolated run passed 454 backend cases, followed by another passing
+  run of all 20 new cases after the final capture-idempotency correction.
+  These regressions exercise the shared actions, captures, documents,
+  review/scheduled review, lending/borrowing, search, jobs and migration metadata.
+  The full frontend suite has 398 passing cases; typecheck and production build
+  pass. Vite still reports its nonfatal large-chunk advisory.
+- Three Chrome journeys use a real isolated PostgreSQL database, API and worker
+  with a local **controlled HTTP provider**: desktop and 375px mobile retrieval,
+  contextual editable approval, consented background review through reload,
+  approved saved records, cancellation, late response fencing and retry.
+  Desktop/mobile screenshots are retained as session artifacts.
+- These are not live-model semantic or prompt-injection-resistance claims.
+  Live-provider quality, physical iPhone/voice/keyboard behavior, native
+  function-calling providers and long-history pagination remain unverified or
+  outside this stage. Existing voice/attachment/manual interfaces are retained;
+  no production records, provider defaults, scheduled cost limits or deployment
+  configuration were changed.
+
+---
+
+## Historical brief and milestones
 
 ## Product outcome
 

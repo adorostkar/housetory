@@ -18,6 +18,7 @@ from .models import Document, ImportBatch, Job, WorkerHeartbeat
 AI_TASKS = frozenset(
     {
         "ai.enrich",
+        "assistant.run",
         "ai.recognize",
         "voice.transcribe",
         "voice.interpret",

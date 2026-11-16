@@ -542,6 +542,9 @@ def _import_proposals(db: Session, batch: ImportBatch, inputs: dict, config: AiR
             config=config,
             chunks=[(document.relative_path, document.text) for document in bundle.documents],
             primary_extraction=primary_extraction,
+            conversation_interpretation=(batch.metadata_json or {})
+            .get("context", {})
+            .get("assistant_interpretation"),
             authorized_places=inputs.get("authorized_places"),
         )
         for position, draft in enumerate(drafts):

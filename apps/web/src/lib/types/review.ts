@@ -74,6 +74,8 @@ export interface ReviewRun {
   ai_eligible_count?: number;
   ai_reviewed_count?: number;
   ai_reused_count?: number;
+  background_active?: boolean;
+  scope_item_ids?: string[];
   ai_coverage_recorded?: boolean;
   resumable?: boolean;
   batch_state?: "paused" | "running" | "cancelled" | "completed" | null;

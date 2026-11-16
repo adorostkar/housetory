@@ -395,6 +395,7 @@ def _ai_organisation_candidates(
     existing_targets: set[uuid.UUID],
     *,
     review_again: bool = False,
+    ai_inference=None,
 ) -> tuple[list[_Candidate], dict[str, Any], str | None, str | None]:
     eligible = [
         item
@@ -475,7 +476,7 @@ def _ai_organisation_candidates(
         }
     )
     try:
-        raw = ai.complete_json(
+        raw = (ai_inference or ai.complete_json)(
             AI_REVIEW_SYSTEM, prompt, config=ai.config_for(db, household_id, AiTask.ASSISTANT.value)
         )
         parsed = AiOrganisationOutput.model_validate(raw)

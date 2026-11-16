@@ -6,6 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from ...db import get_db
@@ -1176,8 +1177,20 @@ def _create_proposal(
     account: AccountContext,
     db: Session,
     refreshed_from: AssistantActionProposal | None = None,
+    tool_receipt_id: uuid.UUID | None = None,
 ) -> AssistantActionProposalOut:
     def finish(result: AssistantActionProposalOut) -> AssistantActionProposalOut:
+        if tool_receipt_id is not None:
+            proposal.id = tool_receipt_id
+            result = result.model_copy(update={"id": tool_receipt_id})
+            proposal.snapshots = {
+                **proposal.snapshots,
+                "tool_payload": payload.model_dump(mode="json"),
+            }
+        proposal.snapshots = {
+            **proposal.snapshots,
+            "tool_preview": result.model_dump(mode="json"),
+        }
         if refreshed_from is not None:
             refreshed_from.state = "superseded"
             refreshed_from.result = result.model_dump(mode="json")
@@ -1186,6 +1199,22 @@ def _create_proposal(
 
     auth = _writer(db, account, payload.household_id)
     _check_property(db, auth, payload.scope_property_id)
+    if tool_receipt_id is not None:
+        db.execute(
+            sql_text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"assistant-proposal:{tool_receipt_id}"},
+        )
+        prior = db.get(AssistantActionProposal, tool_receipt_id)
+        if prior is not None:
+            if (
+                prior.actor_user_id != auth.user.id
+                or prior.household_id != auth.household.id
+                or prior.snapshots.get("tool_payload") != payload.model_dump(mode="json")
+            ):
+                raise ApiError(
+                    409, "tool_receipt_reused", "This tool receipt belongs to a different proposal."
+                )
+            return tool_proposal_preview(db, prior)
     if isinstance(payload, BorrowedReturnProposalRequest):
         record = borrowed.get_record(db, auth.household.id, payload.record_id)
         if (
@@ -1434,6 +1463,47 @@ def _create_proposal(
         before=before,
     )
     return finish(result)
+
+
+def tool_proposal_preview(
+    db: Session, proposal: AssistantActionProposal
+) -> AssistantActionProposalOut:
+    for _ in range(32):
+        if proposal.state != "superseded" or not (proposal.result or {}).get("id"):
+            break
+        successor = db.get(AssistantActionProposal, uuid.UUID(proposal.result["id"]))
+        if successor is None or (
+            successor.actor_user_id != proposal.actor_user_id
+            or successor.household_id != proposal.household_id
+        ):
+            raise ApiError(409, "proposal_stale", "The refreshed proposal is unavailable.")
+        proposal = successor
+    else:
+        raise ApiError(
+            409, "proposal_stale", "This proposal has too many revisions. Prepare it again."
+        )
+    preview = AssistantActionProposalOut.model_validate(proposal.snapshots["tool_preview"])
+    destination = preview.destination
+    if proposal.kind == "move_items":
+        room = items.room(db, proposal.household_id, uuid.UUID(proposal.changes["room_id"]))
+        location_id = proposal.changes.get("storage_location_id")
+        _, location = items.resolve_location(
+            db,
+            proposal.household_id,
+            room.id,
+            uuid.UUID(location_id) if location_id else None,
+        )
+        destination = AssistantActionTarget(
+            id=location.id if location else room.id,
+            name=f"{room.name} / {location.name}" if location else room.name,
+        )
+    return preview.model_copy(
+        update={
+            "state": proposal.state,
+            "changes": proposal.changes,
+            "destination": destination,
+        }
+    )
 
 
 @router.patch("/proposals/{proposal_id}", response_model=AssistantActionProposalOut)

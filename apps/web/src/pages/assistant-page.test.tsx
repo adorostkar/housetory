@@ -6,7 +6,8 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AddItemsProvider } from "@/components/add-items";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { createToolRun } from "@/lib/assistant-tools";
 import { SearchSessionProvider, useSearchSession } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
@@ -36,6 +37,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
 vi.mock("@/lib/assistant-intent", () => ({
   classifyAssistantIntent: vi.fn().mockResolvedValue({ intent: "unavailable", form: null }),
   looksLikeItemDescription: vi.fn((value: string) => /bought|add/i.test(value)),
+}));
+
+vi.mock("@/lib/assistant-tools", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/assistant-tools")>(),
+  createToolRun: vi.fn(),
 }));
 
 vi.mock("@/components/assistant-document-review", () => ({
@@ -251,11 +257,16 @@ function renderPage(
 }
 
 beforeEach(() => {
+  // These existing journeys exercise the retained local/offline conversation flow.
+  vi.mocked(createToolRun).mockReset().mockRejectedValue(
+    new ApiError(409, "assistant_tools_unavailable", "AI is unavailable; use local controls."),
+  );
   window.sessionStorage.clear();
   window.localStorage.removeItem("housetory-search-scope");
   vi.mocked(api.get).mockReset();
   vi.mocked(api.post).mockReset();
   vi.mocked(api.get).mockImplementation(async (path) => {
+    if (path.startsWith("/assistant/runs")) return [];
     if (path.startsWith("/search/scopes")) return { items: [] };
     if (path.startsWith("/auth/session")) return sessionState;
     return aiStatus;
@@ -267,6 +278,84 @@ beforeEach(() => {
 });
 
 describe("AssistantPage", () => {
+  it("uses durable tools directly, retains panel context and isolates fresh header topics", async () => {
+    const user = userEvent.setup();
+    const toolRun = {
+      id: "run-1", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Where is my drill?", state: "completed", generation: 1,
+      message: "The drill is in Workshop.", steps: [],
+      model_calls: 2, max_model_calls: 8, can_retry: false, worker_available: null,
+    };
+    vi.mocked(createToolRun).mockResolvedValue(toolRun);
+    renderPage("/assistant", { id: "tools-header", text: toolRun.query });
+    expect(await screen.findByText("The drill is in Workshop.")).toBeVisible();
+    expect(createToolRun).toHaveBeenCalledWith(
+      expect.not.objectContaining({ parent_id: expect.anything() }), expect.any(AbortSignal),
+    );
+    expect(api.post).not.toHaveBeenCalled();
+    expect(createToolRun).toHaveBeenCalledWith(
+      expect.not.objectContaining({ capture_context: expect.anything() }), expect.any(AbortSignal),
+    );
+    vi.mocked(createToolRun).mockResolvedValue({ ...toolRun, id: "run-2", query: "What about its history?" });
+    const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "What about its history?");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(createToolRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ parent_id: "run-1", query: "What about its history?" }), expect.any(AbortSignal),
+    ));
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("restores a queued tool task without submitting it again and exposes cancellation", async () => {
+    const run = {
+      id: "restored-run", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Review these items", state: "queued", generation: 1, steps: [],
+      message: "Waiting for the AI worker.", model_calls: 0, max_model_calls: 8,
+      can_retry: false, worker_available: false,
+    };
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [run];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    renderPage("/assistant");
+    expect(await screen.findByText("Review these items")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Stop assistant" })).toBeVisible();
+    expect(screen.getByText(/AI worker is unavailable/)).toBeVisible();
+    expect(createToolRun).not.toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps polling a just-submitted task when initial history predates the submission", async () => {
+    const queued = {
+      id: "new-run", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Where is my drill?", state: "queued", generation: 1, steps: [],
+      message: "New task waiting.", model_calls: 0, max_model_calls: 8,
+      can_retry: false, worker_available: true,
+    };
+    let resolveHistory!: (runs: unknown[]) => void;
+    let historyCalls = 0;
+    vi.mocked(createToolRun).mockResolvedValue(queued);
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) {
+        historyCalls++;
+        if (historyCalls === 1) return new Promise((resolve) => { resolveHistory = resolve; });
+        return [{ ...queued, state: "completed", model_calls: 3, message: "New task finished." }];
+      }
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    renderPage("/assistant", { id: "late-history", text: queued.query });
+    expect(await screen.findByText("New task waiting.")).toBeVisible();
+    await act(async () => resolveHistory([]));
+    expect(await screen.findByText("New task finished.", {}, { timeout: 3000 })).toBeVisible();
+    const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    await userEvent.type(input, "And its history?");
+    expect(screen.getByRole("button", { name: "Send question" })).toBeEnabled();
+  });
+
   it("replaces header capture buttons with composer attachments and previews", async () => {
     const user = userEvent.setup();
     renderPage("/assistant");
@@ -317,6 +406,21 @@ describe("AssistantPage", () => {
     await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/imports", expect.any(FormData)));
     expect(await screen.findByText("Item review batch-1")).toBeVisible();
     expect(screen.getByText("Preparing item proposals. Edit the details and destination below, then approve to add them.")).toBeVisible();
+    vi.mocked(createToolRun).mockResolvedValue({
+      id: "capture-follow-up", parent_id: null, household_id: "house-1", property_id: null,
+      query: "What did you extract?", state: "completed", generation: 1, steps: [],
+      message: "Your capture is retained for review.", model_calls: 1, max_model_calls: 8,
+      can_retry: false, worker_available: null,
+    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "What did you extract?",
+    );
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(createToolRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ capture_context: [{ kind: "items", id: "batch-1" }] }),
+      expect.any(AbortSignal),
+    ));
+    expect(api.postForm).toHaveBeenCalledTimes(1);
   });
 
   it("submits a header assistant request through the existing conversation service", async () => {
@@ -344,6 +448,7 @@ describe("AssistantPage", () => {
   it("requires an explicit household when a capture starts in All my places", async () => {
     const user = userEvent.setup();
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) {
         return {
           items: [
@@ -508,6 +613,7 @@ describe("AssistantPage", () => {
   it("keeps a late answer in its original scope and sends its own history on return", async () => {
     let resolveAnswer!: (response: SearchQueryResponse) => void;
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) {
         return { items: [{ id: "house-1", name: "Home", properties: [] }] };
       }
@@ -542,6 +648,7 @@ describe("AssistantPage", () => {
 
   it("does not record an assistant answer into a different page search scope", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) {
         return { items: [
           { id: "house-1", name: "Home", properties: [] },
@@ -588,6 +695,7 @@ describe("AssistantPage", () => {
 
   it("initializes scope from the current page when first opened after navigation", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) {
         return { items: [{ id: "house-1", name: "Home", properties: [] }] };
       }
@@ -626,6 +734,7 @@ describe("AssistantPage", () => {
 
   it("revalidates a retained property scope when available scopes change", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) {
         return { items: [{ id: "house-1", name: "Home", properties: [{ id: "property-1", name: "Cabin" }] }] };
       }
@@ -677,6 +786,7 @@ describe("AssistantPage", () => {
       householdId: "house-1", propertyId: "",
     }));
     vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
       if (path.startsWith("/search/scopes")) throw new Error("offline");
       if (path.startsWith("/auth/session")) return sessionState;
       return aiStatus;

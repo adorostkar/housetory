@@ -33,6 +33,14 @@ from housetory_api.jobs import (
     route_legacy_ai_jobs,
 )
 from housetory_api.models import AuthSession, Job, WorkerHeartbeat
+from housetory_api.services.assistant_tools import TASK as ASSISTANT_TASK
+from housetory_api.services.assistant_tools import run_job as run_assistant
+from housetory_api.services.assistant_tools.review_jobs import (
+    TASK as ASSISTANT_REVIEW_TASK,
+)
+from housetory_api.services.assistant_tools.review_jobs import (
+    run_job as run_assistant_review,
+)
 from housetory_api.services.document_ocr import OCR_TASK
 from housetory_api.services.document_ocr import run_job as run_document_ocr
 from housetory_api.services.enrichment import TASK as ENRICHMENT_TASK
@@ -316,6 +324,8 @@ def ping(payload: dict) -> dict:
 
 
 HANDLERS = {
+    ASSISTANT_TASK: run_assistant,
+    ASSISTANT_REVIEW_TASK: run_assistant_review,
     ENRICHMENT_TASK: run_enhancement,
     PRUNE_TASK: prune_expired_sessions,
     PRUNE_FINISHED_TASK: prune_finished_jobs,
@@ -487,6 +497,8 @@ def _serve_queue(queue: str, *, peer, lane_peer, lane_queue: str | None) -> None
             if job is not None:
                 if (
                     queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
+                    or job.task == ASSISTANT_TASK
+                    or (job.task == ASSISTANT_REVIEW_TASK and queue == "ai")
                     or (
                         job.task == OCR_TASK
                         and (job.payload or {}).get("mode") == "background"

@@ -833,6 +833,7 @@ export function useReviewSuggestions(
     limit?: number;
     offset?: number;
     item_ids?: string[];
+    review_run_id?: string;
   },
   enabled = true,
 ) {
@@ -843,6 +844,7 @@ export function useReviewSuggestions(
     limit: String(filters.limit ?? 50),
     offset: String(filters.offset ?? 0),
     item_ids: filters.item_ids?.join(",") ?? "",
+    review_run_id: filters.review_run_id ?? "",
   };
   return useQuery({
     queryKey: queryKeys.reviewSuggestions(params),
@@ -853,6 +855,7 @@ export function useReviewSuggestions(
           q: filters.q || undefined,
           limit: filters.limit ?? 50,
           offset: filters.offset ?? 0,
+          review_run_id: filters.review_run_id,
       }).replace(/^\?/, ""));
       for (const id of filters.item_ids ?? []) query.append("item_ids", id);
       return api.get<ReviewSuggestionList>(`/inventory-review/suggestions?${query}`);

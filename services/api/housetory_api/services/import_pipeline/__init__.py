@@ -39,6 +39,44 @@ logger = logging.getLogger("housetory.imports")
 IMPORT_TASK = "imports.process"
 
 
+def create_assistant_text_capture(
+    db: Session,
+    household_id: uuid.UUID,
+    text: str,
+    *,
+    context: dict,
+    batch_id: uuid.UUID | None = None,
+    title: str = "Assistant item description",
+) -> ImportBatch:
+    if batch_id is not None:
+        existing = db.scalar(
+            select(ImportBatch).where(
+                ImportBatch.id == batch_id,
+                ImportBatch.household_id == household_id,
+            )
+        )
+        if existing is not None:
+            return existing
+    batch = ImportBatch(
+        id=batch_id or uuid.uuid4(),
+        household_id=household_id,
+        title=title[:200],
+        source_type="text",
+        status=ImportStatus.QUEUED.value,
+        original_filename="pasted-notes.txt",
+        content_type="text/plain",
+        warnings=[],
+        metadata_json={"context": context, "assistant_capture": True},
+    )
+    db.add(batch)
+    db.flush()
+    stored = storage.store_import_text(household_id, batch.id, text)
+    batch.storage_key = stored.storage_key
+    batch.byte_size = stored.byte_size
+    enqueue_import(db, batch)
+    return batch
+
+
 def enqueue_import(db: Session, batch: ImportBatch) -> Any:
     db.flush()
     db.refresh(batch, with_for_update=True)

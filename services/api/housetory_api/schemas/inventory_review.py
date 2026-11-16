@@ -62,10 +62,13 @@ ReviewScheduleState = Literal[
 
 
 class ReviewRunRequest(BaseModel):
+    assistant_run_id: uuid.UUID | None = None
+    assistant_review_id: uuid.UUID | None = None
     scope_type: ReviewScopeType
     scope_id: uuid.UUID | None = None
     item_ids: list[uuid.UUID] | None = Field(default=None, max_length=100)
     include_ai: bool = False
+    background: bool = False
     review_again: bool = False
     reconsider_dismissed: bool = False
     request_id: uuid.UUID
@@ -113,6 +116,8 @@ class ReviewRunOut(BaseModel):
     ai_eligible_count: int = 0
     ai_reviewed_count: int = 0
     ai_reused_count: int = 0
+    background_active: bool = False
+    scope_item_ids: list[uuid.UUID] = Field(default_factory=list)
     ai_coverage_recorded: bool = False
     resumable: bool = False
     batch_state: Literal["paused", "running", "cancelled", "completed"] | None = None
@@ -131,6 +136,7 @@ class ReviewRunOut(BaseModel):
 class ReviewBatchRequest(BaseModel):
     version: int = Field(ge=0)
     resume: bool = False
+    background: bool = False
 
 
 class ReviewSuggestionOut(BaseModel):

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useSearchScope, type SearchScopeSelection } from "@/hooks/use-search-scope";
@@ -15,6 +16,7 @@ import type { SearchConversationContext, SearchQueryResponse } from "@/lib/types
 import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
 import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
+import { createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
 
 export interface AssistantMessage {
   role: "user" | "assistant";
@@ -26,6 +28,8 @@ export interface AssistantMessage {
   fallback?: { href: string; label: string };
   action?: AssistantActionState;
   clarification?: ActionClarification;
+  toolRunId?: string;
+  toolRun?: AssistantToolRun;
 }
 
 export interface AssistantCaptureState {
@@ -134,6 +138,7 @@ interface Conversation {
   context: SearchConversationContext | null;
   actionItemIds: string[] | null;
   pending: boolean;
+  toolParentId: string | null;
 }
 
 type Updater<T> = T | ((current: T) => T);
@@ -208,6 +213,7 @@ const EMPTY: Conversation = {
   context: null,
   actionItemIds: null,
   pending: false,
+  toolParentId: null,
 };
 
 function proposalItemIds(proposal: AssistantActionProposal): string[] {
@@ -221,6 +227,7 @@ const AssistantConversationContext =
   React.createContext<AssistantConversationContextValue | null>(null);
 
 function ConversationStore({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const invalidateInventory = useInvalidateInventory();
   const invalidateLoans = useInvalidateInventory(["loans"]);
   const invalidateBorrowed = useInvalidateInventory(["borrowed"]);
@@ -228,6 +235,28 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   const [conversations, setConversations] = React.useState<Record<string, Conversation>>({});
   const conversationsRef = React.useRef(conversations);
   const controllers = React.useRef(new Set<AbortController>());
+  const seenRuns = React.useRef(new Set<string>());
+  const restoredScopes = React.useRef(new Set<string>());
+  const toolRequests = React.useRef(new Map<string, string>());
+  const toolScope = selection ? `${selection.householdId}|${selection.propertyId}` : null;
+  const waitingForTask = Boolean(toolScope && conversations[toolScope]?.messages.some(
+    (message) => message.toolRun && ["queued", "running"].includes(message.toolRun.state),
+  ));
+  const toolRuns = useQuery({
+    queryKey: ["assistant-runs", selection?.householdId, selection?.propertyId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (selection?.householdId) params.set("household_id", selection.householdId);
+      if (selection?.propertyId) params.set("property_id", selection.propertyId);
+      return api.get<AssistantToolRun[]>(`/assistant/runs?${params}`).then((runs) => {
+        if (!Array.isArray(runs)) throw new Error("Could not restore assistant tasks: invalid history response.");
+        return runs;
+      });
+    },
+    enabled: Boolean(selection),
+    refetchInterval: (query) => waitingForTask || query.state.data?.some((run) =>
+      ["queued", "running"].includes(run.state)) ? 1000 : false,
+  });
 
   React.useEffect(() => {
     const active = controllers.current;
@@ -245,6 +274,32 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     conversationsRef.current = next;
     setConversations(next);
   }, []);
+
+  React.useEffect(() => {
+    if (!toolScope || !toolRuns.data?.length) return;
+    const firstRestore = !restoredScopes.current.has(toolScope);
+    restoredScopes.current.add(toolScope);
+    update(toolScope, (current) => {
+      let messages = current.messages;
+      for (const [index, run] of toolRuns.data.entries()) {
+        const key = `${toolScope}:${run.id}`;
+        const existing = messages.some((message) => message.toolRunId === run.id);
+        if (seenRuns.current.has(key) && !existing) continue;
+        seenRuns.current.add(key);
+        const nextKnown = toolRuns.data.slice(index + 1).find((candidate) =>
+          messages.some((message) => message.toolRunId === candidate.id));
+        const before = nextKnown?.id ?? (firstRestore
+          ? current.messages.find((message) => message.toolRunId)?.toolRunId : undefined);
+        messages = mergeToolRun(messages, run, before);
+      }
+      return {
+        ...current, messages,
+        toolParentId: current.toolParentId ?? (firstRestore ? toolRuns.data.at(-1)?.id ?? null : null),
+        pending: messages.some((message) => message.toolRun &&
+          ["queued", "running"].includes(message.toolRun.state)),
+      };
+    });
+  }, [toolRuns.data, toolScope, update]);
 
   const setDraft = React.useCallback((scope: string, value: Updater<string>) => {
     update(scope, (current) => ({
@@ -303,6 +358,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       capturePending: false,
       context: freshTopic ? null : current.context,
       actionItemIds: freshTopic ? null : current.actionItemIds,
+      toolParentId: freshTopic ? null : current.toolParentId,
       turns: [
         ...(freshTopic ? [] : current.turns),
         { role: "user" as const, content: userText.slice(0, 1200) },
@@ -338,6 +394,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       turns: [],
       context: null,
       actionItemIds: null,
+      toolParentId: null,
     }));
   }, [update]);
 
@@ -503,7 +560,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       }));
       if (session.scopeKey === scope) session.record(value, response);
     });
-    const execute = classifyAssistantIntent(
+    const runLegacy = () => classifyAssistantIntent(
       value, selection.householdId, selection.propertyId, controller.signal,
     ).catch((error: unknown) => {
       if (!controller.signal.aborted && error instanceof ApiError
@@ -571,12 +628,55 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         pending: false,
       }));
     });
+    const request = {
+      query: value,
+      ...(selection.householdId ? { household_id: selection.householdId } : {}),
+      ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
+      ...(!freshTopic && current.toolParentId ? { parent_id: current.toolParentId } : {}),
+      local_date: localDateISO(),
+      page_context: pageReferences.map(({ kind, id }) => ({ kind, id })),
+      ...(!freshTopic ? {
+        capture_context: [...current.messages].reverse()
+          .flatMap<{ kind: AssistantCaptureState["kind"]; id: string }>((message) => {
+            const capture = message.capture;
+            if (!capture) return [];
+            const id = capture.importId ?? capture.documentId ?? capture.recognitionId;
+            const kind = capture.importId ? "items" : capture.documentId ? "document" : "photo";
+            return id ? [{ kind, id }] : [];
+          })
+          .slice(0, 6),
+      } : {}),
+    };
+    const requestKey = JSON.stringify([scope, request]);
+    const requestId = toolRequests.current.get(requestKey) ?? crypto.randomUUID();
+    toolRequests.current.set(requestKey, requestId);
+    const execute = createToolRun({ ...request, request_id: requestId }, controller.signal).then((run) => {
+      if (!run?.id || !Array.isArray(run.steps)) throw new Error("The assistant returned an invalid task. Your draft is retained.");
+      toolRequests.current.delete(requestKey);
+      seenRuns.current.add(`${scope}:${run.id}`);
+      update(scope, (entry) => {
+        const messages = mergeToolRun(regenerate ? entry.messages.slice(0, -2) : entry.messages, run);
+        return {
+          ...entry, messages,
+          pending: messages.some((message) => message.toolRun &&
+            ["queued", "running"].includes(message.toolRun.state)),
+          toolParentId: run.id,
+          draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+    }).catch((error: unknown) => {
+      if (error instanceof ApiError && error.code === "assistant_tools_unavailable") {
+        return runLegacy();
+      }
+      throw error;
+    });
     void execute.catch((error: unknown) => {
       if (controller.signal.aborted) return;
       update(scope, (entry) => ({ ...entry, pending: false }));
       toast.error(getApiErrorMessage(error));
     }).finally(() => controllers.current.delete(controller));
-  }, [update]);
+  }, [update, queryClient]);
 
   const clarifyAction = React.useCallback((scope: string, clarificationId: string, reply: ClarificationReply) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
@@ -701,7 +801,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       { signal: controller.signal },
     ).then((proposal) => {
       if (controller.signal.aborted) return;
-      change({ proposal, pending: false, conflict: undefined, editing: false, requestId: crypto.randomUUID() });
+      change({ proposal, pending: false, conflict: undefined, editing: false, requestId: proposal.id });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       change({ pending: false });

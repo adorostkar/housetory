@@ -78,8 +78,16 @@ def _run_out(run: InventoryReviewRun) -> ReviewRunOut:
     if not result.ai_coverage_recorded and run.ai_used and not run.ai_error:
         result.ai_reviewed_count = run.ai_item_count
     if "remaining" in progress:
+        result.scope_item_ids = [
+            uuid.UUID(value) for value in progress.get("payload", {}).get("item_ids") or []
+        ]
         result.resumable = True
         result.batch_state = progress["state"]
+        result.background_active = (
+            bool(progress.get("background_active"))
+            and (progress["state"] != "cancelled")
+            and bool(progress["remaining"] or progress.get("retry_ids"))
+        )
         result.batch_version = progress["version"]
         result.completed_batch_count = progress.get("completed_batches", 0)
         result.remaining_item_count = len(progress["remaining"]) + len(
@@ -106,6 +114,7 @@ def run_review(
     scope_override: _Scope | None = None,
     local_checks: bool = True,
     comparison_scope: _Scope | None = None,
+    ai_inference=None,
 ) -> ReviewRunOut:
     db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
@@ -203,6 +212,7 @@ def run_review(
                 scope,
                 already_targeted,
                 review_again=payload.review_again,
+                ai_inference=ai_inference,
             )
             ai_used = bool(ai_meta.get("attempted"))
             candidates.extend(ai_candidates)
@@ -407,6 +417,7 @@ def list_suggestions(
     limit: int,
     offset: int,
     item_ids: list[uuid.UUID] | None = None,
+    review_run_id: uuid.UUID | None = None,
 ) -> ReviewSuggestionListOut:
     conditions = [InventoryReviewSuggestion.household_id == household_id]
     if status:
@@ -422,6 +433,24 @@ def list_suggestions(
             or_(
                 InventoryReviewSuggestion.item_id.in_(item_ids),
                 InventoryReviewSuggestion.secondary_item_id.in_(item_ids),
+            )
+        )
+    if review_run_id:
+        selected_run = db.scalar(
+            select(InventoryReviewRun).where(
+                InventoryReviewRun.id == review_run_id,
+                InventoryReviewRun.household_id == household_id,
+            )
+        )
+        if selected_run is None:
+            raise ApiError(404, "review_run_not_found", "Review not found.")
+        targets = [
+            uuid.UUID(value) for value in (selected_run.progress_json or {}).get("snapshot_ids", [])
+        ]
+        conditions.append(
+            or_(
+                InventoryReviewSuggestion.item_id.in_(targets),
+                InventoryReviewSuggestion.secondary_item_id.in_(targets),
             )
         )
     term = (q or "").strip()

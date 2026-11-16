@@ -1,6 +1,7 @@
 """Durable manual review batches, reusing the existing analysis and suggestion writes."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from ...api.errors import ApiError
 from ...models import (
     Household,
+    HouseholdMember,
     InventoryReviewCoverage,
     InventoryReviewRun,
     InventoryReviewSuggestion,
@@ -65,6 +67,7 @@ def start(db: Session, household_id: uuid.UUID, payload: ReviewRunRequest, actor
         created_by_user_id=actor_id,
         progress_json={
             "remaining": [str(value) for value in ids],
+            "snapshot_ids": [str(value) for value in ids],
             "retry_ids": [],
             "state": "paused" if ids else "completed",
             "version": 0,
@@ -106,6 +109,7 @@ def advance(
     allow_ai: bool,
     cancel: bool = False,
     resume: bool = False,
+    ai_inference=None,
 ):
     # One transaction per bounded batch serializes duplicate requests and cancellation.
     # If interrupted, the batch rolls back; already committed batches remain resumable.
@@ -206,6 +210,7 @@ def advance(
         scope_override=scope,
         comparison_scope=comparisons,
         local_checks=not retry,
+        ai_inference=ai_inference,
     )
     db.expire_all()
     if run.include_ai and progress["ai_route"] != _assistant_route(db, household_id)[1]:
@@ -276,3 +281,120 @@ def advance(
     run.completed_at = result.completed_at if not remaining else None
     db.flush()
     return _run_out(run)
+
+
+class _InferenceRequest(Exception):
+    def __init__(self, system, prompt, config):
+        self.system, self.prompt, self.config = system, prompt, config
+
+
+def advance_detached(
+    db: Session,
+    household_id: uuid.UUID,
+    run_id: uuid.UUID,
+    version: int,
+    *,
+    actor_id: uuid.UUID,
+    actor_name: str,
+    allow_ai: bool,
+    resume: bool = False,
+):
+    """Replay the same batch around inference, with no transaction held during the call."""
+    from .. import ai
+
+    run = _locked(db, household_id, run_id)
+    if not run.include_ai:
+        return advance(
+            db,
+            household_id,
+            run_id,
+            version,
+            actor_id=actor_id,
+            actor_name=actor_name,
+            allow_ai=allow_ai,
+            resume=resume,
+        )
+    if not allow_ai:
+        raise ApiError(403, "owner_required", "Only the owner can resume AI review.")
+    progress = dict(run.progress_json)
+    if (
+        version != progress["version"]
+        or progress["state"] == "completed"
+        or (progress["state"] == "cancelled" and not resume)
+    ):
+        return _run_out(run)
+    now = datetime.now(UTC)
+    lease = progress.get("inference_lease")
+    if lease and datetime.fromisoformat(lease["until"]) > now:
+        raise ApiError(
+            409,
+            "review_batch_running",
+            "This batch is already being reviewed. Wait for progress or cancel it.",
+        )
+    token = str(uuid.uuid4())
+    run.progress_json = {
+        **progress,
+        "state": "running",
+        "inference_lease": {"token": token, "until": (now + timedelta(seconds=120)).isoformat()},
+    }
+    db.commit()
+    options = dict(actor_id=actor_id, actor_name=actor_name, allow_ai=allow_ai, resume=resume)
+
+    def capture(system, prompt, *, config):
+        raise _InferenceRequest(system, prompt, config)
+
+    try:
+        request = None
+        try:
+            result = advance(db, household_id, run_id, version, ai_inference=capture, **options)
+        except _InferenceRequest as pending:
+            request = pending
+            db.rollback()
+        if request is not None:
+            failure = None
+            try:
+                with ai.bounded_request_deadline(90):
+                    raw = ai.complete_json(request.system, request.prompt, config=request.config)
+            except ai.AiError as exc:
+                failure = exc
+
+            if (
+                db.scalar(
+                    select(HouseholdMember.role).where(
+                        HouseholdMember.household_id == household_id,
+                        HouseholdMember.user_id == actor_id,
+                    )
+                )
+                != "owner"
+            ):
+                raise ApiError(
+                    403,
+                    "review_permission_changed",
+                    "Review permissions changed during inference; this batch was not published.",
+                )
+
+            def replay(system, prompt, *, config):
+                if (system, prompt, config) != (request.system, request.prompt, request.config):
+                    raise ApiError(
+                        409,
+                        "review_inputs_changed",
+                        "Review inputs changed during inference. Resume with current information.",
+                    )
+                if failure is not None:
+                    raise failure
+                return raw
+
+            result = advance(db, household_id, run_id, version, ai_inference=replay, **options)
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        current = _locked(db, household_id, run_id)
+        progress = dict(current.progress_json)
+        if (progress.get("inference_lease") or {}).get("token") == token:
+            progress.pop("inference_lease", None)
+            if progress["state"] == "running":
+                progress["state"] = "paused"
+            current.progress_json = progress
+        db.commit()
