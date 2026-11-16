@@ -47,8 +47,8 @@ is not advertised as an assistant capability in this stage.
 3. **Conversation and review.** Header requests have no parent; panel follow-ups
    carry a server-verified parent and compact relevant results, not an inventory
    dump. Re-fetch authoritative targets before preparing changes and again at
-   Apply. Show existing action/capture reviews and the shared Review workspace
-   in the conversation. “Do a review and categorise the items” starts local
+   Apply. Show existing action/capture reviews and a compact conversational
+   presentation of the shared review module. “Do a review and categorise the items” starts local
    review and exposes normal AI consent, progress, resume/cancel and approval
    without requiring navigation. Re-review and reconsideration remain separate.
 4. **Verification and publication.** Exercise registry/schema/permission
@@ -105,16 +105,57 @@ observations each. No complete inventory is sent by default. History restoration
 currently shows the latest 30 scoped tasks; older records remain stored and
 addressable by ID, but older-history pagination is not implemented.
 
-The embedded Review workspace uses the same successful-input coverage,
-accepted/dismissed history, re-review/reconsideration controls and approval
-interfaces as the full page. Its background batches continue across navigation.
+The shared `InventoryReview` module owns both presentations and the existing
+queries, consent, mutations, decision dialogs and suggestion cards. Its compact
+conversation presentation shows scope, live local/AI coverage, consent,
+cancel/resume and actionable proposals. Filters, scheduling, re-review /
+reconsideration and detailed diagnostics remain in the full Review workspace,
+reachable through a scope/run-preserving link. Successful-input coverage,
+accepted/dismissed history and approval interfaces are unchanged.
+Background batches continue across navigation.
 Cancel preserves committed batches and fences any unfinished inference; resume
 uses the saved remaining work. The foreground Review page retains its existing
 after-current-batch cancellation behavior. Review inference releases its
 transaction, then revalidates the prompt, configuration, permissions and lease
 before publishing results.
 
-### Verification evidence and remaining gaps
+The panel has one compact scope/control header; model/privacy information is
+optional. Tool prose uses the existing safe formatted-answer renderer and
+application record links, with technical details retained in Diagnostics.
+Prepared action cards are authoritative, without a second generated proposal.
+Live review/capture views own changing progress: generated summaries are not
+displayed alongside them. Generic follow-up buttons and the unrelated capture
+queue are absent from conversations. An explicitly opened capture is placed
+inline; all pending captures remain accessible through the Review queue.
+
+### Presentation correction verification
+
+- 401 frontend tests, production typecheck/build and changed-backend Ruff checks
+  pass. The build retains the existing nonfatal large-chunk advisory.
+- 65 isolated backend tool, review/coverage/decision-memory and scheduled-review
+  cases pass. The tool engine and its confirmation/permission checks are retained;
+  the backend change only adds presentation instructions to its system prompt.
+- Four Chromium journeys pass against a disposable PostgreSQL database and real
+  API/worker with a **controlled local HTTP provider**. Desktop and 375px mobile
+  journeys cover drill lookup, borrower, contextual duration, reviewed return,
+  editable rename, reload, normal AI consent, cancellation/resume during inference,
+  background completion while closed/reloading and explicit suggestion acceptance.
+  An earlier genuinely pending suggestion and a newly generated suggestion verify
+  their distinct labels/counts and successful-input coverage reuse. Deliberately
+  stale generated review prose stays hidden while the live view reports completion.
+  Separate task cancellation, late response fencing and retry also pass.
+  The Review queue opens Alpha, Beta, then Alpha again inline through actual
+  local/manual captures, retaining an unsent draft and PDF attachment. Explicit
+  selection stays visible when durable tool history restores asynchronously.
+- Inspected actual desktop/mobile return and review screenshots. Assertions check
+  formatted prose, hidden technical IDs/paths, one accessible heading, the absent
+  capture queue, record links, scope/control non-overlap and a 44px Send target.
+  Screenshots are retained in session artifacts (`files/assistant-presentation`).
+- No live-model quality claim is made for this correction; the user's independent
+  real-model verification concerns the preserved preceding engine. Physical
+  iPhone, native keyboard/voice and other real providers were not exercised here.
+
+### Original tool-engine verification and remaining gaps
 
 - Twenty new isolated backend cases cover multi-step retrieval and follow-ups,
   bounded execution, unknown/invalid tools, worker/provider/configuration failure,

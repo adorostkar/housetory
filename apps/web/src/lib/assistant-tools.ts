@@ -42,6 +42,31 @@ export interface AssistantToolRun {
   worker_available: boolean | null;
 }
 
+export function assistantAnswerText(text: string, references: AssistantToolOutput["references"] = []) {
+  const internalField = /^(?:[-*]\s*)?`?(?:item_id|item_ids|loan_id|record_id|review_run_id|scope_id|household_id|batch_state|background_active|created_suggestion_count|existing_suggestion_count|item_count_scanned|remaining_item_count|include_ai)`?\s*[:=]/;
+  let answer = text.replace(/```[\s\S]*?```/g, "")
+    .replace(/\s*\((?:item_id|loan_id|record_id|id)\s*:[^)]*\)/g, "")
+    .split("\n").filter((line) => !internalField.test(line.trim()) &&
+      !/^(?:GET |POST |PATCH |DELETE )?\/(?:api\/v\d+|assistant|inventory-review)\//.test(line.trim())).join("\n");
+  for (const reference of references) answer = answer.replaceAll(reference.id, reference.title);
+  return answer
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/gi, "the linked record")
+    .replace(/\/(?:api\/v\d+|assistant|inventory-review|items|loans|borrowed|documents)\/[^\s)`,;]+/g, "the linked record")
+    .replace(/\b(?:item_id|item_ids|loan_id|record_id|review_run_id|scope_id|household_id)\b/g, "record")
+    .replace(/\b(?:batch_state|background_active|created_suggestion_count|existing_suggestion_count|item_count_scanned|remaining_item_count|include_ai)\b/g, "review details")
+    .replace(/\bawaiting_approval\b/g, "ready for review")
+    .replace(/\bneeds_attention\b/g, "needs attention")
+    .trim();
+}
+
+function proposalExplanation(kind: string) {
+  if (kind === "return_loan" || kind === "return_borrowed") return "Review this return, then Apply to record it.";
+  if (kind === "lend" || kind === "borrow") return "Review the lending details, then Apply to record them.";
+  if (kind === "move_items") return "Review the destination, then Apply to move these items.";
+  return "Review the change below, then Apply to save it.";
+}
+
 export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
   const messages: AssistantMessage[] = [
     { role: "user", text: run.query, toolRunId: run.id },
@@ -52,7 +77,7 @@ export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
       const proposal = result.proposal;
       seen.add(proposal.id);
       messages.push({
-        role: "assistant", text: result.summary, toolRunId: run.id,
+        role: "assistant", text: proposalExplanation(proposal.kind), toolRunId: run.id,
         action: {
           proposal, originalRequest: run.query, requestId: proposal.id, pending: false,
           ...(proposal.state === "applied" ? { result: "Already applied." } :

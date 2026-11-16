@@ -4,11 +4,12 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { AnswerText } from "@/components/answer-text";
+import { InventoryReview } from "@/components/inventory-review";
 import { api, getApiErrorMessage } from "@/lib/api";
-import type { AssistantToolRun } from "@/lib/assistant-tools";
+import { assistantAnswerText, type AssistantToolRun } from "@/lib/assistant-tools";
 import { withHousehold } from "@/lib/household-links";
 import { useSelectHousehold, useSession } from "@/lib/queries";
-import { ReviewPage } from "@/pages/review-page";
 
 export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const queryClient = useQueryClient();
@@ -20,6 +21,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
     result.references ?? []).map((reference) => [reference.id, reference])).values()];
   const reviews = [...new Map(run.steps.flatMap(({ result }) =>
     result.review ? [result.review] : []).map((review) => [review.id, review])).values()];
+  const hasPreparedWork = run.steps.some(({ result }) => result.proposal || result.review || result.capture);
   const change = async (action: "cancel" | "retry") => {
     setBusy(true);
     try {
@@ -32,28 +34,25 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
     }
   };
   return (
-    <div className="surface min-w-0 space-y-3 p-4" aria-label="Assistant tool task" data-state={run.state}>
-      <p dir="auto" className="whitespace-pre-wrap break-words text-sm" role={active ? "status" : undefined}>
-        {run.message}
-      </p>
+    <div className={`${hasPreparedWork && !reviews.length && !active && !run.can_retry
+      ? "px-1" : "surface p-4"} min-w-0 space-y-3`}
+      aria-label="Assistant tool task" data-state={run.state}>
+      {active ? <p role="status" className="text-sm">Working on your request…</p>
+        : (!hasPreparedWork || run.can_retry) &&
+          <AnswerText text={assistantAnswerText(run.message, references)} className="break-words" />}
       {active && run.worker_available === false && (
         <p className="text-xs text-brass">
           The AI worker is unavailable. Your request is saved; check the worker or use local/manual controls.
         </p>
       )}
-      <p className="text-2xs text-muted-foreground">
-        {active ? "Working with application tools." : run.state === "awaiting_approval"
-          ? "Tools prepared proposals. Nothing is applied automatically; use their explicit review actions."
-          : "Tools have not applied inventory changes."}
-      </p>
-      <div className="flex flex-wrap gap-2">
+      {(active || run.can_retry) && <div className="flex flex-wrap gap-2">
         {active && <Button className="min-h-11" variant="outline" disabled={busy}
           onClick={() => void change("cancel")}>Stop assistant</Button>}
         {run.can_retry && <Button className="min-h-11" variant="outline" disabled={busy}
           onClick={() => void change("retry")}>Retry assistant</Button>}
         {run.can_retry && <Link className="inline-flex min-h-11 items-center px-3 text-xs underline"
           to={withHousehold("/items", run.household_id)}>Local inventory controls</Link>}
-      </div>
+      </div>}
       {references.length > 0 && (
         <div className="flex flex-wrap gap-2" aria-label="Tool source records">
           {references.map((reference) => (
@@ -65,27 +64,23 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
         </div>
       )}
       {reviews.map((review) => {
-        const params = new URLSearchParams({ scope_type: review.scope_type });
-        if (review.scope_id) params.set("scope_id", review.scope_id);
-        if (review.scope_item_ids?.length) params.set("item_ids", review.scope_item_ids.join(","));
         return (
-          <details key={review.id} open className="min-w-0 border-t pt-3">
-            <summary className="min-h-11 cursor-pointer text-sm font-medium">
-              Inventory review · {review.scope_label}
-            </summary>
+          <div key={review.id} className="min-w-0">
             {session.data?.household?.id === run.household_id ? (
-              <ReviewPage embedded initialRunId={review.id} initialParams={params.toString()} assistantRunId={run.id} />
+              <InventoryReview initialRun={review} assistantRunId={run.id} />
             ) : (
               <Button className="min-h-11" variant="outline" disabled={selectHousehold.isPending}
                 onClick={() => selectHousehold.mutate(run.household_id)}>
                 Switch to this review’s household
               </Button>
             )}
-          </details>
+          </div>
         );
       })}
       <details className="text-2xs text-muted-foreground">
-        <summary className="cursor-pointer">Tool activity · {run.steps.length} results</summary>
+        <summary className="min-h-11 cursor-pointer py-3">Diagnostics</summary>
+        {(active || hasPreparedWork || assistantAnswerText(run.message, references) !== run.message) &&
+          <p className="whitespace-pre-wrap break-words">{run.message}</p>}
         <ol className="mt-2 space-y-2">
           {run.steps.map((step, index) => (
             <li key={index} className="break-words">
@@ -95,6 +90,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
           ))}
         </ol>
         <p className="mt-2">{run.model_calls} model calls so far · up to {run.max_model_calls} per attempt</p>
+        <p>Task: {run.id} · {run.state}</p>
       </details>
     </div>
   );

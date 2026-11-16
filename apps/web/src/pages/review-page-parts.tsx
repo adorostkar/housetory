@@ -39,6 +39,56 @@ export function SuggestionStatusBadge({ suggestion }: { suggestion: ReviewSugges
   );
 }
 
+export function ReviewAiConsent({
+  checked, disabled, isOwner, aiReady, provider, onChange, background = false,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  isOwner: boolean;
+  aiReady: boolean;
+  provider: string;
+  onChange: (checked: boolean) => void;
+  background?: boolean;
+}) {
+  return (
+    <div className="space-y-2 text-xs">
+      <label className="flex min-h-11 items-center gap-2.5">
+        <input type="checkbox" className="size-4 shrink-0 accent-primary"
+          checked={checked} disabled={disabled || !isOwner || !aiReady}
+          onChange={(event) => onChange(event.target.checked)} />
+        <span>Include AI suggestions
+          <span className="mt-0.5 block text-2xs text-muted-foreground">
+            Uses your configured provider; usage charges may apply.
+          </span>
+        </span>
+      </label>
+      <details className="text-2xs leading-relaxed text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-3">What gets sent?</summary>
+        <p>Uses the household Assistant task via {provider}. AI checks items missing
+          a category or tags that do not already have a local category proposal.
+          Each request includes up to 40 eligible items: names, descriptions (up to
+          300 characters), brand/model, current category/tag names, and the names
+          and internal IDs of up to 200 household categories and 200 tags.
+          Review again also includes already organised items.
+          Descriptions may contain personal information you entered. No photo
+          files, receipts, purchase amounts, location fields, loans, private-note
+          fields, borrower records or other households are included. Provider policies apply.
+          Whole-scope review makes multiple paid requests as needed. {background
+            ? "Cancellation preserves completed batches and discards unfinished inference."
+            : "Cancellation stops after the current batch."} Opening Review sends nothing.
+          Only the owner can enable AI; configured cloud consent still applies.</p>
+      </details>
+      {!aiReady && isOwner && <p className="text-2xs text-muted-foreground">
+        AI is not configured for this household. Local checks remain available.{" "}
+        <Link to="/settings/ai" className="underline">Configure AI providers</Link>
+      </p>}
+      {!isOwner && <p className="text-2xs text-muted-foreground">
+        Only the owner can enable AI review. Local review remains available to writers.
+      </p>}
+    </div>
+  );
+}
+
 export function ItemReference({
   item,
   origin,

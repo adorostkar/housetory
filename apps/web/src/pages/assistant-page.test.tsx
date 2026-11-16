@@ -232,7 +232,7 @@ const sessionState = {
 
 function renderPage(
   entry: string,
-  initialRequest?: { id: string; text: string; file?: File },
+  initialRequest?: NonNullable<React.ComponentProps<typeof AssistantPage>>["initialRequest"],
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -278,6 +278,19 @@ beforeEach(() => {
 });
 
 describe("AssistantPage", () => {
+  it("opens a notification's exact capture inline without submitting another request or showing the capture queue", async () => {
+    renderPage("/assistant", {
+      id: "notification-older", text: "", capture: { kind: "items", id: "older-import" },
+    });
+    expect(await screen.findByText("Item review older-import")).toBeVisible();
+    expect(screen.getByLabelText("Assistant capture status")).toContainElement(
+      screen.getByText("Item review older-import"),
+    );
+    expect(screen.queryByText("Pending captures", { exact: true })).not.toBeInTheDocument();
+    expect(createToolRun).not.toHaveBeenCalled();
+    expect(api.postForm).not.toHaveBeenCalled();
+  });
+
   it("uses durable tools directly, retains panel context and isolates fresh header topics", async () => {
     const user = userEvent.setup();
     const toolRun = {
@@ -348,7 +361,7 @@ describe("AssistantPage", () => {
       return aiStatus;
     });
     renderPage("/assistant", { id: "late-history", text: queued.query });
-    expect(await screen.findByText("New task waiting.")).toBeVisible();
+    expect(await screen.findByText("Working on your request…")).toBeVisible();
     await act(async () => resolveHistory([]));
     expect(await screen.findByText("New task finished.", {}, { timeout: 3000 })).toBeVisible();
     const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });

@@ -13,9 +13,9 @@ import {
   Paperclip,
   RotateCcw,
   Send,
-  Sparkles,
 } from "lucide-react";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -30,13 +30,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { looksLikeItemDescription } from "@/lib/assistant-intent";
 import { withHousehold } from "@/lib/household-links";
-import { useAiStatus, useCanWrite, useSelectHousehold, useSession } from "@/lib/queries";
+import { useAiStatus, useCanWrite, useRecognition, useSelectHousehold, useSession } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
-import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope } from "@/lib/assistant-conversation";
+import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope, type AssistantCaptureState } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
-import { CaptureReviewQueue } from "@/components/capture-review-queue";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
 import type { AiRecognition, DocumentRecord, ImportBatchDetail } from "@/lib/types";
@@ -76,14 +75,31 @@ interface AssistantInitialRequest {
   id: string;
   text: string;
   file?: File;
+  capture?: { kind: "items" | "document" | "photo"; id: string };
+}
+
+function CaptureContent({ capture }: { capture: AssistantCaptureState }) {
+  const { activeId, activeImportId, activePhotoId } = useAssistantDocuments();
+  const recognition = useRecognition(capture.recognitionId);
+  const photoImport = recognition.data?.result?._add_items?.import_batch_id;
+  if ((capture.importId ?? photoImport) === activeImportId && activeImportId) return <AssistantImportSlot />;
+  if (capture.documentId === activeId && activeId) return <AssistantDocumentSlot />;
+  if (capture.recognitionId === activePhotoId && activePhotoId) return <AssistantPhotoSlot />;
+  return null;
+}
+
+function AssistantHeader({ container, children }: React.PropsWithChildren<{ container?: HTMLElement | null }>) {
+  return container ? createPortal(children, container) : children;
 }
 
 export function AssistantPage({
   embedded = false,
+  headerContainer,
   initialRequest,
   onInitialRequestHandled,
 }: {
   embedded?: boolean;
+  headerContainer?: HTMLElement | null;
   initialRequest?: AssistantInitialRequest | null;
   onInitialRequestHandled?: (id: string) => void;
 } = {}) {
@@ -114,6 +130,7 @@ export function AssistantPage({
   const endRef = React.useRef<HTMLDivElement>(null);
   const autoAskedRef = React.useRef<string | null>(null);
   const handledInitialRequestRef = React.useRef<string | null>(null);
+  const requestedCaptureRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (embedded) return;
@@ -158,12 +175,23 @@ export function AssistantPage({
   };
 
   const jumpToLatest = () => {
+    requestedCaptureRef.current = null;
     if (typeof endRef.current?.scrollIntoView === "function") {
       endRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   };
 
+  const revealRequestedCapture = React.useCallback(() => {
+    if (!requestedCaptureRef.current) return false;
+    const node = Array.from(paneRef.current?.querySelectorAll<HTMLElement>("[data-capture-id]") ?? [])
+      .find((element) => element.dataset.captureId === requestedCaptureRef.current);
+    if (!node) return false;
+    node.scrollIntoView?.({ block: "start" });
+    return true;
+  }, []);
+
   React.useEffect(() => {
+    if (revealRequestedCapture()) return;
     const last = messages[messages.length - 1];
     const target =
       last?.role === "assistant" && !pending
@@ -175,7 +203,7 @@ export function AssistantPage({
         block: target === endRef.current ? "end" : "start",
       });
     }
-  }, [messages, pending]);
+  }, [messages, pending, revealRequestedCapture]);
 
   React.useEffect(() => {
     const el = textareaRef.current;
@@ -296,6 +324,7 @@ export function AssistantPage({
 
   const submitValue = (value: string, freshRequest = false) => {
     if (pending || tooManyReferences || capturePending) return;
+    requestedCaptureRef.current = null;
     if (attachment && !freshRequest) {
       dictation.stop();
       void submitCapture(value, freshRequest);
@@ -335,7 +364,21 @@ export function AssistantPage({
     }
     startFreshTopic();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
-    if (initialRequest.file) {
+    if (initialRequest.capture) {
+      const source = initialRequest.capture;
+      requestedCaptureRef.current = source.id;
+      if (source.kind === "document") selectDocument(source.id);
+      else if (source.kind === "photo") selectPhoto(source.id);
+      else selectImport(source.id);
+      if (!messages.some((message) => message.capture && (
+        message.capture.documentId === source.id || message.capture.importId === source.id
+        || message.capture.recognitionId === source.id
+      ))) recordCapture("Review capture", undefined, "Review this capture.", {
+        id: source.id, kind: source.kind,
+        ...(source.kind === "document" ? { documentId: source.id }
+          : source.kind === "photo" ? { recognitionId: source.id } : { importId: source.id }),
+      }, true);
+    } else if (initialRequest.file) {
       setAttachment(initialRequest.file);
       setAttachmentIntent(
         documentFileType(initialRequest.file).startsWith("image/") ? null : "document",
@@ -364,7 +407,16 @@ export function AssistantPage({
     setCaptureError,
     setQuestion,
     submitValue,
+    messages,
+    recordCapture,
+    selectDocument,
+    selectImport,
+    selectPhoto,
   ]);
+
+  React.useEffect(() => {
+    revealRequestedCapture();
+  }, [initialRequest?.id, messages, revealRequestedCapture]);
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
@@ -373,6 +425,7 @@ export function AssistantPage({
 
   const newConversation = () => {
     if (pending || actionPending) return;
+    requestedCaptureRef.current = null;
     reset();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     autoAskedRef.current = null;
@@ -399,15 +452,6 @@ export function AssistantPage({
   const displayStatus = lastResponse?.ai_status ?? status;
   const allPlacesScope =
     !selection.householdId || Boolean(selection.propertyId);
-  const modeLabel = lastResponse
-    ? lastResponse.mode === "ai"
-      ? "AI-assisted answer"
-      : lastResponse.mode === "direct"
-        ? "Direct inventory lookup"
-        : displayStatus?.configured
-          ? "AI unavailable · used basic mode"
-          : "AI off · local answer"
-    : "AI when needed · grounded in records";
 
   return (
     <div
@@ -443,31 +487,21 @@ export function AssistantPage({
           Drop a supported file to attach it
         </div>
       )}
-      <div className="shrink-0 pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="eyebrow mb-1 hidden sm:block">Intelligence</p>
-            <h1 className="display-title !text-[1.6rem] sm:!text-[2rem]">
-              Assistant
-            </h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <AssistantHeader container={headerContainer}>
+      <div className={headerContainer ? "min-w-0" : "shrink-0 pb-2"}>
+        <div className="relative flex flex-wrap items-center gap-1">
+          {!embedded && <h1 className="text-sm font-medium">Assistant</h1>}
+          <div className="min-w-0 flex-1 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:truncate"><SearchScopeControl scope={scope} compact /></div>
             <Button
               type="button"
               variant="ghost"
-              className="h-11 px-3 sm:h-10 sm:px-5"
+              className="size-11 shrink-0 p-0"
               onClick={newConversation}
               aria-label="New conversation"
               disabled={pending || actionPending || messages.length === 0}
             >
               <RotateCcw />
-              <span className="sm:hidden">New chat</span>
-              <span className="hidden sm:inline">New conversation</span>
             </Button>
-          </div>
-        </div>
-        <div className="relative mt-3 flex flex-wrap items-center gap-2">
-          <SearchScopeControl scope={scope} compact />
           {pageReferences.length > 0 && (
             <div className="flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-xs" aria-label="Current assistant context">
               <span className="min-w-0 truncate">
@@ -490,29 +524,17 @@ export function AssistantPage({
               </button>
             </div>
           )}
-          <Badge
-            variant={
-              lastResponse?.mode === "ai"
-                ? "brass"
-                : lastResponse?.mode === "fallback"
-                  ? "outline"
-                  : "sage"
-            }
-          >
-            <Sparkles className="size-3" />
-            {modeLabel}
-          </Badge>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="h-11 sm:h-8"
+            className="size-11 shrink-0 p-0"
+            aria-label="Privacy & model"
             aria-expanded={infoOpen}
             aria-controls="assistant-info"
             onClick={() => setInfoOpen((open) => !open)}
           >
             <Info />
-            Privacy &amp; model
           </Button>
           {infoOpen && (
             <div
@@ -563,6 +585,7 @@ export function AssistantPage({
           </p>
         )}
       </div>
+      </AssistantHeader>
 
       <div className="relative min-h-0 flex-1">
         <div
@@ -614,7 +637,8 @@ export function AssistantPage({
                   {message.toolRun ? (
                     <AssistantToolStatus run={message.toolRun} />
                   ) : message.capture ? (
-                    <div className="surface space-y-3 p-4" aria-label="Assistant capture status">
+                    <div className="surface space-y-3 p-4" aria-label="Assistant capture status"
+                      data-capture-id={message.capture.documentId ?? message.capture.importId ?? message.capture.recognitionId}>
                       <p dir="auto" className="text-sm">{message.text}</p>
                       {message.capture.documentId && (
                         <Button size="sm" variant="outline" onClick={() => selectDocument(message.capture!.documentId!)}>
@@ -631,12 +655,11 @@ export function AssistantPage({
                           Review {message.capture.filename || "photo"}
                         </Button>
                       )}
+                      <CaptureContent capture={message.capture} />
                     </div>
                   ) : message.action ? (
                     <div className="surface space-y-3 p-5" aria-label="Action review">
                       <p dir="auto" className="text-sm">{message.text}</p>
-                      <p className="text-xs text-muted-foreground">Original request</p>
-                      <p dir="auto" className="whitespace-pre-wrap break-words text-sm">{message.action.originalRequest}</p>
                       <p className="break-words text-xs text-muted-foreground">
                         Scope: {message.action.proposal.scope_label}
                       </p>
@@ -647,7 +670,13 @@ export function AssistantPage({
                       )}
                       <div className="space-y-1">
                         {message.action.proposal.targets.map((target) => (
-                          <p key={target.id} className="break-words text-sm font-medium">{target.name}</p>
+                          <p key={target.id} className="break-words text-sm font-medium">
+                            {message.action!.proposal.kind === "borrow" ? target.name :
+                              <Link className="underline underline-offset-4" to={withHousehold(
+                                `/${message.action!.proposal.kind === "return_borrowed" ? "borrowed" : message.action!.proposal.kind === "return_loan" ? "loans" : "items"}/${target.id}`,
+                                selection.householdId || undefined,
+                              )}>{target.name}</Link>}
+                          </p>
                         ))}
                         {message.action.proposal.destination && (
                           <p className="break-words text-sm">{message.action.proposal.destination.name}</p>
@@ -862,11 +891,6 @@ export function AssistantPage({
                         }
                         regenerateDisabled={pending}
                       />
-                      {message.response && (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          Read-only answer. No changes were made.
-                        </p>
-                      )}
                       {message.clarification && (
                         <div className="mt-2 flex flex-wrap gap-2" aria-label="Choose an item">
                           {message.clarification.choices.map((choice) => (
@@ -890,7 +914,7 @@ export function AssistantPage({
                       )}
                     </>
                   )}
-                  {!message.action && !message.clarification && index === messages.length - 1 && !pending && (
+                  {!message.toolRunId && !message.capture && !message.action && !message.clarification && index === messages.length - 1 && !pending && (
                     <FollowUps
                       suggestions={followUpSuggestions(
                         message.response,
@@ -909,10 +933,6 @@ export function AssistantPage({
                 Retrieving current records across your places…
               </div>
             )}
-            <AssistantDocumentSlot />
-            <CaptureReviewQueue />
-            <AssistantImportSlot />
-            <AssistantPhotoSlot />
             <div ref={endRef} />
           </div>
         </div>

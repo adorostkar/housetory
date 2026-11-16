@@ -162,10 +162,12 @@ function AppShellLayout() {
   const reviewSummary = useReviewSummary();
   const softwareKeyboardOpen = useSoftwareKeyboardOpen();
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantHeader, setAssistantHeader] = useState<HTMLDivElement | null>(null);
   const [assistantRequest, setAssistantRequest] = useState<{
     id: string;
     text: string;
     file?: File;
+    capture?: { kind: "items" | "document" | "photo"; id: string };
   } | null>(null);
   const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
@@ -192,6 +194,10 @@ function AppShellLayout() {
     if (task.kind === "document") selectDocument(task.id);
     else if (task.kind === "photo") selectPhoto(task.id);
     else selectImport(task.id);
+    setAssistantRequest({
+      id: crypto.randomUUID(), text: "",
+      capture: { kind: task.kind === "import" ? "items" : task.kind, id: task.id },
+    });
     restoreAssistantFocus.current = true;
     assistantTrigger.current = document.querySelector<HTMLButtonElement>('button[title="Open assistant"]');
     if (location.hash === "#assistant") {
@@ -207,6 +213,21 @@ function AppShellLayout() {
   const moreActive = mobileMoreNav.some((item) =>
     navItemActive(item, location.pathname),
   );
+
+  useEffect(() => {
+    if (location.hash !== "#assistant") return;
+    const state: unknown = location.state;
+    if (!state || typeof state !== "object" || !("assistantCapture" in state)) return;
+    const capture = state.assistantCapture;
+    if (!capture || typeof capture !== "object" || !("id" in capture) || typeof capture.id !== "string"
+      || !("kind" in capture)) return;
+    if (capture.kind !== "items" && capture.kind !== "document" && capture.kind !== "photo") return;
+    if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
+      assistantTrigger.current = document.activeElement;
+      restoreAssistantFocus.current = true;
+    }
+    setAssistantRequest({ id: location.key, text: "", capture: { id: capture.id, kind: capture.kind } });
+  }, [location.hash, location.key, location.state]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -537,17 +558,21 @@ function AppShellLayout() {
           onInteractOutside={(event) => { if (desktop) event.preventDefault(); }}
           className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,40vw)] lg:border-l lg:border-border/80"
         >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <DialogPrimitive.Title asChild><h2
               id="assistant-panel-title"
               ref={assistantHeading}
               tabIndex={-1}
-              className="text-sm"
+              className="sr-only"
             >
               Assistant
             </h2></DialogPrimitive.Title>
-            <div className="flex items-center gap-2">
-              <Link to="/review" className="inline-flex min-h-11 items-center text-xs underline">Review queue</Link>
+            <div ref={setAssistantHeader} className="min-w-0 flex-1" />
+            <div className="flex shrink-0 items-center gap-1">
+              <Link to="/review" aria-label="Review queue" title="Review queue"
+                className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-secondary focus-visible:outline focus-visible:outline-2">
+                <ClipboardCheck className="size-4" />
+              </Link>
               <button
                 type="button"
                 onClick={closeAssistant}
@@ -562,6 +587,7 @@ function AppShellLayout() {
             <Suspense fallback={<PageFallback />}>
               <AssistantPage
                 embedded
+                headerContainer={assistantHeader}
                 initialRequest={assistantRequest}
                 onInitialRequestHandled={(id) => {
                   setAssistantRequest((current) => current?.id === id ? null : current);

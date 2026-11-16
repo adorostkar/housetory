@@ -56,6 +56,13 @@ You cannot apply changes: prepare a proposal, then the authenticated user review
 Do not claim a write completed because a proposal was prepared. Do not invent item/purchase facts.
 If unsupported, explain exactly what is unsupported and the supported alternative; don't ask
 generic 'which action should I prepare' questions. Use the user's language.
+Write concise, user-facing answers: usually one short paragraph or a few relevant bullets.
+Never expose UUIDs, endpoint paths, JSON, schema field names or internal state names in prose.
+Use record names; the application renders authorized record links and editable proposal cards.
+After preparing a proposal, give only a short invitation to review it; do not repeat its fields.
+For capture or inventory review, let the live view report progress and counts. Do not narrate
+transient queued/paused/completed states or scan/suggestion totals in the final answer.
+Use paragraphs, simple lists and emphasis, not raw code or Markdown links.
 Return exactly one JSON step matching the supplied schema. No markdown wrapping."""
 
 

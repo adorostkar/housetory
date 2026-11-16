@@ -27,7 +27,10 @@ export function CaptureReviewQueue() {
                 if (review.kind === "document") select(review.id);
                 else if (review.kind === "import") selectImport(review.id);
                 else selectPhoto(review.id);
-                if (location.hash !== "#assistant") navigate({ pathname: location.pathname, search: location.search, hash: "#assistant" });
+                navigate({ pathname: location.pathname, search: location.search, hash: "#assistant" }, {
+                  replace: location.hash === "#assistant",
+                  state: { assistantCapture: { kind: review.kind === "import" ? "items" : review.kind, id: review.id } },
+                });
               }}>
               Review
             </Button>
