@@ -2,9 +2,18 @@ import csv
 import io
 import uuid
 
+from sqlalchemy import select
+
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
-from housetory_api.models import Household, HouseholdMember, Item, User
+from housetory_api.models import (
+    Household,
+    HouseholdMember,
+    Item,
+    Purchase,
+    PurchaseAllocation,
+    User,
+)
 from housetory_api.services.auth import create_session
 
 
@@ -135,6 +144,10 @@ def test_inventory_current_value_is_optional_and_separate(owner_client):
             "current_value_total_cents": 12345,
             "purchase_item_count": 0,
             "current_value_item_count": 1,
+            "purchase_allocated_cents": 0,
+            "purchase_unallocated_cents": 0,
+            "purchase_unallocated_count": 0,
+            "purchase_over_allocated_cents": 0,
         }
     ]
     assert financial["items_missing_purchase_count"] == 2
@@ -498,3 +511,204 @@ def test_shared_purchase_total_is_counted_once_and_stays_separate_from_unit_valu
     assert by_name["Shared sofa"]["current_value_unit_cents"] == "4000"
     assert by_name["Shared sofa"]["current_value_total_cents"] == "8000"
     assert by_name["Shared chair"]["current_value_total_cents"] == "1000"
+
+
+def purchase_allocations(client, purchase_id) -> list[dict]:
+    response = client.get(f"/api/v1/purchases/{purchase_id}")
+    assert response.status_code == 200, response.text
+    return response.json()["allocations"]
+
+
+def reconciled_totals(client) -> dict[str, dict]:
+    """Per-currency totals, after checking they reconcile with both breakdowns."""
+    financial = client.get("/api/v1/financial-overview").json()
+    totals = {entry["currency"]: entry for entry in financial["currency_totals"]}
+    for currency, entry in totals.items():
+        assert entry["purchase_total_cents"] == (
+            entry["purchase_allocated_cents"]
+            - entry["purchase_over_allocated_cents"]
+            + entry["purchase_unallocated_cents"]
+        )
+        for breakdown in ("value_by_room", "value_by_category"):
+            shown = sum(
+                row["purchase_total_cents"]
+                for row in financial[breakdown]
+                if row["currency"] == currency
+            )
+            assert shown == entry["purchase_allocated_cents"]
+    return totals
+
+
+def add_reviewed_allocation(purchase_id, item_id, line_id, cents) -> None:
+    with SessionLocal() as db:
+        purchase = db.get(Purchase, uuid.UUID(purchase_id))
+        db.add(
+            PurchaseAllocation(
+                household_id=purchase.household_id,
+                purchase_id=purchase.id,
+                item_id=uuid.UUID(item_id),
+                source_line_id=line_id,
+                description="Reviewed line",
+                quantity=1,
+                line_total_cents=cents,
+                allocated_cents=cents,
+                currency=purchase.currency,
+            )
+        )
+        db.commit()
+
+
+def test_single_item_purchase_is_allocated_in_full_and_follows_its_price(owner_client):
+    lamp = create_item(owner_client, "Lamp", purchase={"price_cents": 5000, "currency": "USD"})
+    purchase_id = lamp["purchase"]["id"]
+    [allocation] = purchase_allocations(owner_client, purchase_id)
+    assert allocation["item_id"] == lamp["id"]
+    assert allocation["source_line_id"] == "single-item"
+    assert allocation["allocated_cents"] == 5000
+
+    desk = create_item(owner_client, "Desk")
+    created = owner_client.post(
+        "/api/v1/purchases",
+        json={"price_cents": 20000, "currency": "USD", "item_ids": [desk["id"]]},
+    )
+    assert created.status_code == 201, created.text
+    assert [entry["allocated_cents"] for entry in created.json()["purchase"]["allocations"]] == [
+        20000
+    ]
+
+    totals = reconciled_totals(owner_client)
+    assert totals["USD"]["purchase_total_cents"] == 25000
+    assert totals["USD"]["purchase_unallocated_cents"] == 0
+    assert totals["USD"]["purchase_unallocated_count"] == 0
+
+    edited = owner_client.patch(
+        f"/api/v1/items/{lamp['id']}",
+        json={"purchase": {"price_cents": 6000, "currency": "EUR"}},
+    )
+    assert edited.status_code == 200, edited.text
+    [allocation] = purchase_allocations(owner_client, purchase_id)
+    assert (allocation["allocated_cents"], allocation["currency"]) == (6000, "EUR")
+    totals = reconciled_totals(owner_client)
+    assert totals["EUR"]["purchase_allocated_cents"] == 6000
+    assert totals["USD"]["purchase_allocated_cents"] == 20000
+
+
+def test_editing_shared_purchase_through_one_item_keeps_reviewed_allocations(owner_client):
+    sofa = create_item(owner_client, "Sofa")
+    chair = create_item(owner_client, "Chair")
+    purchase = owner_client.post(
+        "/api/v1/purchases",
+        json={"price_cents": 9000, "currency": "USD", "item_ids": [sofa["id"], chair["id"]]},
+    ).json()["purchase"]
+    assert purchase["allocations"] == []
+    add_reviewed_allocation(purchase["id"], sofa["id"], "line-1", 3000)
+    add_reviewed_allocation(purchase["id"], chair["id"], "line-2", 4000)
+
+    edited = owner_client.patch(
+        f"/api/v1/items/{sofa['id']}", json={"purchase": {"price_cents": 10000}}
+    )
+    assert edited.status_code == 200, edited.text
+
+    allocations = purchase_allocations(owner_client, purchase["id"])
+    assert {entry["source_line_id"]: entry["allocated_cents"] for entry in allocations} == {
+        "line-1": 3000,
+        "line-2": 4000,
+    }
+    totals = reconciled_totals(owner_client)
+    assert totals["USD"]["purchase_total_cents"] == 10000
+    assert totals["USD"]["purchase_allocated_cents"] == 7000
+    assert totals["USD"]["purchase_unallocated_cents"] == 3000
+
+
+def test_shared_purchase_is_not_reassigned_when_one_item_is_archived(owner_client):
+    sofa = create_item(owner_client, "Sofa")
+    chair = create_item(owner_client, "Chair")
+    purchase = owner_client.post(
+        "/api/v1/purchases",
+        json={"price_cents": 9000, "currency": "USD", "item_ids": [sofa["id"], chair["id"]]},
+    ).json()["purchase"]
+    archived = owner_client.patch(f"/api/v1/items/{chair['id']}", json={"is_archived": True})
+    assert archived.status_code == 200, archived.text
+    edited = owner_client.patch(
+        f"/api/v1/items/{sofa['id']}", json={"purchase": {"price_cents": 9500}}
+    )
+    assert edited.status_code == 200, edited.text
+
+    assert purchase_allocations(owner_client, purchase["id"]) == []
+    totals = reconciled_totals(owner_client)
+    assert totals["USD"]["purchase_total_cents"] == 9500
+    assert totals["USD"]["purchase_allocated_cents"] == 0
+    assert totals["USD"]["purchase_unallocated_cents"] == 9500
+    assert totals["USD"]["purchase_unallocated_count"] == 1
+
+
+def test_purchase_that_was_ever_shared_is_not_assumed_single_item_again(owner_client):
+    def shared_then_single(release):
+        lamp = create_item(owner_client, "Lamp", purchase={"price_cents": 5000, "currency": "USD"})
+        purchase_id = lamp["purchase"]["id"]
+        assert len(purchase_allocations(owner_client, purchase_id)) == 1
+        shade = create_item(owner_client, "Shade", purchase_id=purchase_id)
+        assert purchase_allocations(owner_client, purchase_id) == []
+        release(shade)
+        edited = owner_client.patch(
+            f"/api/v1/items/{lamp['id']}", json={"purchase": {"price_cents": 5500}}
+        )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["item"]["purchase"]["item_count"] == 1
+        assert purchase_allocations(owner_client, purchase_id) == []
+
+    def delete_link(shade):
+        assert owner_client.delete(f"/api/v1/items/{shade['id']}").status_code == 204
+
+    def relink(shade):
+        other = create_item(owner_client, "Bulb", purchase={"price_cents": 700, "currency": "USD"})
+        moved = owner_client.patch(
+            f"/api/v1/items/{shade['id']}", json={"purchase_id": other["purchase"]["id"]}
+        )
+        assert moved.status_code == 200, moved.text
+        # The purchase the link moved to is shared now, so it loses its own too.
+        assert purchase_allocations(owner_client, other["purchase"]["id"]) == []
+
+    shared_then_single(delete_link)
+    shared_then_single(relink)
+
+    totals = reconciled_totals(owner_client)
+    assert totals["USD"]["purchase_total_cents"] == 5500 + 5500 + 700
+    assert totals["USD"]["purchase_allocated_cents"] == 0
+    assert totals["USD"]["purchase_unallocated_count"] == 3
+
+
+def test_legacy_purchase_without_allocation_history_is_reported_unallocated(owner_client):
+    lamp = create_item(owner_client, "Lamp", purchase={"price_cents": 5000, "currency": "USD"})
+    create_item(owner_client, "Vase", purchase={"price_cents": 1200, "currency": "EUR"})
+    create_item(owner_client, "Desk", purchase={"price_cents": 20000, "currency": "USD"})
+    # Purchases recorded before allocations were written have no row at all.
+    with SessionLocal() as db:
+        for allocation in db.scalars(
+            select(PurchaseAllocation).where(
+                PurchaseAllocation.item_id == uuid.UUID(lamp["id"]),
+            )
+        ).all():
+            db.delete(allocation)
+        db.commit()
+
+    edited = owner_client.patch(
+        f"/api/v1/items/{lamp['id']}", json={"purchase": {"price_cents": 5100}}
+    )
+    assert edited.status_code == 200, edited.text
+    assert purchase_allocations(owner_client, lamp["purchase"]["id"]) == []
+
+    totals = reconciled_totals(owner_client)
+    assert totals["USD"]["purchase_total_cents"] == 25100
+    assert totals["USD"]["purchase_allocated_cents"] == 20000
+    assert totals["USD"]["purchase_unallocated_cents"] == 5100
+    assert totals["USD"]["purchase_unallocated_count"] == 1
+    assert totals["EUR"]["purchase_unallocated_cents"] == 0
+
+    inventory = {
+        row["item"]: row for row in parse_csv(owner_client.get("/api/v1/exports/inventory.csv"))
+    }
+    assert inventory["Lamp"]["purchase_allocation_status"] == "unallocated"
+    assert inventory["Lamp"]["purchase_allocated_cents"] == ""
+    assert inventory["Desk"]["purchase_allocation_status"] == "allocated"
+    assert inventory["Desk"]["purchase_allocated_cents"] == "20000"

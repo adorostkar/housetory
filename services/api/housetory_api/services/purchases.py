@@ -7,6 +7,82 @@ from ..api.errors import ApiError
 from ..models import Document, Household, Item, Purchase, PurchaseAllocation
 from ..schemas.purchases import PurchaseCreate, PurchaseIn, PurchaseUpdate
 
+# Marks the one allocation Housetory writes itself: the full price of a purchase
+# that was created with exactly one linked item. Every other allocation is a
+# reviewed document line. The (purchase, source line) unique constraint keeps it
+# to one per purchase.
+SINGLE_ITEM_LINE_ID = "single-item"
+
+
+def sync_single_item_allocation(db: Session, purchase: Purchase, *, created: bool = False) -> None:
+    """Keep the single-item allocation true to the purchase's complete link set.
+
+    Call after any change to a purchase's price, currency or linked items.
+
+    * A purchase created in this transaction (``created``) with exactly one
+      linked item and no other allocation gets the full price allocated to it.
+    * While that item stays the only link and no reviewed allocation exists, the
+      allocation follows the purchase's price and currency.
+    * Once a second item is linked, the item is unlinked, or a reviewed
+      allocation is recorded, the single-item allocation is removed for good:
+      nothing is redistributed, and a purchase that has been shared is never
+      later assumed to belong to whichever item remains.
+    * Reviewed allocations are never created, changed or removed here.
+    """
+    db.flush()
+    item_rows = db.execute(
+        select(Item.id, Item.name, Item.quantity).where(
+            Item.household_id == purchase.household_id, Item.purchase_id == purchase.id
+        )
+    ).all()
+    allocations = list(
+        db.scalars(
+            select(PurchaseAllocation).where(
+                PurchaseAllocation.household_id == purchase.household_id,
+                PurchaseAllocation.purchase_id == purchase.id,
+            )
+        ).all()
+    )
+    single = next(
+        (entry for entry in allocations if entry.source_line_id == SINGLE_ITEM_LINE_ID), None
+    )
+    sole = item_rows[0] if len(item_rows) == 1 else None
+    if single is None:
+        if not created or sole is None or allocations:
+            return
+        db.add(
+            PurchaseAllocation(
+                household_id=purchase.household_id,
+                purchase_id=purchase.id,
+                item_id=sole.id,
+                source_line_id=SINGLE_ITEM_LINE_ID,
+                description=f"Only item on this purchase: {sole.name}"[:300],
+                quantity=max(1, sole.quantity),
+                allocated_cents=purchase.price_cents,
+                currency=purchase.currency,
+            )
+        )
+    elif sole is None or single.item_id != sole.id or len(allocations) > 1:
+        db.delete(single)
+    else:
+        single.allocated_cents = purchase.price_cents
+        single.currency = purchase.currency
+    db.flush()
+    db.expire(purchase, ["allocations"])
+
+
+def sync_single_item_allocations(
+    db: Session, household_id: uuid.UUID, purchase_ids: set[uuid.UUID]
+) -> None:
+    """Re-check purchases whose items were just moved to another purchase."""
+    if not purchase_ids:
+        return
+    db.flush()
+    for purchase in db.scalars(
+        select(Purchase).where(Purchase.household_id == household_id, Purchase.id.in_(purchase_ids))
+    ).all():
+        sync_single_item_allocation(db, purchase)
+
 
 def purchase_load_options() -> list:
     return [
@@ -102,6 +178,8 @@ def create_purchase(
     db.flush()
     if previous_purchase_ids:
         prune_orphan_purchases(db, household_id)
+        sync_single_item_allocations(db, household_id, previous_purchase_ids)
+    sync_single_item_allocation(db, purchase, created=True)
     db.commit()
     return get_purchase(db, household_id, purchase.id)
 
@@ -139,6 +217,8 @@ def update_purchase(
             db.flush()
             if previous_purchase_ids:
                 prune_orphan_purchases(db, purchase.household_id)
+                sync_single_item_allocations(db, purchase.household_id, previous_purchase_ids)
+    sync_single_item_allocation(db, purchase)
     db.commit()
     return get_purchase(db, purchase.household_id, purchase.id)
 

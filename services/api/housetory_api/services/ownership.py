@@ -94,11 +94,12 @@ def _financial_items(db: Session, household_id: uuid.UUID) -> list[Item]:
 def _purchase_shares(
     db: Session, household_id: uuid.UUID, items: list[Item]
 ) -> dict[uuid.UUID, PurchaseShare]:
-    """Return only explicitly persisted reviewed allocations.
+    """Return each active item's explicitly persisted share of its purchase.
 
-    Legacy purchases without allocation rows still contribute their total once in
-    the purchase totals, but no historical split is invented for category/room
-    breakdowns or exports.
+    Shares are reviewed document lines, or the full price of a purchase that was
+    created with that item as its only link. No split is ever inferred from the
+    items linked today: a purchase without such a row still contributes its
+    total once to the purchase totals and is reported as unallocated.
     """
     item_ids = [item.id for item in items]
     if not item_ids:
@@ -122,6 +123,10 @@ def _purchase_shares(
         item = item_map.get(item_id)
         if item is None or item.purchase_id != purchase_id:
             continue
+        # An allocation recorded in another currency than the purchase now
+        # carries cannot be reconciled against the purchase total.
+        if item.purchase is None or item.purchase.currency != currency:
+            continue
         shares[item_id] = PurchaseShare(
             item_id=item_id,
             purchase_id=purchase_id,
@@ -129,6 +134,46 @@ def _purchase_shares(
             currency=currency,
         )
     return shares
+
+
+@dataclass
+class AllocationCoverage:
+    allocated_cents: int = 0
+    unallocated_cents: int = 0
+    unallocated_purchase_count: int = 0
+    over_allocated_cents: int = 0
+
+
+def _allocation_coverage(
+    items: list[Item], shares: dict[uuid.UUID, PurchaseShare]
+) -> dict[str, AllocationCoverage]:
+    """Reconcile each currency's purchase total with what the breakdowns show.
+
+    Per currency: purchase total = allocated - over-allocated + unallocated.
+    Over-allocation only arises from reviewed lines that exceed a discounted
+    purchase total.
+    """
+    prices: dict[uuid.UUID, tuple[str, int]] = {}
+    allocated: dict[uuid.UUID, int] = defaultdict(int)
+    for item in items:
+        purchase = item.purchase
+        if purchase is None or purchase.price_cents is None:
+            continue
+        prices[purchase.id] = (purchase.currency, purchase.price_cents)
+        share = shares.get(item.id)
+        if share is not None:
+            allocated[purchase.id] += share.allocated_cents
+    coverage: dict[str, AllocationCoverage] = defaultdict(AllocationCoverage)
+    for purchase_id, (currency, price_cents) in prices.items():
+        entry = coverage[currency]
+        entry.allocated_cents += allocated[purchase_id]
+        remainder = price_cents - allocated[purchase_id]
+        if remainder > 0:
+            entry.unallocated_cents += remainder
+            entry.unallocated_purchase_count += 1
+        else:
+            entry.over_allocated_cents -= remainder
+    return coverage
 
 
 def _missing_purchase(item: Item) -> bool:
@@ -265,6 +310,7 @@ def financial_overview(
             missing.append(item)
 
     currencies = sorted(set(purchase_totals) | set(current_totals))
+    coverage = _allocation_coverage(items, allocations)
     currency_totals = [
         CurrencyOwnership(
             currency=currency,
@@ -272,6 +318,10 @@ def financial_overview(
             current_value_total_cents=current_totals.get(currency, 0),
             purchase_item_count=purchase_item_counts.get(currency, 0),
             current_value_item_count=current_item_counts.get(currency, 0),
+            purchase_allocated_cents=coverage[currency].allocated_cents,
+            purchase_unallocated_cents=coverage[currency].unallocated_cents,
+            purchase_unallocated_count=coverage[currency].unallocated_purchase_count,
+            purchase_over_allocated_cents=coverage[currency].over_allocated_cents,
         )
         for currency in currencies
     ]
@@ -370,6 +420,11 @@ def financial_rows_for_export(db: Session, household_id: uuid.UUID) -> list[dict
                 else "",
                 "purchase_total_scope": purchase_total_scope,
                 "purchase_allocated_cents": allocation.allocated_cents if allocation else "",
+                "purchase_allocation_status": (
+                    ""
+                    if purchase is None or purchase.price_cents is None
+                    else ("allocated" if allocation else "unallocated")
+                ),
                 "current_value_unit_cents": (
                     current_value_service.unit_value_cents(item)
                     if current_value_service.unit_value_cents(item) is not None

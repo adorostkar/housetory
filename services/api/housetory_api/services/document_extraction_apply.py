@@ -31,7 +31,7 @@ from ..schemas.purchases import PurchaseIn
 from ..schemas.warranties import WarrantyIn
 from .documents import get_document
 from .items import create_item_record, update_item_record
-from .purchases import apply_purchase_fields, get_purchase
+from .purchases import apply_purchase_fields, get_purchase, sync_single_item_allocation
 from .serializers import document_out
 
 
@@ -627,6 +627,8 @@ def apply_extraction(
                 )
                 allocation.request_id = payload.request_id
                 allocation.created_by_user_id = actor_user_id
+    if purchase is not None:
+        sync_single_item_allocation(db, purchase, created=payload.purchase_action == "create")
     if payload.document_fields is not None:
         fields = payload.document_fields.model_fields_set
         if "merchant" in fields:

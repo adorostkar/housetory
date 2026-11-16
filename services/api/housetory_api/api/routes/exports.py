@@ -205,6 +205,7 @@ def export_inventory(
         "purchase_total_cents",
         "purchase_total_scope",
         "purchase_allocated_cents",
+        "purchase_allocation_status",
         "current_value_unit_cents",
         "current_value_quantity",
         "current_value_total_cents",

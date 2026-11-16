@@ -9,6 +9,12 @@ class CurrencyOwnership(BaseModel):
     current_value_total_cents: int
     purchase_item_count: int
     current_value_item_count: int
+    # purchase_total_cents = purchase_allocated_cents - purchase_over_allocated_cents
+    #                        + purchase_unallocated_cents
+    purchase_allocated_cents: int = 0
+    purchase_unallocated_cents: int = 0
+    purchase_unallocated_count: int = 0
+    purchase_over_allocated_cents: int = 0
 
 
 class ValueBreakdownRow(BaseModel):

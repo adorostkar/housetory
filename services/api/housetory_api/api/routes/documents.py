@@ -38,6 +38,8 @@ from ...services.purchases import (
     get_purchase,
     prune_orphan_purchases,
     resolve_items,
+    sync_single_item_allocation,
+    sync_single_item_allocations,
 )
 from ...services.serializers import document_out, document_summary
 from ..deps import AuthContext, require_auth
@@ -430,7 +432,9 @@ def apply_document_ocr(
                 422, "item_required", "Choose at least one item for the confirmed purchase."
             )
         shared_ids = {item.purchase_id for item in selected_items}
-        if len(shared_ids) == 1 and None not in shared_ids:
+        created_purchase = not (len(shared_ids) == 1 and None not in shared_ids)
+        previous_purchase_ids: set[uuid.UUID] = set()
+        if not created_purchase:
             purchase = get_purchase(db, auth.household.id, next(iter(shared_ids)))
         else:
             previous_purchase_ids = {
@@ -452,6 +456,8 @@ def apply_document_ocr(
         purchase.notes = payload.notes
         if payload.attach_as_receipt:
             purchase.receipt_document_id = document.id
+        sync_single_item_allocations(db, auth.household.id, previous_purchase_ids)
+        sync_single_item_allocation(db, purchase, created=created_purchase)
 
     for entry in payload.item_updates:
         item = update_by_id.get(entry.item_id)

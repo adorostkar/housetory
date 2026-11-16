@@ -423,6 +423,11 @@ export interface CurrencyOwnership {
   current_value_total_cents: number;
   purchase_item_count: number;
   current_value_item_count: number;
+  /** purchase_total = allocated - over_allocated + unallocated, per currency. */
+  purchase_allocated_cents: number;
+  purchase_unallocated_cents: number;
+  purchase_unallocated_count: number;
+  purchase_over_allocated_cents: number;
 }
 
 export interface ValueBreakdownRow {

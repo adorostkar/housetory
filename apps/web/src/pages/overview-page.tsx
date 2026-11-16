@@ -438,6 +438,9 @@ function OwnershipSection({
         financial.value_by_category.length > 0 ||
         financial.value_by_room.length > 0),
   );
+  const unallocated = (financial?.currency_totals ?? []).filter(
+    (entry) => entry.purchase_unallocated_cents > 0,
+  );
 
   return (
     <section className="mt-10">
@@ -527,13 +530,39 @@ function OwnershipSection({
           </div>
 
           {(financial.value_by_category.length > 0 ||
-            financial.value_by_room.length > 0) && (
+            financial.value_by_room.length > 0 ||
+            unallocated.length > 0) && (
             <div className="grid gap-4 lg:grid-cols-2">
               {financial.value_by_category.length > 0 && (
                 <BreakdownTable title="Purchases by category" rows={financial.value_by_category} valuesHidden={valuesHidden} />
               )}
               {financial.value_by_room.length > 0 && (
                 <BreakdownTable title="Purchases by room" rows={financial.value_by_room} valuesHidden={valuesHidden} />
+              )}
+              {unallocated.length > 0 && (
+                <div className="surface p-5 lg:col-span-2" data-testid="unallocated-purchases">
+                  <p className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                    Not allocated to items
+                  </p>
+                  <ul className="mt-3 space-y-1.5 text-sm">
+                    {unallocated.map((entry) => (
+                      <li key={entry.currency} className="flex flex-wrap items-baseline justify-between gap-x-4">
+                        <span className="text-muted-foreground">
+                          {entry.currency} · {pluralize(entry.purchase_unallocated_count, "purchase")}
+                        </span>
+                        <span className="tabular-nums">
+                          {valuesHidden
+                            ? "••••••"
+                            : formatCurrency(entry.purchase_unallocated_cents, entry.currency, { compact: true })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-2xs leading-relaxed text-muted-foreground">
+                    Counted in the purchase totals but not in the category and room breakdowns:
+                    shared purchases, and purchases with no record of which items they paid for.
+                  </p>
+                </div>
               )}
             </div>
           )}

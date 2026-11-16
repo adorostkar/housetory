@@ -363,7 +363,14 @@ Key decisions:
   product-line amounts persist in `purchase_allocations` under the one shared purchase
   total, including source document/extraction/line evidence. Tax/discount/shipping
   charges are not fabricated or equal-split; legacy purchases without allocation rows
-  keep no invented historical split. Exact duplicate content is warned about by
+  keep no invented historical split. A purchase created with exactly one linked item
+  gets one `single-item` allocation of its full price in the same transaction
+  (`services/purchases.py::sync_single_item_allocation`); it follows the price while
+  that item stays the only link, and is removed for good once a second item is linked,
+  the item is unlinked or a reviewed allocation is recorded. Nothing is redistributed
+  and reviewed allocations are never rewritten. The financial overview reports the
+  remainder per currency as unallocated, so
+  `purchase_total = allocated - over_allocated + unallocated`. Exact duplicate content is warned about by
   SHA-256; it is never auto-merged or deleted.
 - **Categories** are household-scoped and optionally nested. **Tags** are flat
   and many-to-many with items.
@@ -804,9 +811,10 @@ development and nginx proxies in production. No CORS allowlist is needed.
   counts and installed language packs. It proposes values only; review is
   mandatory.
 - No exchange-rate provider or conversion configuration. Multi-currency values
-  are reported separately. Category/room purchase breakdowns use persisted reviewed
-  allocations only; legacy purchases without allocation rows have no fabricated
-  per-item split.
+  are reported separately. Category/room purchase breakdowns use persisted
+  allocations only (reviewed lines, or the full price of a purchase created with one
+  item); legacy purchases without allocation rows have no fabricated per-item split
+  and are shown as an unallocated amount per currency.
 - Original files are preserved for new uploads; documents created before Phase 3
   only have their already-sanitized copy because the original bytes were removed
   by the earlier security hardening.

@@ -18,7 +18,13 @@ from ..schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from . import current_value as current_value_service
 from . import history, lending, storage_items
 from .purchase_info import explicit_status_value
-from .purchases import get_purchase, prune_orphan_purchases, validate_receipt
+from .purchases import (
+    get_purchase,
+    prune_orphan_purchases,
+    sync_single_item_allocation,
+    sync_single_item_allocations,
+    validate_receipt,
+)
 from .serializers import item_load_options
 from .warranties import resolve_end_date
 
@@ -381,6 +387,8 @@ def create_item_record(db: Session, household_id: uuid.UUID, payload: ItemCreate
         apply_warranty(db, item, payload.warranty, replace=True)
     db.add(item)
     db.flush()
+    if item.purchase is not None:
+        sync_single_item_allocation(db, item.purchase, created=payload.purchase_id is None)
     # Auto image lookup/generation is strictly opt-in per household and only
     # runs after the item is saved. The default is off.
     from .item_image_generation import maybe_enqueue_new_item_image
@@ -534,15 +542,23 @@ def update_item_record(
         if previous_purchase_id is not None:
             db.flush()
             prune_orphan_purchases(db, household_id)
+            sync_single_item_allocations(db, household_id, {previous_purchase_id})
+        if item.purchase_id is not None:
+            sync_single_item_allocation(db, get_purchase(db, household_id, item.purchase_id))
     elif "purchase" in fields:
         previous_purchase_id = item.purchase_id
+        created_purchase = False
         if payload.purchase is None:
             item.purchase_id = None
         else:
-            apply_purchase(db, item, payload.purchase, replace=item.purchase is None)
+            created_purchase = item.purchase is None
+            apply_purchase(db, item, payload.purchase, replace=created_purchase)
         if previous_purchase_id is not None and item.purchase_id != previous_purchase_id:
             db.flush()
             prune_orphan_purchases(db, household_id)
+            sync_single_item_allocations(db, household_id, {previous_purchase_id})
+        if payload.purchase is not None and item.purchase is not None:
+            sync_single_item_allocation(db, item.purchase, created=created_purchase)
     if "warranty" in fields:
         if payload.warranty is None:
             item.warranty = None

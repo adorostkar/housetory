@@ -128,6 +128,10 @@ const populatedFinancial: FinancialOverview = {
       current_value_total_cents: 30000,
       purchase_item_count: 1,
       current_value_item_count: 1,
+      purchase_allocated_cents: 49900,
+      purchase_unallocated_cents: 0,
+      purchase_unallocated_count: 0,
+      purchase_over_allocated_cents: 0,
     },
   ],
   value_by_category: [
@@ -266,5 +270,28 @@ describe("OverviewPage sparse and populated states", () => {
     expect(screen.getByText("Purchases by category")).toBeVisible();
     expect(screen.getByText("Expiring soon")).toBeVisible();
     expect(screen.getByText("Missing purchase info")).toBeVisible();
+    expect(screen.queryByTestId("unallocated-purchases")).not.toBeInTheDocument();
+  });
+
+  it("shows the purchase amount that the breakdowns do not cover, and masks it with other values", async () => {
+    state.overview = populatedOverview;
+    state.financial = {
+      ...populatedFinancial,
+      currency_totals: [
+        {
+          ...populatedFinancial.currency_totals[0]!,
+          purchase_total_cents: 62400,
+          purchase_unallocated_cents: 12500,
+          purchase_unallocated_count: 2,
+        },
+      ],
+    };
+    renderPage();
+    const line = screen.getByTestId("unallocated-purchases");
+    expect(line).toHaveTextContent("Not allocated to items");
+    expect(line).toHaveTextContent("USD · 2 purchases");
+    expect(line).toHaveTextContent("$125");
+    await userEvent.click(screen.getByRole("button", { name: "Hide purchase values" }));
+    expect(screen.getByTestId("unallocated-purchases")).not.toHaveTextContent("$125");
   });
 });
