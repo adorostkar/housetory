@@ -7,6 +7,7 @@ can therefore share a single PostgreSQL instance safely.
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -291,7 +292,22 @@ def mark_succeeded(
     return True
 
 
-def mark_failed(db: Session, job_id: uuid.UUID, error: str, *, claim: Job | None = None) -> bool:
+def mark_failed(
+    db: Session,
+    job_id: uuid.UUID,
+    error: str,
+    *,
+    claim: Job | None = None,
+    terminal: bool = False,
+    on_terminal: Callable[[Session, Job], None] | None = None,
+) -> bool:
+    """Record a failed attempt, retrying unless attempts are exhausted or ``terminal``.
+
+    ``on_terminal`` runs only when the job ends as failed, inside the same
+    transaction and while the claim's row lock is held, so dependent state (a
+    document's processing stage) changes together with the job or not at all.
+    A job that will retry leaves that state untouched.
+    """
     job = lock_claimed_job(db, job_id, claim, update_name="failure")
     if job is None:
         return False
@@ -303,7 +319,7 @@ def mark_failed(db: Session, job_id: uuid.UUID, error: str, *, claim: Job | None
         job.queue in {DOCUMENT_LOCAL_QUEUE, DOCUMENT_AI_QUEUE}
         and (job.payload or {}).get("mode") != "background"
     )
-    if job.attempts < job.max_attempts and not interactive_document:
+    if job.attempts < job.max_attempts and not interactive_document and not terminal:
         job.status = JobStatus.QUEUED.value
         job.finished_at = None
         delay_seconds = min(2**job.attempts, 300)
@@ -311,6 +327,9 @@ def mark_failed(db: Session, job_id: uuid.UUID, error: str, *, claim: Job | None
     else:
         job.status = JobStatus.FAILED.value
         job.finished_at = now
+        if on_terminal is not None:
+            db.flush()
+            on_terminal(db, job)
     db.commit()
     return True
 

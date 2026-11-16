@@ -15,14 +15,14 @@ from pathlib import Path
 
 import pytest
 from reportlab.pdfgen.canvas import Canvas
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "worker"))
 
 import housetory_worker  # noqa: E402
 
 from housetory_api.db import SessionLocal
-from housetory_api.jobs import claim_job, enqueue
+from housetory_api.jobs import claim_job, enqueue, requeue_stale_jobs
 from housetory_api.models import Document, Job
 from housetory_api.services import ai
 from housetory_api.services.document_ocr import OCR_TASK
@@ -154,6 +154,143 @@ def test_child_start_failure_fails_claimed_document_job(
     status = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
     assert status["stage"] == "failed"
     assert status["reason"] == "worker_interrupted"
+
+
+def _background_ocr_job(owner_client):
+    """A retryable background OCR job for a freshly uploaded document."""
+    uploaded = owner_client.post(
+        "/api/v1/documents",
+        files={"file": ("receipt.txt", b"receipt", "text/plain")},
+        data={"document_type": "invoice"},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    document_id = uploaded.json()["id"]
+    with SessionLocal() as db:
+        job = db.scalar(
+            select(Job).where(
+                Job.task == OCR_TASK, Job.payload["document_id"].astext == document_id
+            )
+        )
+        job.queue = "default"
+        job.payload = {**job.payload, "mode": "background"}
+        job.max_attempts = 3
+        db.commit()
+        return document_id, job.id
+
+
+class _InterruptedProcess:
+    pid = None
+
+    def start(self):
+        pass
+
+    def is_alive(self):
+        raise KeyboardInterrupt
+
+
+class _InterruptedContext:
+    def Process(self, **kwargs):
+        return _InterruptedProcess()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "expired_deadline",
+        "deadline_while_running",
+        "start_failure",
+        "non_zero_exit",
+        "clean_exit_still_running",
+        "interruption",
+    ],
+)
+def test_old_supervisor_cannot_alter_a_reclaimed_attempt(owner_client, path):
+    document_id, job_id = _background_ocr_job(owner_client)
+    with SessionLocal() as db:
+        stale_claim = claim_job(db, worker_id="old-supervisor", queue="default")
+        assert stale_claim.id == job_id
+        stale_claim.locked_at = datetime.now(UTC) - timedelta(hours=1)
+        db.commit()
+    # A separate session, so the old supervisor keeps its own copy of the claim.
+    with SessionLocal() as db:
+        assert requeue_stale_jobs(db, older_than_minutes=15) == 1
+        new_claim = claim_job(db, worker_id="new-supervisor", queue="default")
+        assert (new_claim.id, new_claim.attempts) == (job_id, 2)
+    before = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+    assert before["stage"] != "failed"
+
+    kwargs = {}
+    if path == "expired_deadline":
+        stale_claim.payload = {
+            **stale_claim.payload,
+            "deadline_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        }
+    elif path == "deadline_while_running":
+        stale_claim.payload = {
+            **stale_claim.payload,
+            "deadline_at": (datetime.now(UTC) + timedelta(seconds=0.25)).isoformat(),
+        }
+        kwargs = {"process_target": time.sleep, "process_args": (2,)}
+    elif path == "start_failure":
+
+        class BrokenContext:
+            def Process(self, **kwargs):
+                raise OSError("synthetic construction failure")
+
+        kwargs = {"process_context": BrokenContext()}
+    elif path == "non_zero_exit":
+        kwargs = {"process_target": os._exit, "process_args": (3,)}
+    elif path == "clean_exit_still_running":
+        kwargs = {"process_target": time.sleep, "process_args": (0,)}
+    else:
+        kwargs = {"process_context": _InterruptedContext()}
+
+    if path == "interruption":
+        with pytest.raises(KeyboardInterrupt):
+            housetory_worker.process_interactive_job(stale_claim, **kwargs)
+    else:
+        housetory_worker.process_interactive_job(stale_claim, **kwargs)
+
+    with SessionLocal() as db:
+        stored = db.get(Job, job_id)
+        assert stored.status == "running"
+        assert stored.locked_by == "new-supervisor"
+        assert stored.attempts == 2
+        assert stored.finished_at is None
+        assert stored.last_error not in {
+            "interactive_deadline_exceeded",
+            "interactive_worker_interrupted",
+        }
+    after = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+    assert (after["stage"], after["reason"]) == (before["stage"], before["reason"])
+
+
+def test_document_stays_retryable_while_its_job_will_retry(owner_client):
+    document_id, job_id = _background_ocr_job(owner_client)
+    before = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+
+    def run_past_deadline():
+        with SessionLocal() as db:
+            db.execute(update(Job).where(Job.id == job_id).values(run_at=datetime.now(UTC)))
+            db.commit()
+            claimed = claim_job(db, worker_id="test-documents", queue="default")
+        claimed.payload = {
+            **claimed.payload,
+            "deadline_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        }
+        housetory_worker.process_interactive_job(claimed)
+        with SessionLocal() as db:
+            return db.get(Job, job_id).status
+
+    for _attempt in range(2):
+        assert run_past_deadline() == "queued"
+        status = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+        assert (status["stage"], status["reason"]) == (before["stage"], before["reason"])
+
+    # The last attempt ends the job, and only then the document fails with it.
+    assert run_past_deadline() == "failed"
+    status = owner_client.get(f"/api/v1/documents/{document_id}/processing").json()
+    assert (status["stage"], status["reason"]) == ("failed", "deadline_exceeded")
 
 
 def test_worker_handler_failure_updates_document_processing(owner_client):

@@ -27,7 +27,6 @@ from housetory_api.jobs import (
     claim_job,
     enqueue,
     has_active_job,
-    lock_claimed_job,
     mark_failed,
     mark_succeeded,
     requeue_stale_jobs,
@@ -184,19 +183,53 @@ def _stop_document_process(child) -> None:
             os.killpg(pid, signal.SIGKILL)
 
 
-def _fail_interrupted_job(job: Job) -> None:
+def _fail_document_job(job: Job, error: str, *, reason: str, terminal: bool = False) -> None:
+    """Fail this attempt and, only if the job ends as failed, its document.
+
+    Both changes commit in one transaction under the claim's row lock, so a
+    supervisor whose job was recovered and reclaimed changes neither.
+    """
     from housetory_api.services.document_processing import fail_processing_for_job
 
     with SessionLocal() as db:
-        current = lock_claimed_job(db, job.id, job, update_name="interruption")
-        if current is not None:
-            current.status = JobStatus.FAILED.value
-            current.last_error = "interactive_worker_interrupted"
-            current.finished_at = datetime.now(UTC)
-            current.locked_by = None
-            current.locked_at = None
-            db.commit()
-            fail_processing_for_job(db, current, reason="worker_interrupted")
+        mark_failed(
+            db,
+            job.id,
+            error,
+            claim=job,
+            terminal=terminal,
+            on_terminal=lambda session, current: fail_processing_for_job(
+                session, current, reason=reason
+            ),
+        )
+
+
+def _fail_interrupted_job(job: Job) -> None:
+    _fail_document_job(
+        job, "interactive_worker_interrupted", reason="worker_interrupted", terminal=True
+    )
+
+
+def _fail_document_of_failed_attempt(job: Job) -> None:
+    """The handler recorded this attempt as failed; fail its document to match."""
+    from housetory_api.services.document_processing import fail_processing_for_job
+
+    with SessionLocal() as db:
+        current = db.scalar(
+            select(Job)
+            .where(
+                Job.id == job.id,
+                Job.status == JobStatus.FAILED.value,
+                Job.attempts == job.attempts,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            db.rollback()
+            return
+        fail_processing_for_job(db, current, reason="worker_interrupted")
+        db.commit()
 
 
 def process_interactive_job(
@@ -223,15 +256,7 @@ def process_interactive_job(
     if (job.payload or {}).get("mode") != "background":
         timeout = min(timeout, INTERACTIVE_DEADLINE_SECONDS)
     if timeout <= 0:
-        with SessionLocal() as db:
-            current = db.get(Job, job.id)
-            if current is not None:
-                mark_failed(db, job.id, "interactive_deadline_exceeded", claim=job)
-                from housetory_api.services.document_processing import (
-                    fail_processing_for_job,
-                )
-
-                fail_processing_for_job(db, current, reason="deadline_exceeded")
+        _fail_document_job(job, "interactive_deadline_exceeded", reason="deadline_exceeded")
         return
 
     expires_at = time.monotonic() + timeout
@@ -258,15 +283,9 @@ def process_interactive_job(
             child.join(timeout=min(0.5, max(0.0, expires_at - time.monotonic())))
             if time.monotonic() >= expires_at and child.is_alive():
                 _stop_document_process(child)
-                with SessionLocal() as db:
-                    current = db.get(Job, job.id)
-                    if current is not None:
-                        mark_failed(db, job.id, "interactive_deadline_exceeded", claim=job)
-                        from housetory_api.services.document_processing import (
-                            fail_processing_for_job,
-                        )
-
-                        fail_processing_for_job(db, current, reason="deadline_exceeded")
+                _fail_document_job(
+                    job, "interactive_deadline_exceeded", reason="deadline_exceeded"
+                )
                 return
             with SessionLocal() as db:
                 current = db.get(Job, job.id)
@@ -276,16 +295,15 @@ def process_interactive_job(
         if child.exitcode not in {0, None}:
             _fail_interrupted_job(job)
         else:
+            # Each helper acts only on this attempt: one if the handler already
+            # recorded its failure, the other if it exited without recording anything.
+            _fail_document_of_failed_attempt(job)
             with SessionLocal() as db:
-                current = db.get(Job, job.id)
-                if current is not None and current.status == JobStatus.FAILED.value:
-                    from housetory_api.services.document_processing import (
-                        fail_processing_for_job,
-                    )
-
-                    fail_processing_for_job(db, current, reason="worker_interrupted")
-                elif current is not None and current.status == JobStatus.RUNNING.value:
-                    _fail_interrupted_job(job)
+                still_running = db.scalar(select(Job.status).where(Job.id == job.id)) == (
+                    JobStatus.RUNNING.value
+                )
+            if still_running:
+                _fail_interrupted_job(job)
     except KeyboardInterrupt:
         _stop_document_process(child)
         _fail_interrupted_job(job)
