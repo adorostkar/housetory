@@ -41,6 +41,126 @@ def seed_review_items(client, count):
     return room
 
 
+def sent_items(prompt):
+    return json.loads(prompt.split("Items: ", 1)[1].split("\nReturn ", 1)[0])
+
+
+def decline_all(_system, prompt, **_kwargs):
+    """A complete model answer: one reasoned decline per item sent."""
+    return {
+        "suggestions": [
+            {"index": record["index"], "no_category_reason": "The record does not say what it is."}
+            for record in sent_items(prompt)
+        ]
+    }
+
+
+def test_empty_ai_response_covers_nothing_and_a_later_review_sends_every_item_again(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 2)
+    calls = []
+
+    def complete(_system, prompt, **_kwargs):
+        calls.append(sent_items(prompt))
+        return {}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    empty = run_review(owner_client, include_ai=True).json()
+    assert (empty["ai_item_count"], empty["ai_reviewed_count"]) == (2, 0)
+    assert empty["ai_unanswered_count"] == 2
+    assert empty["status"] == "partial"
+    assert empty["ai_error"] is None
+    assert "no usable answer for 2" in empty["partial_reason"]
+    assert empty["remaining_item_count"] == 0
+
+    monkeypatch.setattr(
+        ai, "complete_json", lambda *a, **k: calls.append(sent_items(a[1])) or decline_all(*a, **k)
+    )
+    later = run_review(owner_client, include_ai=True).json()
+    assert len(calls[-1]) == 2
+    assert (later["ai_reused_count"], later["ai_reviewed_count"]) == (0, 2)
+    assert later["ai_unanswered_count"] == 0
+    assert later["status"] == "completed"
+    assert later["partial_reason"] is None
+
+
+def test_partial_ai_response_covers_only_answered_items_and_reports_the_rest(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 4)
+    calls = []
+
+    def complete(_system, prompt, **_kwargs):
+        records = sent_items(prompt)
+        calls.append([record["name"] for record in records])
+        if len(calls) > 1:
+            return decline_all(_system, prompt)
+        return {
+            "suggestions": [
+                {"index": 0, "category": {"name": "Camping"}, "reason": "Named as camping gear."},
+                {"index": 1, "no_category_reason": "The name does not say what it is."},
+                # An entry with neither a proposal nor a reason is not an answer.
+                {"index": 2},
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    partial = run_review(owner_client, include_ai=True).json()
+    assert (partial["ai_item_count"], partial["ai_reviewed_count"]) == (4, 2)
+    assert partial["ai_unanswered_count"] == 2
+    assert partial["status"] == "partial"
+    assert partial["ai_error"] is None
+    assert "no usable answer for 2" in partial["partial_reason"]
+    assert len(organisation_suggestions(owner_client)) == 1
+
+    later = run_review(owner_client, include_ai=True).json()
+    assert calls[1] == calls[0][2:]
+    assert (later["ai_reused_count"], later["ai_reviewed_count"]) == (2, 2)
+    assert later["ai_unanswered_count"] == 0
+    assert later["status"] == "completed"
+    # The answered item's proposal survives the later review untouched.
+    assert len(organisation_suggestions(owner_client)) == 1
+
+
+def test_fully_answered_ai_response_covers_every_item_and_reports_completion(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 2)
+    calls = []
+
+    def complete(_system, prompt, **_kwargs):
+        calls.append(prompt)
+        return {
+            "suggestions": [
+                {"index": 0, "category": {"name": "Camping"}, "reason": "Named as camping gear."},
+                {"index": 1, "no_category_reason": "The name does not say what it is."},
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    full = run_review(owner_client, include_ai=True).json()
+    assert (full["ai_item_count"], full["ai_reviewed_count"]) == (2, 2)
+    assert full["ai_unanswered_count"] == 0
+    assert full["status"] == "completed"
+    assert full["partial_reason"] is None
+    later = run_review(owner_client, include_ai=True).json()
+    assert len(calls) == 1
+    assert (later["ai_reused_count"], later["ai_reviewed_count"]) == (2, 0)
+
+
 def test_successful_ai_coverage_reuses_unchanged_inputs_but_not_relevant_edits(
     owner_client,
     configured_ai,
@@ -56,7 +176,7 @@ def test_successful_ai_coverage_reuses_unchanged_inputs_but_not_relevant_edits(
 
     def complete(*args, **kwargs):
         calls.append(args)
-        return {"suggestions": []}
+        return decline_all(*args, **kwargs)
 
     monkeypatch.setattr(ai, "complete_json", complete)
     first = run_review(client, include_ai=True).json()
@@ -307,7 +427,7 @@ def test_capability_changes_and_failures_do_not_reuse_incomplete_coverage(
         calls.append(args)
         if fail:
             raise ai.AiError("Synthetic incomplete review")
-        return {"suggestions": []}
+        return decline_all(*args, **kwargs)
 
     monkeypatch.setattr(ai, "complete_json", complete)
     first = run_review(client, include_ai=True).json()
@@ -356,7 +476,7 @@ def test_invalid_item_references_never_record_successful_coverage(
     assert failed["ai_reviewed_count"] == failed["ai_reused_count"] == 0
     assert failed["ai_error"]
     assert organisation_suggestions(owner_client) == []
-    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    monkeypatch.setattr(ai, "complete_json", decline_all)
     retry = advance_review(owner_client, failed)
     assert retry["ai_reviewed_count"] == 1
     assert retry["ai_reused_count"] == 0
@@ -371,7 +491,7 @@ def test_capability_upgrade_preserves_completed_batches_but_requires_current_rev
     from housetory_api.services.inventory_review import coverage
 
     seed_review_items(owner_client, 41)
-    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    monkeypatch.setattr(ai, "complete_json", decline_all)
     partial = run_review(owner_client, include_ai=True).json()
     assert partial["ai_reviewed_count"] == 40
     monkeypatch.setattr(coverage, "CAPABILITY_VERSION", coverage.CAPABILITY_VERSION + 1)
@@ -402,7 +522,7 @@ def test_normal_review_prioritises_unfinished_inputs_over_unchanged_covered_item
 
     def complete(*args, **kwargs):
         calls.append(args)
-        return {"suggestions": []}
+        return decline_all(*args, **kwargs)
 
     monkeypatch.setattr(ai, "complete_json", complete)
     first = run_review(owner_client, include_ai=True).json()
@@ -613,7 +733,7 @@ def test_review_resume_rechecks_provider_consent_and_handles_interrupted_batch(
     from housetory_api.services import ai
 
     seed_review_items(owner_client, 41)
-    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    monkeypatch.setattr(ai, "complete_json", decline_all)
     run = run_review(owner_client, include_ai=True).json()
     monkeypatch.setattr(
         ai, "config_for", lambda *a, **k: replace(configured_ai, model="changed-after-consent")
@@ -634,7 +754,7 @@ def test_review_resume_rechecks_provider_consent_and_handles_interrupted_batch(
     restored = owner_client.get("/api/v1/inventory-review/summary").json()["last_run"]
     assert restored["batch_version"] == run["batch_version"]
     assert restored["ai_reviewed_count"] == 40
-    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: {"suggestions": []})
+    monkeypatch.setattr(ai, "complete_json", decline_all)
     resumed = advance_review(owner_client, restored)
     assert resumed["ai_reviewed_count"] == 41
 
@@ -717,7 +837,7 @@ def test_ai_eligibility_excludes_organised_items_and_no_eligible_batch_is_sent(
 
     def complete(_system, prompt, **_kwargs):
         sent.extend(json.loads(prompt.split("Items: ", 1)[1].split("\nReturn ", 1)[0]))
-        return {"suggestions": []}
+        return decline_all(_system, prompt)
 
     monkeypatch.setattr(ai, "complete_json", complete)
     run = run_review(client, include_ai=True).json()

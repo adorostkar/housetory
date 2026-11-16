@@ -553,6 +553,9 @@ def _ai_organisation_candidates(
                     }
                 )
             declined = (entry.no_category_reason or "").strip()[:200]
+            if category is None and not proposed_tags and not declined and item.category_id is None:
+                # Neither a proposal nor a reason: the item stays unanswered and retryable.
+                continue
             outcomes[str(item.id)] = {
                 "result": "category"
                 if category is not None
@@ -629,10 +632,26 @@ def _ai_organisation_candidates(
         if len(remaining) > MAX_AI_ITEMS
         else None
     )
-    meta["reviewed_count"] = len(selected)
+    answered = [item for item in selected if outcomes[str(item.id)]["result"] != "no_answer"]
+    unanswered_ids = [
+        str(item.id) for item in selected if outcomes[str(item.id)]["result"] == "no_answer"
+    ]
+    if unanswered_ids:
+        note = unanswered_note(len(unanswered_ids))
+        partial = f"{partial} {note}" if partial else note
+    meta["reviewed_count"] = len(answered)
+    meta["unanswered_ids"] = unanswered_ids
     meta["outcomes"] = outcomes
-    meta["reviewed_inputs"] = {str(item.id): inputs[item.id] for item in selected}
+    # Only answered items count as covered; the rest are sent again by a later review.
+    meta["reviewed_inputs"] = {str(item.id): inputs[item.id] for item in answered}
     return output, meta, partial, None
+
+
+def unanswered_note(unanswered: int) -> str:
+    return (
+        f"AI gave no usable answer for {unanswered} of the items it was sent; "
+        "they remain unreviewed and a later review will send them again."
+    )
 
 
 def _canonical_fingerprint_value(value: Any) -> Any:

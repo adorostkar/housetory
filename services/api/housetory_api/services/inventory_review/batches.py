@@ -18,6 +18,7 @@ from ...models import (
 from ...schemas.inventory_review import ReviewRunRequest
 from ..serializers import item_load_options
 from . import _request_fingerprint, _run_out, coverage, run_review
+from .candidates import unanswered_note
 from .scope import MAX_AI_ITEMS, _normalized, _Scope, _scope_conditions
 
 
@@ -236,6 +237,17 @@ def advance(
         **progress.get("ai_outcomes", {}),
         **(child.progress_json or {}).get("ai_outcomes", {}),
     }
+    answered_now = (child.progress_json or {}).get("ai_successful_inputs", {})
+    # Unanswered items are not requeued here (a model that keeps omitting them would never
+    # finish); they stay uncovered for a later review and are reported on this run.
+    still_unanswered = [
+        value for value in progress.get("ai_unanswered_ids", []) if value not in answered_now
+    ]
+    progress["ai_unanswered_ids"] = list(
+        dict.fromkeys(
+            [*still_unanswered, *(child.progress_json or {}).get("ai_unanswered_ids", [])]
+        )
+    )
     child.progress_json = {**child.progress_json, "parent_id": str(run.id)}
     for field in (
         "created_suggestion_count",
@@ -274,14 +286,17 @@ def advance(
     progress["state"] = "paused" if remaining else "completed"
     progress["version"] += 1
     run.progress_json = progress
-    run.status = "partial" if remaining or progress["unavailable"] else "completed"
-    run.partial_reason = (
+    unanswered = len(progress["ai_unanswered_ids"])
+    run.status = "partial" if remaining or progress["unavailable"] or unanswered else "completed"
+    reasons = [
         f"{remaining} items unfinished. Resume to continue without repeating completed batches."
         if remaining
         else f"{progress['unavailable']} items became unavailable or left the selected scope."
         if progress["unavailable"]
-        else None
-    )
+        else None,
+        unanswered_note(unanswered) if unanswered else None,
+    ]
+    run.partial_reason = " ".join(reason for reason in reasons if reason) or None
     run.completed_at = result.completed_at if not remaining else None
     db.flush()
     return _run_out(run)

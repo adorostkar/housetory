@@ -358,7 +358,8 @@ def test_scheduled_ai_needs_separate_consent_and_route_changes_skip_ai(owner_cli
                     "tags": [],
                     "confidence": "high",
                     "reason": "Fixture garden evidence.",
-                }
+                },
+                {"index": 1, "no_category_reason": "Fixture record is unclear."},
             ]
         }
 

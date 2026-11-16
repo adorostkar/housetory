@@ -115,6 +115,8 @@ class ReviewRunOut(BaseModel):
     ai_item_count: int = 0
     ai_eligible_count: int = 0
     ai_reviewed_count: int = 0
+    # Sent to the model but left without a usable answer; still uncovered.
+    ai_unanswered_count: int = 0
     ai_reused_count: int = 0
     background_active: bool = False
     review_again: bool = False

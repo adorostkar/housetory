@@ -83,6 +83,7 @@ def _run_out(run: InventoryReviewRun) -> ReviewRunOut:
     result.ai_coverage_recorded = "remaining" in progress or "ai_eligible_ids" in progress
     if not result.ai_coverage_recorded and run.ai_used and not run.ai_error:
         result.ai_reviewed_count = run.ai_item_count
+    result.ai_unanswered_count = len(progress.get("ai_unanswered_ids", []))
     request = progress.get("payload") or {}
     result.review_again = bool(request.get("review_again"))
     result.reconsider_dismissed = bool(request.get("reconsider_dismissed"))
@@ -249,6 +250,7 @@ def run_review(
     run.progress_json = {
         **run.progress_json,
         "ai_successful_inputs": successful_inputs,
+        "ai_unanswered_ids": ai_meta.get("unanswered_ids", []),
         "ai_eligible_ids": ai_meta.get("eligible_ids", eligible_ids),
     }
     run.ai_provider_label = ai_meta.get("provider")
@@ -354,9 +356,15 @@ def run_review(
             continue
         if row.id in matched_rows:
             continue
-        if (row.source == "ai" and (ai_error or not payload.include_ai)) or (
-            row.source != "ai" and not local_checks
-        ):
+        if (
+            row.source == "ai"
+            and (
+                ai_error
+                or not payload.include_ai
+                # No answer is not a withdrawal: the earlier proposal stays until a real one.
+                or str(row.item_id) in ai_meta.get("unanswered_ids", [])
+            )
+        ) or (row.source != "ai" and not local_checks):
             continue
         if row.source == "ai" and str(row.item_id) in ai_meta.get("reused_ids", []):
             existing_count += 1

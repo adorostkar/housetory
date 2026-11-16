@@ -75,6 +75,7 @@ export interface ReviewRun {
   ai_item_count: number;
   ai_eligible_count?: number;
   ai_reviewed_count?: number;
+  ai_unanswered_count?: number;
   ai_reused_count?: number;
   background_active?: boolean;
   scope_item_ids?: string[];
