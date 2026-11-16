@@ -21,6 +21,7 @@ import { toast } from "sonner";
 
 import { AnswerText } from "@/components/answer-text";
 import { AssistantToolStatus } from "@/components/assistant-tool-status";
+import { InventoryReview } from "@/components/inventory-review";
 import { CONDITIONS } from "@/components/item-form-sections";
 import { SearchScopeControl } from "@/components/search-scope-select";
 import { Badge } from "@/components/ui/badge";
@@ -932,6 +933,11 @@ export function AssistantPage({
                           ))}
                         </div>
                       )}
+                      {message.review && (
+                        <div className="surface mt-2 min-w-0 p-4">
+                          <InventoryReview initialRun={message.review} />
+                        </div>
+                      )}
                       {message.fallback && (
                         <Link className="mt-2 inline-flex text-sm underline" to={message.fallback.href}>
                           {message.fallback.label}
@@ -939,7 +945,7 @@ export function AssistantPage({
                       )}
                     </>
                   )}
-                  {!message.toolRunId && !message.capture && !message.action && !message.clarification && index === messages.length - 1 && !pending && (
+                  {!message.toolRunId && !message.capture && !message.action && !message.review && !message.clarification && index === messages.length - 1 && !pending && (
                     <FollowUps
                       suggestions={followUpSuggestions(
                         message.response,

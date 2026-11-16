@@ -25,6 +25,7 @@ from ...schemas.assistant_tools import CaptureLink, ToolOutput
 from ...schemas.inventory_review import ReviewRunRequest
 from .. import ai_tools, history
 from ..ai_tools.inventory_query import property_item_conditions
+from ..inventory_review.scope import MAX_AI_ITEMS
 
 
 class Arguments(BaseModel):
@@ -79,6 +80,28 @@ class ReviewArguments(Arguments):
     scope_type: Literal["household", "property", "room", "location", "items"] = "household"
     scope_id: uuid.UUID | None = None
     item_ids: list[uuid.UUID] | None = Field(default=None, max_length=100)
+    analysis: Literal["ai", "local"] = Field(
+        default="ai",
+        description=(
+            "ai (default): analyse the items with the household's configured assistant model "
+            "to suggest categories and tags, alongside the local checks. Use it whenever the "
+            "user asks to review, categorise, organise, tidy or get suggestions. "
+            "local: rule-based checks only (naming, duplicates, missing details); use only "
+            "when the user explicitly asks for no AI."
+        ),
+    )
+    review_again: bool = Field(
+        default=False,
+        description=(
+            "Reassess items that were already reviewed or already have a category and tags. "
+            "Use only when the user asks to redo or re-check; earlier decisions are kept."
+        ),
+    )
+
+
+# Up to this many items (three provider requests) are analysed straight away.
+# Larger scopes get one cost confirmation in the conversation first.
+AI_REVIEW_AUTO_ITEMS = MAX_AI_ITEMS * 3
 
 
 class CaptureArguments(Arguments):
@@ -172,13 +195,16 @@ TOOLS.update(
         ),
         "start_inventory_review": Tool(
             "start_inventory_review",
-            "Start normal bounded local review/categorization in the chosen scope, "
-            "preserving coverage/decisions. Returns the shared Review workspace with "
-            "AI consent, Review again and separate reconsideration. Never applies suggestions.",
+            "Carry out an inventory review in the chosen scope: AI category/tag analysis with "
+            "the configured assistant model plus local checks, in background batches that "
+            "reuse earlier coverage and decisions. The result says whether AI analysis "
+            "started, needs one cost confirmation, or was unavailable (local checks only). "
+            "Suggestions appear in the live review; analysis never changes inventory.",
             ReviewArguments,
             "writer",
-            "persist review snapshot and queue local batches",
-            "no inventory writes; AI needs owner consent; suggestions need approval",
+            "persist review snapshot and queue analysis batches",
+            "no inventory writes; AI needs configured provider consent and the owner; "
+            "large scopes need one cost confirmation; every suggestion needs approval",
         ),
         "get_capture_status": Tool(
             "get_capture_status",
@@ -187,8 +213,9 @@ TOOLS.update(
         ),
         "get_inventory_review": Tool(
             "get_inventory_review",
-            "Inspect review progress, coverage and bounded pending suggestions by review_run_id. "
-            "Returns the shared workspace. Does not apply or restart a review.",
+            "Inspect a review by review_run_id: whether analysis is still running, AI coverage, "
+            "and up to 8 pending suggestions. Use it for follow-ups about what was found. "
+            "Does not apply suggestions or restart a review.",
             ReviewStatusArguments,
             side_effects="reconcile interrupted review delivery only",
         ),
@@ -296,7 +323,7 @@ def execute(
     if name == "start_inventory_review":
         from .review_jobs import start_review
 
-        payload = ReviewRunRequest(**args.model_dump(), request_id=receipt_id)
+        payload = ReviewRunRequest(**args.model_dump(exclude={"analysis"}), request_id=receipt_id)
         if run.property_id:
             if payload.scope_type == "household":
                 payload = payload.model_copy(
@@ -325,10 +352,59 @@ def execute(
                     )
                 ):
                     raise ApiError(404, "room_not_found", "Review is outside this property.")
+        from ..inventory_review.scope import _scope_conditions
+        from ..inventory_review_schedule import _assistant_route
+
+        conditions, _, _ = _scope_conditions(db, auth.household.id, payload)
+        item_count = db.scalar(select(func.count(Item.id)).where(*conditions)) or 0
+        requests = -(-item_count // MAX_AI_ITEMS)
+        status, _ = _assistant_route(db, auth.household.id)
+        unchanged = "Nothing in the inventory changes until the user accepts a suggestion."
+        if args.analysis == "local":
+            mode, reason = "local", "Local checks only, as requested."
+        elif not status.configured:
+            mode = "local"
+            reason = "AI analysis is unavailable: " + (
+                status.error or "no assistant model is configured for this household."
+            )
+        elif auth.role != "owner":
+            mode, reason = "local", "Only the household owner can run AI analysis."
+        elif item_count > AI_REVIEW_AUTO_ITEMS:
+            mode, reason = "ai_needs_confirmation", ""
+        else:
+            mode, reason = "ai", ""
+        payload = payload.model_copy(update={"include_ai": mode == "ai"})
         result = start_review(db, auth, payload)
+        if mode == "ai":
+            summary = (
+                f"AI analysis of {item_count} items started in the background with the "
+                "configured assistant model. Category and tag suggestions appear in the live "
+                "review in this conversation as batches finish; it is not finished yet. "
+                f"Do not ask the user to enable AI. {unchanged}"
+            )
+        elif mode == "ai_needs_confirmation":
+            summary = (
+                f"Local checks started. AI analysis of {item_count} items needs about "
+                f"{requests} provider requests, so the live review shows one 'Run AI analysis' "
+                "confirmation; usage charges may apply. Ask the user to confirm there. "
+                f"AI analysis has not started. {unchanged}"
+            )
+        else:
+            summary = (
+                f"{reason} Local rule-based checks of {item_count} items started instead; "
+                "they find naming, duplicate and missing-detail issues but cannot suggest "
+                f"categories from meaning. Say this plainly. {unchanged}"
+            )
         return ToolOutput(
-            summary="Local review started. AI organization needs explicit consent in this review. "
-            "Approve suggestions here before inventory changes.",
+            summary=summary,
+            facts={
+                "review_analysis": {
+                    "mode": mode,
+                    "reason": reason,
+                    "item_count": item_count,
+                    "provider_requests": requests,
+                }
+            },
             review=result,
         )
     if name == "get_inventory_review":
@@ -368,9 +444,29 @@ def execute(
             offset=0,
             review_run_id=review.id,
         )
+        current = _run_out(review)
+        if current.background_active:
+            state = "Analysis is still running"
+        elif current.remaining_item_count:
+            state = "Analysis is unfinished (stopped or interrupted; it can be resumed)"
+        else:
+            state = "Analysis finished"
+        if review.include_ai:
+            coverage = (
+                f"AI analysed {current.ai_reviewed_count or 0} of "
+                f"{current.ai_eligible_count or 0} eligible items"
+                + (f"; AI error: {review.ai_error}" if review.ai_error else "")
+            )
+        else:
+            coverage = "local checks only, no AI analysis"
         return ToolOutput(
-            summary=f"{review.item_count_scanned} locally scanned; {pending.total} pending.",
-            review=_run_out(review),
+            summary=(
+                f"{state}: {review.item_count_scanned} of {review.total_item_count} items "
+                f"checked; {coverage}; {pending.total} suggestions waiting for the user's "
+                "approval. Suggestions are proposals, not applied changes; the user accepts "
+                "or dismisses each one in the live review."
+            ),
+            review=current,
             facts=pending.model_dump(mode="json"),
         )
     if name == "get_capture_status":

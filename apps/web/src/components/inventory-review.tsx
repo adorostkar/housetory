@@ -319,7 +319,7 @@ export function InventoryReview({
   };
 
   const runReview = useMutation({
-    mutationFn: async (request: { resume?: ReviewRun; reviewAgain?: boolean }) => {
+    mutationFn: async (request: { resume?: ReviewRun; reviewAgain?: boolean; includeAi?: boolean }) => {
       if (!canWrite) throw new Error("Review changes require write access.");
       stopReview.current = false;
       setCancelRequested(false);
@@ -330,7 +330,7 @@ export function InventoryReview({
         scope_type: scopeType,
         scope_id: scopeType === "items" || scopeType === "household" ? null : scopeId,
         item_ids: scopeType === "items" ? selectedItemIds : null,
-        include_ai: includeAi,
+        include_ai: request.includeAi ?? includeAi,
         review_again: Boolean(request.reviewAgain),
         reconsider_dismissed: Boolean(request.reviewAgain && reconsiderDismissed),
         request_id: requestId,
@@ -613,7 +613,10 @@ export function InventoryReview({
   const consent = <ReviewAiConsent checked={includeAi}
     disabled={runReview.isPending || Boolean(displayedRun?.background_active)}
     isOwner={isOwner} aiReady={aiReady} provider={aiProvider}
-    onChange={setIncludeAi} background={embedded} />;
+    onChange={setIncludeAi} background={embedded} detailsOnly={embedded} />;
+  const waitingCount = suggestionsQuery.data?.total ?? 0;
+  const analysisDone = Boolean(displayedRun && !displayedRun.background_active
+    && !displayedRun.remaining_item_count && displayedRun.status === "completed");
   const workspaceParams = new URLSearchParams(localParams);
   if (selectedRunId) workspaceParams.set("run_id", selectedRunId);
 
@@ -631,11 +634,18 @@ export function InventoryReview({
             onClick={() => void runQuery.refetch()}>Retry loading review</Button>
         </div> : !displayedRun ? <p role="status" className="text-sm">Loading live review…</p> : <>
           <div role="status" className="space-y-1">
-            <p className="text-sm font-medium">{displayedRun.background_active ? "Reviewing…"
-              : displayedRun.batch_state === "cancelled" ? "Review stopped"
-              : displayedRun.status === "completed" ? "Review complete" : "Review needs attention"}</p>
-            <p className="text-xs">Reviewed {displayedRun.item_count_scanned}
-              {` of ${displayedRun.total_item_count}`} items locally.</p>
+            <p className="text-sm font-medium">{displayedRun.background_active
+              ? displayedRun.include_ai ? "Analysing with AI…" : "Checking items…"
+              : displayedRun.batch_state === "cancelled" ? "Analysis stopped"
+              : analysisDone ? displayedRun.include_ai ? "Analysis finished" : "Local checks finished"
+              : "Analysis needs attention"}</p>
+            <p className="text-xs">Checked {displayedRun.item_count_scanned}
+              {` of ${displayedRun.total_item_count}`} items.</p>
+            {analysisDone && suggestionsQuery.data && <p className="text-xs">
+              {waitingCount
+                ? `${pluralize(waitingCount, "suggestion")} waiting for your approval. Nothing has been changed yet.`
+                : "No suggestions. Nothing has been changed."}
+            </p>}
             <p className="text-xs text-muted-foreground">
               This run: {pluralize(displayedRun.created_suggestion_count, "new suggestion")} ·{" "}
               {displayedRun.existing_suggestion_count} already pending.
@@ -646,6 +656,9 @@ export function InventoryReview({
                 ? ` of ${displayedRun.ai_eligible_count ?? 0} eligible` : ""}.
               {Boolean(displayedRun.ai_reused_count) &&
                 ` Earlier AI coverage reused for ${pluralize(displayedRun.ai_reused_count ?? 0, "unchanged item")}.`}
+              {analysisDone && !displayedRun.ai_error && displayedRun.ai_coverage_recorded
+                && !displayedRun.ai_eligible_count && !displayedRun.ai_reused_count &&
+                " Every item here already has a category and tags, so there was nothing for AI to suggest. Ask me to review them again to reassess."}
             </p>}
           </div>
           {displayedRun.background_active && <>
@@ -661,13 +674,25 @@ export function InventoryReview({
               disabled={!canWrite || runReview.isPending || (displayedRun.include_ai && !isOwner)}
               onClick={() => runReview.mutate({ resume: displayedRun })}>Resume review</Button>}
           {displayedRun.ai_error && <p role="alert" className="text-xs text-destructive">
-            AI review did not finish. Completed work is saved; resume or use the full Review workspace.
+            AI analysis did not finish. Completed work is saved; resume or retry below.
           </p>}
-          {(!displayedRun.include_ai || displayedRun.ai_error) && <div className="space-y-2 border-t pt-3">
-            {consent}
-            <Button className="min-h-11" variant="outline"
-              disabled={!canRun || !includeAi || runReview.isPending || displayedRun.background_active}
-              onClick={() => startRun()}>Review with AI</Button>
+          {(!displayedRun.include_ai || displayedRun.ai_error) && !displayedRun.background_active
+            && <div className="space-y-2 border-t pt-3 text-xs" aria-label="AI analysis">
+            {isOwner && aiReady ? <>
+              <p>AI can suggest categories and tags for {pluralize(displayedRun.total_item_count, "item")}:
+                about {pluralize(Math.max(1, Math.ceil(displayedRun.total_item_count / 40)), "request")} to {aiProvider}.
+                Usage charges may apply.</p>
+              <Button className="min-h-11" disabled={!canRun || runReview.isPending}
+                onClick={() => { setRunError(null); runReview.mutate({ includeAi: true }); }}>
+                {displayedRun.ai_error ? "Retry AI analysis" : "Run AI analysis"}</Button>
+              {consent}
+            </> : <p className="text-muted-foreground">
+              {isOwner
+                ? <>AI analysis isn’t set up, so only local checks ran. They find naming, duplicate and
+                  missing-detail issues but can’t suggest categories from meaning.{" "}
+                  <Link to="/settings/ai" className="underline">Set up AI</Link></>
+                : "Only the household owner can run AI analysis. Local checks ran instead."}
+            </p>}
           </div>}
         </>}
         {runError && <p role="alert" className="text-xs text-destructive">{runError}</p>}

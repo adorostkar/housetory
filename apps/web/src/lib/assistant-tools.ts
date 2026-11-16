@@ -43,6 +43,11 @@ export interface AssistantToolRun {
   worker_available: boolean | null;
 }
 
+/** The review a step started. Status reads refer to a review already shown above. */
+export function startedReview(step: AssistantToolRun["steps"][number]) {
+  return step.call.name === "start_inventory_review" ? step.result.review ?? null : null;
+}
+
 export function assistantAnswerText(text: string, references: AssistantToolOutput["references"] = []) {
   const internalField = /^(?:[-*]\s*)?`?(?:item_id|item_ids|loan_id|record_id|review_run_id|scope_id|household_id|batch_state|background_active|created_suggestion_count|existing_suggestion_count|item_count_scanned|remaining_item_count|include_ai)`?\s*[:=]/;
   let answer = text.replace(/```[\s\S]*?```/g, "")
@@ -88,7 +93,7 @@ export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
   ];
   const seen = new Set<string>();
   // Prepared work is shown by its own card; the answer to everything else leads it.
-  const answer = run.steps.some(({ result }) => result.proposal || result.review || result.capture)
+  const answer = run.steps.some((step) => step.result.proposal || startedReview(step) || step.result.capture)
     && ["completed", "awaiting_approval"].includes(run.state)
     ? assistantAnswerText(run.answer ?? "", run.steps.flatMap(({ result }) => result.references ?? []))
     : "";

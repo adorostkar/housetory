@@ -151,6 +151,22 @@ for (const mobile of [false, true]) {
     await expect(page.getByRole("button", { name: "Review again", exact: true })).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/${size}-review.png`, fullPage: true });
 
+    // Without AI, a review request still runs: local checks, stated plainly.
+    await page.goto("/items");
+    await page.locator('button[title="Open assistant"]').first().click();
+    const offlinePanel = page.getByTestId("assistant-panel");
+    await offlinePanel.getByRole("textbox", { name: "Ask the Housetory assistant" })
+      .fill("Review my items and suggest categories.");
+    await offlinePanel.getByRole("button", { name: "Send question", exact: true }).click();
+    await expect(offlinePanel.getByText(/AI isn’t available right now, so I ran the local checks instead/)).toBeVisible();
+    const localReview = offlinePanel.getByRole("region", { name: "Inventory review", exact: true }).last();
+    await expect(localReview.getByRole("status")).toContainText("Local checks finished");
+    await expect(localReview.getByRole("status")).toContainText(/Nothing has been changed/);
+    await expect(localReview.getByLabel("AI analysis")).toContainText("AI analysis isn’t set up, so only local checks ran.");
+    await expect(localReview.getByRole("button", { name: "Run AI analysis" })).toHaveCount(0);
+    if (shots) await page.screenshot({ path: `${shots}/${size}-offline-review.png` });
+    await offlinePanel.getByRole("button", { name: "Close assistant", exact: true }).click();
+
     await page.goto("/imports");
     await expect(page.getByRole("textbox", { name: /Notes/ })).not.toHaveAttribute("placeholder", /\\n/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

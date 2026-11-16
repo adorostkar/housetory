@@ -263,90 +263,192 @@ def test_failed_worker_reconciles_and_request_replay_is_idempotent(
     assert invalid.status_code == 409
 
 
-def test_required_review_request_uses_existing_background_review_and_explicit_approval(
-    owner_client,
-    configured_ai,
-    monkeypatch,
-):
+def _review_job(review_id):
+    from housetory_api.models import InventoryReviewRun
     from housetory_api.services.assistant_tools import review_jobs
 
-    client = owner_client
-    _, item = seed(client, "  Validation drill  ")
-    responses = iter(
-        [
-            call("start_inventory_review", scope_type="items", item_ids=[item["id"]]),
-            {
-                "kind": "answer",
-                "message": "Local review is running. Enable AI suggestions for categorization.",
-            },
-        ]
-    )
-    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: next(responses))
-    run = start(client, "Do a review and categorise the items.")
-    work(run)
-    result = read(client, run)
-    review = result["steps"][0]["result"]["review"]
-    assert review["background_active"]
-    assert review["scope_item_ids"] == [item["id"]]
     with SessionLocal() as db:
-        from housetory_api.models import InventoryReviewRun
-
-        root = db.get(InventoryReviewRun, uuid.UUID(review["id"]))
-        job = db.get(Job, uuid.UUID(root.progress_json["background_job_id"]))
-        payload = job.payload
+        root = db.get(InventoryReviewRun, uuid.UUID(review_id))
+        payload = db.get(Job, uuid.UUID(root.progress_json["background_job_id"])).payload
     review_jobs.run_job(payload)
-    current = client.get(f"/api/v1/inventory-review/runs/{review['id']}").json()
-    assert current["batch_state"] == "completed", current
-    assert current["item_count_scanned"] == 1
-    assert current["ai_reviewed_count"] == 0
-    assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["category"] is None
-    queued = client.get(f"/api/v1/inventory-review/suggestions?review_run_id={review['id']}").json()
-    assert all(suggestion["item"]["id"] == item["id"] for suggestion in queued["items"])
-    ai_review = client.post(
-        "/api/v1/inventory-review/runs",
-        json={
-            "request_id": str(uuid.uuid4()),
-            "scope_type": "items",
-            "item_ids": [item["id"]],
-            "include_ai": True,
-            "background": True,
-            "assistant_run_id": run["id"],
-            "assistant_review_id": review["id"],
-        },
-    )
-    assert ai_review.status_code == 200, ai_review.text
-    active = ai_review.json()
-    assert read(client, run)["steps"][0]["result"]["review"]["id"] == active["id"]
-    monkeypatch.setattr(
-        ai,
-        "complete_json",
-        lambda *a, **k: {
+
+
+def _tagging(prompts=None):
+    def complete(system, prompt, **kwargs):
+        if prompts is not None:
+            prompts.append(prompt)
+        items = json.loads(prompt.split("Items: ")[1].split("\nReturn ")[0])
+        return {
             "suggestions": [
                 {
-                    "index": 0,
+                    "index": entry["index"],
                     "tags": [{"name": "tools"}],
                     "confidence": "high",
                     "reason": "Synthetic tool review",
                 }
-            ],
-        },
+                for entry in items
+            ]
+        }
+
+    return complete
+
+
+def test_review_request_runs_ai_analysis_directly_and_keeps_explicit_approval(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    client = owner_client
+    _, item = seed(client, "Validation drill")
+    prompts = []
+    responses = iter(
+        [
+            call("start_inventory_review", scope_type="items", item_ids=[item["id"]]),
+            {"kind": "answer", "message": "I'm analysing your items; suggestions appear below."},
+        ]
     )
-    with SessionLocal() as db:
-        root = db.get(InventoryReviewRun, uuid.UUID(active["id"]))
-        payload = db.get(Job, uuid.UUID(root.progress_json["background_job_id"])).payload
-    review_jobs.run_job(payload)
-    queue = client.get(f"/api/v1/inventory-review/suggestions?review_run_id={active['id']}").json()
-    organisation = next(
-        suggestion for suggestion in queue["items"] if suggestion["type"] == "organisation"
-    )
+
+    def planner(system, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        return next(responses)
+
+    monkeypatch.setattr(ai, "complete_json", planner)
+    run = start(client, "Review my items and suggest categories.")
+    work(run)
+    result = read(client, run)
+    step = result["steps"][0]["result"]
+    review = step["review"]
+    # The tool started the AI analysis itself: no separate enable-AI request.
+    assert step["facts"]["review_analysis"]["mode"] == "ai"
+    assert review["include_ai"] and review["background_active"]
+    assert "Do not ask the user to enable AI" in prompts[-1]["observations"][0]["result"]["summary"]
+    assert result["state"] == "awaiting_approval"
+
+    sent = []
+    monkeypatch.setattr(ai, "complete_json", _tagging(sent))
+    _review_job(review["id"])
+    current = client.get(f"/api/v1/inventory-review/runs/{review['id']}").json()
+    assert current["batch_state"] == "completed", current
+    assert current["ai_reviewed_count"] == 1 and len(sent) == 1
+    queue = client.get(f"/api/v1/inventory-review/suggestions?review_run_id={review['id']}").json()
+    organisation = next(entry for entry in queue["items"] if entry["type"] == "organisation")
+    # Analysis finished is not a change.
     assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["tags"] == []
+
+    responses = iter(
+        [
+            call("get_inventory_review", review_run_id=review["id"]),
+            {"kind": "answer", "message": "One suggestion: tag the drill as tools."},
+        ]
+    )
+    monkeypatch.setattr(ai, "complete_json", planner)
+    follow = start(client, "What did you find?", parent_id=run["id"])
+    work(follow)
+    followed = read(client, follow)
+    # Reading results is an answer, not new work awaiting approval.
+    assert followed["state"] == "completed"
+    observed = followed["steps"][0]["result"]
+    assert observed["summary"].startswith("Analysis finished: 1 of 1 items checked")
+    assert "AI analysed 1 of 1 eligible items" in observed["summary"]
+    assert "not applied changes" in observed["summary"]
+    assert observed["facts"]["total"] >= 1
+    assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["tags"] == []
+
+    # Unchanged, already analysed information is not sent to the provider again.
+    responses = iter(
+        [
+            call("start_inventory_review", scope_type="items", item_ids=[item["id"]]),
+            {"kind": "answer", "message": "Nothing new to suggest."},
+        ]
+    )
+    monkeypatch.setattr(ai, "complete_json", planner)
+    again = start(client, "Review my items and suggest categories.")
+    work(again)
+    second = read(client, again)["steps"][0]["result"]["review"]
+    resent = []
+    monkeypatch.setattr(ai, "complete_json", _tagging(resent))
+    _review_job(second["id"])
+    assert resent == []
+
     approved = client.post(
-        f"/api/v1/inventory-review/suggestions/{organisation['id']}/accept",
-        json={},
+        f"/api/v1/inventory-review/suggestions/{organisation['id']}/accept", json={}
     )
     assert approved.status_code == 200, approved.text
     saved = client.get(f"/api/v1/items/{item['id']}").json()["item"]
     assert [tag["name"] for tag in saved["tags"]] == ["tools"]
+
+
+def test_review_tool_confirms_large_scopes_once_and_falls_back_honestly(
+    owner_client,
+    anon_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services.assistant_tools import registry
+    from tests.test_lending import _add_member, _headers
+
+    client = owner_client
+    room, first = seed(client, "Validation drill")
+    second = client.post(
+        "/api/v1/items", json={"name": "Validation saw", "room_id": room["id"]}
+    ).json()["item"]
+    monkeypatch.setattr(registry, "AI_REVIEW_AUTO_ITEMS", 1)
+
+    def ask(http, headers, *steps):
+        responses = iter(steps)
+        monkeypatch.setattr(ai, "complete_json", lambda *a, **k: next(responses))
+        response = http.post(
+            "/api/v1/assistant/runs",
+            json={"request_id": str(uuid.uuid4()), "query": "Review and categorise everything"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        run = response.json()
+        work(run)
+        current = http.get(f"/api/v1/assistant/runs/{run['id']}", headers=headers)
+        return run, current.json()["steps"][0]["result"]
+
+    done = {"kind": "answer", "message": "Started."}
+    run, large = ask(client, {}, call("start_inventory_review"), done)
+    analysis = large["facts"]["review_analysis"]
+    assert (analysis["mode"], analysis["item_count"]) == ("ai_needs_confirmation", 2)
+    assert not large["review"]["include_ai"]
+    assert "AI analysis has not started" in large["summary"]
+    # Local checks need no provider and no confirmation.
+    sent = []
+    monkeypatch.setattr(ai, "complete_json", _tagging(sent))
+    _review_job(large["review"]["id"])
+    assert sent == []
+    # The single confirmation is the existing owner-only review request.
+    confirmed = client.post(
+        "/api/v1/inventory-review/runs",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "scope_type": "household",
+            "include_ai": True,
+            "background": True,
+            "assistant_run_id": run["id"],
+            "assistant_review_id": large["review"]["id"],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    _review_job(confirmed.json()["id"])
+    assert len(sent) == 1
+    ai_run = client.get(f"/api/v1/inventory-review/runs/{confirmed.json()['id']}").json()
+    assert ai_run["ai_reviewed_count"] == 2
+    for item in (first, second):
+        assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["tags"] == []
+
+    _, local = ask(client, {}, call("start_inventory_review", analysis="local"), done)
+    assert local["facts"]["review_analysis"]["mode"] == "local"
+    assert not local["review"]["include_ai"]
+
+    # A member may review, but only the owner can spend on AI analysis.
+    token, _ = _add_member(client, email="member@example.com", role="member")
+    _, member = ask(anon_client, _headers(token), call("start_inventory_review"), done)
+    assert member["facts"]["review_analysis"]["mode"] == "local"
+    assert "Only the household owner" in member["summary"]
+    assert not member["review"]["include_ai"]
 
 
 def test_detached_review_has_no_transaction_and_cancelled_inference_does_not_publish(

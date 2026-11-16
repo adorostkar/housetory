@@ -12,7 +12,7 @@ import {
 } from "@/lib/assistant-page-context";
 import { useInvalidateInventory, useSession } from "@/lib/queries";
 import type { SearchTurn } from "@/lib/search-session";
-import type { SearchConversationContext, SearchQueryResponse } from "@/lib/types";
+import type { ReviewRun, SearchConversationContext, SearchQueryResponse } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
 import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
@@ -28,6 +28,8 @@ export interface AssistantMessage {
   fallback?: { href: string; label: string };
   action?: AssistantActionState;
   clarification?: ActionClarification;
+  /** A local review started for the user when AI was unavailable. */
+  review?: ReviewRun;
   toolRunId?: string;
   toolRun?: AssistantToolRun;
   toolAnswer?: boolean;
@@ -581,6 +583,39 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       }));
       if (session.scopeKey === scope) session.record(value, response);
     });
+    // Without AI the request is still carried out with the local checks, and says so.
+    const isReviewRequest = /\b(?:review|categori[sz]e|organi[sz]e|tidy|declutter)\b/i.test(value)
+      && /\b(?:items?|inventory|things|stuff|everything|categor\w+|tags?|home|house)\b/i.test(value);
+    const runLocalReview = () => {
+      const finish = (message: AssistantMessage) => update(scope, (entry) => ({
+        ...entry,
+        messages: [
+          ...(regenerate ? entry.messages.slice(0, -2) : entry.messages),
+          { role: "user", text: value, pageReferences },
+          message,
+        ],
+        draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
+        pending: false,
+      }));
+      return api.post<ReviewRun>("/inventory-review/runs", {
+        scope_type: selection.propertyId ? "property" : "household",
+        scope_id: selection.propertyId || null,
+        include_ai: false, background: true, request_id: crypto.randomUUID(),
+      }, { signal: controller.signal }).then((review) => {
+        if (controller.signal.aborted) return;
+        finish({
+          role: "assistant", review,
+          text: "AI isn’t available right now, so I ran the local checks instead. They find naming, duplicate and missing-detail issues but can’t suggest categories from meaning.",
+        });
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        finish({
+          role: "assistant",
+          text: `AI isn’t available and the local review could not start: ${getApiErrorMessage(error)}`,
+          fallback: { href: withHousehold("/review", selection.householdId || undefined), label: "Open Review" },
+        });
+      });
+    };
     const runLegacy = () => classifyAssistantIntent(
       value, selection.householdId, selection.propertyId, controller.signal,
     ).catch((error: unknown) => {
@@ -609,6 +644,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           respondUnsupported();
           return;
         }
+        if (isReviewRequest) return runLocalReview();
         if (looksLikeItemDescription(value)) {
           captureItem();
           return;

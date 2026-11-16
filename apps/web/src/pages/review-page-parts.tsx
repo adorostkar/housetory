@@ -40,8 +40,10 @@ export function SuggestionStatusBadge({ suggestion }: { suggestion: ReviewSugges
 }
 
 export function ReviewAiConsent({
-  checked, disabled, isOwner, aiReady, provider, onChange, background = false,
+  checked, disabled, isOwner, aiReady, provider, onChange, background = false, detailsOnly = false,
 }: {
+  /** Show only the data-sharing details, for a single confirm-and-run step. */
+  detailsOnly?: boolean;
   checked: boolean;
   disabled: boolean;
   isOwner: boolean;
@@ -52,7 +54,7 @@ export function ReviewAiConsent({
 }) {
   return (
     <div className="space-y-2 text-xs">
-      <label className="flex min-h-11 items-center gap-2.5">
+      {!detailsOnly && <label className="flex min-h-11 items-center gap-2.5">
         <input type="checkbox" className="size-4 shrink-0 accent-primary"
           checked={checked} disabled={disabled || !isOwner || !aiReady}
           onChange={(event) => onChange(event.target.checked)} />
@@ -61,7 +63,7 @@ export function ReviewAiConsent({
             Uses your configured provider; usage charges may apply.
           </span>
         </span>
-      </label>
+      </label>}
       <details className="text-2xs leading-relaxed text-muted-foreground">
         <summary className="min-h-11 cursor-pointer py-3">What gets sent?</summary>
         <p>Uses the household Assistant task via {provider}. AI checks items missing

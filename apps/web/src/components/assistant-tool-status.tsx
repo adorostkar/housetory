@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AnswerText } from "@/components/answer-text";
 import { InventoryReview } from "@/components/inventory-review";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { assistantAnswerText, type AssistantToolRun } from "@/lib/assistant-tools";
+import { assistantAnswerText, startedReview, type AssistantToolRun } from "@/lib/assistant-tools";
 import { withHousehold } from "@/lib/household-links";
 import { useSelectHousehold, useSession } from "@/lib/queries";
 
@@ -19,9 +19,12 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const active = ["queued", "running"].includes(run.state);
   const references = [...new Map(run.steps.flatMap(({ result }) =>
     result.references ?? []).map((reference) => [reference.id, reference])).values()];
-  const reviews = [...new Map(run.steps.flatMap(({ result }) =>
-    result.review ? [result.review] : []).map((review) => [review.id, review])).values()];
-  const hasPreparedWork = run.steps.some(({ result }) => result.proposal || result.review || result.capture);
+  const reviews = [...new Map(run.steps.flatMap((step) => {
+    const review = startedReview(step);
+    return review ? [review] : [];
+  }).map((review) => [review.id, review])).values()];
+  const hasPreparedWork = run.steps.some((step) =>
+    step.result.proposal || startedReview(step) || step.result.capture);
   const change = async (action: "cancel" | "retry") => {
     setBusy(true);
     try {

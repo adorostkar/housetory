@@ -10,6 +10,8 @@ let itemName = "";
 let loanId = "";
 let reviewItemIds: string[] = [];
 let holdNext = false;
+let holdReview = false;
+let reviewRequests = 0;
 let release: (() => void) | undefined;
 const contexts: { request: string; parents: unknown[] }[] = [];
 
@@ -26,8 +28,11 @@ test.beforeAll(async ({ request }) => {
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const prompt = body.messages.at(-1).content as string;
-    if (holdNext) {
+    const planning = prompt.includes('"step_schema"');
+    if (!planning) reviewRequests += 1;
+    if (holdNext || (holdReview && !planning)) {
       holdNext = false;
+      holdReview = false;
       await new Promise<void>((resolve) => { release = resolve; });
       release = undefined;
     }
@@ -37,7 +42,17 @@ test.beforeAll(async ({ request }) => {
       contexts.push({ request: input.request, parents: input.context_newest_first });
       const observed = input.observations.length;
       const tool = (name: string, args: object) => ({ kind: "tool", call: { name, arguments: args } });
-      if (input.request.includes("categorise")) {
+      if (input.request.includes("whole home")) {
+        output = observed === 0 ? tool("start_inventory_review", {})
+          : { kind: "answer", message: "This is a large review, so please confirm the AI analysis below.",
+            prepared_note: input.observations[0].result.summary };
+      } else if (input.request === "What did you find?") {
+        const review = input.context_newest_first[0].observations.at(-1).result.review;
+        output = observed === 0 ? tool("get_inventory_review", { review_run_id: review.id })
+          : { kind: "answer", message: input.observations[0].result.summary.startsWith("Analysis finished")
+            ? "I suggested the **tools** tag. Nothing is applied until you accept it."
+            : "The analysis is still running." };
+      } else if (input.request.includes("categor")) {
         output = observed === 0
           ? tool("start_inventory_review", { scope_type: "items", item_ids: reviewItemIds })
           : { kind: "answer", message: "", prepared_note: "The review is partial and paused with zero items scanned." };
@@ -89,7 +104,7 @@ test.beforeAll(async ({ request }) => {
   expect(task.ok(), await task.text()).toBeTruthy();
 });
 
-test.afterEach(() => { holdNext = false; release?.(); });
+test.afterEach(() => { holdNext = false; holdReview = false; release?.(); });
 test.afterAll(async ({ request }) => {
   release?.();
   if (providerId) await request.delete(`/api/v1/ai/providers/${providerId}`);
@@ -213,23 +228,21 @@ for (const mobile of [false, true]) {
     await page.reload();
     await expect(page.getByText("Already applied.").last()).toBeVisible();
 
-    await ask(page, "Do a review and categorise the items.");
+    // The request itself carries out the AI analysis: no checkbox, no second prompt.
+    holdReview = true;
+    await ask(page, "Review my items and suggest categories.");
     const workspace = page.getByRole("region", { name: "Inventory review", exact: true }).last();
-    await expect(workspace.getByRole("status")).toContainText("Reviewed 2 of 2 items locally");
-    await expect(workspace.getByRole("status")).toContainText("Review complete");
+    await expect(workspace.getByRole("status")).toContainText("Analysing with AI…");
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await expect(workspace.getByRole("button", { name: "Run AI analysis" })).toHaveCount(0);
+    await expect(workspace.getByRole("checkbox", { name: /Include AI suggestions/ })).toHaveCount(0);
     await expect(page.getByText("The review is partial and paused with zero items scanned.", { exact: true }).last()).toBeHidden();
     await expect(workspace.getByRole("combobox", { name: "Review scope type" })).toBeHidden();
     await expect(page.getByLabel("Assistant tool task").last()).toHaveAttribute("data-state", "awaiting_approval");
-    await workspace.getByRole("checkbox", { name: /Include AI suggestions/ }).check();
-    holdNext = true;
-    await workspace.getByRole("button", { name: "Review with AI", exact: true }).click();
-    await page.getByRole("button", { name: "Run review with AI", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Include AI suggestions?" })).toBeHidden();
-    await expect.poll(() => Boolean(release)).toBe(true);
     await workspace.getByRole("button", { name: "Cancel review", exact: true }).click();
-    await expect(workspace.getByRole("status")).toContainText("Review stopped");
+    await expect(workspace.getByRole("status")).toContainText("Analysis stopped");
     release!();
-    holdNext = true;
+    holdReview = true;
     await workspace.getByRole("button", { name: "Resume review", exact: true }).click();
     await expect.poll(() => Boolean(release)).toBe(true);
     await page.getByRole("button", { name: "Close assistant", exact: true }).click();
@@ -242,6 +255,17 @@ for (const mobile of [false, true]) {
     }).filter({ hasText: `Approved ${itemName}` }).last();
     await expect(suggestion).toBeVisible();
     await expect(workspace.getByRole("status")).toContainText("1 new suggestion · 1 already pending");
+    // Finished analysis is clearly not an applied change.
+    await expect(workspace.getByRole("status")).toContainText("Analysis finished");
+    await expect(workspace.getByRole("status")).toContainText("waiting for your approval. Nothing has been changed yet.");
+    await ask(page, "What did you find?");
+    const found = page.getByLabel("Assistant tool task").last();
+    await expect(found.getByTestId("answer-text"))
+      .toHaveText("I suggested the tools tag. Nothing is applied until you accept it.");
+    // A follow-up answers in words; it does not open a second copy of the live review.
+    await expect(found.getByRole("region", { name: "Inventory review" })).toHaveCount(0);
+    await expect(found).toHaveAttribute("data-state", "completed");
+    expect((await (await request.get(`/api/v1/items/${itemId}`)).json()).item.tags).toEqual([]);
     await expect(suggestion.getByText("New this review", { exact: true })).toBeVisible();
     await expect(page.locator("li").filter({ hasText: `Earlier reviewed ${itemName}` })
       .getByText("Already pending", { exact: true })).toBeVisible();
@@ -316,4 +340,37 @@ test("the Review queue opens exact older captures inline and preserves a parked 
     await expect(panel.getByText("parked.pdf", { exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
   }
+});
+
+test("a large review asks for one cost confirmation before any AI request", async ({ page, request }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const total = async () => (await (await request.get("/api/v1/items?limit=1")).json()).total as number;
+  for (let index = await total(); index <= 121; index += 1) {
+    const created = await request.post("/api/v1/items", { data: { name: `Bulk review item ${index}`, quantity: 1 } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+  }
+  const items = await total();
+  expect(items).toBeGreaterThan(120);
+  await page.goto("/items");
+  const before = reviewRequests;
+  await ask(page, "Review my whole home and suggest categories", true);
+  const workspace = page.getByRole("region", { name: "Inventory review", exact: true }).last();
+  const offer = workspace.getByLabel("AI analysis");
+  await expect(offer).toContainText(`${items} items`);
+  await expect(offer).toContainText(`about ${Math.ceil(items / 40)} requests`);
+  await expect(offer).toContainText("Usage charges may apply.");
+  await expect(page.getByLabel("Assistant answer").last())
+    .toHaveText("This is a large review, so please confirm the AI analysis below.");
+  // Local checks ran for free; the AI analysis has not been claimed or started.
+  await expect(workspace.getByRole("status")).toContainText("Local checks finished");
+  expect(reviewRequests).toBe(before);
+  await page.screenshot({ path: test.info().outputPath("large-review-confirmation.png") });
+  // One click, no further dialog.
+  await offer.getByRole("button", { name: "Run AI analysis", exact: true }).click();
+  await expect(workspace.getByRole("status")).toContainText("Analysing with AI…");
+  await expect(page.getByRole("dialog", { name: "Include AI suggestions?" })).toHaveCount(0);
+  await expect(workspace.getByRole("status")).toContainText("Analysis finished", { timeout: 120_000 });
+  expect(reviewRequests).toBeGreaterThan(before);
+  await expect(offer).toHaveCount(0);
 });

@@ -14,19 +14,30 @@ from ..inventory_review import _run_out, batches
 TASK = "assistant.review"
 
 
-def _queue(db, auth, run, *, resume=False):
+def _queue(db, auth, run, *, resume=False, continuing=False):
+    """Queue the next batch. `continuing` hands over from the job that just finished a
+    batch, keeping the review marked active so observers never see a false pause."""
     run = batches._locked(db, auth.household.id, run.id)
     progress = dict(run.progress_json)
-    if progress["state"] == "cancelled" and not resume:
-        return _run_out(run)
-    if not progress["remaining"] and not progress.get("retry_ids"):
+    finished = (progress["state"] == "cancelled" and not resume) or (
+        not progress["remaining"] and not progress.get("retry_ids")
+    )
+    if finished:
+        if continuing and progress.get("background_active"):
+            run.progress_json = {**progress, "background_active": False}
+            db.commit()
         return _run_out(run)
     previous = (
         db.get(Job, uuid.UUID(progress["background_job_id"]))
         if progress.get("background_job_id")
         else None
     )
-    if progress.get("background_active") and previous and previous.status in {"queued", "running"}:
+    if (
+        not continuing
+        and progress.get("background_active")
+        and previous
+        and previous.status in {"queued", "running"}
+    ):
         return _run_out(run)
     job = enqueue(
         db,
@@ -168,12 +179,13 @@ def run_job(payload: dict):
         run = batches._locked(db, auth.household.id, result.id)
         if run.progress_json.get("background_job_id") != payload["job_id"]:
             return {"state": "superseded"}
-        run.progress_json = {**run.progress_json, "background_active": False}
-        db.commit()
         if (
             result.remaining_item_count
             and result.batch_state != "cancelled"
             and not result.ai_error
         ):
-            result = _queue(db, auth, run)
+            result = _queue(db, auth, run, continuing=True)
+        else:
+            run.progress_json = {**run.progress_json, "background_active": False}
+            db.commit()
         return result.model_dump(mode="json")

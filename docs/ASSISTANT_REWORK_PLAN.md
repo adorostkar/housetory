@@ -176,6 +176,39 @@ two fields is unverified.
   real-model verification concerns the preserved preceding engine. Physical
   iPhone, native keyboard/voice and other real providers were not exercised here.
 
+### AI-first review requests
+
+“Review my items and suggest categories” is carried out, not handed back. The
+`start_inventory_review` tool takes `analysis` (`ai` by default, `local` only on
+request) and `review_again`, and the application decides how the work runs:
+
+| Situation | What happens |
+| --- | --- |
+| Provider configured and consented, owner, up to 120 items in scope | AI analysis starts in background batches straight away. No checkbox or dialog. |
+| Same, more than 120 items | Local checks run; the live review shows one “Run AI analysis” step with the item count and approximate number of provider requests. |
+| Member (not owner) | Local checks only, with the reason. The owner-only rule for AI review is unchanged. |
+| No usable provider | Local checks only, stated plainly. In the panel without any AI, a review request starts the local checks inline rather than falling through to search. |
+
+Provider configuration and cloud consent are the existing consent; the assistant
+does not ask again. The tool result tells the model which case applied, so its
+answer cannot claim analysis that did not run or ask the user to enable AI after
+it started. `get_inventory_review` reports running/finished, AI coverage and
+pending suggestions for follow-ups; it is an answer, not new work, so it does
+not open a second live review. The live review says “Analysing with AI…”,
+“Analysis finished” or “Local checks finished”, and states how many suggestions
+wait for approval and that nothing has changed. Coverage reuse, decision memory,
+cancel/resume and explicit accept per suggestion are unchanged. Consecutive
+background batches now hand over without a moment where the review looks paused.
+
+Verification: backend cases cover direct AI analysis, follow-up, coverage reuse,
+the large-scope confirmation, explicit local mode and the member fallback. Five
+Chromium journeys with the **controlled local provider** and two without any
+provider cover the request on desktop and 375px mobile, cancel/resume/reload,
+follow-up, the large-scope confirmation and the no-AI fallback.
+`e2e/assistant-review-live.spec.ts` runs the same request against a real
+configured provider (`LIVE_AI_E2E=1`); it has **not** been run, because no real
+provider was reachable from the development machine.
+
 ### Original tool-engine verification and remaining gaps
 
 - Twenty new isolated backend cases cover multi-step retrieval and follow-ups,
