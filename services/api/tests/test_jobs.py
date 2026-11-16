@@ -96,6 +96,50 @@ def test_stale_running_jobs_are_requeued():
         assert "requeued" in requeued.last_error
 
 
+@pytest.mark.parametrize("new_worker", ["worker-b", "worker-a"])
+@pytest.mark.parametrize("late_update", ["success", "failure"])
+def test_late_completion_after_stale_recovery_leaves_newer_attempt_untouched(
+    late_update, new_worker
+):
+    with SessionLocal() as db:
+        job_id = enqueue(db, "maintenance.ping").id
+        stale_claim = claim_job(db, worker_id="worker-a")
+        stale_claim.locked_at = datetime.now(UTC) - timedelta(hours=1)
+        db.commit()
+
+    with SessionLocal() as db:
+        assert requeue_stale_jobs(db, older_than_minutes=15) == 1
+        # Recovered but not yet reclaimed: the old worker no longer owns it.
+        assert mark_succeeded(db, job_id, result={"late": True}, claim=stale_claim) is False
+        assert db.get(Job, job_id).status == JobStatus.QUEUED.value
+        new_claim = claim_job(db, worker_id=new_worker)
+        assert new_claim.attempts == 2
+
+    with SessionLocal() as db:
+        if late_update == "success":
+            assert mark_succeeded(db, job_id, result={"late": True}, claim=stale_claim) is False
+        else:
+            assert mark_failed(db, job_id, "late failure", claim=stale_claim) is False
+
+    with SessionLocal() as db:
+        current = db.get(Job, job_id)
+        assert current.status == JobStatus.RUNNING.value
+        assert current.locked_by == new_worker
+        assert current.attempts == 2
+        assert "late" not in (current.result or {})
+        assert current.finished_at is None
+        assert current.last_error != "late failure"
+
+        assert mark_succeeded(db, job_id, result={"late": False}, claim=new_claim) is True
+        finished = db.get(Job, job_id)
+        assert finished.status == JobStatus.SUCCEEDED.value
+        assert finished.result == {"late": False}
+
+        # A finished job accepts no further completion, even from its own attempt.
+        assert mark_failed(db, job_id, "after success", claim=new_claim) is False
+        assert db.get(Job, job_id).status == JobStatus.SUCCEEDED.value
+
+
 def test_ai_lane_and_legacy_jobs_do_not_block_local_queue():
     with SessionLocal() as db:
         legacy = enqueue(db, "ai.enrich", queue="default")

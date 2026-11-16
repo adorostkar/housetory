@@ -27,6 +27,7 @@ from housetory_api.jobs import (
     claim_job,
     enqueue,
     has_active_job,
+    lock_claimed_job,
     mark_failed,
     mark_succeeded,
     requeue_stale_jobs,
@@ -183,12 +184,12 @@ def _stop_document_process(child) -> None:
             os.killpg(pid, signal.SIGKILL)
 
 
-def _fail_interrupted_job(job_id: uuid.UUID) -> None:
+def _fail_interrupted_job(job: Job) -> None:
     from housetory_api.services.document_processing import fail_processing_for_job
 
     with SessionLocal() as db:
-        current = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
-        if current is not None and current.status == JobStatus.RUNNING.value:
+        current = lock_claimed_job(db, job.id, job, update_name="interruption")
+        if current is not None:
             current.status = JobStatus.FAILED.value
             current.last_error = "interactive_worker_interrupted"
             current.finished_at = datetime.now(UTC)
@@ -225,7 +226,7 @@ def process_interactive_job(
         with SessionLocal() as db:
             current = db.get(Job, job.id)
             if current is not None:
-                mark_failed(db, job.id, "interactive_deadline_exceeded")
+                mark_failed(db, job.id, "interactive_deadline_exceeded", claim=job)
                 from housetory_api.services.document_processing import (
                     fail_processing_for_job,
                 )
@@ -250,7 +251,7 @@ def process_interactive_job(
         logger.exception("Could not start supervised document job %s", job.id)
         if child is not None:
             _stop_document_process(child)
-        _fail_interrupted_job(job.id)
+        _fail_interrupted_job(job)
         return
     try:
         while child.is_alive():
@@ -260,7 +261,7 @@ def process_interactive_job(
                 with SessionLocal() as db:
                     current = db.get(Job, job.id)
                     if current is not None:
-                        mark_failed(db, job.id, "interactive_deadline_exceeded")
+                        mark_failed(db, job.id, "interactive_deadline_exceeded", claim=job)
                         from housetory_api.services.document_processing import (
                             fail_processing_for_job,
                         )
@@ -273,7 +274,7 @@ def process_interactive_job(
                     _stop_document_process(child)
                     return
         if child.exitcode not in {0, None}:
-            _fail_interrupted_job(job.id)
+            _fail_interrupted_job(job)
         else:
             with SessionLocal() as db:
                 current = db.get(Job, job.id)
@@ -284,10 +285,10 @@ def process_interactive_job(
 
                     fail_processing_for_job(db, current, reason="worker_interrupted")
                 elif current is not None and current.status == JobStatus.RUNNING.value:
-                    _fail_interrupted_job(job.id)
+                    _fail_interrupted_job(job)
     except KeyboardInterrupt:
         _stop_document_process(child)
-        _fail_interrupted_job(job.id)
+        _fail_interrupted_job(job)
         raise
     finally:
         _stop_document_process(child)
@@ -360,7 +361,9 @@ def process_job(job: Job) -> None:
     handler = HANDLERS.get(job.task)
     if handler is None:
         with SessionLocal() as db:
-            mark_failed(db, job.id, f"No handler registered for task {job.task!r}.")
+            mark_failed(
+                db, job.id, f"No handler registered for task {job.task!r}.", claim=job
+            )
         logger.error("No handler for job %s (%s)", job.id, job.task)
         return
 
@@ -370,7 +373,7 @@ def process_job(job: Job) -> None:
     except Exception as exc:
         logger.exception("Job %s failed", job.id)
         with SessionLocal() as db:
-            mark_failed(db, job.id, f"{type(exc).__name__}: {exc}")
+            mark_failed(db, job.id, f"{type(exc).__name__}: {exc}", claim=job)
         return
 
     with SessionLocal() as db:
@@ -378,6 +381,7 @@ def process_job(job: Job) -> None:
             db,
             job.id,
             result=result if isinstance(result, dict) else {"result": result},
+            claim=job,
         )
     logger.info("Job %s succeeded: status recorded", job.id)
 

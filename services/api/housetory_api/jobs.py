@@ -5,6 +5,7 @@ Workers claim rows with ``FOR UPDATE SKIP LOCKED``; multiple worker processes
 can therefore share a single PostgreSQL instance safely.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from .domain import JobStatus
 from .models import Document, ImportBatch, Job, WorkerHeartbeat
+
+logger = logging.getLogger(__name__)
 
 AI_TASKS = frozenset(
     {
@@ -235,15 +238,47 @@ def claim_job(db: Session, *, worker_id: str, queue: str = "default") -> Job | N
     return job
 
 
+def lock_claimed_job(
+    db: Session, job_id: uuid.UUID, claim: Job | None, *, update_name: str
+) -> Job | None:
+    """Lock the job only while it is still running under the caller's claim.
+
+    ``claim`` is the job as returned by ``claim_job``. Its ``locked_by`` and
+    ``attempts`` identify one attempt: stale recovery clears ``locked_by`` and
+    every new claim increments ``attempts``, so a late worker never matches a
+    newer attempt. Without a claim, only the running status is required.
+    """
+    query = (
+        select(Job)
+        .where(Job.id == job_id, Job.status == JobStatus.RUNNING.value)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if claim is not None:
+        query = query.where(Job.locked_by == claim.locked_by, Job.attempts == claim.attempts)
+    job = db.scalar(query)
+    if job is None:
+        db.rollback()
+        logger.warning(
+            "Dropped %s for job %s: it is no longer running under this claim (%s, attempt %s).",
+            update_name,
+            job_id,
+            claim.locked_by if claim is not None else None,
+            claim.attempts if claim is not None else None,
+        )
+    return job
+
+
 def mark_succeeded(
     db: Session,
     job_id: uuid.UUID,
     *,
     result: dict[str, Any] | None = None,
-) -> None:
-    job = db.get(Job, job_id)
-    if job is None or job.status == JobStatus.CANCELLED.value:
-        return
+    claim: Job | None = None,
+) -> bool:
+    job = lock_claimed_job(db, job_id, claim, update_name="success")
+    if job is None:
+        return False
     now = datetime.now(UTC)
     if result is not None:
         job.result = result
@@ -253,12 +288,13 @@ def mark_succeeded(
     job.locked_at = None
     job.last_error = None
     db.commit()
+    return True
 
 
-def mark_failed(db: Session, job_id: uuid.UUID, error: str) -> None:
-    job = db.get(Job, job_id)
-    if job is None or job.status == JobStatus.CANCELLED.value:
-        return
+def mark_failed(db: Session, job_id: uuid.UUID, error: str, *, claim: Job | None = None) -> bool:
+    job = lock_claimed_job(db, job_id, claim, update_name="failure")
+    if job is None:
+        return False
     now = datetime.now(UTC)
     job.last_error = error[:4000]
     job.locked_by = None
@@ -276,13 +312,15 @@ def mark_failed(db: Session, job_id: uuid.UUID, error: str) -> None:
         job.status = JobStatus.FAILED.value
         job.finished_at = now
     db.commit()
+    return True
 
 
 def requeue_stale_jobs(db: Session, *, older_than_minutes: int = 15) -> int:
     """Recover jobs left running after a worker crash."""
     cutoff = datetime.now(UTC) - timedelta(minutes=older_than_minutes)
     jobs = db.scalars(
-        select(Job).where(
+        select(Job)
+        .where(
             Job.status == JobStatus.RUNNING.value,
             Job.locked_at.is_not(None),
             Job.locked_at < cutoff,
@@ -293,6 +331,8 @@ def requeue_stale_jobs(db: Session, *, older_than_minutes: int = 15) -> int:
             )
             .exists(),
         )
+        # A job whose worker is completing it right now is not stale.
+        .with_for_update(skip_locked=True)
     ).all()
     for job in jobs:
         job.locked_by = None
