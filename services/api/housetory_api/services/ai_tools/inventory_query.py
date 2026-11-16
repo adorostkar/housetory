@@ -49,109 +49,113 @@ def property_item_conditions(property_id: Any) -> list[Any]:
     ]
 
 
-def _resolve_room(
+def _match_rooms(
     db: Session,
     household_id: uuid.UUID,
     *,
+    property_id: Any = None,
     room_id: uuid.UUID | None = None,
     name: str | None = None,
-) -> Room | None:
+) -> list[Room]:
+    """Rooms a reference could mean inside the household and property scope.
+
+    A name yields every exact (case-insensitive) match, or every substring match
+    when none is exact. More than one room means the reference is ambiguous.
+    """
+    scope = [Room.household_id == household_id]
+    if property_id is not None:
+        scope.append(Room.property_id == property_id)
     if room_id:
-        return db.scalar(select(Room).where(Room.id == room_id, Room.household_id == household_id))
-    if not name:
-        return None
-    normalized = name.strip().lower()
-    found = db.scalar(
-        select(Room)
-        .where(
-            Room.household_id == household_id,
-            func.lower(Room.name) == normalized,
-        )
-        .limit(1)
-    ) or db.scalar(
-        select(Room)
-        .where(Room.household_id == household_id, Room.name.ilike(f"%{normalized}%"))
-        .order_by(func.length(Room.name))
-        .limit(1)
+        return list(db.scalars(select(Room).where(Room.id == room_id, *scope)).all())
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return []
+    order = (func.length(Room.name), func.lower(Room.name), Room.id)
+    found = (
+        db.scalars(
+            select(Room).where(*scope, func.lower(Room.name) == normalized).order_by(*order)
+        ).all()
+        or db.scalars(
+            select(Room).where(*scope, Room.name.ilike(f"%{normalized}%")).order_by(*order)
+        ).all()
     )
-    if found is not None or not contains_non_latin(name):
-        return found
-    target = normalize_for_match(name)
-    candidates = db.scalars(
-        select(Room).where(Room.household_id == household_id)
-    ).all()
-    matches = [
-        room
-        for room in candidates
-        if target in normalize_for_match(room.name)
+    if found or not contains_non_latin(normalized):
+        return list(found)
+    target = normalize_for_match(normalized)
+    if not target:
+        return []
+    candidates = db.scalars(select(Room).where(*scope).order_by(*order)).all()
+    return [room for room in candidates if normalize_for_match(room.name) == target] or [
+        room for room in candidates if target in normalize_for_match(room.name)
     ]
-    return min(matches, key=lambda room: len(room.name), default=None)
 
 
-def _resolve_location(
+def _match_locations(
     db: Session,
     household_id: uuid.UUID,
     *,
+    property_id: Any = None,
     location_id: uuid.UUID | None = None,
     name: str | None = None,
-) -> StorageLocation | None:
+) -> list[StorageLocation]:
+    """Storage places a reference could mean; same rules as `_match_rooms`."""
+    scope = [StorageLocation.household_id == household_id, StorageLocation.active()]
+    if property_id is not None:
+        scope.append(StorageLocation.room.has(Room.property_id == property_id))
     if location_id:
-        return db.scalar(
-            select(StorageLocation).where(
-                StorageLocation.id == location_id,
-                StorageLocation.household_id == household_id,
-                StorageLocation.active(),
-            )
+        return list(
+            db.scalars(
+                select(StorageLocation).where(StorageLocation.id == location_id, *scope)
+            ).all()
         )
-    if not name:
-        return None
-    normalized = name.strip().lower()
-    identifier = name.strip().upper()
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return []
+    identifier = normalized.upper()
     if re.fullmatch(r"[A-Z]{2,12}-[0-9]{3,6}", identifier):
-        exact = db.scalar(
+        exact = db.scalars(
             select(StorageLocation).where(
-                StorageLocation.household_id == household_id,
-                StorageLocation.active(),
-                func.upper(StorageLocation.identifier) == identifier,
+                *scope, func.upper(StorageLocation.identifier) == identifier
             )
-        )
-        if exact is not None:
-            return exact
-    found = db.scalar(
-        select(StorageLocation)
-        .where(
-            StorageLocation.household_id == household_id,
-            StorageLocation.active(),
-            func.lower(StorageLocation.name) == normalized,
-        )
-        .limit(1)
-    ) or db.scalar(
-        select(StorageLocation)
-        .where(
-            StorageLocation.household_id == household_id,
-            StorageLocation.active(),
-            StorageLocation.name.ilike(f"%{normalized}%"),
-        )
-        .order_by(func.length(StorageLocation.name))
-        .limit(1)
+        ).all()
+        if exact:
+            return list(exact)
+    order = (
+        func.length(StorageLocation.name),
+        func.lower(StorageLocation.name),
+        StorageLocation.id,
     )
-    if found is not None or not contains_non_latin(name):
-        return found
-    target = normalize_for_match(name)
-    candidates = db.scalars(
-        select(StorageLocation).where(
-            StorageLocation.household_id == household_id,
-            StorageLocation.active(),
+    found = (
+        db.scalars(
+            select(StorageLocation)
+            .where(*scope, func.lower(StorageLocation.name) == normalized)
+            .order_by(*order)
+        ).all()
+        or db.scalars(
+            select(StorageLocation)
+            .where(*scope, StorageLocation.name.ilike(f"%{normalized}%"))
+            .order_by(*order)
+        ).all()
+    )
+    if found or not contains_non_latin(normalized):
+        return list(found)
+    target = normalize_for_match(normalized)
+    if not target:
+        return []
+    labelled = [
+        (
+            location,
+            [
+                normalize_for_match(label)
+                for label in (location.name, location.identifier, *(location.aliases or []))
+                if label
+            ],
         )
-    ).all()
-    matches = []
-    for location in candidates:
-        labels = [location.name, location.identifier or "", *(location.aliases or [])]
-        if any(
-            target in normalize_for_match(label) for label in labels if label
-        ):
-            matches.append(location)
-    return min(matches, key=lambda entry: len(entry.name), default=None)
+        for location in db.scalars(select(StorageLocation).where(*scope).order_by(*order)).all()
+    ]
+    return [location for location, labels in labelled if target in labels] or [
+        location for location, labels in labelled if any(target in label for label in labels)
+    ]
 
 
 def _resolve_category(
@@ -217,35 +221,50 @@ def _inventory_conditions(
                 ),
             )
         )
-    room = _resolve_room(db, household_id, room_id=filters.room_id, name=filters.room_name)
-    if filters.room_id and room is None:
+    # An ambiguous place name is never narrowed to an arbitrary match here: every
+    # candidate is searched. Tools report the ambiguity before calling this.
+    rooms = _match_rooms(
+        db,
+        household_id,
+        property_id=filters.property_id,
+        room_id=filters.room_id,
+        name=filters.room_name,
+    )
+    if filters.room_id and not rooms:
         return None
     room_rows = db.execute(
         select(Room.id, Room.parent_id).where(Room.household_id == household_id)
     ).all()
-    if room is not None:
-        conditions.append(Item.room_id.in_(descendant_ids(room_rows, room.id)))
+    if rooms:
+        room_ids = set().union(*(descendant_ids(room_rows, room.id) for room in rooms))
+        conditions.append(Item.room_id.in_(room_ids))
     if filters.exclude_room_id:
-        excluded = _resolve_room(db, household_id, room_id=filters.exclude_room_id)
-        if excluded is not None:
+        for excluded in _match_rooms(db, household_id, room_id=filters.exclude_room_id):
             conditions.append(
                 or_(
                     Item.room_id.is_(None),
                     Item.room_id.not_in(descendant_ids(room_rows, excluded.id)),
                 )
             )
-    location = _resolve_location(
-        db, household_id, location_id=filters.location_id, name=filters.location_name
+    locations = _match_locations(
+        db,
+        household_id,
+        property_id=filters.property_id,
+        location_id=filters.location_id,
+        name=filters.location_name,
     )
-    if filters.location_id and location is None:
+    if filters.location_id and not locations:
         return None
-    if location is not None:
+    if locations:
         location_rows = db.execute(
             select(StorageLocation.id, StorageLocation.parent_id).where(
                 StorageLocation.household_id == household_id
             )
         ).all()
-        conditions.append(Item.storage_location_id.in_(descendant_ids(location_rows, location.id)))
+        location_ids = set().union(
+            *(descendant_ids(location_rows, location.id) for location in locations)
+        )
+        conditions.append(Item.storage_location_id.in_(location_ids))
     category = _resolve_category(
         db, household_id, category_id=filters.category_id, name=filters.category_name
     )

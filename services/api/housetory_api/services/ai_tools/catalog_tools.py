@@ -39,7 +39,7 @@ from ..containers import (
 )
 from ..items import get_item
 from ..lending import item_loan_summary
-from .inventory_query import _resolve_location, _resolve_room, inventory_totals, search_inventory
+from .inventory_query import _match_locations, _match_rooms, inventory_totals, search_inventory
 from .references import (
     ToolResult,
     _borrowed_reference,
@@ -47,6 +47,84 @@ from .references import (
     _location_display,
     _summaries_with_paths,
 )
+
+
+def _place_candidate(
+    db: Session, household_id: uuid.UUID, place: Room | StorageLocation
+) -> dict[str, Any]:
+    is_room = isinstance(place, Room)
+    room_id = place.id if is_room else place.room_id
+    room_chain = room_ancestors(db, household_id, room_id) if room_id else []
+    home = room_chain[0].property if room_chain else None
+    names = [entry.name for entry in room_chain]
+    if not is_room:
+        names += [entry.name for entry in location_ancestors(db, household_id, place.id)]
+    candidate = {
+        "id": str(place.id),
+        "kind": "room" if is_room else "location",
+        "name": place.name,
+        "path": " / ".join(([home.name] if home is not None else []) + names),
+        "property_id": str(home.id) if home is not None else None,
+        "property": home.name if home is not None else None,
+        "url": f"/rooms/{place.id}" if is_room else f"/containers/{place.id}",
+    }
+    if not is_room:
+        candidate["identifier"] = place.identifier
+        candidate["room"] = room_chain[-1].name if room_chain else None
+    return candidate
+
+
+def _ambiguous_place(
+    db: Session,
+    household_id: uuid.UUID,
+    *,
+    tool: str,
+    field: str,
+    query: str,
+    places: list[Room] | list[StorageLocation],
+    filters: dict[str, Any] | None = None,
+) -> ToolResult:
+    """Ask which place was meant instead of answering for an arbitrary match."""
+    candidates = [_place_candidate(db, household_id, place) for place in places[:12]]
+    is_room = candidates[0]["kind"] == "room"
+    summary = (
+        f"{len(places)} {'rooms' if is_room else 'storage places'} match “{query}”: "
+        + "; ".join(
+            candidate["path"]
+            + (f" [{candidate['identifier']}]" if candidate.get("identifier") else "")
+            for candidate in candidates
+        )
+        + ". Which one did you mean? Ask, or retry with its "
+        + ("room_id" if is_room else "container_id")
+        + "."
+    )
+    return ToolResult(
+        tool=tool,
+        summary=summary,
+        filters=filters or {field: query},
+        locations=[
+            {**candidate, "type": "room" if is_room else "storage_location"}
+            for candidate in candidates
+        ],
+        references=[
+            AssistantReference(
+                type=candidate["kind"],
+                id=candidate["id"],
+                title=candidate["name"],
+                subtitle=candidate["path"],
+                url=candidate["url"],
+            )
+            for candidate in candidates
+        ],
+        facts={
+            "total": 0,
+            "ambiguous": True,
+            "ambiguous_field": field,
+            "query": query,
+            "candidate_total": len(places),
+            "candidates": candidates,
+        },
+    )
 
 
 def tool_search_items(
@@ -59,7 +137,9 @@ def tool_search_items(
     filters = NaturalSearchFilters(
         q=str(args.get("q") or "").strip() or None,
         property_id=args.get("property_id"),
+        room_id=args.get("room_id"),
         room_name=str(args.get("room_name") or "").strip() or None,
+        location_id=args.get("container_id"),
         location_name=str(args.get("location_name") or "").strip() or None,
         exclude_room_id=args.get("exclude_room_id"),
         category_name=str(args.get("category_name") or "").strip() or None,
@@ -76,6 +156,34 @@ def tool_search_items(
         max_purchase_cents=args.get("max_purchase_cents"),
         sort=args.get("sort") or "relevance",
     )
+    for field, places in (
+        (
+            "room_name",
+            _match_rooms(
+                db, household_id, property_id=filters.property_id, name=filters.room_name
+            )
+            if filters.room_id is None
+            else [],
+        ),
+        (
+            "location_name",
+            _match_locations(
+                db, household_id, property_id=filters.property_id, name=filters.location_name
+            )
+            if filters.location_id is None
+            else [],
+        ),
+    ):
+        if len(places) > 1:
+            return _ambiguous_place(
+                db,
+                household_id,
+                tool="search_items",
+                field=field,
+                query=getattr(filters, field),
+                places=places,
+                filters=filters.model_dump(mode="json", exclude_none=True),
+            )
     items, total = search_inventory(
         db, household_id, filters, household_reminder_days=household_reminder_days
     )
@@ -258,16 +366,25 @@ def tool_list_room_contents(
     *,
     household_reminder_days: int,
 ) -> ToolResult:
-    room = _resolve_room(
+    rooms_matched = _match_rooms(
         db,
         household_id,
+        property_id=args.get("property_id"),
         room_id=args.get("room_id"),
         name=args.get("room_name"),
     )
-    if room is None:
+    if not rooms_matched:
         raise ValueError("Room not found")
-    if args.get("property_id") is not None and room.property_id != args["property_id"]:
-        raise ValueError("Room not found in the selected property")
+    if len(rooms_matched) > 1:
+        return _ambiguous_place(
+            db,
+            household_id,
+            tool="list_room_contents",
+            field="room_name",
+            query=str(args.get("room_name") or "").strip(),
+            places=rooms_matched,
+        )
+    room = rooms_matched[0]
     rooms = db.scalars(select(Room).where(Room.household_id == household_id)).all()
     children = {room.id}
     changed = True
@@ -335,22 +452,28 @@ def tool_get_container_contents(
 ) -> ToolResult:
     location_id = args.get("container_id")
     identifier = str(args.get("identifier") or "").strip().upper()
+    property_id = args.get("property_id")
+    container_name = str(args.get("container_name") or "").strip()
     if location_id:
-        location = _resolve_location(db, household_id, location_id=uuid.UUID(str(location_id)))
-    elif identifier:
-        location = _resolve_location(db, household_id, name=identifier)
-    else:
-        location = _resolve_location(
-            db, household_id, name=str(args.get("container_name") or "").strip()
+        matched = _match_locations(
+            db, household_id, property_id=property_id, location_id=uuid.UUID(str(location_id))
         )
-    if location is None:
+    else:
+        matched = _match_locations(
+            db, household_id, property_id=property_id, name=identifier or container_name
+        )
+    if not matched:
         raise ValueError("Container not found")
-    if (
-        args.get("property_id") is not None
-        and location.room is not None
-        and location.room.property_id != args["property_id"]
-    ):
-        raise ValueError("Container not found in the selected property")
+    if len(matched) > 1:
+        return _ambiguous_place(
+            db,
+            household_id,
+            tool="get_container_contents",
+            field="identifier" if identifier else "container_name",
+            query=identifier or container_name,
+            places=matched,
+        )
+    location = matched[0]
     items = load_container_items(db, household_id, location.id)
     summaries = _summaries_with_paths(
         db, household_id, items, household_reminder_days=household_reminder_days

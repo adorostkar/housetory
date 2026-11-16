@@ -1140,3 +1140,161 @@ def test_category_requests_get_a_category_or_a_recorded_reason_and_stay_compact(
         "start_inventory_review",
         "get_inventory_review",
     ]
+
+
+def two_homes(client):
+    """Two properties that each have a Kitchen with a Spice shelf holding one item."""
+    homes = {}
+    for label in ("Town house", "Lake cabin"):
+        home = client.post("/api/v1/properties", json={"name": label}).json()
+
+        def room(name, home=home):
+            response = client.post("/api/v1/rooms", json={"name": name, "property_id": home["id"]})
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        def shelf(name, room_id):
+            response = client.post(
+                "/api/v1/storage-locations", json={"name": name, "room_id": room_id}
+            )
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        kitchen = room("Kitchen")
+        spices = shelf("Spice shelf", kitchen["id"])
+        item = client.post(
+            "/api/v1/items",
+            json={
+                "name": f"{label} pepper mill",
+                "room_id": kitchen["id"],
+                "storage_location_id": spices["id"],
+            },
+        ).json()["item"]
+        homes[label] = {
+            "id": home["id"],
+            "kitchen": kitchen,
+            "spices": spices,
+            "item": item,
+            "room": room,
+            "shelf": shelf,
+        }
+    return homes
+
+
+def tool_results(client, monkeypatch, calls, **fields):
+    responses = iter([*calls, {"kind": "answer", "message": "Done."}])
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: next(responses))
+    run = start(client, "Look in the kitchen", **fields)
+    work(run)
+    steps = read(client, run)["steps"]
+    assert len(steps) == len(calls)
+    return [step["result"] for step in steps]
+
+
+def candidate_paths(result, kind):
+    facts = result["facts"]
+    assert result["error"] is None
+    assert facts["ambiguous"] is True
+    assert {entry["kind"] for entry in facts["candidates"]} == {kind}
+    return {entry["id"]: entry["path"] for entry in facts["candidates"]}
+
+
+def test_same_named_places_in_two_properties_are_reported_as_ambiguous(
+    owner_client, configured_ai, monkeypatch
+):
+    homes = two_homes(owner_client)
+    town, cabin = homes["Town house"], homes["Lake cabin"]
+    kitchens = {
+        town["kitchen"]["id"]: "Town house / Kitchen",
+        cabin["kitchen"]["id"]: "Lake cabin / Kitchen",
+    }
+    shelves = {
+        town["spices"]["id"]: "Town house / Kitchen / Spice shelf",
+        cabin["spices"]["id"]: "Lake cabin / Kitchen / Spice shelf",
+    }
+    listed, searched, opened, placed, by_room, by_shelf = tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            call("list_room_contents", room_name="kitchen"),
+            call("search_items", room_name="Kitchen"),
+            call("get_container_contents", container_name="spice shelf"),
+            call("search_items", location_name="Spice shelf"),
+            call("search_items", room_id=cabin["kitchen"]["id"]),
+            call("get_container_contents", container_id=town["spices"]["id"]),
+        ],
+    )
+    assert candidate_paths(listed, "room") == kitchens
+    assert candidate_paths(searched, "room") == kitchens
+    assert candidate_paths(opened, "location") == shelves
+    assert candidate_paths(placed, "location") == shelves
+    for result in (listed, searched, opened, placed):
+        assert result["facts"]["total"] == 0
+        assert "Which one did you mean?" in result["summary"]
+        assert "Town house" in result["summary"] and "Lake cabin" in result["summary"]
+        assert {ref["id"] for ref in result["references"]} == set(
+            candidate_paths(result, result["facts"]["candidates"][0]["kind"])
+        )
+    # The listed ids let the model retry without guessing.
+    assert [ref["title"] for ref in by_room["references"]] == ["Lake cabin pepper mill"]
+    assert by_shelf["facts"]["container_id"] == town["spices"]["id"]
+
+
+def test_property_scope_is_applied_before_place_names_are_resolved(
+    owner_client, configured_ai, monkeypatch
+):
+    homes = two_homes(owner_client)
+    for label, home in homes.items():
+        listed, searched, opened, placed = tool_results(
+            owner_client,
+            monkeypatch,
+            [
+                call("list_room_contents", room_name="Kitchen"),
+                call("search_items", room_name="Kitchen"),
+                call("get_container_contents", container_name="Spice shelf"),
+                call("search_items", location_name="Spice shelf"),
+            ],
+            property_id=home["id"],
+        )
+        assert listed["error"] is None and opened["error"] is None
+        assert listed["facts"]["room_id"] == home["kitchen"]["id"]
+        assert opened["facts"]["container_id"] == home["spices"]["id"]
+        for result in (searched, placed):
+            assert result["facts"]["total"] == 1
+            assert [ref["title"] for ref in result["references"]] == [f"{label} pepper mill"]
+
+
+def test_exact_place_names_win_over_substring_matches(owner_client, configured_ai, monkeypatch):
+    homes = two_homes(owner_client)
+    town = homes["Town house"]
+    pantry = town["room"]("Kitchen pantry")
+    annex = town["shelf"]("Spice shelf annex", pantry["id"])
+    exact_room, exact_shelf, only_room, only_shelf, many_rooms, many_shelves, searched = (
+        tool_results(
+            owner_client,
+            monkeypatch,
+            [
+                call("list_room_contents", room_name="Kitchen"),
+                call("get_container_contents", container_name="Spice shelf"),
+                call("list_room_contents", room_name="pantry"),
+                call("get_container_contents", container_name="annex"),
+                call("list_room_contents", room_name="Kitch"),
+                call("get_container_contents", container_name="Spice"),
+                call("search_items", room_name="Kitchen", location_name="Spice shelf"),
+            ],
+            property_id=town["id"],
+        )
+    )
+    assert exact_room["facts"]["room_id"] == town["kitchen"]["id"]
+    assert exact_shelf["facts"]["container_id"] == town["spices"]["id"]
+    assert only_room["facts"]["room_id"] == pantry["id"]
+    assert only_shelf["facts"]["container_id"] == annex["id"]
+    assert candidate_paths(many_rooms, "room") == {
+        town["kitchen"]["id"]: "Town house / Kitchen",
+        pantry["id"]: "Town house / Kitchen pantry",
+    }
+    assert candidate_paths(many_shelves, "location") == {
+        town["spices"]["id"]: "Town house / Kitchen / Spice shelf",
+        annex["id"]: "Town house / Kitchen pantry / Spice shelf annex",
+    }
+    assert [ref["title"] for ref in searched["references"]] == ["Town house pepper mill"]

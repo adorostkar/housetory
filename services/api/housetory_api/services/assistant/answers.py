@@ -120,7 +120,12 @@ def _deterministic_answer(result: ToolResult) -> str:
             lines.append(line)
     if result.facts.get("ambiguous") and result.facts.get("candidates"):
         names = ", ".join(
-            str(candidate.get("name") or candidate.get("item_name") or candidate)
+            str(
+                candidate.get("path")
+                or candidate.get("name")
+                or candidate.get("item_name")
+                or candidate
+            )
             for candidate in result.facts["candidates"][:8]
         )
         if names:
@@ -247,9 +252,9 @@ def _answer_fact_lines(result: ToolResult) -> list[str]:
     if facts.get("ambiguous"):
         candidates = facts.get("candidates") or []
         names = [
-            str(candidate.get("name") or candidate.get("item_name"))
+            str(candidate.get("path") or candidate.get("name") or candidate.get("item_name"))
             for candidate in candidates[:8]
-            if candidate.get("name") or candidate.get("item_name")
+            if candidate.get("path") or candidate.get("name") or candidate.get("item_name")
         ]
         if names:
             lines.append("Ambiguous candidates: " + ", ".join(names) + ".")
