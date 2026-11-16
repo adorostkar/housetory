@@ -1,3 +1,5 @@
+import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -571,3 +573,172 @@ def test_lending_cross_household_and_viewer_isolation(owner_client, anon_client)
         ).status_code
         == 404
     )
+
+
+def _overlapping(first, second):
+    """Run two service calls so the second starts before the first commits."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def run(call, *, holds: bool):
+        with SessionLocal() as db:
+            try:
+                result = call(db)
+                if holds:
+                    started.set()
+                    release.wait(5)
+                db.commit()
+                return result
+            except ApiError as exc:
+                db.rollback()
+                return exc.code
+            except Exception as exc:  # noqa: BLE001 - the test reports unexpected failures
+                db.rollback()
+                return type(exc).__name__
+            finally:
+                started.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        one = pool.submit(run, first, holds=True)
+        assert started.wait(5)
+        two = pool.submit(run, second, holds=False)
+        time.sleep(0.4)
+        release.set()
+        return one.result(10), two.result(10)
+
+
+def _lend_call(household, item_id, request_id, **overrides):
+    payload = LoanCreate(
+        **{
+            "item_id": uuid.UUID(item_id),
+            "borrower_name": "Sam",
+            "quantity": 1,
+            "lent_on": date(2026, 1, 1),
+            "request_id": request_id,
+            **overrides,
+        }
+    )
+
+    def call(db):
+        return lending.create_loan(db, household, payload, actor_user_id=None, actor_name="Test").id
+
+    return call
+
+
+def _return_call(household, loan_id, request_id, **overrides):
+    payload = LoanReturnCreate(
+        **{
+            "quantity": 1,
+            "returned_on": date(2026, 1, 5),
+            "request_id": request_id,
+            **overrides,
+        }
+    )
+
+    def call(db):
+        detail = lending.create_return(
+            db, household, uuid.UUID(loan_id), payload, actor_user_id=None, actor_name="Test"
+        )
+        return detail.returned_quantity
+
+    return call
+
+
+def test_concurrent_identical_loan_retries_replay_the_original(owner_client):
+    room = create_room(owner_client, "Office")
+    # One unit: a retry that slipped past the replay check would hit the stock rule.
+    item = create_item(owner_client, "Camera", room["id"], quantity=1)
+    household = household_id(owner_client)
+    request_id = uuid.uuid4()
+
+    one, two = _overlapping(
+        _lend_call(household, item["id"], request_id),
+        _lend_call(household, item["id"], request_id),
+    )
+
+    assert isinstance(one, uuid.UUID)
+    assert two == one
+    summary = owner_client.get(f"/api/v1/items/{item['id']}/loans").json()
+    assert [loan["id"] for loan in summary["loans"]] == [str(one)]
+    assert summary["on_loan_quantity"] == 1
+
+
+def test_concurrent_loan_request_reuse_with_changed_payload_conflicts(owner_client):
+    room = create_room(owner_client, "Office")
+    item = create_item(owner_client, "Tent", room["id"], quantity=5)
+    other = create_item(owner_client, "Stove", room["id"], quantity=5)
+    household = household_id(owner_client)
+
+    same_item = uuid.uuid4()
+    one, two = _overlapping(
+        _lend_call(household, item["id"], same_item),
+        _lend_call(household, item["id"], same_item, quantity=2),
+    )
+    assert isinstance(one, uuid.UUID)
+    assert two == "request_id_payload_mismatch"
+
+    different_items = uuid.uuid4()
+    one, two = _overlapping(
+        _lend_call(household, item["id"], different_items),
+        _lend_call(household, other["id"], different_items),
+    )
+    assert isinstance(one, uuid.UUID)
+    assert two == "request_id_payload_mismatch"
+
+    assert owner_client.get(f"/api/v1/items/{item['id']}/loans").json()["on_loan_quantity"] == 2
+    assert owner_client.get(f"/api/v1/items/{other['id']}/loans").json()["loans"] == []
+
+    sequential = create_loan(
+        owner_client, item["id"], request_id=str(same_item), borrower_name="Kim"
+    )
+    assert sequential.status_code == 409
+    assert sequential.json()["detail"]["code"] == "request_id_payload_mismatch"
+
+
+def test_concurrent_identical_return_retries_replay_the_original(owner_client):
+    room = create_room(owner_client, "Office")
+    item = create_item(owner_client, "Camera", room["id"], quantity=1)
+    loan_id = create_loan(owner_client, item["id"]).json()["id"]
+    household = household_id(owner_client)
+    request_id = uuid.uuid4()
+
+    # The loan closes on the first return: a retry that slipped past the replay
+    # check would be rejected as loan_not_open.
+    one, two = _overlapping(
+        _return_call(household, loan_id, request_id),
+        _return_call(household, loan_id, request_id),
+    )
+
+    assert (one, two) == (1, 1)
+    latest = owner_client.get(f"/api/v1/loans/{loan_id}").json()
+    assert latest["returned_quantity"] == 1
+    assert len(latest["returns"]) == 1
+
+
+def test_concurrent_return_request_reuse_with_changed_payload_conflicts(owner_client):
+    room = create_room(owner_client, "Office")
+    item = create_item(owner_client, "Tent", room["id"], quantity=10)
+    loan_id = create_loan(owner_client, item["id"], quantity=4).json()["id"]
+    other_loan_id = create_loan(owner_client, item["id"], quantity=4).json()["id"]
+    household = household_id(owner_client)
+
+    same_loan = uuid.uuid4()
+    one, two = _overlapping(
+        _return_call(household, loan_id, same_loan),
+        _return_call(household, loan_id, same_loan, quantity=2),
+    )
+    assert one == 1
+    assert two == "request_id_payload_mismatch"
+
+    different_loans = uuid.uuid4()
+    one, two = _overlapping(
+        _return_call(household, loan_id, different_loans),
+        _return_call(household, other_loan_id, different_loans),
+    )
+    assert one == 2
+    assert two == "request_id_reused"
+
+    assert owner_client.get(f"/api/v1/loans/{loan_id}").json()["returned_quantity"] == 2
+    untouched = owner_client.get(f"/api/v1/loans/{other_loan_id}").json()
+    assert untouched["returned_quantity"] == 0
+    assert untouched["returns"] == []

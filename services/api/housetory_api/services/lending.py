@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
@@ -639,6 +641,79 @@ def _existing_return_request(
     )
 
 
+def _lock_request(db: Session, household_id: uuid.UUID, request_id: uuid.UUID) -> None:
+    """Serialize every use of one request id until the transaction ends.
+
+    Item and loan row locks cannot do this: retries that reuse a request id for
+    different items or loans take different row locks.
+    """
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"housetory-request-{household_id}-{request_id}"},
+    )
+
+
+def _fingerprint(payload: LoanCreate | LoanReturnCreate) -> str:
+    data = payload.model_dump(mode="json", exclude={"request_id"})
+    encoded = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _replayed_loan(
+    db: Session, household_id: uuid.UUID, payload: LoanCreate, fingerprint: str
+) -> Loan | None:
+    existing = _existing_loan_request(db, household_id, payload.request_id)
+    if existing is None:
+        return None
+    event = history.find_request_event(db, household_id, payload.request_id)
+    details = (event.details if event is not None else None) or {}
+    recorded = details.get("request_fingerprint")
+    if recorded is not None:
+        same = recorded == fingerprint
+    else:
+        # Loans recorded before fingerprints existed: compare what the creation
+        # event kept, because the loan row may have been corrected since.
+        same = (
+            existing.item_id == payload.item_id
+            and details.get("quantity", existing.quantity) == payload.quantity
+            and details.get("borrower_name", existing.borrower_name) == payload.borrower_name
+        )
+    if not same:
+        raise ApiError(
+            409,
+            "request_id_payload_mismatch",
+            "That request id was already used with different loan details.",
+        )
+    return existing
+
+
+def _replayed_return(
+    db: Session,
+    household_id: uuid.UUID,
+    loan_id: uuid.UUID,
+    payload: LoanReturnCreate,
+    fingerprint: str,
+) -> LoanReturn | None:
+    existing = _existing_return_request(db, household_id, payload.request_id)
+    if existing is None:
+        return None
+    if existing.loan_id != loan_id:
+        raise ApiError(409, "request_id_reused", "That request id was used for another loan.")
+    event = history.find_request_event(db, household_id, payload.request_id)
+    recorded = ((event.details if event is not None else None) or {}).get("request_fingerprint")
+    if recorded is not None:
+        same = recorded == fingerprint
+    else:
+        same = existing.quantity == payload.quantity and existing.returned_on == payload.returned_on
+    if not same:
+        raise ApiError(
+            409,
+            "request_id_payload_mismatch",
+            "That request id was already used with different return details.",
+        )
+    return existing
+
+
 def _build_loan(
     db: Session,
     household_id: uuid.UUID,
@@ -684,7 +759,9 @@ def create_loan(
     actor_name: str | None,
     on_date: date | None = None,
 ) -> LoanDetailOut:
-    existing_request = _existing_loan_request(db, household_id, payload.request_id)
+    _lock_request(db, household_id, payload.request_id)
+    fingerprint = _fingerprint(payload)
+    existing_request = _replayed_loan(db, household_id, payload, fingerprint)
     if existing_request is not None:
         return loan_detail(db, household_id, existing_request.id, on_date=on_date)
     if history.find_request_event(db, household_id, payload.request_id) is not None:
@@ -805,6 +882,7 @@ def create_loan(
             request_id=child_request_id,
         )
     details = _loan_event_details(loan)
+    details["request_fingerprint"] = fingerprint
     if child_loans:
         details.update(
             {
@@ -845,10 +923,10 @@ def create_return(
     actor_name: str | None,
     on_date: date | None = None,
 ) -> LoanDetailOut:
-    existing_request = _existing_return_request(db, household_id, payload.request_id)
+    _lock_request(db, household_id, payload.request_id)
+    fingerprint = _fingerprint(payload)
+    existing_request = _replayed_return(db, household_id, loan_id, payload, fingerprint)
     if existing_request is not None:
-        if existing_request.loan_id != loan_id:
-            raise ApiError(409, "request_id_reused", "That request id was used for another loan.")
         return loan_detail(db, household_id, existing_request.loan_id, on_date=on_date)
     if history.find_request_event(db, household_id, payload.request_id) is not None:
         raise ApiError(409, "request_id_reused", "That request id was used for another action.")
@@ -890,6 +968,7 @@ def create_return(
             "return_quantity": payload.quantity,
             "returned_on": payload.returned_on.isoformat(),
             "returned_before": before,
+            "request_fingerprint": fingerprint,
         }
     )
     history.record_event(
