@@ -516,6 +516,13 @@ export function SystemStatusPanel({
               </p>
               <JobCounts status={statusQuery.data} />
             </div>
+            {statusQuery.data.jobs.failed_historical ? (
+              <p className="mt-2 text-2xs text-muted-foreground">
+                {statusQuery.data.jobs.failed_needing_action ?? 0} failed job(s) need
+                action; {statusQuery.data.jobs.failed_historical} earlier failure(s)
+                were covered by a newer attempt and are kept as history.
+              </p>
+            ) : null}
             {statusQuery.data.jobs.recent_failed.length === 0 ? (
               <p className="mt-2 text-2xs text-muted-foreground">
                 No failed jobs recorded.
@@ -529,6 +536,12 @@ export function SystemStatusPanel({
                   >
                     <span className="min-w-0 flex-1">
                       <span className="font-medium">{job.task}</span>
+                      <Badge
+                        variant={job.needs_action === false ? "outline" : "destructive"}
+                        className="ml-2"
+                      >
+                        {job.needs_action === false ? "Historical" : "Needs action"}
+                      </Badge>
                       <span className="ml-2 text-2xs text-muted-foreground">
                         {formatTimestamp(job.finished_at ?? job.created_at)}
                       </span>

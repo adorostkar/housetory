@@ -29,6 +29,8 @@ const status: SystemStatus = {
   ],
   jobs: {
     counts: { queued: 1, failed: 2, succeeded: 8 },
+    failed_needing_action: 1,
+    failed_historical: 1,
     recent_failed: [
       {
         id: "job-1",
@@ -38,6 +40,17 @@ const status: SystemStatus = {
         error: "fixture failure",
         created_at: "2026-11-06T10:00:00Z",
         finished_at: "2026-11-06T10:01:00Z",
+        needs_action: true,
+      },
+      {
+        id: "job-0",
+        task: "fixture.superseded",
+        attempts: 1,
+        max_attempts: 1,
+        error: "older fixture failure",
+        created_at: "2026-11-05T10:00:00Z",
+        finished_at: "2026-11-05T10:01:00Z",
+        needs_action: false,
       },
     ],
   },
@@ -218,6 +231,13 @@ describe("SystemStatusPanel", () => {
     expect(screen.getByText("Last heartbeat 120s ago.")).toBeVisible();
     expect(screen.getByText("fixture.failed")).toBeVisible();
     expect(screen.getByText("fixture failure")).toBeVisible();
+    const rowFor = (task: string) =>
+      screen.getByText(task).closest("li") as HTMLElement;
+    expect(within(rowFor("fixture.failed")).getByText("Needs action")).toBeVisible();
+    expect(within(rowFor("fixture.superseded")).getByText("Historical")).toBeVisible();
+    expect(
+      screen.getByText(/1 failed job\(s\) need\s+action; 1 earlier failure\(s\)/),
+    ).toBeVisible();
     expect(screen.getByText(/saved ID not in catalog/)).toBeVisible();
     expect(screen.getAllByText("Compatible").length).toBeGreaterThan(0);
     expect(screen.getByText(/Live-tested/)).toBeVisible();
@@ -244,7 +264,12 @@ describe("SystemStatusPanel", () => {
       status: "queued",
     });
     renderPanel();
-    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await userEvent.click(
+      within(screen.getByText("fixture.failed").closest("li") as HTMLElement).getByRole(
+        "button",
+        { name: "Retry" },
+      ),
+    );
     expect(api.post).toHaveBeenCalledWith("/system/jobs/job-1/retry");
   });
 

@@ -15,6 +15,7 @@ export interface SystemFailedJob {
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  needs_action?: boolean;
 }
 
 export interface SystemTaskStatus {
@@ -56,6 +57,8 @@ export interface SystemStatusSummary {
   attention_count: number;
   core_issue_count: number;
   configured_feature_issue_count: number;
+  failed_jobs_needing_action?: number;
+  historical_failed_jobs?: number;
   optional_not_configured: string[];
   issues: SystemStatusIssue[];
   generated_at: string;
@@ -95,6 +98,8 @@ export interface SystemStatus {
   readiness: SystemReadinessComponent[];
   jobs: {
     counts: Record<string, number>;
+    failed_needing_action?: number;
+    failed_historical?: number;
     recent_failed: SystemFailedJob[];
   };
   tasks: SystemTaskStatus[];

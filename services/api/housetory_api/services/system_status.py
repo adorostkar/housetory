@@ -6,8 +6,8 @@ import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.orm import Session, aliased
 
 from .. import __version__
 from ..api.errors import ApiError
@@ -35,6 +35,24 @@ TASK_ORDER = tuple(task.value for task in ACTIVE_AI_TASKS)
 # These handlers are retained only so historical rows can be retried safely.
 # Their old failures must not keep the live system in a core-attention state.
 RETIRED_JOB_TASKS = frozenset({"maintenance.prune_item_images"})
+# Payload fields that identify "the same work" for a task. A failed job only
+# becomes history when a newer job for the same task and the same values is
+# queued, running or succeeded. Tasks not listed here (and not maintenance
+# sweeps, which carry no payload and are identified by the task alone) are
+# never treated as superseded.
+SAME_WORK_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
+    "ai.enrich": ("kind", "source_id"),
+    "documents.ocr": ("document_id",),
+    "inventory.review.scheduled": ("schedule_id",),
+    "insurance.estimate": ("item_id",),
+    "item_images.new_item": ("item_id",),
+    "assistant.review": ("run_id",),
+}
+SUPERSEDING_STATUSES = (
+    JobStatus.QUEUED.value,
+    JobStatus.RUNNING.value,
+    JobStatus.SUCCEEDED.value,
+)
 
 
 def _release() -> ReleaseStatus:
@@ -114,15 +132,60 @@ def _readiness(db: Session) -> list[ReadinessComponent]:
     return components
 
 
-def _job_scope(household_id: uuid.UUID):
+def _job_scope(household_id: uuid.UUID, job=Job):
     return or_(
-        Job.payload["household_id"].astext == str(household_id),
-        Job.task.like("maintenance.%"),
+        job.payload["household_id"].astext == str(household_id),
+        job.task.like("maintenance.%"),
     )
+
+
+def _superseded(household_id: uuid.UUID):
+    """True for a failed job whose work a newer job in the same scope covers."""
+    newer = aliased(Job)
+    same_work = or_(
+        Job.task.like("maintenance.%"),
+        *(
+            and_(
+                Job.task == task,
+                *(Job.payload[key].astext == newer.payload[key].astext for key in keys),
+            )
+            for task, keys in SAME_WORK_PAYLOAD_KEYS.items()
+        ),
+    )
+    return (
+        select(newer.id)
+        .where(
+            _job_scope(household_id, newer),
+            newer.task == Job.task,
+            newer.id != Job.id,
+            newer.created_at > Job.created_at,
+            newer.status.in_(SUPERSEDING_STATUSES),
+            same_work,
+        )
+        .exists()
+    )
+
+
+def _failed_job_counts(db: Session, household_id: uuid.UUID) -> tuple[int, int]:
+    """Return (needing action, historical) counts of non-retired failed jobs."""
+    superseded = _superseded(household_id)
+    rows = db.execute(
+        select(superseded, func.count(Job.id))
+        .where(
+            _job_scope(household_id),
+            Job.status == JobStatus.FAILED.value,
+            Job.task.not_in(RETIRED_JOB_TASKS),
+        )
+        .group_by(superseded)
+    ).all()
+    by_superseded = {bool(is_superseded): int(count or 0) for is_superseded, count in rows}
+    return by_superseded.get(False, 0), by_superseded.get(True, 0)
 
 
 def _jobs(db: Session, household_id: uuid.UUID) -> JobStatusOut:
     scope = _job_scope(household_id)
+    superseded = _superseded(household_id)
+    needing_action, historical = _failed_job_counts(db, household_id)
     counts = {
         str(status): int(count or 0)
         for status, count in db.execute(
@@ -134,18 +197,21 @@ def _jobs(db: Session, household_id: uuid.UUID) -> JobStatusOut:
             .group_by(Job.status)
         ).all()
     }
-    recent_failed = db.scalars(
-        select(Job)
+    recent_failed = db.execute(
+        select(Job, superseded)
         .where(
             Job.status == JobStatus.FAILED.value,
             scope,
             Job.task.not_in(RETIRED_JOB_TASKS),
         )
-        .order_by(Job.finished_at.desc().nullslast(), Job.created_at.desc())
+        # Failures that still need action must not be pushed out by history.
+        .order_by(superseded, Job.finished_at.desc().nullslast(), Job.created_at.desc())
         .limit(10)
     ).all()
     return JobStatusOut(
         counts=counts,
+        failed_needing_action=needing_action,
+        failed_historical=historical,
         recent_failed=[
             FailedJobOut(
                 id=job.id,
@@ -155,8 +221,9 @@ def _jobs(db: Session, household_id: uuid.UUID) -> JobStatusOut:
                 error=(job.last_error or "")[:400] or None,
                 created_at=job.created_at,
                 finished_at=job.finished_at,
+                needs_action=not is_superseded,
             )
-            for job in recent_failed
+            for job, is_superseded in recent_failed
         ],
     )
 
@@ -254,19 +321,6 @@ def _external_services(db: Session, household_id: uuid.UUID) -> list[ExternalSer
     ]
 
 
-def _failed_job_count(db: Session, household_id: uuid.UUID) -> int:
-    return int(
-        db.scalar(
-            select(func.count(Job.id)).where(
-                _job_scope(household_id),
-                Job.status == JobStatus.FAILED.value,
-                Job.task.not_in(RETIRED_JOB_TASKS),
-            )
-        )
-        or 0
-    )
-
-
 def _scheduled_review(db: Session, household_id: uuid.UUID) -> ScheduledReviewStatus:
     summary = schedule_summary(db, household_id)
     return ScheduledReviewStatus(
@@ -296,7 +350,7 @@ def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusS
     readiness = _readiness(db)
     tasks = _tasks(db, household_id)
     external_services = _external_services(db, household_id)
-    failed_jobs = _failed_job_count(db, household_id)
+    failed_jobs, historical_failed_jobs = _failed_job_counts(db, household_id)
     scheduled_review = _scheduled_review(db, household_id)
     issues: list[SystemStatusIssue] = []
     for component in readiness:
@@ -315,7 +369,7 @@ def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusS
                 kind="core",
                 label="Worker jobs",
                 detail=(
-                    f"{failed_jobs} failed job(s) recorded. Review the job details "
+                    f"{failed_jobs} failed job(s) need action. Review the job details "
                     "and retry after fixing the cause."
                 ),
                 settings_path="/settings/system-status",
@@ -392,6 +446,8 @@ def system_status_summary(db: Session, household_id: uuid.UUID) -> SystemStatusS
         attention_count=len(issues),
         core_issue_count=core_count,
         configured_feature_issue_count=configured_count,
+        failed_jobs_needing_action=failed_jobs,
+        historical_failed_jobs=historical_failed_jobs,
         optional_not_configured=optional,
         issues=issues,
         generated_at=datetime.now(UTC),

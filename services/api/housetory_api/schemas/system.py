@@ -28,10 +28,14 @@ class FailedJobOut(BaseModel):
     error: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
+    # False once a newer job for the same work is queued, running or succeeded.
+    needs_action: bool = True
 
 
 class JobStatusOut(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)
+    failed_needing_action: int = 0
+    failed_historical: int = 0
     recent_failed: list[FailedJobOut] = Field(default_factory=list)
 
 
@@ -74,6 +78,8 @@ class SystemStatusSummaryOut(BaseModel):
     attention_count: int = 0
     core_issue_count: int = 0
     configured_feature_issue_count: int = 0
+    failed_jobs_needing_action: int = 0
+    historical_failed_jobs: int = 0
     optional_not_configured: list[str] = Field(default_factory=list)
     issues: list[SystemStatusIssue] = Field(default_factory=list)
     generated_at: datetime

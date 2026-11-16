@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -424,6 +424,104 @@ def test_system_status_summary_keeps_optional_configuration_out_of_attention(
         job["task"] != "maintenance.prune_item_images"
         for job in status["jobs"]["recent_failed"]
     )
+
+
+def _status_job(household_id, document_id, status, *, minutes_ago, task="documents.ocr"):
+    created = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    return Job(
+        queue="documents",
+        task=task,
+        payload={"household_id": str(household_id), "document_id": str(document_id)},
+        status=status,
+        attempts=1,
+        max_attempts=1,
+        last_error="fixture ocr failure" if status == "failed" else None,
+        created_at=created,
+        finished_at=None if status in {"queued", "running"} else created,
+    )
+
+
+def test_superseded_failed_job_is_history_and_does_not_degrade_health(owner_client):
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    document_id = uuid.uuid4()
+    _healthy_heartbeat()
+    with SessionLocal() as db:
+        db.add(_status_job(household_id, document_id, "failed", minutes_ago=60))
+        db.add(_status_job(household_id, document_id, "succeeded", minutes_ago=5))
+        db.commit()
+
+    summary = owner_client.get("/api/v1/system/status/summary").json()
+    assert summary["status"] == "healthy"
+    assert summary["core_issue_count"] == 0
+    assert summary["failed_jobs_needing_action"] == 0
+    assert summary["historical_failed_jobs"] == 1
+
+    jobs = owner_client.get("/api/v1/system/status").json()["jobs"]
+    assert jobs["counts"]["failed"] == 1
+    assert jobs["failed_needing_action"] == 0
+    assert jobs["failed_historical"] == 1
+    assert [(job["task"], job["needs_action"]) for job in jobs["recent_failed"]] == [
+        ("documents.ocr", False)
+    ]
+
+
+def test_failed_job_without_newer_attempt_still_needs_action(owner_client):
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    document_id = uuid.uuid4()
+    _healthy_heartbeat()
+    with SessionLocal() as db:
+        # A success that predates the failure does not cover it.
+        db.add(_status_job(household_id, document_id, "succeeded", minutes_ago=90))
+        db.add(_status_job(household_id, document_id, "failed", minutes_ago=60))
+        db.commit()
+
+    summary = owner_client.get("/api/v1/system/status/summary").json()
+    assert summary["status"] == "attention"
+    assert summary["core_issue_count"] == 1
+    assert summary["failed_jobs_needing_action"] == 1
+    assert summary["historical_failed_jobs"] == 0
+    issues = {issue["label"]: issue for issue in summary["issues"]}
+    assert issues["Worker jobs"]["kind"] == "core"
+
+    jobs = owner_client.get("/api/v1/system/status").json()["jobs"]
+    assert jobs["failed_needing_action"] == 1
+    assert jobs["failed_historical"] == 0
+    assert jobs["recent_failed"][0]["needs_action"] is True
+
+
+def test_failed_job_is_not_superseded_by_unrelated_or_foreign_success(owner_client):
+    household_id = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    document_id = uuid.uuid4()
+    _healthy_heartbeat()
+    with SessionLocal() as db:
+        db.add(_status_job(household_id, document_id, "failed", minutes_ago=60))
+        # Same task, different document.
+        db.add(_status_job(household_id, uuid.uuid4(), "succeeded", minutes_ago=5))
+        # Same document id, different task.
+        db.add(
+            _status_job(household_id, document_id, "succeeded", minutes_ago=5, task="fixture.other")
+        )
+        # Same task and document id recorded for another household.
+        db.add(_status_job(uuid.uuid4(), document_id, "succeeded", minutes_ago=5))
+        # A task with no known work identity is never superseded.
+        db.add(
+            _status_job(household_id, document_id, "failed", minutes_ago=60, task="fixture.unkeyed")
+        )
+        db.add(
+            _status_job(
+                household_id, document_id, "succeeded", minutes_ago=5, task="fixture.unkeyed"
+            )
+        )
+        db.commit()
+
+    summary = owner_client.get("/api/v1/system/status/summary").json()
+    assert summary["status"] == "attention"
+    assert summary["failed_jobs_needing_action"] == 2
+    assert summary["historical_failed_jobs"] == 0
+
+    jobs = owner_client.get("/api/v1/system/status").json()["jobs"]
+    assert jobs["failed_needing_action"] == 2
+    assert all(job["needs_action"] for job in jobs["recent_failed"])
 
 
 def test_system_status_summary_distinguishes_core_and_configured_feature_issues(
