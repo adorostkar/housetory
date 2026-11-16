@@ -194,7 +194,12 @@ for (const mobile of [false, true]) {
     await expect(page.getByLabel("Assistant answer").last().locator("strong")).toHaveText("3 days");
     await returnAction.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/loans/${loanId}`)).json()).returned_quantity).toBe(1);
-    await expect(page.getByRole("region", { name: "Prepared actions" })).toHaveCount(0);
+    // Applied work is resolved: it leaves the pending list, whatever else is waiting.
+    const household = (await (await request.get("/api/v1/auth/session")).json()).household.id;
+    const stillPending = await (await request.get(
+      `/api/v1/assistant/actions/proposals/pending?household_id=${household}&limit=100`,
+    )).json();
+    expect(stillPending.items.map((entry: { id: string }) => entry.id)).not.toContain(proposalId);
     await ask(page, "Rename it please");
     const action = page.getByLabel("Action review").filter({ hasText: itemName }).last();
     await expect(action.getByRole("button", { name: "Apply", exact: true })).toBeVisible();

@@ -125,7 +125,7 @@ Implemented on `feature/product-simplification`. Row numbers refer to the table 
 | 2 | Done. `search-page.tsx` and its test removed. |
 | 3 | Done. `/scan` and `/recognize` open Add items with their place context; the pages, their test and `lib/recognition.ts` are removed. |
 | 4, 5 | **Not done, deliberately.** The three unused endpoints are thin routes over services that `/search/query` still uses, and about fifty backend tests enter through them. Removing them saves little and loses coverage. The phrase-based fallback is what keeps typed actions working without AI, so removing it would cut offline capability. |
-| 6 | Done as a count and a list. Prepared actions waiting for Apply now count in the header badge and appear on the Review page, where they can be reopened or cancelled. Storage stays separate. |
+| 6 | Done as a count and a list. Prepared actions waiting for Apply count in the header badge and appear on the Review page, where they can be reopened or cancelled. The list is paginated with an exact server total, so nothing drops out by age or beyond a page; applied, cancelled and superseded proposals are resolved and leave it, while a proposal made stale by a later change stays counted until it is refreshed or cancelled. Reopening loads the proposal itself, independent of restored conversation history. Storage stays separate. |
 | 7 | Partly. Online-search setup, iPhone install and credential instructions are collapsed until needed; Settings is still one page. |
 | 8 | Partly. Credential operations are collapsed; the provider and task layout is unchanged. |
 | 9 | Partly. Removed from Overview and the item page; review surfaces keep their own wording. |

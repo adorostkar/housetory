@@ -1,11 +1,11 @@
 import re
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
@@ -34,6 +34,7 @@ from ...schemas.assistant_actions import (
     AssistantIntentRequest,
     AssistantMoveDestination,
     AssistantMoveDestinationList,
+    AssistantPendingActionList,
     BorrowedReturnProposalRequest,
     BorrowingProposalRequest,
     BorrowingReviewRequest,
@@ -2088,35 +2089,82 @@ def cancel_proposal(
     return result
 
 
-PENDING_PROPOSAL_DAYS = 7
+def _pending_entry(db: Session, proposal: AssistantActionProposal) -> AssistantActionProposalOut:
+    try:
+        return tool_proposal_preview(db, proposal)
+    except (ApiError, KeyError, ValidationError):
+        # Still outstanding: it cannot be shown or applied as prepared, so the user
+        # is told to cancel it instead of it silently dropping out of the count.
+        return AssistantActionProposalOut(
+            id=proposal.id,
+            kind=proposal.kind,
+            state="stale",
+            scope_label="",
+            targets=[],
+            changes=proposal.changes or {},
+        )
 
 
-@router.get("/proposals/pending", response_model=list[AssistantActionProposalOut])
+@router.get("/proposals/pending", response_model=AssistantPendingActionList)
 def pending_proposals(
     household_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     account: AccountContext = Depends(require_account),
     db: Session = Depends(get_db),
-) -> list[AssistantActionProposalOut]:
-    """Recent prepared actions still waiting for this user's Apply or Cancel."""
+) -> AssistantPendingActionList:
+    """Every prepared action still waiting for this user's Apply or Cancel.
+
+    Applied, cancelled and superseded proposals are resolved and never listed.
+    Nothing expires by age; `total` is the exact count across all pages.
+    """
+    role = db.scalar(
+        select(HouseholdMember.role).where(
+            HouseholdMember.user_id == account.user.id,
+            HouseholdMember.household_id == household_id,
+        )
+    )
+    if role is None:
+        raise ApiError(404, "household_not_found", "Household not found.")
+    if role not in {"owner", "member"}:
+        # Without write access nothing here can be applied by this user.
+        return AssistantPendingActionList(items=[], total=0, limit=limit, offset=offset)
+    outstanding = (
+        AssistantActionProposal.actor_user_id == account.user.id,
+        AssistantActionProposal.household_id == household_id,
+        AssistantActionProposal.state == "ready",
+    )
+    total = db.scalar(select(func.count()).select_from(AssistantActionProposal).where(*outstanding))
     rows = db.scalars(
         select(AssistantActionProposal)
-        .where(
-            AssistantActionProposal.actor_user_id == account.user.id,
-            AssistantActionProposal.household_id == household_id,
-            AssistantActionProposal.state == "ready",
-            AssistantActionProposal.created_at
-            >= datetime.now(UTC) - timedelta(days=PENDING_PROPOSAL_DAYS),
-        )
-        .order_by(AssistantActionProposal.created_at.desc())
-        .limit(20)
+        .where(*outstanding)
+        .order_by(AssistantActionProposal.created_at.desc(), AssistantActionProposal.id)
+        .limit(limit)
+        .offset(offset)
     ).all()
-    pending = []
-    for row in rows:
-        # Only proposals the conversation can restore are listed.
-        if "tool_preview" not in (row.snapshots or {}):
-            continue
-        try:
-            pending.append(tool_proposal_preview(db, row))
-        except ApiError:
-            continue
-    return pending
+    return AssistantPendingActionList(
+        items=[_pending_entry(db, row) for row in rows],
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/proposals/{proposal_id}", response_model=AssistantActionProposalOut)
+def read_proposal(
+    proposal_id: uuid.UUID,
+    account: AccountContext = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> AssistantActionProposalOut:
+    """One of the user's own proposals in its current state, for reopening its review."""
+    proposal = db.scalar(
+        select(AssistantActionProposal).where(
+            AssistantActionProposal.id == proposal_id,
+            AssistantActionProposal.actor_user_id == account.user.id,
+        )
+    )
+    if proposal is None:
+        raise ApiError(404, "proposal_not_found", "Proposal not found.")
+    auth = _writer(db, account, proposal.household_id)
+    _check_property(db, auth, proposal.scope_property_id)
+    return _pending_entry(db, proposal)

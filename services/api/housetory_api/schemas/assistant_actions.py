@@ -194,6 +194,13 @@ class AssistantActionStateOut(BaseModel):
     state: str
 
 
+class AssistantPendingActionList(BaseModel):
+    items: list[AssistantActionProposalOut]
+    total: int
+    limit: int
+    offset: int
+
+
 class AssistantActionInterpretRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

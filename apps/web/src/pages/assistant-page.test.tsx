@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as React from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -278,6 +278,35 @@ beforeEach(() => {
 });
 
 describe("AssistantPage", () => {
+  it("reopens a prepared action from the proposal itself when its conversation is not loaded", async () => {
+    const proposal = {
+      id: "old-proposal", kind: "edit_item", state: "ready", scope_label: "Home",
+      targets: [{ id: "item-drill", name: "Heavy drill" }], before: { name: "Heavy drill" },
+      changes: { name: "Cordless drill" }, destination: null,
+    };
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path === "/assistant/actions/proposals/old-proposal") return proposal;
+      if (path.startsWith("/assistant/runs")) return [];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    vi.mocked(api.post).mockReset().mockResolvedValue({ message: "Item updated." });
+    renderPage("/assistant", {
+      id: "reopen-old", text: "", capture: { kind: "action", id: "old-proposal" },
+    });
+    const card = await screen.findByLabelText("Action review");
+    expect(card).toHaveTextContent("Heavy drill");
+    expect(createToolRun).not.toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+    await userEvent.click(within(card).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/assistant/actions/proposals/old-proposal/apply",
+      { request_id: "old-proposal" }, expect.anything(),
+    ));
+    expect(await within(card).findByText("Item updated.")).toBeVisible();
+  });
+
   it("opens a notification's exact capture inline without submitting another request or showing the capture queue", async () => {
     renderPage("/assistant", {
       id: "notification-older", text: "", capture: { kind: "items", id: "older-import" },

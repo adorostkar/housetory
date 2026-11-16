@@ -724,9 +724,7 @@ def test_ai_classifies_natural_item_creation_as_supported(
         return {"intent": "create_item", "form": None}
 
     monkeypatch.setattr(ai, "complete_json", complete)
-    response = owner_client.post(
-        "/api/v1/assistant/actions/intent", json={"query": query}
-    )
+    response = owner_client.post("/api/v1/assistant/actions/intent", json={"query": query})
     assert response.status_code == 200, response.text
     assert response.json() == {"intent": "create_item", "form": None}
     assert "requests to add or create inventory items are create_item" in prompts[0].lower()
@@ -2480,3 +2478,128 @@ def test_move_review_lists_destinations_in_frozen_property_scope(owner_client):
         proposal["scope_label"]
         == f"{client.get('/api/v1/auth/session').json()['household']['name']} · {home['name']}"
     )
+
+
+def test_pending_actions_are_durable_exactly_counted_and_reopenable(owner_client, anon_client):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from housetory_api.models import AssistantActionProposal
+    from tests.test_lending import _add_member, _headers
+
+    client = owner_client
+    household = client.get("/api/v1/auth/session").json()["household"]["id"]
+    pending = f"/api/v1/assistant/actions/proposals/pending?household_id={household}"
+    item = client.post("/api/v1/items", json={"name": "Drill", "quantity": 1}).json()["item"]
+    other = client.post("/api/v1/items", json={"name": "Saw", "quantity": 1}).json()["item"]
+
+    def prepare(target, name):
+        response = client.post(
+            "/api/v1/assistant/actions/proposals",
+            json={"kind": "edit_item", "item_id": target["id"], "changes": {"name": name}},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    ids = [prepare(item, f"Drill {index}") for index in range(24)]
+    saw = prepare(other, "Hand saw")
+    oldest = ids[0]
+    with SessionLocal() as db:
+        db.execute(
+            update(AssistantActionProposal)
+            .where(AssistantActionProposal.id == uuid.UUID(oldest))
+            .values(created_at=datetime.now(UTC) - timedelta(days=400))
+        )
+        db.commit()
+
+    first = client.get(pending).json()
+    assert (first["total"], len(first["items"]), first["limit"]) == (25, 20, 20)
+    second = client.get(f"{pending}&offset=20").json()
+    assert second["total"] == 25
+    listed = [entry["id"] for entry in first["items"] + second["items"]]
+    assert sorted(listed) == sorted([*ids, saw])
+    # Age never hides an outstanding action: the oldest is simply last.
+    assert listed[-1] == oldest
+    assert client.get(f"{pending}&limit=101").status_code == 422
+
+    # Reopening works from the proposal alone and it still applies after a year.
+    reopened = client.get(f"/api/v1/assistant/actions/proposals/{oldest}")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["state"] == "ready"
+    assert reopened.json()["changes"] == {"name": "Drill 0"}
+
+    # Another member of the same household sees none of them and cannot read one.
+    token, _ = _add_member(client, email="member@example.com", role="member")
+    member = _headers(token)
+    assert anon_client.get(pending, headers=member).json()["total"] == 0
+    assert (
+        anon_client.get(f"/api/v1/assistant/actions/proposals/{oldest}", headers=member).status_code
+        == 404
+    )
+    assert (
+        anon_client.get(
+            f"/api/v1/assistant/actions/proposals/pending?household_id={uuid.uuid4()}",
+            headers=member,
+        ).status_code
+        == 404
+    )
+
+    # Resolved work leaves the list: cancelled, then applied.
+    cancelled = client.post(f"/api/v1/assistant/actions/proposals/{ids[1]}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    applied = client.post(
+        f"/api/v1/assistant/actions/proposals/{oldest}/apply",
+        json={"request_id": str(uuid.uuid4())},
+    )
+    assert applied.status_code == 200, applied.text
+    assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["name"] == "Drill 0"
+    remaining = client.get(f"{pending}&limit=100").json()
+    assert remaining["total"] == 23
+    assert {oldest, ids[1]}.isdisjoint(entry["id"] for entry in remaining["items"])
+    for resolved, state in ((oldest, "applied"), (ids[1], "cancelled")):
+        assert (
+            client.get(f"/api/v1/assistant/actions/proposals/{resolved}").json()["state"] == state
+        )
+
+    # The item changed, so the other drill proposals are stale. They stay counted
+    # until the user refreshes or cancels them, and Apply still refuses.
+    stale = client.post(
+        f"/api/v1/assistant/actions/proposals/{ids[2]}/apply",
+        json={"request_id": str(uuid.uuid4())},
+    )
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "proposal_stale"
+    assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["name"] == "Drill 0"
+    assert client.get(pending).json()["total"] == 23
+    refreshed = client.post(f"/api/v1/assistant/actions/proposals/{ids[2]}/refresh")
+    assert refreshed.status_code == 201, refreshed.text
+    after_refresh = client.get(f"{pending}&limit=100").json()
+    assert after_refresh["total"] == 23
+    current = [entry["id"] for entry in after_refresh["items"]]
+    assert refreshed.json()["id"] in current and ids[2] not in current
+
+    # A proposal whose stored preview is unusable is listed as stale, not dropped.
+    with SessionLocal() as db:
+        db.execute(
+            update(AssistantActionProposal)
+            .where(AssistantActionProposal.id == uuid.UUID(saw))
+            .values(snapshots={})
+        )
+        db.commit()
+    broken = next(
+        entry for entry in client.get(f"{pending}&limit=100").json()["items"] if entry["id"] == saw
+    )
+    assert broken["state"] == "stale"
+
+    # A viewer cannot apply anything, so nothing is presented as pending work.
+    with SessionLocal() as db:
+        membership = db.scalar(
+            select(HouseholdMember).where(HouseholdMember.household_id == uuid.UUID(household))
+        )
+        owner_id = membership.user_id
+        db.execute(
+            update(HouseholdMember).where(HouseholdMember.user_id == owner_id).values(role="viewer")
+        )
+        db.commit()
+    assert client.get(pending).json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
+    assert client.get(f"/api/v1/assistant/actions/proposals/{ids[3]}").status_code == 403

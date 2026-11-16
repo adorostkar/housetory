@@ -174,7 +174,8 @@ def test_tool_proposal_is_editable_authoritative_and_applied_exactly_once(
     household = client.get("/api/v1/auth/session").json()["household"]["id"]
     pending = f"/api/v1/assistant/actions/proposals/pending?household_id={household}"
     waiting = client.get(pending).json()
-    assert [(entry["id"], entry["changes"]) for entry in waiting] == [
+    assert waiting["total"] == 1
+    assert [(entry["id"], entry["changes"]) for entry in waiting["items"]] == [
         (proposal_id, {"name": "Reviewed drill"})
     ]
     for _ in range(2):
@@ -183,7 +184,7 @@ def test_tool_proposal_is_editable_authoritative_and_applied_exactly_once(
             json={"request_id": proposal_id},
         )
         assert response.status_code == 200, response.text
-    assert client.get(pending).json() == []
+    assert client.get(pending).json()["total"] == 0
     assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["name"] == "Reviewed drill"
     events = client.get(f"/api/v1/items/{item['id']}/history").json()["items"]
     assert sum(event["action"] == "item.updated" for event in events) == 1

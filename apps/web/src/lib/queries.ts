@@ -816,14 +816,22 @@ export function useCaptureReviews(dismissed = false) {
   });
 }
 
-export function usePendingActions() {
+export const PENDING_ACTIONS_PAGE = 20;
+
+/** One page of prepared actions; `total` is the exact number outstanding. */
+export function usePendingActions(offset = 0) {
   const session = useSession();
   const householdId = session.data?.household?.id;
   return useQuery({
-    queryKey: ["assistant-pending-actions", householdId],
-    queryFn: ({ signal }) => api.get<{ id: string; kind: string; targets: { id: string; name: string }[] }[]>(
-      `/assistant/actions/proposals/pending?household_id=${householdId}`, { signal },
+    queryKey: ["assistant-pending-actions", householdId, offset],
+    queryFn: ({ signal }) => api.get<{
+      items: { id: string; kind: string; state: string; targets: { id: string; name: string }[] }[];
+      total: number;
+    }>(
+      `/assistant/actions/proposals/pending?household_id=${householdId}&limit=${PENDING_ACTIONS_PAGE}&offset=${offset}`,
+      { signal },
     ),
+    placeholderData: (previous) => previous,
     enabled: Boolean(householdId),
     refetchInterval: 5000,
     retry: false,

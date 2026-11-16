@@ -68,6 +68,20 @@ function proposalExplanation(kind: string) {
   return "Review the change below, then Apply to save it.";
 }
 
+/** The authoritative review card for one proposal in its current server state. */
+export function actionMessage(proposal: AssistantActionProposal, originalRequest = ""): AssistantMessage {
+  return {
+    role: "assistant", text: proposalExplanation(proposal.kind),
+    action: {
+      proposal, originalRequest, requestId: proposal.id, pending: false,
+      ...(proposal.state === "applied" ? { result: "Already applied." } :
+        proposal.state === "cancelled" || proposal.state === "superseded"
+          ? { result: `Proposal ${proposal.state}.` }
+          : proposal.state !== "ready" ? { conflict: "This proposal is stale. Refresh it before applying." } : {}),
+    },
+  };
+}
+
 export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
   const messages: AssistantMessage[] = [
     { role: "user", text: run.query, toolRunId: run.id },
@@ -83,16 +97,7 @@ export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
     if (result.proposal && !seen.has(result.proposal.id)) {
       const proposal = result.proposal;
       seen.add(proposal.id);
-      messages.push({
-        role: "assistant", text: proposalExplanation(proposal.kind), toolRunId: run.id,
-        action: {
-          proposal, originalRequest: run.query, requestId: proposal.id, pending: false,
-          ...(proposal.state === "applied" ? { result: "Already applied." } :
-            proposal.state === "cancelled" || proposal.state === "superseded"
-              ? { result: `Proposal ${proposal.state}.` }
-              : proposal.state !== "ready" ? { conflict: "This proposal is stale. Refresh it before applying." } : {}),
-        },
-      });
+      messages.push({ ...actionMessage(proposal, run.query), toolRunId: run.id });
     }
     if (result.capture && !seen.has(result.capture.id)) {
       const capture = result.capture;
@@ -132,6 +137,9 @@ export function mergeToolRun(
       },
     } : message;
   });
+  const arriving = new Set(incoming.flatMap((message) => message.action ? [message.action.proposal.id] : []));
+  messages = messages.filter((message) =>
+    message.toolRunId || !message.action || !arriving.has(message.action.proposal.id));
   const index = messages.findIndex((message) => message.toolRunId === run.id);
   if (index < 0) {
     const before = beforeRunId ? messages.findIndex((message) => message.toolRunId === beforeRunId) : -1;

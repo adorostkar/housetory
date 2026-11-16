@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assistantAnswerText, mergeToolRun, toolRunMessages, type AssistantToolRun } from "@/lib/assistant-tools";
+import { actionMessage, assistantAnswerText, mergeToolRun, toolRunMessages, type AssistantToolRun } from "@/lib/assistant-tools";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 
 describe("durable assistant observations", () => {
@@ -57,6 +57,10 @@ describe("durable assistant observations", () => {
       "Validation Borrower has had it for **3 days**.",
       "Review this return, then Apply to record it.",
     ]);
+    // A card reopened on its own is replaced, not duplicated, when its task loads.
+    const merged = mergeToolRun([actionMessage(run.steps[0]!.result.proposal!)], run);
+    expect(merged.filter((message) => message.action)).toHaveLength(1);
+    expect(merged.find((message) => message.action)?.toolRunId).toBe("run");
     // While the task is still being retried or has no extra answer, nothing is duplicated.
     expect(toolRunMessages({ ...run, answer: "" }).some((message) => message.toolAnswer)).toBe(false);
     expect(toolRunMessages({ ...run, state: "running" }).some((message) => message.toolAnswer)).toBe(false);

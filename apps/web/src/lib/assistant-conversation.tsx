@@ -16,7 +16,7 @@ import type { SearchConversationContext, SearchQueryResponse } from "@/lib/types
 import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
 import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
-import { createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
+import { actionMessage, createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
 
 export interface AssistantMessage {
   role: "user" | "assistant";
@@ -162,6 +162,7 @@ interface AssistantConversationContextValue {
   setCaptureHouseholdId: (scope: string, value: string) => void;
   setCapturePending: (scope: string, value: boolean) => void;
   setCaptureError: (scope: string, value: string | null) => void;
+  openAction: (scope: string, proposal: AssistantActionProposal) => void;
   recordCapture: (
     scope: string,
     userText: string,
@@ -296,7 +297,11 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           ? current.messages.find((message) => message.toolRunId)?.toolRunId : undefined);
         messages = mergeToolRun(messages, run, before);
       }
-      messages = [...messages, ...local];
+      // A card reopened on its own gives way to the same proposal restored with its task.
+      const restored = new Set(messages.flatMap((message) =>
+        message.action ? [message.action.proposal.id] : []));
+      messages = [...messages, ...local.filter((message) =>
+        !message.action || !restored.has(message.action.proposal.id))];
       return {
         ...current, messages,
         toolParentId: current.toolParentId ?? (firstRestore ? toolRuns.data.at(-1)?.id ?? null : null),
@@ -339,6 +344,17 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   const setCaptureError = React.useCallback((scope: string, value: string | null) => {
     update(scope, (current) => ({ ...current, captureError: value }));
   }, [update]);
+
+  // Shows a prepared action's review card even when its original task is not loaded.
+  const openAction = React.useCallback((scope: string, proposal: AssistantActionProposal) => {
+    update(scope, (current) => current.messages.some((message) => message.action?.proposal.id === proposal.id)
+      ? current
+      : { ...current, messages: [...current.messages, actionMessage(proposal)] });
+  }, [update]);
+
+  const pendingActionsChanged = React.useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["assistant-pending-actions"] });
+  }, [queryClient]);
 
   const recordCapture = React.useCallback((
     scope: string,
@@ -770,6 +786,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     ).then((response) => {
       if (controller.signal.aborted) return;
       changeAction((entry) => ({ ...entry, pending: false, result: response.message }));
+      pendingActionsChanged();
       invalidateInventory();
       invalidateLoans();
       invalidateBorrowed();
@@ -782,7 +799,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         toast.error(getApiErrorMessage(error));
       }
     }).finally(() => controllers.current.delete(controller));
-  }, [invalidateInventory, invalidateLoans, invalidateBorrowed, update]);
+  }, [invalidateInventory, invalidateLoans, invalidateBorrowed, update, pendingActionsChanged]);
 
   const refreshAction = React.useCallback((scope: string, proposalId: string) => {
     const action = (conversationsRef.current[scope] ?? EMPTY).messages.find(
@@ -807,12 +824,13 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     ).then((proposal) => {
       if (controller.signal.aborted) return;
       change({ proposal, pending: false, conflict: undefined, editing: false, requestId: proposal.id });
+      pendingActionsChanged();
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       change({ pending: false });
       toast.error(getApiErrorMessage(error));
     }).finally(() => controllers.current.delete(controller));
-  }, [update]);
+  }, [update, pendingActionsChanged]);
 
   const cancelAction = React.useCallback((scope: string, proposalId: string) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
@@ -835,12 +853,13 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       .then(() => {
         if (controller.signal.aborted) return;
         changeAction((entry) => ({ ...entry, pending: false, result: "Proposal cancelled. Nothing was changed." }));
+        pendingActionsChanged();
       }).catch((error: unknown) => {
         if (controller.signal.aborted) return;
         changeAction((entry) => ({ ...entry, pending: false }));
         toast.error(getApiErrorMessage(error));
       }).finally(() => controllers.current.delete(controller));
-  }, [update]);
+  }, [update, pendingActionsChanged]);
 
   const editMove = React.useCallback((scope: string, proposalId: string) => {
     const action = (conversationsRef.current[scope] ?? EMPTY).messages.find(
@@ -1114,14 +1133,14 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   const value = React.useMemo(
     () => ({
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
-      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
+      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
       reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     }),
     [
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
-      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, updateCapture,
+      setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
       reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
@@ -1162,6 +1181,7 @@ export function useAssistantConversation(scope: string) {
     setCaptureHouseholdId: (value: string) => store.setCaptureHouseholdId(scope, value),
     setCapturePending: (value: boolean) => store.setCapturePending(scope, value),
     setCaptureError: (value: string | null) => store.setCaptureError(scope, value),
+    openAction: (proposal: AssistantActionProposal) => store.openAction(scope, proposal),
     recordCapture: (
       userText: string,
       attachment: AssistantMessage["attachment"],

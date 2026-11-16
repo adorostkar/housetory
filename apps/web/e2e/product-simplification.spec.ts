@@ -157,3 +157,120 @@ for (const mobile of [false, true]) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const mobile of [false, true]) {
+  const size = mobile ? "mobile" : "desktop";
+  test(`${size}: every prepared action stays counted and reopens without its conversation`, async ({ page, request }) => {
+    const database = process.env.SIMPLIFY_E2E_DATABASE;
+    test.skip(!database, "Needs the disposable database name to age a proposal");
+    expect(database).toMatch(/^housetory_[a-z0-9_]+$/);
+    await page.setViewportSize(mobile ? { width: 375, height: 812 } : { width: 1440, height: 1000 });
+    const suffix = crypto.randomUUID().slice(0, 6);
+    const household = (await (await request.get("/api/v1/auth/session")).json()).household.id;
+    const pendingTotal = async () => (await (await request.get(
+      `/api/v1/assistant/actions/proposals/pending?household_id=${household}&limit=1`,
+    )).json()).total as number;
+    // Clear leftovers so the counts below are exact.
+    for (;;) {
+      const { items } = await (await request.get(
+        `/api/v1/assistant/actions/proposals/pending?household_id=${household}&limit=100`,
+      )).json();
+      if (!items.length) break;
+      for (const entry of items) await request.post(`/api/v1/assistant/actions/proposals/${entry.id}/cancel`);
+    }
+    const create = async (name: string) =>
+      (await (await request.post("/api/v1/items", { data: { name, quantity: 1 } })).json()).item;
+    const prepare = async (item: { id: string }, name: string) => {
+      const response = await request.post("/api/v1/assistant/actions/proposals", {
+        data: { kind: "edit_item", item_id: item.id, changes: { name } },
+      });
+      expect(response.ok(), await response.text()).toBeTruthy();
+      return (await response.json()).id as string;
+    };
+    const lamp = await create(`Old lamp ${suffix}`);
+    const drill = await create(`Bulk drill ${suffix}`);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/review");
+    const badge = async () => Number(/(\d+) unresolved/.exec(
+      await page.locator('button[title="Open assistant"]').first().getAttribute("aria-label") ?? "",
+    )?.[1] ?? 0);
+    await page.waitForLoadState("networkidle");
+    const before = await badge();
+
+    // One action prepared a month ago with no assistant conversation at all, then 22 newer ones.
+    const oldId = await prepare(lamp, `Reading lamp ${suffix}`);
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("psql", ["-h", "127.0.0.1", "-d", database!, "-v", "ON_ERROR_STOP=1", "-c",
+      `UPDATE assistant_action_proposals SET created_at = now() - interval '30 days' WHERE id = '${oldId}'`]);
+    for (let index = 0; index < 22; index += 1) await prepare(drill, `Bulk drill ${suffix} v${index}`);
+    expect(await pendingTotal()).toBe(23);
+
+    const queue = page.getByRole("region", { name: "Prepared actions" });
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 23");
+    await expect.poll(badge).toBe(before + 23);
+    await expect(queue.getByText("1–20 of 23")).toBeVisible();
+    const oldTitle = `Review Edit: Old lamp ${suffix}`;
+    await expect(queue.getByRole("button", { name: oldTitle, exact: true })).toHaveCount(0);
+    await queue.getByRole("button", { name: "Next actions" }).click();
+    await expect(queue.getByText("21–23 of 23")).toBeVisible();
+    // Smooth scrolling settles shortly after paging; the list must end up in view.
+    await page.waitForTimeout(800);
+    await expect(queue.getByRole("heading")).toBeInViewport();
+    if (shots) await page.screenshot({ path: `${shots}/${size}-prepared-actions-page-2.png` });
+
+    // Reopen the month-old action: it is not in any restored conversation.
+    expect((await (await request.get("/api/v1/assistant/runs")).json())
+      .some((run: { steps: unknown[] }) => JSON.stringify(run.steps).includes(oldId))).toBe(false);
+    await queue.getByRole("button", { name: oldTitle, exact: true }).click();
+    const panel = page.getByTestId("assistant-panel");
+    const card = panel.locator(`[data-capture-id="${oldId}"]`);
+    await expect(card).toBeInViewport();
+    await expect(card).toContainText(`Reading lamp ${suffix}`);
+    const nameOf = async (id: string) => (await (await request.get(`/api/v1/items/${id}`)).json()).item.name;
+    expect(await nameOf(lamp.id)).toBe(`Old lamp ${suffix}`);
+    if (shots) await page.screenshot({ path: `${shots}/${size}-reopened-old-action.png` });
+    await card.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect.poll(() => nameOf(lamp.id)).toBe(`Reading lamp ${suffix}`);
+    await expect.poll(badge).toBe(before + 22);
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 22");
+    await expect(queue.getByText("21–22 of 22")).toBeVisible();
+
+    // Apply one drill rename; the others are now stale but stay counted until handled.
+    const applyFirst = async () => {
+      await queue.getByRole("button", { name: /^Review Edit: Bulk drill/ }).first().click();
+      const open = panel.getByLabel("Action review").last();
+      await expect(open).toBeInViewport();
+      return open;
+    };
+    let open = await applyFirst();
+    await open.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect.poll(() => nameOf(drill.id)).toMatch(/ v\d+$/);
+    const renamed = await nameOf(drill.id);
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 21");
+    open = await applyFirst();
+    await open.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(open.getByRole("alert")).toContainText("Refresh the proposal");
+    expect(await nameOf(drill.id)).toBe(renamed);
+    expect(await pendingTotal()).toBe(21);
+    await open.getByRole("button", { name: "Refresh proposal" }).click();
+    await expect(open.getByRole("alert")).toHaveCount(0);
+    expect(await pendingTotal()).toBe(21);
+    await open.getByRole("button", { name: "Cancel proposal", exact: true }).click();
+    await expect.poll(pendingTotal).toBe(20);
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+
+    // Cancel from the list, then reload: the count is the server's, not a page length.
+    await queue.getByRole("button", { name: /^Cancel Edit: Bulk drill/ }).first().click();
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 19");
+    await page.reload();
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 19");
+    await expect.poll(badge).toBe(before + 19);
+    await expect(queue.getByRole("button", { name: "Next actions" })).toHaveCount(0);
+    expect(await nameOf(drill.id)).toBe(renamed);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}

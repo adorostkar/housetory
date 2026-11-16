@@ -175,7 +175,7 @@ function AppShellLayout() {
   const handedToReview = useRef(new Set<string>());
   const pendingActions = usePendingActions();
   const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length
-    + (pendingActions.data?.length ?? 0);
+    + (pendingActions.data?.total ?? 0);
   const desktop = useMediaQuery("(min-width: 1024px)");
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;

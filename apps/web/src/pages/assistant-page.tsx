@@ -33,7 +33,7 @@ import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useCanWrite, useRecognition, useSelectHousehold, useSession } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
-import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope, type AssistantCaptureState } from "@/lib/assistant-conversation";
+import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope, type AssistantActionProposal, type AssistantCaptureState } from "@/lib/assistant-conversation";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
@@ -124,7 +124,7 @@ export function AssistantPage({
     if (!submitCaptureRef.current) throw new Error("The item capture handler is not ready.");
     return submitCaptureRef.current(value);
   }, []);
-  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, openAction, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
   const endRef = React.useRef<HTMLDivElement>(null);
@@ -363,8 +363,21 @@ export function AssistantPage({
       return;
     }
     if (initialRequest.capture?.kind === "action") {
-      // A prepared action already lives in the conversation; just bring it into view.
-      requestedCaptureRef.current = initialRequest.capture.id;
+      const proposalId = initialRequest.capture.id;
+      requestedCaptureRef.current = proposalId;
+      // The card is loaded from the proposal itself, so it opens even when its
+      // original conversation is older than the restored history.
+      if (!messages.some((message) => message.action?.proposal.id === proposalId)) {
+        void api.get<AssistantActionProposal>(`/assistant/actions/proposals/${proposalId}`)
+          .then((proposal) => {
+            if (requestedCaptureRef.current === proposalId) requestedCaptureRef.current = proposal.id;
+            openAction(proposal);
+          })
+          .catch((error: unknown) => {
+            if (requestedCaptureRef.current === proposalId) requestedCaptureRef.current = null;
+            toast.error(getApiErrorMessage(error));
+          });
+      }
       onInitialRequestHandled?.(initialRequest.id);
       return;
     }
@@ -415,6 +428,7 @@ export function AssistantPage({
     submitValue,
     messages,
     recordCapture,
+    openAction,
     selectDocument,
     selectImport,
     selectPhoto,
