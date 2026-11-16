@@ -61,6 +61,7 @@ def _match_rooms(
 
     A name yields every exact (case-insensitive) match, or every substring match
     when none is exact. More than one room means the reference is ambiguous.
+    Names are matched literally: ``%`` and ``_`` are not wildcards.
     """
     scope = [Room.household_id == household_id]
     if property_id is not None:
@@ -76,7 +77,9 @@ def _match_rooms(
             select(Room).where(*scope, func.lower(Room.name) == normalized).order_by(*order)
         ).all()
         or db.scalars(
-            select(Room).where(*scope, Room.name.ilike(f"%{normalized}%")).order_by(*order)
+            select(Room)
+            .where(*scope, Room.name.icontains(normalized, autoescape=True))
+            .order_by(*order)
         ).all()
     )
     if found or not contains_non_latin(normalized):
@@ -133,7 +136,7 @@ def _match_locations(
         ).all()
         or db.scalars(
             select(StorageLocation)
-            .where(*scope, StorageLocation.name.ilike(f"%{normalized}%"))
+            .where(*scope, StorageLocation.name.icontains(normalized, autoescape=True))
             .order_by(*order)
         ).all()
     )
@@ -288,11 +291,11 @@ def _inventory_conditions(
                     Item.model.ilike(search),
                     Item.serial_number.ilike(search),
                     Item.category.has(Category.name.ilike(search)),
-                    Item.room.has(Room.name.ilike(search)),
+                    Item.room.has(Room.name.icontains(value, autoescape=True)),
                     Item.storage_location.has(
                         or_(
-                            StorageLocation.name.ilike(search),
-                            StorageLocation.identifier.ilike(search),
+                            StorageLocation.name.icontains(value, autoescape=True),
+                            StorageLocation.identifier.icontains(value, autoescape=True),
                         )
                     ),
                     Item.tags.any(Tag.name.ilike(search)),

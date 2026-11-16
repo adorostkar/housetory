@@ -1356,3 +1356,61 @@ def test_missing_place_returns_nothing_instead_of_searching_elsewhere(
         )
         assert total == 2
 
+
+def test_place_names_are_matched_literally_not_as_wildcards(
+    owner_client, configured_ai, monkeypatch
+):
+    town = two_homes(owner_client)["Town house"]
+    underscore = town["room"]("A_B room")
+    town["room"]("AXB room")
+    percent = town["room"]("Sale 50% rack")
+    decoy = town["room"]("Sale 500 rack")
+    slash = town["room"]("In/Out tray")
+    box = town["shelf"]("Box_1", underscore["id"])
+    town["shelf"]("BoxA1", underscore["id"])
+    crate = town["shelf"]("Crate 10%", percent["id"])
+    town["shelf"]("Crate 100", decoy["id"])
+    for name, room, shelf in (("Scarf", percent, crate["id"]), ("Gloves", decoy, None)):
+        created = owner_client.post(
+            "/api/v1/items",
+            json={"name": name, "room_id": room["id"], "storage_location_id": shelf},
+        )
+        assert created.status_code == 201, created.text
+
+    results = tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            call("list_room_contents", room_name="A_B"),
+            call("list_room_contents", room_name="_"),
+            call("list_room_contents", room_name="50%"),
+            call("list_room_contents", room_name="%"),
+            call("list_room_contents", room_name="n/O"),
+            call("list_room_contents", room_name="\\"),
+        ],
+        property_id=town["id"],
+    ) + tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            call("get_container_contents", container_name="x_1"),
+            call("get_container_contents", container_name="10%"),
+            call("search_items", room_name="50%"),
+            call("search_items", location_name="10%"),
+            call("search_items", q="50%"),
+            call("search_items", q="e 10%"),
+        ],
+        property_id=town["id"],
+    )
+    by_underscore, only_underscore, by_percent, only_percent, by_slash, backslash = results[:6]
+    assert by_underscore["facts"]["room_id"] == underscore["id"]
+    assert only_underscore["facts"]["room_id"] == underscore["id"]
+    assert by_percent["facts"]["room_id"] == percent["id"]
+    assert only_percent["facts"]["room_id"] == percent["id"]
+    assert by_slash["facts"]["room_id"] == slash["id"]
+    assert backslash["error"] == "tool_validation"
+    assert results[6]["facts"]["container_id"] == box["id"]
+    assert results[7]["facts"]["container_id"] == crate["id"]
+    for result in results[8:]:
+        assert result["error"] is None
+        assert [ref["title"] for ref in result["references"]] == ["Scarf"]
