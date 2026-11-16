@@ -6,9 +6,12 @@ from PIL import Image
 from pillow_heif import register_heif_opener
 from sqlalchemy import select
 
+from housetory_api.api.errors import ApiError
 from housetory_api.db import SessionLocal
 from housetory_api.domain import OcrStatus
 from housetory_api.models import Document, Job, Purchase
+from housetory_api.services import documents as documents_service
+from housetory_api.services import storage
 
 register_heif_opener()
 
@@ -301,3 +304,57 @@ def test_heic_document_preserves_original_and_normalizes_download(owner_client):
     assert original.status_code == 200
     assert original.content == original_bytes
     assert original.headers["content-type"] == "image/heic"
+
+
+def stored_files(upload_root) -> set:
+    return {path for path in upload_root.rglob("*") if path.is_file()}
+
+
+def test_failed_document_creation_removes_stored_files(
+    owner_client, upload_root, pdf_bytes, monkeypatch
+):
+    files = {"file": ("receipt.pdf", pdf_bytes, "application/pdf")}
+    first = owner_client.post("/api/v1/documents", files=files, data={"title": "Receipt"})
+    assert first.status_code == 201, first.text
+    before = stored_files(upload_root)
+    assert len(before) == 2
+
+    def fail_hashing(_storage_key):
+        raise ApiError(500, "hash_failed", "Could not hash the upload.")
+
+    monkeypatch.setattr(storage, "file_sha256", fail_hashing)
+    failed = owner_client.post("/api/v1/documents", files=files, data={"title": "Copy"})
+    assert failed.status_code == 500, failed.text
+    assert stored_files(upload_root) == before
+    monkeypatch.undo()
+
+    def fail_duplicate_lookup(*_args, **_kwargs):
+        raise ApiError(500, "lookup_failed", "Could not check for duplicates.")
+
+    monkeypatch.setattr(documents_service, "select", fail_duplicate_lookup)
+    failed = owner_client.post("/api/v1/documents", files=files, data={"title": "Copy"})
+    assert failed.status_code == 500, failed.text
+    assert stored_files(upload_root) == before
+    monkeypatch.undo()
+
+    assert owner_client.get(first.json()["original_url"]).content == pdf_bytes
+    with SessionLocal() as db:
+        assert len(db.scalars(select(Document)).all()) == 1
+
+
+def test_duplicate_upload_keeps_original_document_files(owner_client, upload_root, pdf_bytes):
+    files = {"file": ("receipt.pdf", pdf_bytes, "application/pdf")}
+    first = owner_client.post("/api/v1/documents", files=files, data={"title": "Receipt"})
+    assert first.status_code == 201, first.text
+    original_files = stored_files(upload_root)
+
+    duplicate = owner_client.post("/api/v1/documents", files=files, data={"title": "Copy"})
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["id"] != first.json()["id"]
+    assert original_files < stored_files(upload_root)
+    assert len(stored_files(upload_root)) == 4
+
+    assert owner_client.delete(f"/api/v1/documents/{duplicate.json()['id']}").status_code == 204
+    assert stored_files(upload_root) == original_files
+    assert owner_client.get(first.json()["url"]).content == pdf_bytes
+    assert owner_client.get(first.json()["original_url"]).content == pdf_bytes

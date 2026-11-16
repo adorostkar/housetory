@@ -74,45 +74,48 @@ def create_document(
     upload_started = time.monotonic()
     stored = storage.store_document(household_id, upload)
     upload_ms = max(0, round((time.monotonic() - upload_started) * 1000))
-    preprocess_started = time.monotonic()
-    content_sha256 = storage.file_sha256(stored.original_storage_key)
-    extracted_metadata = dict(metadata or {})
-    duplicates = list(
-        db.scalars(
-            select(Document)
-            .where(
-                Document.household_id == household_id,
-                Document.content_sha256 == content_sha256,
-            )
-            .order_by(Document.created_at.desc())
-            .limit(10)
-        ).all()
-    )
-    if duplicates:
-        extracted_metadata["duplicate_documents"] = [
-            {"id": str(duplicate.id), "title": duplicate.title} for duplicate in duplicates
-        ]
-    document = Document(
-        household_id=household_id,
-        storage_key=stored.storage_key,
-        original_storage_key=stored.original_storage_key,
-        content_sha256=content_sha256,
-        original_filename=stored.original_filename,
-        content_type=stored.content_type,
-        original_content_type=stored.original_content_type,
-        byte_size=stored.byte_size,
-        original_byte_size=stored.original_byte_size,
-        title=clean_title,
-        document_type=document_type.value,
-        document_date=document_date,
-        merchant=merchant,
-        notes=notes,
-        extracted_metadata=extracted_metadata,
-        ocr_status=OcrStatus.NOT_REQUESTED.value,
-    )
-    document.items = items
-    db.add(document)
+    # Everything after the files are written runs under the cleanup below. The keys
+    # are freshly generated per upload, so they can never belong to an existing row
+    # (content duplicates get their own row and files).
     try:
+        preprocess_started = time.monotonic()
+        content_sha256 = storage.file_sha256(stored.original_storage_key)
+        extracted_metadata = dict(metadata or {})
+        duplicates = list(
+            db.scalars(
+                select(Document)
+                .where(
+                    Document.household_id == household_id,
+                    Document.content_sha256 == content_sha256,
+                )
+                .order_by(Document.created_at.desc())
+                .limit(10)
+            ).all()
+        )
+        if duplicates:
+            extracted_metadata["duplicate_documents"] = [
+                {"id": str(duplicate.id), "title": duplicate.title} for duplicate in duplicates
+            ]
+        document = Document(
+            household_id=household_id,
+            storage_key=stored.storage_key,
+            original_storage_key=stored.original_storage_key,
+            content_sha256=content_sha256,
+            original_filename=stored.original_filename,
+            content_type=stored.content_type,
+            original_content_type=stored.original_content_type,
+            byte_size=stored.byte_size,
+            original_byte_size=stored.original_byte_size,
+            title=clean_title,
+            document_type=document_type.value,
+            document_date=document_date,
+            merchant=merchant,
+            notes=notes,
+            extracted_metadata=extracted_metadata,
+            ocr_status=OcrStatus.NOT_REQUESTED.value,
+        )
+        document.items = items
+        db.add(document)
         db.flush()
         page_count = 1
         if document.original_content_type == "application/pdf":
