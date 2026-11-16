@@ -174,6 +174,23 @@ def tool_search_items(
             else [],
         ),
     ):
+        if getattr(filters, field) and not places:
+            kind = "room" if field == "room_name" else "storage place"
+            return ToolResult(
+                tool="search_items",
+                summary=(
+                    f"No {kind} named “{getattr(filters, field)}” was found"
+                    + (" in this property" if filters.property_id is not None else "")
+                    + ". Nothing was searched elsewhere; use search_locations to find the place."
+                ),
+                filters=filters.model_dump(mode="json", exclude_none=True),
+                facts={
+                    "total": 0,
+                    "place_not_found": True,
+                    "not_found_field": field,
+                    "query": getattr(filters, field),
+                },
+            )
         if len(places) > 1:
             return _ambiguous_place(
                 db,

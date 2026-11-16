@@ -1298,3 +1298,61 @@ def test_exact_place_names_win_over_substring_matches(owner_client, configured_a
         annex["id"]: "Town house / Kitchen pantry / Spice shelf annex",
     }
     assert [ref["title"] for ref in searched["references"]] == ["Town house pepper mill"]
+
+
+def test_missing_place_returns_nothing_instead_of_searching_elsewhere(
+    owner_client, configured_ai, monkeypatch
+):
+    from housetory_api.schemas.ai import NaturalSearchFilters
+    from housetory_api.services.ai_tools.inventory_query import inventory_totals, search_inventory
+
+    homes = two_homes(owner_client)
+    town, cabin = homes["Town house"], homes["Lake cabin"]
+    garage = cabin["room"]("Garage")
+    cabin["shelf"]("Tool chest", garage["id"])
+
+    no_room, no_shelf, with_text, listed, opened = tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            # Both places exist, but only in the other property.
+            call("search_items", room_name="Garage"),
+            call("search_items", location_name="Tool chest"),
+            call("search_items", q="pepper", room_name="Cellar"),
+            call("list_room_contents", room_name="Garage"),
+            call("get_container_contents", container_name="Tool chest"),
+        ],
+        property_id=town["id"],
+    )
+    for result, field in (
+        (no_room, "room_name"),
+        (no_shelf, "location_name"),
+        (with_text, "room_name"),
+    ):
+        assert result["error"] is None
+        assert result["facts"]["place_not_found"] is True
+        assert result["facts"]["not_found_field"] == field
+        assert result["facts"]["total"] == 0
+        assert result["references"] == []
+        assert "was found" in result["summary"] and "No " in result["summary"]
+    for result in (listed, opened):
+        assert result["error"] == "tool_validation"
+        assert result["references"] == []
+
+    household = uuid.UUID(owner_client.get("/api/v1/auth/session").json()["household"]["id"])
+    with SessionLocal() as db:
+        for filters in (
+            NaturalSearchFilters(room_name="Cellar"),
+            NaturalSearchFilters(location_name="Wine rack"),
+            NaturalSearchFilters(q="pepper", room_name="Cellar"),
+            NaturalSearchFilters(room_name="Garage", property_id=town["id"]),
+            NaturalSearchFilters(room_name="Kitchen", location_name="Wine rack"),
+        ):
+            assert search_inventory(db, household, filters, household_reminder_days=30) == ([], 0)
+            assert inventory_totals(db, household, filters, household_reminder_days=30) == (0, 0)
+        # The same search without the missing place does find inventory.
+        _rows, total = search_inventory(
+            db, household, NaturalSearchFilters(q="pepper"), household_reminder_days=30
+        )
+        assert total == 2
+

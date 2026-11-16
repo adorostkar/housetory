@@ -223,6 +223,8 @@ def _inventory_conditions(
         )
     # An ambiguous place name is never narrowed to an arbitrary match here: every
     # candidate is searched. Tools report the ambiguity before calling this.
+    # A place that matches nothing in scope yields no results; the restriction is
+    # never dropped to search elsewhere.
     rooms = _match_rooms(
         db,
         household_id,
@@ -230,7 +232,7 @@ def _inventory_conditions(
         room_id=filters.room_id,
         name=filters.room_name,
     )
-    if filters.room_id and not rooms:
+    if (filters.room_id or (filters.room_name or "").strip()) and not rooms:
         return None
     room_rows = db.execute(
         select(Room.id, Room.parent_id).where(Room.household_id == household_id)
@@ -253,7 +255,7 @@ def _inventory_conditions(
         location_id=filters.location_id,
         name=filters.location_name,
     )
-    if filters.location_id and not locations:
+    if (filters.location_id or (filters.location_name or "").strip()) and not locations:
         return None
     if locations:
         location_rows = db.execute(
