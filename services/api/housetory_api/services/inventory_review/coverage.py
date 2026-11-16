@@ -11,7 +11,8 @@ from ...models import InventoryReviewCoverage, Item
 from .scope import _hash
 
 CAPABILITY = "ai_organisation"
-CAPABILITY_VERSION = 1
+# 2: every uncategorised item gets a category proposal or a recorded reason.
+CAPABILITY_VERSION = 2
 
 
 def item_input(item: Item) -> dict:

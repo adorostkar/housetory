@@ -54,6 +54,8 @@ export type ReviewScheduleLastStatus =
   | "disabled";
 
 export interface ReviewRun {
+  review_again?: boolean;
+  reconsider_dismissed?: boolean;
   id: UUID;
   request_id: UUID;
   trigger_type: ReviewRunTrigger;

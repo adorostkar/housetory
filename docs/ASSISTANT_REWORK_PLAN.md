@@ -209,6 +209,45 @@ follow-up, the large-scope confirmation and the no-AI fallback.
 configured provider (`LIVE_AI_E2E=1`); it has **not** been run, because no real
 provider was reachable from the development machine.
 
+### Delegated review outcomes
+
+Real-provider testing of the AI-first review showed missing categories, an
+invented explanation and a context-limit failure. The causes and fixes:
+
+- **New categories were discarded for uncategorised items.** A proposed new
+  category has no id yet, and it was compared with the item's empty category and
+  dropped as "unchanged". Tags survived, so a category request could end with
+  tags only or nothing. Fixed; an identical existing category is still dropped.
+- **The analysis could stay silent.** It now returns one entry per item. For an
+  item with no category it must propose one or give a reason for declining.
+  Each item's result is recorded with the review (category proposed, declined
+  with reason, no answer, unchanged since last analysis, already pending, or
+  previously accepted/dismissed). The coverage capability version is 2, so
+  uncategorised items analysed under the old prompt are eligible again.
+- **Follow-through.** A review of one batch or less (40 items) is followed to
+  its results: the assistant attempt steps aside while the analysis runs, then
+  reads the review and writes its answer with the outcomes in front of it.
+  Larger reviews stay in the background as before.
+- **Grounded follow-ups.** `get_inventory_review` accepts `item_ids` and
+  returns, per item, the current category and tags, suggestions waiting,
+  earlier decisions and the recorded analysis result. The model is told to
+  explain only from these facts and to say when no reason was recorded.
+- **Compact context.** The planning prompt's fixed part fell from about 69,000
+  to about 21,000 characters by stating shared argument schemas once. Tool
+  results are passed as summary, bounded facts and identifiers rather than full
+  review and proposal records; earlier turns are dropped oldest-first before a
+  follow-up is refused.
+- **Re-review intent.** Reviews expose `review_again` and
+  `reconsider_dismissed`; the conversation's confirmation and retry controls
+  send them back unchanged.
+
+Verification used the **controlled provider** only: backend cases for the
+category/tags/reason outcomes, repeated proposals, re-review and prompt size
+across a long conversation, and the browser journeys including a re-review
+through the cost confirmation. The four-request sequence from the report is in
+`e2e/assistant-review-live.spec.ts` for a real provider; it has not been run
+here because no real model is reachable from the development machine.
+
 ### Original tool-engine verification and remaining gaps
 
 - Twenty new isolated backend cases cover multi-step retrieval and follow-ups,

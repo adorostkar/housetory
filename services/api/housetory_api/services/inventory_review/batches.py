@@ -232,6 +232,10 @@ def advance(
     seen = set(progress.get("pending_fingerprints", []))
     repeated = len(pending & seen)
     progress["pending_fingerprints"] = sorted(seen | pending)
+    progress["ai_outcomes"] = {
+        **progress.get("ai_outcomes", {}),
+        **(child.progress_json or {}).get("ai_outcomes", {}),
+    }
     child.progress_json = {**child.progress_json, "parent_id": str(run.id)}
     for field in (
         "created_suggestion_count",

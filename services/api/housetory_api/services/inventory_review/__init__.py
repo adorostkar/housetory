@@ -71,12 +71,21 @@ def _request_fingerprint(payload: ReviewRunRequest) -> str:
     )
 
 
+def _note_decision(outcomes: dict[str, dict[str, Any]], candidate, decision: str) -> None:
+    """Record that an AI proposal was not shown as new, and why."""
+    if candidate.source == "ai" and candidate.item_id and str(candidate.item_id) in outcomes:
+        outcomes[str(candidate.item_id)]["not_shown_as_new"] = decision
+
+
 def _run_out(run: InventoryReviewRun) -> ReviewRunOut:
     result = ReviewRunOut.model_validate(run, from_attributes=True)
     progress = run.progress_json or {}
     result.ai_coverage_recorded = "remaining" in progress or "ai_eligible_ids" in progress
     if not result.ai_coverage_recorded and run.ai_used and not run.ai_error:
         result.ai_reviewed_count = run.ai_item_count
+    request = progress.get("payload") or {}
+    result.review_again = bool(request.get("review_again"))
+    result.reconsider_dismissed = bool(request.get("reconsider_dismissed"))
     if "remaining" in progress:
         result.scope_item_ids = [
             uuid.UUID(value) for value in progress.get("payload", {}).get("item_ids") or []
@@ -231,6 +240,12 @@ def run_review(
     run.ai_reused_count = len(ai_meta.get("reused_ids", []))
     successful_inputs = ai_meta.get("reviewed_inputs", {})
     coverage.remember(db, household_id, run.id, successful_inputs)
+    ai_outcomes: dict[str, dict[str, Any]] = dict(ai_meta.get("outcomes", {}))
+    for item_id in ai_meta.get("reused_ids", []):
+        ai_outcomes.setdefault(item_id, {"result": "unchanged_since_last_analysis"})
+    for item in scope.items:
+        if payload.include_ai and item.id in existing_targets:
+            ai_outcomes.setdefault(str(item.id), {"result": "local_category_suggestion"})
     run.progress_json = {
         **run.progress_json,
         "ai_successful_inputs": successful_inputs,
@@ -311,11 +326,13 @@ def run_review(
                     existing_count += 1
                     pending_fingerprints.append(fingerprint)
                     matched_rows.add(prior.id)
+                    _note_decision(ai_outcomes, candidate, "already_pending")
                     continue
             if prior.status == "accepted" or (
                 prior.status == "dismissed" and not payload.reconsider_dismissed
             ):
                 suppressed += 1
+                _note_decision(ai_outcomes, candidate, f"previously_{prior.status}")
                 continue
         _create_suggestion(db, household_id, run, candidate, fingerprint)
         pending_fingerprints.append(fingerprint)
@@ -368,7 +385,11 @@ def run_review(
     run.existing_suggestion_count = existing_count
     run.stale_suggestion_count = stale
     run.suppressed_suggestion_count = suppressed
-    run.progress_json = {**run.progress_json, "pending_fingerprints": pending_fingerprints}
+    run.progress_json = {
+        **run.progress_json,
+        "pending_fingerprints": pending_fingerprints,
+        "ai_outcomes": ai_outcomes,
+    }
     run.status = "partial" if run.partial_reason or run.ai_error else "completed"
     run.completed_at = datetime.now(UTC)
     history.record_event(

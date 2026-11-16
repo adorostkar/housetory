@@ -43,11 +43,11 @@ test.beforeAll(async ({ request }) => {
       const observed = input.observations.length;
       const tool = (name: string, args: object) => ({ kind: "tool", call: { name, arguments: args } });
       if (input.request.includes("whole home")) {
-        output = observed === 0 ? tool("start_inventory_review", {})
+        output = observed === 0 ? tool("start_inventory_review", { review_again: true })
           : { kind: "answer", message: "This is a large review, so please confirm the AI analysis below.",
             prepared_note: input.observations[0].result.summary };
       } else if (input.request === "What did you find?") {
-        const review = input.context_newest_first[0].observations.at(-1).result.review;
+        const review = input.context_newest_first[0].observations[0].result.review;
         output = observed === 0 ? tool("get_inventory_review", { review_run_id: review.id })
           : { kind: "answer", message: input.observations[0].result.summary.startsWith("Analysis finished")
             ? "I suggested the **tools** tag. Nothing is applied until you accept it."
@@ -238,10 +238,13 @@ for (const mobile of [false, true]) {
     await expect(workspace.getByRole("checkbox", { name: /Include AI suggestions/ })).toHaveCount(0);
     await expect(page.getByText("The review is partial and paused with zero items scanned.", { exact: true }).last()).toBeHidden();
     await expect(workspace.getByRole("combobox", { name: "Review scope type" })).toBeHidden();
-    await expect(page.getByLabel("Assistant tool task").last()).toHaveAttribute("data-state", "awaiting_approval");
+    // The assistant waits for this small analysis rather than answering before it has results.
+    await expect(page.getByLabel("Assistant tool task").last()).toHaveAttribute("data-state", /queued|running/);
     await workspace.getByRole("button", { name: "Cancel review", exact: true }).click();
     await expect(workspace.getByRole("status")).toContainText("Analysis stopped");
+    // Once the provider lets go of the cancelled request, the assistant finishes its answer.
     release!();
+    await expect(page.getByLabel("Assistant tool task").last()).toHaveAttribute("data-state", "awaiting_approval");
     holdReview = true;
     await workspace.getByRole("button", { name: "Resume review", exact: true }).click();
     await expect.poll(() => Boolean(release)).toBe(true);
@@ -354,10 +357,10 @@ test("a large review asks for one cost confirmation before any AI request", asyn
   expect(items).toBeGreaterThan(120);
   await page.goto("/items");
   const before = reviewRequests;
-  await ask(page, "Review my whole home and suggest categories", true);
+  await ask(page, "Review my whole home again and suggest categories", true);
   const workspace = page.getByRole("region", { name: "Inventory review", exact: true }).last();
   const offer = workspace.getByLabel("AI analysis");
-  await expect(offer).toContainText(`${items} items`);
+  await expect(offer).toContainText(`reassess and suggest categories and tags for ${items} items`);
   await expect(offer).toContainText(`about ${Math.ceil(items / 40)} requests`);
   await expect(offer).toContainText("Usage charges may apply.");
   await expect(page.getByLabel("Assistant answer").last())
@@ -373,4 +376,12 @@ test("a large review asks for one cost confirmation before any AI request", asyn
   await expect(workspace.getByRole("status")).toContainText("Analysis finished", { timeout: 120_000 });
   expect(reviewRequests).toBeGreaterThan(before);
   await expect(offer).toHaveCount(0);
+  // The confirmation kept the re-review intent of the original request.
+  const latest = (await (await request.get("/api/v1/assistant/runs")).json()).at(-1);
+  const confirmed = await (await request.get(
+    `/api/v1/inventory-review/runs/${latest.steps[0].result.review.id}`,
+  )).json();
+  expect(confirmed.include_ai).toBe(true);
+  expect(confirmed.review_again).toBe(true);
+  expect(confirmed.ai_reviewed_count).toBe(items);
 });

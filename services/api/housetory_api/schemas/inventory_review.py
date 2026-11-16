@@ -117,6 +117,8 @@ class ReviewRunOut(BaseModel):
     ai_reviewed_count: int = 0
     ai_reused_count: int = 0
     background_active: bool = False
+    review_again: bool = False
+    reconsider_dismissed: bool = False
     scope_item_ids: list[uuid.UUID] = Field(default_factory=list)
     ai_coverage_recorded: bool = False
     resumable: bool = False

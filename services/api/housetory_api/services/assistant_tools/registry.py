@@ -115,6 +115,15 @@ class ItemCaptureArguments(Arguments):
 
 class ReviewStatusArguments(Arguments):
     review_run_id: uuid.UUID
+    item_ids: list[uuid.UUID] | None = Field(
+        default=None,
+        max_length=10,
+        description=(
+            "Items the user is asking about. Returns, for each, its current category and "
+            "tags, suggestions waiting for approval, what the analysis concluded and "
+            "earlier accepted or dismissed decisions."
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -432,6 +441,8 @@ def execute(
             if count != len(ids) or (not ids and review.scope_id != run.property_id):
                 raise ApiError(404, "review_run_not_found", "Review is outside this property.")
         recover(db, review)
+        from ...models import InventoryReviewSuggestion
+
         pending = list_suggestions(
             db,
             auth.household.id,
@@ -445,6 +456,47 @@ def execute(
             review_run_id=review.id,
         )
         current = _run_out(review)
+        progress = review.progress_json or {}
+
+        def brief(row) -> dict[str, Any]:
+            after = getattr(row, "after", None) or getattr(row, "after_json", None) or {}
+            return {
+                "title": row.title,
+                "status": row.status,
+                **({"category": after["category_name"]} if after.get("category_name") else {}),
+                **({"tags": [tag["name"] for tag in after["tags"]]} if after.get("tags") else {}),
+                "explanation": (row.explanation or "")[:240],
+            }
+
+        asked = list(args.item_ids or [])
+        snapshot_ids = [uuid.UUID(value) for value in progress.get("snapshot_ids", [])]
+        if not asked and len(snapshot_ids) <= 10:
+            asked = snapshot_ids
+        item_facts = []
+        for item_id in asked:
+            item = _check_item(db, auth, run, item_id)
+            rows = db.scalars(
+                select(InventoryReviewSuggestion)
+                .where(
+                    InventoryReviewSuggestion.household_id == auth.household.id,
+                    InventoryReviewSuggestion.item_id == item.id,
+                    InventoryReviewSuggestion.status.in_(["pending", "accepted", "dismissed"]),
+                )
+                .order_by(InventoryReviewSuggestion.created_at.desc())
+                .limit(6)
+            ).all()
+            item_facts.append(
+                {
+                    "item": item.name,
+                    "in_this_review": item.id in snapshot_ids,
+                    "current_category": item.category.name if item.category else None,
+                    "current_tags": sorted(tag.name for tag in item.tags),
+                    "waiting_for_approval": [brief(row) for row in rows if row.status == "pending"],
+                    "earlier_decisions": [brief(row) for row in rows if row.status != "pending"],
+                    # Absent when this review did not send the item to the model.
+                    "analysis_result": (progress.get("ai_outcomes") or {}).get(str(item.id)),
+                }
+            )
         if current.background_active:
             state = "Analysis is still running"
         elif current.remaining_item_count:
@@ -464,10 +516,43 @@ def execute(
                 f"{state}: {review.item_count_scanned} of {review.total_item_count} items "
                 f"checked; {coverage}; {pending.total} suggestions waiting for the user's "
                 "approval. Suggestions are proposals, not applied changes; the user accepts "
-                "or dismisses each one in the live review."
+                "or dismisses each one in the live review. Explain results only from these "
+                "facts. If they do not say why something is missing, say that no reason was "
+                "recorded; do not guess."
             ),
-            review=current,
-            facts=pending.model_dump(mode="json"),
+            facts={
+                "review": {
+                    "id": str(review.id),
+                    "scope": review.scope_label,
+                    "ai_analysis": review.include_ai,
+                    "review_again": current.review_again,
+                    "new_suggestions": review.created_suggestion_count,
+                    "already_pending": review.existing_suggestion_count,
+                    "not_repeated_after_earlier_decision": review.suppressed_suggestion_count,
+                },
+                "waiting_for_approval_total": pending.total,
+                "waiting_for_approval": [
+                    {"item": (entry.item or {}).get("name"), **brief(entry)}
+                    for entry in pending.items
+                ],
+                "items": item_facts,
+                "analysis_result_meanings": {
+                    "category": "a category was proposed",
+                    "no_category": "the model declined to propose a category; see reason",
+                    "kept_category": "the item already has a category and none better was proposed",
+                    "no_answer": "the model returned nothing for this item",
+                    "unchanged_since_last_analysis": (
+                        "not sent again because nothing relevant changed; "
+                        "ask to review again to reassess"
+                    ),
+                    "local_category_suggestion": (
+                        "a local rule already proposes a category, so the model was not asked"
+                    ),
+                    "not_shown_as_new": (
+                        "the same proposal is already pending, or was accepted or dismissed before"
+                    ),
+                },
+            },
         )
     if name == "get_capture_status":
         from ...models import AiRecognition

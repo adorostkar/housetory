@@ -331,8 +331,11 @@ export function InventoryReview({
         scope_id: scopeType === "items" || scopeType === "household" ? null : scopeId,
         item_ids: scopeType === "items" ? selectedItemIds : null,
         include_ai: request.includeAi ?? includeAi,
-        review_again: Boolean(request.reviewAgain),
-        reconsider_dismissed: Boolean(request.reviewAgain && reconsiderDismissed),
+        // In the conversation, confirming or retrying keeps what the review was asked to do.
+        review_again: Boolean(request.reviewAgain ?? (embedded && displayedRun?.review_again)),
+        reconsider_dismissed: Boolean(request.reviewAgain === undefined && embedded
+          ? displayedRun?.reconsider_dismissed
+          : request.reviewAgain && reconsiderDismissed),
         request_id: requestId,
         ...(assistantRunId ? { assistant_run_id: assistantRunId, assistant_review_id: initialRunId } : {}),
         ...(embedded ? { background: true } : {}),
@@ -679,7 +682,7 @@ export function InventoryReview({
           {(!displayedRun.include_ai || displayedRun.ai_error) && !displayedRun.background_active
             && <div className="space-y-2 border-t pt-3 text-xs" aria-label="AI analysis">
             {isOwner && aiReady ? <>
-              <p>AI can suggest categories and tags for {pluralize(displayedRun.total_item_count, "item")}:
+              <p>AI can {displayedRun.review_again ? "reassess and suggest" : "suggest"} categories and tags for {pluralize(displayedRun.total_item_count, "item")}:
                 about {pluralize(Math.max(1, Math.ceil(displayedRun.total_item_count / 40)), "request")} to {aiProvider}.
                 Usage charges may apply.</p>
               <Button className="min-h-11" disabled={!canRun || runReview.isPending}

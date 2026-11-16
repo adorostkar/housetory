@@ -321,12 +321,25 @@ def test_review_request_runs_ai_analysis_directly_and_keeps_explicit_approval(
     # The tool started the AI analysis itself: no separate enable-AI request.
     assert step["facts"]["review_analysis"]["mode"] == "ai"
     assert review["include_ai"] and review["background_active"]
-    assert "Do not ask the user to enable AI" in prompts[-1]["observations"][0]["result"]["summary"]
-    assert result["state"] == "awaiting_approval"
+    # The assistant steps aside while the small analysis runs instead of answering early.
+    assert result["state"] == "queued" and len(prompts) == 1
 
     sent = []
     monkeypatch.setattr(ai, "complete_json", _tagging(sent))
     _review_job(review["id"])
+    monkeypatch.setattr(ai, "complete_json", planner)
+    work(run)
+    result = read(client, run)
+    assert result["state"] == "awaiting_approval"
+    assert [entry["call"]["name"] for entry in result["steps"]] == [
+        "start_inventory_review",
+        "get_inventory_review",
+    ]
+    # Its final answer is written with the finished results in front of it.
+    seen = prompts[-1]["observations"]
+    assert "Do not ask the user to enable AI" in seen[0]["result"]["summary"]
+    assert seen[1]["result"]["summary"].startswith("Analysis finished: 1 of 1 items checked")
+    assert seen[1]["result"]["facts"]["items"][0]["waiting_for_approval"][0]["tags"] == ["tools"]
     current = client.get(f"/api/v1/inventory-review/runs/{review['id']}").json()
     assert current["batch_state"] == "completed", current
     assert current["ai_reviewed_count"] == 1 and len(sent) == 1
@@ -351,7 +364,7 @@ def test_review_request_runs_ai_analysis_directly_and_keeps_explicit_approval(
     assert observed["summary"].startswith("Analysis finished: 1 of 1 items checked")
     assert "AI analysed 1 of 1 eligible items" in observed["summary"]
     assert "not applied changes" in observed["summary"]
-    assert observed["facts"]["total"] >= 1
+    assert observed["facts"]["waiting_for_approval_total"] >= 1
     assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["tags"] == []
 
     # Unchanged, already analysed information is not sent to the provider again.
@@ -369,6 +382,14 @@ def test_review_request_runs_ai_analysis_directly_and_keeps_explicit_approval(
     monkeypatch.setattr(ai, "complete_json", _tagging(resent))
     _review_job(second["id"])
     assert resent == []
+    monkeypatch.setattr(ai, "complete_json", planner)
+    work(again)
+    unchanged = read(client, again)["steps"][1]["result"]["facts"]["items"][0]
+    # The record says why nothing new was produced; the model need not guess.
+    assert unchanged["analysis_result"] == {
+        "result": "unchanged_since_last_analysis",
+        "not_shown_as_new": "already_pending",
+    }
 
     approved = client.post(
         f"/api/v1/inventory-review/suggestions/{organisation['id']}/accept", json={}
@@ -983,3 +1004,139 @@ def test_prepared_work_keeps_every_other_part_of_the_answer(
     recovered = read(client, empty)
     assert recovered["state"] == "completed"
     assert recovered["answer"] == "It is in Tool Storage."
+
+
+def test_category_requests_get_a_category_or_a_recorded_reason_and_stay_compact(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    client = owner_client
+    room, monitor = seed(client, "Validation Monitor")
+    drill = client.post(
+        "/api/v1/items",
+        json={"name": "Heavy drill", "brand": "Dewalt", "room_id": room["id"]},
+    ).json()["item"]
+    for index in range(30):
+        client.post("/api/v1/items", json={"name": f"Filler {index}", "room_id": room["id"]})
+    review_prompts = []
+    plans = []
+
+    def analysis(system, prompt, **kwargs):
+        review_prompts.append((system, prompt))
+        items = json.loads(prompt.split("Items: ")[1].split("\nReturn ")[0])
+        decisions = []
+        for entry in items:
+            if entry["name"] == "Validation Monitor":
+                decisions.append(
+                    {
+                        "index": entry["index"],
+                        "category": {"name": "Electronics"},
+                        "reason": "A monitor.",
+                    }
+                )
+            elif entry["name"] == "Heavy drill":
+                # Tags only: must not pass as a category.
+                decisions.append({"index": entry["index"], "tags": [{"name": "DIY"}]})
+        return {"suggestions": decisions}
+
+    def turn(query, steps, parent=None):
+        responses = iter(steps)
+
+        def planner(system, prompt, **kwargs):
+            plans.append(prompt)
+            return next(responses)
+
+        monkeypatch.setattr(ai, "complete_json", planner)
+        run = start(client, query, **({"parent_id": parent} if parent else {}))
+        work(run)
+        current = read(client, run)
+        if current["state"] == "queued":
+            monkeypatch.setattr(ai, "complete_json", analysis)
+            _review_job(current["steps"][-1]["result"]["review"]["id"])
+            monkeypatch.setattr(ai, "complete_json", planner)
+            work(run)
+            current = read(client, run)
+        assert current["state"] in {"completed", "awaiting_approval"}, current
+        return current
+
+    answer = {"kind": "answer", "message": "Done."}
+    both = [monitor["id"], drill["id"]]
+    first = turn(
+        "Review these and suggest categories",
+        [call("start_inventory_review", scope_type="items", item_ids=both), answer],
+    )
+    system, prompt = review_prompts[0]
+    assert "exactly one entry for every item" in prompt and "tags never replace" in system
+    facts = {entry["item"]: entry for entry in first["steps"][1]["result"]["facts"]["items"]}
+    assert facts["Validation Monitor"]["analysis_result"] == {
+        "result": "category",
+        "category": "Electronics",
+    }
+    assert facts["Validation Monitor"]["waiting_for_approval"][0]["category"] == "Electronics"
+    # Tags were proposed, but the record is explicit that no category was.
+    assert facts["Heavy drill"]["analysis_result"] == {
+        "result": "no_category",
+        "tags": ["DIY"],
+        "reason": "The model gave no reason.",
+    }
+    assert "category" not in facts["Heavy drill"]["waiting_for_approval"][0]
+    for item in (monitor, drill):
+        assert client.get(f"/api/v1/items/{item['id']}").json()["item"]["category"] is None
+
+    # Re-review keeps its intent, and an identical proposal is reported as already pending.
+    again = turn(
+        "Review Validation Monitor again with AI and suggest a category for it.",
+        [
+            call(
+                "start_inventory_review",
+                scope_type="items",
+                item_ids=[monitor["id"]],
+                review_again=True,
+            ),
+            answer,
+        ],
+        parent=first["id"],
+    )
+    assert again["steps"][0]["result"]["review"]["review_again"] is True
+    assert len(review_prompts) == 2
+    repeated = again["steps"][1]["result"]["facts"]["items"][0]
+    assert repeated["analysis_result"] == {
+        "result": "category",
+        "category": "Electronics",
+        "not_shown_as_new": "already_pending",
+    }
+
+    # Ordinary follow-ups stay small however long the conversation gets.
+    parent = again["id"]
+    for index in range(6):
+        current = turn(
+            f"What category did you suggest for Validation Monitor? ({index})",
+            [
+                call(
+                    "get_inventory_review",
+                    review_run_id=again["steps"][0]["result"]["review"]["id"],
+                    item_ids=both,
+                ),
+                answer,
+            ],
+            parent=parent,
+        )
+        parent = current["id"]
+    assert max(len(prompt) for prompt in plans) < 40_000
+    last = json.loads(plans[-1])
+    assert len(last["context_newest_first"]) == 4
+    assert "scope_item_ids" not in plans[-1]
+    asked = {entry["item"]: entry for entry in last["observations"][0]["result"]["facts"]["items"]}
+    assert asked["Heavy drill"]["in_this_review"] is False
+    assert asked["Validation Monitor"]["analysis_result"]["category"] == "Electronics"
+
+    # A one-batch room review is followed through to its results as well.
+    wide = turn(
+        "Review the whole room",
+        [call("start_inventory_review", scope_type="room", scope_id=room["id"]), answer],
+    )
+    assert [entry["call"]["name"] for entry in wide["steps"]][:2] == [
+        "start_inventory_review",
+        "get_inventory_review",
+    ]
