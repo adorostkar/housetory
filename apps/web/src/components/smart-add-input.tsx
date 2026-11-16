@@ -176,7 +176,7 @@ export function SmartAddInput({
       { pathname: location.pathname, search: location.search, hash: "#assistant" },
       {
         replace: location.hash === "#assistant",
-        state: { assistantCapture: { kind: "items", id: batchId } },
+        state: { assistantCapture: { kind: "items", id: batchId, fresh: true } },
       },
     );
   };

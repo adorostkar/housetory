@@ -115,6 +115,29 @@ Imports, document extraction, photo recognition and voice suggestions each have 
 5. Trim Settings, AI settings and assurance text (rows 7–9).
 6. Optional polish (rows 10–12, 15); consider row 13 only after the rest.
 
+## Implementation status
+
+Implemented on `feature/product-simplification`. Row numbers refer to the table above.
+
+| Row | Outcome |
+|---|---|
+| 1 | **Adjusted.** The Add items dialog stays as the quick entry, because its place picker, camera buttons and "fill in the form yourself" link are the fastest way to start. Its captures are now reviewed inline in the assistant panel, so every capture ends in one review surface. |
+| 2 | Done. `search-page.tsx` and its test removed. |
+| 3 | Done. `/scan` and `/recognize` open Add items with their place context; the pages, their test and `lib/recognition.ts` are removed. |
+| 4, 5 | **Not done, deliberately.** The three unused endpoints are thin routes over services that `/search/query` still uses, and about fifty backend tests enter through them. Removing them saves little and loses coverage. The phrase-based fallback is what keeps typed actions working without AI, so removing it would cut offline capability. |
+| 6 | Done as a count and a list. Prepared actions waiting for Apply now count in the header badge and appear on the Review page, where they can be reopened or cancelled. Storage stays separate. |
+| 7 | Partly. Online-search setup, iPhone install and credential instructions are collapsed until needed; Settings is still one page. |
+| 8 | Partly. Credential operations are collapsed; the provider and task layout is unchanged. |
+| 9 | Partly. Removed from Overview and the item page; review surfaces keep their own wording. |
+| 10 | Done. One "Ask the assistant" row; the duplicate buttons are gone where the panel is available. |
+| 11 | Done. Insurance list, evidence export and new room are in one Home actions menu on every size; the empty warranty section is hidden. |
+| 12 | **Adjusted.** "Store items inside" stays visible with one line of text instead of moving into a menu; the duplicated loan caveat is removed. |
+| 13 | Done as **Places**: one navigation entry, Rooms as the starting tab and Containers one tab away. Both pages keep their own behaviour, including label and QR actions. Room and container detail pages keep the Places entry highlighted. |
+| 14 | Partly. The duplicate Loans entry is gone; breadcrumbs still show household and property. |
+| 15 | Not done. Two superseded documents carry a note; the wider documentation clean-up remains. |
+
+Also done: the four visible defects, restored conversation history now appears above a newly opened capture, and a capture already on screen no longer raises a separate "ready" notification. The valuation dialog, unwired from the interface by an earlier simplification, is removed; its server endpoints remain.
+
 ## Scale, for context
 
 About 56,000 lines of frontend and 77,000 lines of backend code (excluding tests), 75 tables, 33 authenticated routes, 83 documented environment variables and 52 browser test files, for a household inventory. The numbers are not a problem in themselves, but they explain why consistency is hard to keep and why removal now pays more than addition.

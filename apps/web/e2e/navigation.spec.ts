@@ -1,88 +1,42 @@
-import fs from "node:fs/promises";
+import { expect, test } from "@playwright/test";
 
-import { expect, test, type Page } from "@playwright/test";
-
-async function shot(page: Page, name: string) {
-  await fs.mkdir("../../docs/walkthrough/simplification3", { recursive: true });
-  await page.screenshot({
-    path: `../../docs/walkthrough/simplification3/${name}.png`,
-    fullPage: false,
-    animations: "disabled",
-  });
-}
-
-test("desktop navigation keeps core links calm and secondary routes under More", async ({
-  page,
-}) => {
+test("desktop sidebar lists each destination once", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/items");
-  const aside = page.locator("aside");
-  await expect(aside.getByRole("link", { name: "Items" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Places" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Loans" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Review" })).not.toBeVisible();
-  await shot(page, "03-navigation-desktop-calm");
-
-  const more = aside.locator("summary").filter({ hasText: "More" });
-  await expect(more).toBeVisible();
-  await more.focus();
-  await page.keyboard.press("Enter");
-  await expect(aside.getByRole("link", { name: "Review" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Purchases" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Warranties" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Assistant" })).toBeVisible();
-  await shot(page, "04-navigation-desktop-more");
-  await aside.getByRole("link", { name: "Review" }).click();
-  await expect(page).toHaveURL(/\/review$/);
-  await expect(aside.locator("details")).toHaveAttribute("open", "");
+  const nav = page.locator("aside nav a");
+  await expect(nav).toHaveText([
+    "Overview", "Items", "Places", "Loans", "Documents", "Financials", "Review",
+  ]);
+  await page.locator("aside").getByRole("link", { name: "Places", exact: true }).click();
+  await expect(page).toHaveURL(/\/rooms$/);
+  await page.getByRole("navigation", { name: "Places" }).getByRole("link", { name: "Containers" }).click();
+  await expect(page).toHaveURL(/\/containers$/);
+  await expect(page.locator("aside").getByRole("link", { name: "Places", exact: true }))
+    .toHaveClass(/nav-link-active/);
 });
 
-test("mobile navigation uses five destinations and keeps every secondary route reachable", async ({
-  page,
-}) => {
+test("mobile bar has five slots and More reaches everything else", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/items");
   const bottom = page.getByTestId("mobile-bottom-nav");
-  await expect(bottom).toBeVisible();
-  const links = bottom.locator("a");
-  await expect(links).toHaveCount(4);
-  await expect(links.nth(0)).toContainText("Home");
-  await expect(links.nth(1)).toContainText("Items");
-  await expect(links.nth(2)).toContainText("Rooms");
-  await expect(links.nth(3)).toContainText("Loans");
-  await expect(bottom.getByRole("button", { name: "More destinations" })).toBeVisible();
-
+  await expect(bottom.locator("a")).toHaveText(["Home", "Items", "Loans"]);
+  await expect(bottom.getByRole("button", { name: "Add items" })).toBeVisible();
   await bottom.getByRole("button", { name: "More destinations" }).click();
-  const menu = page.getByTestId("mobile-more-menu");
-  await expect(menu).toBeVisible();
-  await shot(page, "05-navigation-mobile-more");
-  for (const label of [
-    "Review",
-    "Documents",
-    "Purchases",
-    "Warranties",
-    "Containers",
-    "Assistant",
-    "Search",
-    "Settings",
-  ]) {
-    await expect(menu.getByRole("menuitem", { name: label })).toBeVisible();
-  }
-  await menu.getByRole("menuitem", { name: "Assistant" }).click();
-  await expect(page).toHaveURL(/\/assistant$/);
-  await expect(
-    page.getByRole("textbox", { name: "Ask the Housetory assistant" }),
-  ).toBeVisible();
+  await expect(page.getByTestId("mobile-more-menu").getByRole("menuitem"))
+    .toHaveText(["Places", "Documents", "Financials", "Review", "Settings"]);
 });
 
-test("search keeps Assistant secondary without adding a competing nav entry", async ({
-  page,
-}) => {
+test("retired destinations redirect instead of breaking old links", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/search");
-  await expect(
-    page.getByRole("link", { name: "Assistant", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Assistant", exact: true }).click();
-  await expect(page).toHaveURL(/\/assistant$/);
+  await page.goto("/search?q=ladder");
+  await expect(page).toHaveURL(/\/items\?q=ladder$/);
+  await page.goto("/assistant");
+  await expect(page).toHaveURL(/#assistant$/);
+  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await page.getByRole("button", { name: "Close assistant", exact: true }).click();
+  for (const path of ["/scan", "/recognize", "/add-items"]) {
+    await page.goto(path);
+    await expect(page.getByRole("dialog", { name: "Add items" })).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
 });

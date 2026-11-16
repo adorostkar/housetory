@@ -124,6 +124,7 @@ for (const mobile of [false, true]) {
     await expect(results.getByText(/^Ask the assistant:/)).toHaveCount(1);
     await results.getByText(itemName).first().click();
     await expect(page).toHaveURL(new RegExp(`/items/${saved.id}`));
+    await expect(page.getByRole("heading", { name: itemName, level: 1 })).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/${size}-item.png`, fullPage: true });
 
     // Overview keeps occasional tasks in one menu; Settings keeps setup detail collapsed.

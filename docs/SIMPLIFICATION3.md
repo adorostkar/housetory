@@ -1,5 +1,7 @@
 # Simplification 3: default AI setup, calmer navigation and optional schedules
 
+> **Navigation section superseded.** Current navigation is Overview, Items, Places (Rooms and Containers tabs), Loans, Documents, Financials and Review. See `docs/PRODUCT_DESIGN_REVIEW.md`.
+
 This batch keeps the existing permissions, stored task assignments, provider
 credentials, consent, search context and visual style. It reduces setup and
 navigation friction without deleting features or adding a subscription.

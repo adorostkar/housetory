@@ -1,5 +1,7 @@
 # Unified search and multilingual assistant
 
+> **Superseded in part.** There is no longer a Search page or a separate Assistant page: `/search` and `/assistant` redirect, and assistance opens in the panel from the header entry. The submit-time order and scope rules below still apply to the no-AI fallback.
+
 Housetory has one submit-time search flow across the global top box, the mobile
 entry, the search results page and the secondary Assistant page. Typing is still
 a cheap, local direct lookup; pressing Enter submits the same request everywhere.

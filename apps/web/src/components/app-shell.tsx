@@ -170,13 +170,9 @@ function AppShellLayout() {
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const restoreAssistantFocus = useRef(false);
   const { openAddItems } = useAddItems();
-  const {
-    select: selectDocument, selectImport, selectPhoto, pendingReviews,
-    activeId, activeImportId, activePhotoId,
-  } = useAssistantDocuments();
-  // The review already on screen needs no "ready" toast.
-  const visibleReview = useRef<string | null>(null);
-  visibleReview.current = assistantOpen ? activeImportId ?? activeId ?? activePhotoId : null;
+  const { select: selectDocument, selectImport, selectPhoto, pendingReviews } = useAssistantDocuments();
+  // Captures handed straight to the inline review need no separate "ready" toast.
+  const handedToReview = useRef(new Set<string>());
   const pendingActions = usePendingActions();
   const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length
     + (pendingActions.data?.length ?? 0);
@@ -232,6 +228,7 @@ function AppShellLayout() {
       assistantTrigger.current = document.activeElement;
       restoreAssistantFocus.current = true;
     }
+    if ("fresh" in capture && capture.fresh === true) handedToReview.current.add(capture.id);
     setAssistantRequest({ id: location.key, text: "", capture: { id: capture.id, kind: capture.kind } });
   }, [location.hash, location.key, location.state]);
 
@@ -317,7 +314,7 @@ function AppShellLayout() {
       } catch {
         // The in-memory key still prevents repeat toasts in this page session.
       }
-      if (visibleReview.current === task.id) return;
+      if (handedToReview.current.delete(task.id)) return;
       toast.success(task.title, {
         id: key,
         description: task.description,

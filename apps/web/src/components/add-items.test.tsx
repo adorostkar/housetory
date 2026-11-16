@@ -146,7 +146,7 @@ const currentUrl = () =>
 const expectInlineReview = () => waitFor(() => {
   expect(screen.getByTestId("location-hash")).toHaveTextContent("#assistant");
   expect(JSON.parse(screen.getByTestId("navigation-state").textContent ?? "null"))
-    .toEqual({ assistantCapture: { kind: "items", id: "batch-1" } });
+    .toEqual({ assistantCapture: { kind: "items", id: "batch-1", fresh: true } });
   expect(currentUrl().pathname).toBe("/");
 });
 

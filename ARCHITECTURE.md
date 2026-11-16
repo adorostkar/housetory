@@ -151,7 +151,7 @@ All application endpoints are versioned under `/api/v1`.
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}`, `POST /voice/{id}/interpret`, transcription retry, explicit confirm and cancel |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
-| AI | `GET /ai/status?task=`, `POST /assistant/query`, `POST /search/natural`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
+| AI | `GET /ai/status?task=`, `POST /assistant/query` and `POST /search/natural` (compatibility endpoints with no caller in the web app; they share services with `POST /search/query`), recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
 
 OpenAPI documentation is available in development at `/api/docs`. It is
