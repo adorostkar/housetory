@@ -712,3 +712,120 @@ def test_legacy_purchase_without_allocation_history_is_reported_unallocated(owne
     assert inventory["Lamp"]["purchase_allocated_cents"] == ""
     assert inventory["Desk"]["purchase_allocation_status"] == "allocated"
     assert inventory["Desk"]["purchase_allocated_cents"] == "20000"
+
+
+def representative_purchases(client) -> None:
+    """Synthetic household covering every allocation state in two currencies.
+
+    USD: two single-item purchases (5,000 + 20,000), a reviewed shared purchase
+    (9,000 with 7,000 reviewed), a legacy purchase with no allocation (12,000),
+    a shared purchase with an archived member (8,000) and an over-allocated
+    reviewed purchase (10,000 with 11,500 reviewed).
+    EUR: a single-item purchase (1,200), a legacy purchase (3,400) and a reviewed
+    shared purchase (6,000) whose second reviewed line belongs to an archived item.
+    """
+
+    def single(name, cents, currency):
+        return create_item(client, name, purchase={"price_cents": cents, "currency": currency})
+
+    def shared(names, cents, currency, reviewed=()):
+        items = [create_item(client, name) for name in names]
+        response = client.post(
+            "/api/v1/purchases",
+            json={
+                "price_cents": cents,
+                "currency": currency,
+                "item_ids": [item["id"] for item in items],
+            },
+        )
+        assert response.status_code == 201, response.text
+        purchase_id = response.json()["purchase"]["id"]
+        for line, (item, line_cents) in enumerate(zip(items, reviewed, strict=False)):
+            add_reviewed_allocation(purchase_id, item["id"], f"line-{line}", line_cents)
+        return items
+
+    def archive(item):
+        response = client.patch(f"/api/v1/items/{item['id']}", json={"is_archived": True})
+        assert response.status_code == 200, response.text
+
+    def forget_allocation(item):
+        # A purchase recorded before allocations were written has no row at all.
+        with SessionLocal() as db:
+            for allocation in db.scalars(
+                select(PurchaseAllocation).where(
+                    PurchaseAllocation.item_id == uuid.UUID(item["id"])
+                )
+            ).all():
+                db.delete(allocation)
+            db.commit()
+
+    single("Lamp", 5000, "USD")
+    single("Desk", 20000, "USD")
+    shared(["Sofa", "Chair"], 9000, "USD", reviewed=(3000, 4000))
+    forget_allocation(single("Rug", 12000, "USD"))
+    archive(shared(["Table", "Bench"], 8000, "USD")[1])
+    shared(["Mixer", "Bowl"], 10000, "USD", reviewed=(6000, 5500))
+
+    single("Vase", 1200, "EUR")
+    forget_allocation(single("Clock", 3400, "EUR"))
+    archive(shared(["Plates", "Cups"], 6000, "EUR", reviewed=(2500, 2500))[1])
+
+
+def test_representative_fixture_reconciles_per_currency_across_overview_and_export(owner_client):
+    representative_purchases(owner_client)
+
+    totals = reconciled_totals(owner_client)
+    coverage = {
+        currency: (
+            entry["purchase_total_cents"],
+            entry["purchase_allocated_cents"],
+            entry["purchase_over_allocated_cents"],
+            entry["purchase_unallocated_cents"],
+            entry["purchase_unallocated_count"],
+        )
+        for currency, entry in totals.items()
+    }
+    assert coverage == {
+        #       total, allocated, over-allocated, unallocated, unallocated purchases
+        "USD": (64000, 43500, 1500, 22000, 3),
+        "EUR": (10600, 3700, 0, 6900, 2),
+    }
+    for total, allocated, over_allocated, unallocated, _count in coverage.values():
+        assert total == allocated - over_allocated + unallocated
+
+    # The headline totals on the Overview are the same purchase totals.
+    overview = owner_client.get("/api/v1/overview").json()
+    assert {entry["currency"]: entry["total_cents"] for entry in overview["value_by_currency"]} == {
+        "USD": 64000,
+        "EUR": 10600,
+    }
+
+    # The inventory export allocates exactly what the Overview breakdowns show.
+    rows = {
+        row["item"]: row for row in parse_csv(owner_client.get("/api/v1/exports/inventory.csv"))
+    }
+    assert "Bench" not in rows and "Cups" not in rows
+    exported: dict[str, int] = {}
+    for row in rows.values():
+        if row["purchase_allocated_cents"]:
+            assert row["purchase_allocation_status"] == "allocated"
+            exported[row["purchase_currency"]] = exported.get(row["purchase_currency"], 0) + int(
+                row["purchase_allocated_cents"]
+            )
+    assert exported == {"USD": 43500, "EUR": 3700}
+    assert {
+        name: (row["purchase_allocation_status"], row["purchase_allocated_cents"])
+        for name, row in rows.items()
+    } == {
+        "Lamp": ("allocated", "5000"),
+        "Desk": ("allocated", "20000"),
+        "Sofa": ("allocated", "3000"),
+        "Chair": ("allocated", "4000"),
+        "Rug": ("unallocated", ""),
+        "Table": ("unallocated", ""),
+        "Mixer": ("allocated", "6000"),
+        "Bowl": ("allocated", "5500"),
+        "Vase": ("allocated", "1200"),
+        "Clock": ("unallocated", ""),
+        "Plates": ("allocated", "2500"),
+    }
