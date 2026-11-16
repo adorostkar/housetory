@@ -634,7 +634,11 @@ export function AssistantPage({
                   }
                   className="scroll-mt-2"
                 >
-                  {message.toolRun ? (
+                  {message.toolAnswer ? (
+                    <div className="surface min-w-0 p-4" aria-label="Assistant answer">
+                      <AnswerText text={message.text} className="break-words" />
+                    </div>
+                  ) : message.toolRun ? (
                     <AssistantToolStatus run={message.toolRun} />
                   ) : message.capture ? (
                     <div className="surface space-y-3 p-4" aria-label="Assistant capture status"

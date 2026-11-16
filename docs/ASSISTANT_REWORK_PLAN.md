@@ -128,6 +128,27 @@ displayed alongside them. Generic follow-up buttons and the unrelated capture
 queue are absent from conversations. An explicitly opened capture is placed
 inline; all pending captures remain accessible through the Review queue.
 
+The final step separates what the user must read from remarks about prepared
+work. `message` carries every answer, clarification, limitation and unsupported
+or incomplete part; optional `prepared_note` holds any remark about a proposal,
+capture or review and is kept for diagnostics. The run exposes `answer`, which
+the conversation shows before the card or live view, so a mixed request such as
+“How long have they had it? Prepare a return for today.” yields the duration and
+the editable return together. An empty answer is valid only when prepared work
+is the whole reply; otherwise the task becomes recoverable. Runs recorded before
+this contract have no `answer` and keep their earlier presentation. The
+separation depends on the model using the two fields as described; it is not
+enforced by parsing prose.
+
+Mixed-answer verification: 203 isolated backend cases (tools, actions, review
+and scheduling) and 402 frontend cases pass, with typecheck, build and Ruff.
+The four Chromium journeys pass on desktop and 375px mobile against a disposable
+database, API and worker with the **controlled local provider**, covering the
+combined duration/return request, a stated limitation, formatting, hidden
+identifiers and note, order before the card, reload, and unchanged approval.
+No real provider was reachable for this correction, so real-model use of the
+two fields is unverified.
+
 ### Presentation correction verification
 
 - 401 frontend tests, production typecheck/build and changed-backend Ruff checks

@@ -30,6 +30,7 @@ export interface AssistantMessage {
   clarification?: ActionClarification;
   toolRunId?: string;
   toolRun?: AssistantToolRun;
+  toolAnswer?: boolean;
 }
 
 export interface AssistantCaptureState {

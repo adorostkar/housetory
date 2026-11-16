@@ -59,9 +59,11 @@ generic 'which action should I prepare' questions. Use the user's language.
 Write concise, user-facing answers: usually one short paragraph or a few relevant bullets.
 Never expose UUIDs, endpoint paths, JSON, schema field names or internal state names in prose.
 Use record names; the application renders authorized record links and editable proposal cards.
-After preparing a proposal, give only a short invitation to review it; do not repeat its fields.
-For capture or inventory review, let the live view report progress and counts. Do not narrate
-transient queued/paused/completed states or scan/suggestion totals in the final answer.
+A request may have several parts. Put every answer, clarifying question, limitation, incomplete
+or unsupported part in message, even when you also prepared a proposal, capture or review.
+The application displays prepared work itself: never restate proposal fields in message, and for
+capture or inventory review never narrate queued/paused/completed states or scan/suggestion
+totals there. Any remark about prepared work belongs in prepared_note, not message.
 Use paragraphs, simple lists and emphasis, not raw code or Markdown links.
 Return exactly one JSON step matching the supplied schema. No markdown wrapping."""
 
@@ -298,6 +300,7 @@ def snapshot(db: Session, run: AssistantRun) -> RunOut:
         state=run.state,
         generation=run.generation,
         message=data.get("message", ""),
+        answer=data.get("answer") if run.state in {"completed", "awaiting_approval"} else None,
         steps=steps,
         model_calls=data.get("model_calls", 0),
         max_model_calls=MAX_MODEL_CALLS,
@@ -312,6 +315,7 @@ def cancel(db: Session, run: AssistantRun):
         run.generation += 1
         run.data = {
             **run.data,
+            "answer": None,
             "message": "Assistant stopped. Started captures/reviews and proposals are retained.",
         }
         job = db.get(Job, run.job_id)
@@ -338,6 +342,7 @@ def retry(db: Session, account: AccountContext, run: AssistantRun):
         **run.data,
         "route": route,
         "session_id": str(account.session.id),
+        "answer": None,
         "message": "Retrying with completed tool results retained.",
     }
     _enqueue(db, run)
@@ -548,8 +553,22 @@ def run_job(payload: dict):
                     output.get("proposal") or output.get("capture") or output.get("review")
                     for output in outputs
                 )
+                answer = step.message.strip()
+                if not answer and not awaiting:
+                    raise ApiError(
+                        422,
+                        "assistant_empty_answer",
+                        "The model returned no answer. Retry or use local search.",
+                    )
                 run.state = "awaiting_approval" if awaiting else "completed"
-                run.data = {**run.data, "message": step.message}
+                run.data = {
+                    **run.data,
+                    "answer": answer,
+                    "message": " ".join(
+                        part for part in (answer, (step.prepared_note or "").strip()) if part
+                    )
+                    or "Prepared for your review.",
+                }
                 db.commit()
                 return {"run_id": str(run_id), "state": run.state}
     except (ai.AiError, ValidationError, ApiError) as exc:

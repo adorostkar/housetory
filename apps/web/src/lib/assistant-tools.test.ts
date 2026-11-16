@@ -28,6 +28,38 @@ describe("durable assistant observations", () => {
     const action = toolRunMessages(run).find((message) => message.action);
     expect(action?.text).toBe("Review this return, then Apply to record it.");
     expect(action?.action?.proposal.changes).toEqual({ quantity: 1 });
+    // Runs recorded before answers were separated keep their old prose out of view.
+    expect(toolRunMessages(run).some((message) => message.toolAnswer)).toBe(false);
+  });
+
+  it("shows the rest of a mixed answer before the prepared action, without internal identifiers", () => {
+    const loan = "492cc387-1ac5-4db4-b4b2-204e2806e784";
+    const run: AssistantToolRun = {
+      id: "run", query: "How long have they had it? Prepare a return for today.",
+      household_id: "home", property_id: null, parent_id: null, generation: 1,
+      state: "awaiting_approval",
+      message: "Validation Borrower has had it for 3 days. Return of 1 is ready.",
+      answer: `Validation Borrower has had it for **3 days** (loan_id: ${loan}).`,
+      steps: [{ call: { name: "prepare_action", arguments: {} }, result: {
+        summary: "Proposal ready. Nothing has been applied.", references: [],
+        proposal: {
+          id: "proposal", kind: "return_loan", state: "ready", scope_label: "Home",
+          targets: [{ id: loan, name: "Drill · Validation Borrower" }], before: {},
+          changes: { quantity: 1 }, destination: null,
+        },
+      } }],
+      model_calls: 3, max_model_calls: 8, can_retry: false, worker_available: null,
+    };
+    const messages = toolRunMessages(run);
+    expect(messages.map((message) => message.toolAnswer ? "answer" : message.action ? "card"
+      : message.toolRun ? "status" : "request")).toEqual(["request", "answer", "card", "status"]);
+    expect(messages.slice(1, 3).map((message) => message.text)).toEqual([
+      "Validation Borrower has had it for **3 days**.",
+      "Review this return, then Apply to record it.",
+    ]);
+    // While the task is still being retried or has no extra answer, nothing is duplicated.
+    expect(toolRunMessages({ ...run, answer: "" }).some((message) => message.toolAnswer)).toBe(false);
+    expect(toolRunMessages({ ...run, state: "running" }).some((message) => message.toolAnswer)).toBe(false);
   });
 
   it("does not regress a completed poll when an older create response arrives late", () => {

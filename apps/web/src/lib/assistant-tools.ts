@@ -35,6 +35,7 @@ export interface AssistantToolRun {
   state: string;
   generation: number;
   message: string;
+  answer?: string | null;
   steps: { call: { name: string; arguments: Record<string, unknown> }; result: AssistantToolOutput }[];
   model_calls: number;
   max_model_calls: number;
@@ -72,6 +73,12 @@ export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
     { role: "user", text: run.query, toolRunId: run.id },
   ];
   const seen = new Set<string>();
+  // Prepared work is shown by its own card; the answer to everything else leads it.
+  const answer = run.steps.some(({ result }) => result.proposal || result.review || result.capture)
+    && ["completed", "awaiting_approval"].includes(run.state)
+    ? assistantAnswerText(run.answer ?? "", run.steps.flatMap(({ result }) => result.references ?? []))
+    : "";
+  if (answer) messages.push({ role: "assistant", text: answer, toolRunId: run.id, toolAnswer: true });
   for (const { result } of run.steps) {
     if (result.proposal && !seen.has(result.proposal.id)) {
       const proposal = result.proposal;

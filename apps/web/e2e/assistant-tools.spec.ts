@@ -40,18 +40,20 @@ test.beforeAll(async ({ request }) => {
       if (input.request.includes("categorise")) {
         output = observed === 0
           ? tool("start_inventory_review", { scope_type: "items", item_ids: reviewItemIds })
-          : { kind: "answer", message: "The review is partial and paused with zero items scanned." };
+          : { kind: "answer", message: "", prepared_note: "The review is partial and paused with zero items scanned." };
       } else if (input.request === "Who borrowed it?" || input.request === "How long have they had it?") {
         output = observed === 0 ? tool("get_item_history", { item_id: itemId })
           : { kind: "answer", message: input.request === "Who borrowed it?"
             ? "**Mohsen** borrowed one drill." : "Mohsen has had it for **3 days**." };
-      } else if (input.request === "Mark it returned") {
+      } else if (input.request === "How long have they had it? Prepare a return for today.") {
         output = observed === 0 ? tool("get_item_history", { item_id: itemId })
           : observed === 1 ? tool("prepare_action", { action: {
             kind: "return_loan", loan_id: loanId, quantity: 1,
             returned_on: new Date().toISOString().slice(0, 10),
           } })
-          : { kind: "answer", message: "A very long duplicated return proposal with internal schema fields." };
+          : { kind: "answer",
+            message: `Mohsen has had it for **3 days** (loan_id: ${loanId}).\n\nI can't notify Mohsen from here.`,
+            prepared_note: "A very long duplicated return proposal with internal schema fields." };
       } else if (input.request.includes("Rename")) {
         output = observed === 0 ? tool("get_item_details", { item_id: itemId })
           : observed === 1 ? tool("prepare_action", { action: {
@@ -160,18 +162,24 @@ for (const mobile of [false, true]) {
     await ask(page, "Who borrowed it?");
     await expect(page.getByLabel("Assistant tool task").last().getByTestId("answer-text"))
       .toHaveText("Mohsen borrowed one drill.");
-    await ask(page, "How long have they had it?");
-    await expect(page.getByLabel("Assistant tool task").last().getByTestId("answer-text"))
-      .toHaveText("Mohsen has had it for 3 days.");
-    await ask(page, "Mark it returned");
+    await ask(page, "How long have they had it? Prepare a return for today.");
     const returnAction = page.getByLabel("Action review").filter({ hasText: itemName }).last();
     await expect(returnAction.getByRole("button", { name: "Apply", exact: true })).toBeVisible();
+    const mixedAnswer = page.getByLabel("Assistant answer").last();
+    await expect(mixedAnswer.getByTestId("answer-text"))
+      .toHaveText("Mohsen has had it for 3 days.I can't notify Mohsen from here.");
+    await expect(mixedAnswer.locator("strong")).toHaveText("3 days");
+    await expect(mixedAnswer).toBeInViewport();
+    expect((await mixedAnswer.boundingBox())!.y).toBeLessThan((await returnAction.boundingBox())!.y);
+    await expect(page.getByLabel("Follow-up questions")).toHaveCount(0);
     await expect(returnAction.getByRole("link", { name: `${itemName} · Mohsen`, exact: true }))
       .toHaveAttribute("href", new RegExp(`/loans/${loanId}(\\?|$)`));
     expect((await (await request.get(`/api/v1/loans/${loanId}`)).json()).returned_quantity).toBe(0);
-    expect(contexts.filter((entry) => entry.request === "How long have they had it?").at(-1)?.parents.length).toBeGreaterThan(0);
-    await expect(page.getByText("A very long duplicated return proposal with internal schema fields.", { exact: true }).last()).toBeHidden();
+    expect(contexts.filter((entry) => entry.request.startsWith("How long have they had it?")).at(-1)?.parents.length).toBeGreaterThan(0);
+    await expect(page.getByText("A very long duplicated return proposal with internal schema fields.", { exact: false }).last()).toBeHidden();
     await page.screenshot({ path: test.info().outputPath(`return-proposal-${mobile ? "mobile" : "desktop"}.png`) });
+    await page.reload();
+    await expect(page.getByLabel("Assistant answer").last().locator("strong")).toHaveText("3 days");
     await returnAction.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/loans/${loanId}`)).json()).returned_quantity).toBe(1);
     await ask(page, "Rename it please");

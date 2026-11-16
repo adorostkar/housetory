@@ -786,3 +786,90 @@ def test_lending_borrowing_returns_and_moves_use_shared_reviewed_actions(
     approve(proposal)
     saved = client.get(f"/api/v1/items/{item['id']}").json()["item"]
     assert saved["room"]["id"] == destination["id"]
+
+
+def test_prepared_work_keeps_every_other_part_of_the_answer(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    client = owner_client
+    _, item = seed(client)
+    loan = client.post(
+        "/api/v1/loans",
+        json={
+            "item_id": item["id"],
+            "borrower_name": "Validation Borrower",
+            "quantity": 1,
+            "lent_on": "2026-01-01",
+            "request_id": str(uuid.uuid4()),
+        },
+    ).json()
+    prompts = []
+
+    def ask(query, *steps, parent=None):
+        responses = iter(steps)
+
+        def complete(system, prompt, **kwargs):
+            prompts.append((system, json.loads(prompt)))
+            return next(responses)
+
+        monkeypatch.setattr(ai, "complete_json", complete)
+        run = start(client, query, **({"parent_id": parent} if parent else {}))
+        work(run)
+        return read(client, run)
+
+    returned = {"kind": "return_loan", "loan_id": loan["id"], "quantity": 1}
+    mixed = ask(
+        "How long have they had it? Prepare a return for today.",
+        call("get_item_history", item_id=item["id"]),
+        call("prepare_action", action={**returned, "returned_on": "2026-01-04"}),
+        {
+            "kind": "answer",
+            "message": "Validation Borrower has had it for 3 days.",
+            "prepared_note": "Return of 1 on 2026-01-04 is ready.",
+        },
+    )
+    assert mixed["state"] == "awaiting_approval"
+    assert mixed["answer"] == "Validation Borrower has had it for 3 days."
+    assert mixed["steps"][-1]["result"]["proposal"]["kind"] == "return_loan"
+    # The remark about the card stays out of the user-facing answer but in the record.
+    assert "ready" in mixed["message"] and "ready" not in mixed["answer"]
+    assert client.get(f"/api/v1/loans/{loan['id']}").json()["returned_quantity"] == 0
+    system, prompt = prompts[-1]
+    assert "prepared_note" in system
+    assert "prepared_note" in json.dumps(prompt["step_schema"])
+
+    limited = ask(
+        "Return it and delete the old manual",
+        call("prepare_action", action={**returned, "returned_on": "2026-01-05"}),
+        {"kind": "unsupported", "message": "I can't delete documents; use the Documents page."},
+        parent=mixed["id"],
+    )
+    assert limited["state"] == "awaiting_approval"
+    assert limited["answer"] == "I can't delete documents; use the Documents page."
+    # Follow-ups still see what was said, including the earlier answer.
+    assert "3 days" in json.dumps(prompts[-1][1]["context_newest_first"])
+
+    only_action = ask(
+        "He brought it back",
+        call("prepare_action", action={**returned, "returned_on": "2026-01-06"}),
+        {"kind": "answer", "message": "", "prepared_note": "Proposal prepared."},
+    )
+    assert only_action["state"] == "awaiting_approval"
+    assert only_action["answer"] == ""
+
+    empty = ask(
+        "Where is the drill?",
+        call("search_items", q="Validation drill"),
+        {"kind": "answer", "message": " ", "prepared_note": "Nothing prepared."},
+    )
+    assert empty["state"] == "needs_attention"
+    assert empty["answer"] is None and empty["can_retry"]
+    responses = iter([{"kind": "answer", "message": "It is in Tool Storage."}])
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: next(responses))
+    assert client.post(f"/api/v1/assistant/runs/{empty['id']}/retry", json={}).status_code == 200
+    work(empty)
+    recovered = read(client, empty)
+    assert recovered["state"] == "completed"
+    assert recovered["answer"] == "It is in Tool Storage."

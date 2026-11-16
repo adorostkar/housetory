@@ -57,7 +57,25 @@ class AnswerStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["answer", "clarify", "unsupported"]
-    message: str = Field(min_length=1, max_length=4000)
+    message: str = Field(
+        default="",
+        max_length=4000,
+        description=(
+            "Everything the user must read that the application does not already display: "
+            "the answer to every question asked, clarifying questions, limitations, parts "
+            "that could not be completed and unsupported parts. Required even when a "
+            "proposal, capture or review was also prepared. Never restate proposal fields "
+            "or review/capture progress here. Empty only when prepared work is the whole reply."
+        ),
+    )
+    prepared_note: str | None = Field(
+        default=None,
+        max_length=1000,
+        description=(
+            "Optional remark about the prepared proposal, capture or review. The application "
+            "shows that work itself, so this is kept for diagnostics and not shown as the answer."
+        ),
+    )
 
 
 class RunOut(BaseModel):
@@ -69,6 +87,7 @@ class RunOut(BaseModel):
     state: str
     generation: int
     message: str
+    answer: str | None = None
     steps: list[dict[str, Any]]
     model_calls: int
     max_model_calls: int
