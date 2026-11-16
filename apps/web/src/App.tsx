@@ -30,6 +30,7 @@ import {
 import type { SessionState } from "@/lib/types";
 import { ForgotPasswordPage } from "@/pages/forgot-password-page";
 import { FinancialsLayout } from "@/components/financials-layout";
+import { PlacesLayout } from "@/components/places-layout";
 import { InvitationPage } from "@/pages/invitation-page";
 import { LoginPage } from "@/pages/login-page";
 import { NoHouseholdPage } from "@/pages/no-household-page";
@@ -119,14 +120,6 @@ const ImportsPage = React.lazy(() =>
 const ImportDetailPage = React.lazy(() =>
   import("@/pages/import-detail-page").then((module) => ({
     default: module.ImportDetailPage,
-  })),
-);
-const ScanPage = React.lazy(() =>
-  import("@/pages/scan-page").then((module) => ({ default: module.ScanPage })),
-);
-const RecognitionPage = React.lazy(() =>
-  import("@/pages/recognition-page").then((module) => ({
-    default: module.RecognitionPage,
   })),
 );
 const ContainersPage = React.lazy(() =>
@@ -323,7 +316,10 @@ export default function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
             <Route index element={<OverviewPage />} />
-            <Route path="rooms" element={<RoomsPage />} />
+            <Route element={<PlacesLayout />}>
+              <Route path="rooms" element={<RoomsPage />} />
+              <Route path="containers" element={<ContainersPage />} />
+            </Route>
             <Route path="rooms/:roomId" element={<RoomDetailPage />} />
             <Route path="items" element={<ItemsPage />} />
             <Route element={<RequireWriter />}>
@@ -355,10 +351,10 @@ export default function App() {
             </Route>
             <Route path="assistant" element={<LegacyAssistantRedirect />} />
             <Route element={<RequireWriter />}>
-              <Route path="scan" element={<ScanPage />} />
-              <Route path="recognize" element={<RecognitionPage />} />
+              {/* Photo capture now lives in Add items; old links keep their place context. */}
+              <Route path="scan" element={<AddItemsRedirect />} />
+              <Route path="recognize" element={<AddItemsRedirect />} />
             </Route>
-            <Route path="containers" element={<ContainersPage />} />
             <Route
               path="containers/:containerId"
               element={<ContainerDetailPage />}

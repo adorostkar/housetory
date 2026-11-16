@@ -254,25 +254,8 @@ export function SettingsPage() {
           >
             <p className="text-xs font-medium">Item images</p>
             <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-              Item pages use actual photos first, then a public reference image, then a
-              category icon. Existing AI illustrations remain viewable and removable;
-              new illustration generation was retired.
+              Item pages show your photo first, then a reference image, then a category icon.
             </p>
-            <div className="mt-3 rounded-lg border border-border/60 bg-background/30 p-3">
-              <p className="text-2xs font-medium">Online reference-image lookup</p>
-              <p className="mt-1 break-words text-2xs leading-relaxed text-muted-foreground">
-                Configure it in{" "}
-                <Link
-                  to="/settings#online-search"
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  Online search
-                </Link>
-                : add one Brave Search key. Reference-image lookup searches public
-                websites automatically by default; an optional advanced source
-                restriction can narrow downloads.
-              </p>
-            </div>
             <label className="mt-3 flex items-start gap-2.5 text-2xs">
               <input
                 type="checkbox"
@@ -284,8 +267,7 @@ export function SettingsPage() {
               <span>
                 Automatically find a reference image for new items
                 <span className="mt-0.5 block text-2xs text-muted-foreground">
-                  Off by default. Requires a configured Brave Image Search key and a
-                  saved item with a useful product description.
+                  Off by default. Needs online search to be set up below.
                 </span>
               </span>
             </label>
@@ -457,10 +439,7 @@ export function SettingsPage() {
                 {aiStatus.data.privacy_note}
               </p>
               <p className="text-2xs leading-relaxed text-muted-foreground">
-                Status checks provider configuration and, when configured, the
-                provider&apos;s model catalog. A listed model is not proof of inference
-                access, billing eligibility or output quality; Housetory does not send a
-                test prompt. Choose or search models on the AI providers page.
+                This checks configuration only; Housetory does not send a test prompt.
               </p>
               {aiStatus.data.error && (
                 <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
@@ -480,13 +459,11 @@ export function SettingsPage() {
 
         <SystemHealthSummary isOwner={isOwner} />
 
-        <section className="surface p-5 sm:p-6">
-          <div className="flex items-center gap-2">
+        <details className="surface p-5 sm:p-6">
+          <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
             <Smartphone className="size-4 text-muted-foreground" strokeWidth={1.7} />
-            <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-              On your iPhone
-            </h2>
-          </div>
+            Install on your iPhone
+          </summary>
           <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted-foreground">
             Open Housetory at its trusted HTTPS address — your public domain, a
             trusted LAN address, or an optional Tailscale address — in Safari, tap
@@ -494,7 +471,7 @@ export function SettingsPage() {
             <span className="text-foreground">Add to Home Screen</span>. Camera
             capture and installed-PWA features require this secure context.
           </p>
-        </section>
+        </details>
 
         <section className="surface flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>

@@ -253,7 +253,7 @@ export function ContainersPage() {
       )}
 
       <section className="surface p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
           <div className="inline-flex shrink-0 rounded-full border border-border/70 bg-background/50 p-1">
             <button
               type="button"
@@ -280,7 +280,7 @@ export function ContainersPage() {
               Fixed places
             </button>
           </div>
-          <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1 lg:min-w-[18rem]">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}

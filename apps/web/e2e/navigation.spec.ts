@@ -18,7 +18,7 @@ test("desktop navigation keeps core links calm and secondary routes under More",
   await page.goto("/items");
   const aside = page.locator("aside");
   await expect(aside.getByRole("link", { name: "Items" })).toBeVisible();
-  await expect(aside.getByRole("link", { name: "Rooms" })).toBeVisible();
+  await expect(aside.getByRole("link", { name: "Places" })).toBeVisible();
   await expect(aside.getByRole("link", { name: "Loans" })).toBeVisible();
   await expect(aside.getByRole("link", { name: "Review" })).not.toBeVisible();
   await shot(page, "03-navigation-desktop-calm");

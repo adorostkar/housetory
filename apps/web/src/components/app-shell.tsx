@@ -1,5 +1,4 @@
 import {
-  Boxes,
   ClipboardCheck,
   DoorOpen,
   FileText,
@@ -30,6 +29,7 @@ import {
   useAddItems,
 } from "@/components/add-items";
 import { isFinancialsPath } from "@/components/financials-layout";
+import { isPlacesPath } from "@/components/places-layout";
 import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useCanWrite, useReviewSummary } from "@/lib/queries";
+import { useCanWrite, usePendingActions, useReviewSummary } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
 import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useAssistantDocuments } from "@/lib/assistant-documents";
@@ -74,8 +74,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     label: "Inventory",
     items: [
       { to: "/items", label: "Items", icon: Package },
-      { to: "/rooms", label: "Rooms", icon: DoorOpen },
-      { to: "/containers", label: "Containers", icon: Boxes },
+      { to: "/rooms", label: "Places", icon: DoorOpen, match: isPlacesPath },
       { to: "/loans", label: "Loans", icon: HandCoins },
     ],
   },
@@ -113,9 +112,7 @@ const AssistantPage = lazy(() =>
 );
 
 const mobileMoreNav: NavItem[] = [
-  { to: "/rooms", label: "Rooms", icon: DoorOpen },
-  { to: "/containers", label: "Containers", icon: Boxes },
-  { to: "/loans", label: "Loans", icon: HandCoins },
+  { to: "/rooms", label: "Places", icon: DoorOpen, match: isPlacesPath },
   { to: "/documents", label: "Documents", icon: FileText },
   {
     to: "/purchases",
@@ -167,14 +164,22 @@ function AppShellLayout() {
     id: string;
     text: string;
     file?: File;
-    capture?: { kind: "items" | "document" | "photo"; id: string };
+    capture?: { kind: "items" | "document" | "photo" | "action"; id: string };
   } | null>(null);
   const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const restoreAssistantFocus = useRef(false);
   const { openAddItems } = useAddItems();
-  const { select: selectDocument, selectImport, selectPhoto, pendingReviews } = useAssistantDocuments();
-  const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length;
+  const {
+    select: selectDocument, selectImport, selectPhoto, pendingReviews,
+    activeId, activeImportId, activePhotoId,
+  } = useAssistantDocuments();
+  // The review already on screen needs no "ready" toast.
+  const visibleReview = useRef<string | null>(null);
+  visibleReview.current = assistantOpen ? activeImportId ?? activeId ?? activePhotoId : null;
+  const pendingActions = usePendingActions();
+  const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length
+    + (pendingActions.data?.length ?? 0);
   const desktop = useMediaQuery("(min-width: 1024px)");
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;
@@ -221,7 +226,8 @@ function AppShellLayout() {
     const capture = state.assistantCapture;
     if (!capture || typeof capture !== "object" || !("id" in capture) || typeof capture.id !== "string"
       || !("kind" in capture)) return;
-    if (capture.kind !== "items" && capture.kind !== "document" && capture.kind !== "photo") return;
+    if (capture.kind !== "items" && capture.kind !== "document" && capture.kind !== "photo"
+      && capture.kind !== "action") return;
     if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
       assistantTrigger.current = document.activeElement;
       restoreAssistantFocus.current = true;
@@ -311,6 +317,7 @@ function AppShellLayout() {
       } catch {
         // The in-memory key still prevents repeat toasts in this page session.
       }
+      if (visibleReview.current === task.id) return;
       toast.success(task.title, {
         id: key,
         description: task.description,

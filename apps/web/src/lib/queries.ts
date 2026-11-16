@@ -816,6 +816,20 @@ export function useCaptureReviews(dismissed = false) {
   });
 }
 
+export function usePendingActions() {
+  const session = useSession();
+  const householdId = session.data?.household?.id;
+  return useQuery({
+    queryKey: ["assistant-pending-actions", householdId],
+    queryFn: ({ signal }) => api.get<{ id: string; kind: string; targets: { id: string; name: string }[] }[]>(
+      `/assistant/actions/proposals/pending?household_id=${householdId}`, { signal },
+    ),
+    enabled: Boolean(householdId),
+    refetchInterval: 5000,
+    retry: false,
+  });
+}
+
 export function useReviewSchedule(enabled = true) {
   return useQuery({
     queryKey: queryKeys.reviewSchedule,

@@ -168,9 +168,17 @@ export function SmartAddInput({
     if (locationId) form.append("location_id", locationId);
   };
 
-  const finishAt = (path: string) => {
+  // Item captures are reviewed inline in the assistant panel, the same place
+  // as captures started from the header or composer.
+  const reviewInAssistant = (batchId: string) => {
     onFinish();
-    navigate(path);
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: "#assistant" },
+      {
+        replace: location.hash === "#assistant",
+        state: { assistantCapture: { kind: "items", id: batchId } },
+      },
+    );
   };
 
   const createTextImport = useMutation({
@@ -181,7 +189,7 @@ export function SmartAddInput({
       appendContext(form);
       return api.postForm<ImportBatchDetail>("/imports", form);
     },
-    onSuccess: (batch) => finishAt(`/imports/${batch.id}`),
+    onSuccess: (batch) => reviewInAssistant(batch.id),
     onError: (caught) => setError(getApiErrorMessage(caught)),
   });
 
@@ -222,7 +230,7 @@ export function SmartAddInput({
   const adaptRecognition = useMutation({
     mutationFn: (id: string) =>
       api.post<ImportBatchDetail>(`/imports/from-recognition/${id}`),
-    onSuccess: (batch) => finishAt(`/imports/${batch.id}`),
+    onSuccess: (batch) => reviewInAssistant(batch.id),
     onError: (caught) => {
       setError(getApiErrorMessage(caught));
       setRecognitionId(null);

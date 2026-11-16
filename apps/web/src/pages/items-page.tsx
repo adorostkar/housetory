@@ -362,7 +362,7 @@ export function ItemsPage() {
               onChange={(event) => updateParam("location_id", event.target.value)}
               className="h-9 rounded-lg text-xs"
             >
-              <option value="">{roomFilter ? "All places" : "Choose a room"}</option>
+              <option value="">All places</option>
               {locationOptions.map(({ location }) => (
                 <option key={location.id} value={location.id}>
                   {locationPath(locationsQuery.data?.items ?? [], location.id)

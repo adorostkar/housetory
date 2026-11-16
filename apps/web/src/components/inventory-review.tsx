@@ -749,7 +749,9 @@ export function InventoryReview({
                 : "Find suggestions"}
           </Button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
+        <details className="mt-3 text-xs">
+        <summary className="min-h-11 cursor-pointer py-3 text-muted-foreground">Review again options</summary>
+        <div className="flex flex-wrap items-center gap-3">
           <Button type="button" variant="outline" className="min-h-11"
             disabled={!canRun || runReview.isPending || displayedRun?.background_active} onClick={() => startRun(true)}>
             Review again
@@ -770,6 +772,7 @@ export function InventoryReview({
             </span>
           </span>
         </label>
+        </details>
         {(runReview.isPending || displayedRun?.background_active) && (
           <div className="mt-3">
           <p className="text-2xs text-muted-foreground" aria-live="polite">

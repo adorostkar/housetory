@@ -89,7 +89,8 @@ test("a voice note is transcribed and opens straight in the import review", asyn
   await expect(strip).toBeVisible();
   await page.waitForTimeout(1200);
   await strip.getByRole("button", { name: "Stop" }).click();
-  await expect(page).toHaveURL(/\/imports\/voice-batch$/);
+  await expect(page).toHaveURL(/#assistant$/);
+  await expect(page.getByTestId("assistant-panel").locator('[data-capture-id="voice-batch"]')).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Add items" })).toHaveCount(0);
   expect(uploads).toBe(1);
   expect(importBody).toContain("One camping stove in the garage");

@@ -16,7 +16,7 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { AddItemsButton, useAddItems } from "@/components/add-items";
+import { useAddItems } from "@/components/add-items";
 import { FirstRunChecklist } from "@/components/first-run-checklist";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -150,7 +150,7 @@ export function OverviewPage() {
             )
           )}
         </div>
-        <div className="shrink-0 sm:hidden">
+        <div className="shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="size-11" aria-label="Home actions">
@@ -173,27 +173,6 @@ export function OverviewPage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-        <div className="hidden flex-wrap items-center gap-2 sm:flex sm:gap-2.5">
-          {data.item_count > 0 && (
-            <>
-              <Button variant="outline" asChild>
-                <Link to="/insurance">
-                  <ShieldCheck />
-                  Create insurance list
-                </Link>
-              </Button>
-              <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
-                <Download />
-                Export evidence
-              </Button>
-            </>
-          )}
-          <Button variant="outline" onClick={() => setRoomDialogOpen(true)}>
-            <DoorOpen />
-            New room
-          </Button>
-          <AddItemsButton className="hidden lg:inline-flex" />
         </div>
       </header>
 
@@ -397,18 +376,14 @@ export function OverviewPage() {
             valuesHidden={valuesHidden}
           />
 
+          {hasWarranties && (
           <section className="mt-8">
             <SectionHeading
               title="Warranty watch"
-              description={
-                hasWarranties
-                  ? `Expiring-soon reminders use a ${pluralize(warrantyCounts.reminder_days, "day")} window.`
-                  : "No warranties recorded. Add one while editing an item."
-              }
-              actionLabel={hasWarranties ? "All warranties" : undefined}
-              actionTo={hasWarranties ? "/warranties" : undefined}
+              description={`Expiring-soon reminders use a ${pluralize(warrantyCounts.reminder_days, "day")} window.`}
+              actionLabel="All warranties"
+              actionTo="/warranties"
             />
-            {hasWarranties ? (
               <div className="grid gap-4 lg:grid-cols-3">
                 <WarrantyGroup
                   title="Expiring soon"
@@ -429,13 +404,8 @@ export function OverviewPage() {
                   total={warrantyCounts.expired_count}
                 />
               </div>
-            ) : (
-              <div className="surface px-5 py-4 text-xs leading-relaxed text-muted-foreground">
-                Warranty dates and documents stay with each item when you add them.
-                Nothing is tracked as expiring yet.
-              </div>
-            )}
           </section>
+          )}
         </>
       )}
 

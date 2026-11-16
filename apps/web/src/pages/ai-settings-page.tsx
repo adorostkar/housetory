@@ -1002,10 +1002,10 @@ export function AiSettingsPage() {
         </div>
       </details>
 
-      <section id="credentials" className="surface scroll-mt-32 mt-5 p-5 text-2xs leading-relaxed text-muted-foreground">
-        <p className="flex items-center gap-1.5 font-medium text-foreground/80">
+      <details id="credentials" className="surface scroll-mt-32 mt-5 p-5 text-2xs leading-relaxed text-muted-foreground">
+        <summary className="flex min-h-11 cursor-pointer items-center gap-1.5 font-medium text-foreground/80">
           <KeyRound className="size-3.5 text-brass" /> Credential operations
-        </p>
+        </summary>
         <p className="mt-2">
           Keys are encrypted with <code className="rounded bg-secondary px-1.5 py-0.5">AI_CREDENTIAL_KEY</code>{" "}
           from the deployment environment. To rotate, set the old key as{" "}
@@ -1017,10 +1017,10 @@ export function AiSettingsPage() {
           If the key is missing or wrong, provider calls fail closed. API keys are replaceable
           without re-creating the provider.
         </p>
-        <Button variant="outline" size="sm" className="mt-3" asChild>
-          <Link to="/settings">Back to settings</Link>
-        </Button>
-      </section>
+      </details>
+      <Button variant="outline" size="sm" className="mt-4" asChild>
+        <Link to="/settings">Back to settings</Link>
+      </Button>
 
       <StickySaveBar
         dirty={defaultDirty}

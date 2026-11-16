@@ -102,7 +102,15 @@ with SessionLocal() as db:
   return { room, id };
 }
 
+async function showAgainOptions(page: Page) {
+  const options = page.locator("details").filter({ hasText: "Review again options" });
+  if (!(await options.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await options.locator("summary").click();
+  }
+}
+
 async function start(page: Page, again = false) {
+  if (again) await showAgainOptions(page);
   await page.getByRole("button", { name: again ? "Review again" : "Review with AI", exact: true }).click();
   await page.getByRole("button", { name: "Run review with AI", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
@@ -175,6 +183,7 @@ for (const mobile of [false, true]) {
     expect(queue.total).toBe(0);
     const dismissed = await (await request.get(`/api/v1/inventory-review/suggestions?status=dismissed&item_ids=${item.id}`)).json();
     expect(dismissed.total).toBe(1);
+    await showAgainOptions(page);
     const reconsider = page.getByRole("checkbox", { name: /Reconsider dismissed suggestions/ });
     await expect(reconsider).not.toBeChecked();
     await reconsider.check();

@@ -178,10 +178,23 @@ for (const mobile of [false, true]) {
     expect(contexts.filter((entry) => entry.request.startsWith("How long have they had it?")).at(-1)?.parents.length).toBeGreaterThan(0);
     await expect(page.getByText("A very long duplicated return proposal with internal schema fields.", { exact: false }).last()).toBeHidden();
     await page.screenshot({ path: test.info().outputPath(`return-proposal-${mobile ? "mobile" : "desktop"}.png`) });
+    // A prepared action counts as pending work and can be reopened from the Review queue.
+    const proposalId = await returnAction.getAttribute("data-capture-id");
+    const assistantButton = page.locator('button[title="Open assistant"]').first();
+    await expect(assistantButton).toHaveAttribute("aria-label", /unresolved review/);
+    await page.getByRole("button", { name: "Close assistant", exact: true }).click();
+    await page.goto("/review");
+    await page.getByRole("region", { name: "Prepared actions" })
+      .getByRole("button", { name: `Review Return: ${itemName} · Mohsen`, exact: true }).click();
+    const reopenedAction = page.locator(`[data-capture-id="${proposalId}"]`);
+    await expect(reopenedAction).toBeInViewport();
+    await expect(reopenedAction.getByRole("button", { name: "Apply", exact: true })).toBeVisible();
+    expect((await (await request.get(`/api/v1/loans/${loanId}`)).json()).returned_quantity).toBe(0);
     await page.reload();
     await expect(page.getByLabel("Assistant answer").last().locator("strong")).toHaveText("3 days");
     await returnAction.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/loans/${loanId}`)).json()).returned_quantity).toBe(1);
+    await expect(page.getByRole("region", { name: "Prepared actions" })).toHaveCount(0);
     await ask(page, "Rename it please");
     const action = page.getByLabel("Action review").filter({ hasText: itemName }).last();
     await expect(action.getByRole("button", { name: "Apply", exact: true })).toBeVisible();

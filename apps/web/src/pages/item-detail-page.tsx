@@ -404,11 +404,9 @@ export function ItemDetailPage() {
                 ) : (
                   <span className="text-muted-foreground">Not assigned</span>
                 )}
-                {onLoan > 0 && (
+                {onLoan > 0 && available > 0 && (
                   <span className="mt-1.5 block text-2xs leading-relaxed text-muted-foreground">
-                    {available > 0
-                      ? `This home location covers only the ${available} at-home ${available === 1 ? "unit" : "units"}.`
-                      : "All owned units are on loan. This is the recorded home, not a current physical location."}
+                    {`This home location covers only the ${available} at-home ${available === 1 ? "unit" : "units"}.`}
                   </span>
                 )}
               </InfoRow>

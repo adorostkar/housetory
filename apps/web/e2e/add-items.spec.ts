@@ -110,9 +110,12 @@ test("unified Add items input detects input kinds and preserves context", async 
     .getByRole("textbox", { name: "Describe items or paste a product link" })
     .fill(`- Context import item ${suffix}`);
   await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(page).toHaveURL(/\/imports\/[0-9a-f-]+$/);
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  const contextBatchId = page.url().split("/").pop();
+  // The capture is reviewed inline in the assistant panel on the same page.
+  await expect(page).toHaveURL(new RegExp(`/containers/${container.id}#assistant$`));
+  await expect(page.getByRole("dialog", { name: "Add items" })).toHaveCount(0);
+  const inlineReview = page.getByTestId("assistant-panel").getByLabel("Assistant capture status").last();
+  await expect(inlineReview.getByRole("region", { name: "Assistant item review" })).toBeVisible();
+  const contextBatchId = await inlineReview.getAttribute("data-capture-id");
   await expect
     .poll(async () => {
       const response = await page.request.get(`/api/v1/imports/${contextBatchId}`);

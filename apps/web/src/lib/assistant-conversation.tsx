@@ -281,7 +281,10 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     const firstRestore = !restoredScopes.current.has(toolScope);
     restoredScopes.current.add(toolScope);
     update(toolScope, (current) => {
-      let messages = current.messages;
+      // Restored history is older than anything already shown locally, so it goes above.
+      const local = firstRestore && !current.messages.some((message) => message.toolRunId)
+        ? current.messages : [];
+      let messages = local.length ? [] : current.messages;
       for (const [index, run] of toolRuns.data.entries()) {
         const key = `${toolScope}:${run.id}`;
         const existing = messages.some((message) => message.toolRunId === run.id);
@@ -293,6 +296,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           ? current.messages.find((message) => message.toolRunId)?.toolRunId : undefined);
         messages = mergeToolRun(messages, run, before);
       }
+      messages = [...messages, ...local];
       return {
         ...current, messages,
         toolParentId: current.toolParentId ?? (firstRestore ? toolRuns.data.at(-1)?.id ?? null : null),

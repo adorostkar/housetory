@@ -75,6 +75,7 @@ function LocationProbe() {
   const location = useLocation();
   return <>
     <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+    <output data-testid="location-hash">{location.hash}</output>
     <output data-testid="navigation-state">{JSON.stringify(location.state)}</output>
   </>;
 }
@@ -140,6 +141,14 @@ const review = () => screen.getByRole("button", { name: "Review items" });
 const mic = () => screen.getByRole("button", { name: "Record voice note" });
 const currentUrl = () =>
   new URL(screen.getByTestId("location").textContent ?? "/", "http://housetory.invalid");
+
+// Item captures stay on the current page and open their review in the assistant panel.
+const expectInlineReview = () => waitFor(() => {
+  expect(screen.getByTestId("location-hash")).toHaveTextContent("#assistant");
+  expect(JSON.parse(screen.getByTestId("navigation-state").textContent ?? "null"))
+    .toEqual({ assistantCapture: { kind: "items", id: "batch-1" } });
+  expect(currentUrl().pathname).toBe("/");
+});
 
 function attachPhoto(name = "backpack.png") {
   fireEvent.change(screen.getByTestId("smart-add-library"), {
@@ -276,7 +285,7 @@ describe("AddItems smart input", () => {
     expect(form.get("room_id")).toBe("room-1");
     expect(form.get("location_id")).toBe("box-1");
     expect(form.get("property_id")).toBe("home");
-    await waitFor(() => expect(currentUrl().pathname).toBe("/imports/batch-1"));
+    await expectInlineReview();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -310,7 +319,7 @@ describe("AddItems smart input", () => {
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith("/imports/from-recognition/recognition-1"),
     );
-    await waitFor(() => expect(currentUrl().pathname).toBe("/imports/batch-1"));
+    await expectInlineReview();
   });
 
   it("stores a photographed receipt as a document and opens its review", async () => {
@@ -429,7 +438,7 @@ describe("AddItems smart input", () => {
     const form = vi.mocked(api.postForm).mock.calls[1]![1] as FormData;
     expect(form.get("text")).toBe("One stove");
     expect(form.get("room_id")).toBe("room-1");
-    await waitFor(() => expect(currentUrl().pathname).toBe("/imports/batch-1"));
+    await expectInlineReview();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

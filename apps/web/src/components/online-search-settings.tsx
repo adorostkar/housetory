@@ -190,6 +190,13 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         </div>
       </div>
 
+      <details
+        className="mt-3"
+        open={settings.has_api_key || settings.credential_source === "environment"}
+      >
+      <summary className="min-h-11 cursor-pointer py-3 text-xs text-muted-foreground">
+        Online search settings
+      </summary>
       {settings.warning && (
         <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
           {settings.warning}
@@ -407,6 +414,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         </p>
       </details>
 
+      </details>
       <ConfirmDialog
         open={testConfirmOpen}
         onOpenChange={setTestConfirmOpen}

@@ -115,9 +115,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
               Store items inside
             </h2>
             <p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-              Make this owned item act as a toolbox, box or piece of furniture that holds
-              other inventory. Purchase, warranty, photos, documents, value and history stay
-              on this item.
+              Use this item as a toolbox, box or piece of furniture that holds other items.
             </p>
             {item.quantity !== 1 ? (
               <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">

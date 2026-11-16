@@ -548,15 +548,17 @@ export function QuickSearch({
                   Press Enter to ask Housetory. Straightforward item searches
                   stay local and open a match directly.
                 </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => submitToResults(true)}
-                >
-                  <Sparkles />
-                  Ask Housetory
-                </Button>
+                {!onAsk && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => submitToResults(true)}
+                  >
+                    <Sparkles />
+                    Ask Housetory
+                  </Button>
+                )}
                 <div
                   role="listbox"
                   id="quick-search-results"
@@ -627,17 +629,18 @@ export function QuickSearch({
                     {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}
                   </span>
                   <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-2xs"
-                      onClick={() => onAsk ? askAssistant() : submitToResults(true)}
-                      title="Ask the configured assistant (Shift+Enter)"
-                    >
-                      <Sparkles className="size-3" />
-                      Ask Housetory
-                    </Button>
+                    {!onAsk && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-2xs"
+                        onClick={() => submitToResults(true)}
+                      >
+                        <Sparkles className="size-3" />
+                        Ask Housetory
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       variant="ghost"

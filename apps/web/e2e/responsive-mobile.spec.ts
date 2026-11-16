@@ -795,13 +795,15 @@ test.describe("mobile responsive", () => {
       fullPage: false,
     });
     const menuItems = menu.getByRole("menuitem");
-    await expect(menuItems).toHaveCount(8);
+    await expect(menuItems).toHaveCount(5);
     for (const item of await menuItems.all()) {
       const box = await item.boundingBox();
       expect(box).not.toBeNull();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
     }
-    await menu.getByRole("menuitem", { name: "Containers" }).click();
+    await menu.getByRole("menuitem", { name: "Places" }).click();
+    await expect(page).toHaveURL(/\/rooms$/);
+    await page.getByRole("navigation", { name: "Places" }).getByRole("link", { name: "Containers" }).click();
     await expect(page).toHaveURL(/\/containers$/);
     await expect(page.getByRole("button", { name: "More destinations" })).toHaveAttribute(
       "data-active",

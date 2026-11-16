@@ -75,7 +75,7 @@ interface AssistantInitialRequest {
   id: string;
   text: string;
   file?: File;
-  capture?: { kind: "items" | "document" | "photo"; id: string };
+  capture?: { kind: "items" | "document" | "photo" | "action"; id: string };
 }
 
 function CaptureContent({ capture }: { capture: AssistantCaptureState }) {
@@ -362,10 +362,16 @@ export function AssistantPage({
       onInitialRequestHandled?.(initialRequest.id);
       return;
     }
+    if (initialRequest.capture?.kind === "action") {
+      // A prepared action already lives in the conversation; just bring it into view.
+      requestedCaptureRef.current = initialRequest.capture.id;
+      onInitialRequestHandled?.(initialRequest.id);
+      return;
+    }
     startFreshTopic();
     if (searchSession.scopeKey === scopeSignature) searchSession.reset();
     if (initialRequest.capture) {
-      const source = initialRequest.capture;
+      const source = { ...initialRequest.capture, kind: initialRequest.capture.kind };
       requestedCaptureRef.current = source.id;
       if (source.kind === "document") selectDocument(source.id);
       else if (source.kind === "photo") selectPhoto(source.id);
@@ -503,7 +509,7 @@ export function AssistantPage({
               <RotateCcw />
             </Button>
           {pageReferences.length > 0 && (
-            <div className="flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-xs" aria-label="Current assistant context">
+            <div className="order-last flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-xs" aria-label="Current assistant context">
               <span className="min-w-0 truncate">
                 {pageReferences.length === 1 && pageReferences[0]
                   ? `${pageReferences[0].kind}: ${pageReferences[0].name}`
@@ -662,7 +668,8 @@ export function AssistantPage({
                       <CaptureContent capture={message.capture} />
                     </div>
                   ) : message.action ? (
-                    <div className="surface space-y-3 p-5" aria-label="Action review">
+                    <div className="surface space-y-3 p-5" aria-label="Action review"
+                      data-capture-id={message.action.proposal.id}>
                       <p dir="auto" className="text-sm">{message.text}</p>
                       <p className="break-words text-xs text-muted-foreground">
                         Scope: {message.action.proposal.scope_label}

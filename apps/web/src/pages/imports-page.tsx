@@ -183,7 +183,7 @@ export function ImportsPage() {
                     value={text}
                     onChange={(event) => setText(event.target.value)}
                     placeholder={
-                      "Winter clothes are in the blue boxes in the attic.\\nTwo suitcases are stored under the guest bed.\\nCamera equipment is in the office cupboard."
+                      "Winter clothes are in the blue boxes in the attic.\nTwo suitcases are stored under the guest bed.\nCamera equipment is in the office cupboard."
                     }
                     className="min-h-44 font-mono text-xs leading-relaxed"
                   />

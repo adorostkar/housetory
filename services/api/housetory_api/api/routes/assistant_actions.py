@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -2086,3 +2086,37 @@ def cancel_proposal(
     result = AssistantActionStateOut(id=proposal.id, state=proposal.state)
     db.commit()
     return result
+
+
+PENDING_PROPOSAL_DAYS = 7
+
+
+@router.get("/proposals/pending", response_model=list[AssistantActionProposalOut])
+def pending_proposals(
+    household_id: uuid.UUID,
+    account: AccountContext = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> list[AssistantActionProposalOut]:
+    """Recent prepared actions still waiting for this user's Apply or Cancel."""
+    rows = db.scalars(
+        select(AssistantActionProposal)
+        .where(
+            AssistantActionProposal.actor_user_id == account.user.id,
+            AssistantActionProposal.household_id == household_id,
+            AssistantActionProposal.state == "ready",
+            AssistantActionProposal.created_at
+            >= datetime.now(UTC) - timedelta(days=PENDING_PROPOSAL_DAYS),
+        )
+        .order_by(AssistantActionProposal.created_at.desc())
+        .limit(20)
+    ).all()
+    pending = []
+    for row in rows:
+        # Only proposals the conversation can restore are listed.
+        if "tool_preview" not in (row.snapshots or {}):
+            continue
+        try:
+            pending.append(tool_proposal_preview(db, row))
+        except ApiError:
+            continue
+    return pending

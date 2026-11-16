@@ -770,7 +770,7 @@ test("mobile navigation has five equal, working slots with a centered Add contro
   await controls[3]!.click();
   await expect(page).toHaveURL("/loans");
   await controls[4]!.click();
-  await page.getByRole("menuitem", { name: "Rooms" }).click();
+  await page.getByRole("menuitem", { name: "Places" }).click();
   await expect(page).toHaveURL("/rooms");
   expect(errors).toEqual([]);
 });
