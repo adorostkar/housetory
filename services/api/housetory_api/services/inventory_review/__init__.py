@@ -251,6 +251,7 @@ def run_review(
         **run.progress_json,
         "ai_successful_inputs": successful_inputs,
         "ai_unanswered_ids": ai_meta.get("unanswered_ids", []),
+        "ai_diagnostics": ai_meta.get("diagnostics", []),
         "ai_eligible_ids": ai_meta.get("eligible_ids", eligible_ids),
     }
     run.ai_provider_label = ai_meta.get("provider")

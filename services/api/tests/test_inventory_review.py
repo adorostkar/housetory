@@ -131,6 +131,85 @@ def test_partial_ai_response_covers_only_answered_items_and_reports_the_rest(
     assert len(organisation_suggestions(owner_client)) == 1
 
 
+def test_invalid_ai_entries_do_not_discard_valid_ones_or_count_as_coverage(
+    owner_client,
+    configured_ai,
+    monkeypatch,
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 6)
+    calls = []
+    decline = {"index": 4, "no_category_reason": "The name does not say what it is."}
+
+    def complete(_system, prompt, **_kwargs):
+        calls.append([record["name"] for record in sent_items(prompt)])
+        if len(calls) > 1:
+            return decline_all(_system, prompt)
+        return {
+            "suggestions": [
+                {"index": 0, "category": {"name": "Camping"}, "reason": "Named as camping gear."},
+                {"index": 1, "category": {"id": str(uuid.uuid4())}},
+                "not an entry",
+                {"index": 7, "category": {"name": "Camping"}},
+                {"index": -1, "category": {"name": "Camping"}},
+                # An invalid duplicate must not suppress the valid answer after it.
+                {"index": 2, "tags": [{"id": str(uuid.uuid4())}]},
+                {"index": 2, "no_category_reason": "The name does not say what it is."},
+                # Conflicting duplicates: neither answer is recorded.
+                {"index": 3, "category": {"name": "Tools"}},
+                {"index": 3, "category": {"name": "Garden"}},
+                # Agreeing duplicates are one answer.
+                decline,
+                decline,
+            ]
+        }
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    partial = run_review(owner_client, include_ai=True).json()
+    assert partial["ai_error"] is None
+    assert partial["status"] == "partial"
+    assert (partial["ai_item_count"], partial["ai_reviewed_count"]) == (6, 3)
+    assert partial["ai_unanswered_count"] == 3
+    reason = partial["partial_reason"]
+    assert "no usable answer for 3" in reason
+    assert "6 invalid AI entries were ignored" in reason
+    assert "entry 1: unknown existing category id" in reason
+    [suggestion] = organisation_suggestions(owner_client)
+    assert suggestion["after"]["category_name"] == "Camping"
+
+    later = run_review(owner_client, include_ai=True).json()
+    names = calls[0]
+    assert calls[1] == [names[1], names[3], names[5]]
+    assert (later["ai_reused_count"], later["ai_reviewed_count"]) == (3, 3)
+    assert later["status"] == "completed"
+
+
+@pytest.mark.parametrize("response", ["not json", ["index", 0], {"suggestions": "none"}])
+def test_unparseable_ai_response_leaves_the_batch_uncovered_with_an_error(
+    owner_client, configured_ai, monkeypatch, response
+):
+    from housetory_api.services import ai
+
+    seed_review_items(owner_client, 2)
+    calls = []
+    monkeypatch.setattr(
+        ai, "complete_json", lambda _system, prompt, **_k: calls.append(prompt) or response
+    )
+    failed = run_review(owner_client, include_ai=True).json()
+    assert "AI organisation review failed" in failed["ai_error"]
+    assert failed["status"] == "partial"
+    assert failed["ai_reviewed_count"] == 0
+    assert organisation_suggestions(owner_client) == []
+
+    monkeypatch.setattr(
+        ai, "complete_json", lambda *a, **k: calls.append(a[1]) or decline_all(*a, **k)
+    )
+    later = run_review(owner_client, include_ai=True).json()
+    assert len(sent_items(calls[-1])) == 2
+    assert (later["ai_reused_count"], later["ai_reviewed_count"]) == (0, 2)
+
+
 def test_fully_answered_ai_response_covers_every_item_and_reports_completion(
     owner_client,
     configured_ai,
@@ -474,10 +553,12 @@ def test_invalid_item_references_never_record_successful_coverage(
     )
     failed = run_review(owner_client, include_ai=True).json()
     assert failed["ai_reviewed_count"] == failed["ai_reused_count"] == 0
-    assert failed["ai_error"]
+    assert failed["status"] == "partial"
+    assert failed["ai_unanswered_count"] == 1
+    assert "1 invalid AI entries were ignored" in failed["partial_reason"]
     assert organisation_suggestions(owner_client) == []
     monkeypatch.setattr(ai, "complete_json", decline_all)
-    retry = advance_review(owner_client, failed)
+    retry = run_review(owner_client, include_ai=True).json()
     assert retry["ai_reviewed_count"] == 1
     assert retry["ai_reused_count"] == 0
 
@@ -1468,8 +1549,7 @@ def test_ai_organisation_output_is_validated_and_offline_runs_never_call_ai(
     invalid = run_review(client, include_ai=True, review_again=True)
     assert invalid.status_code == 200, invalid.text
     assert invalid.json()["status"] == "partial"
-    assert invalid.json()["ai_error"]
-    assert invalid.json()["status"] != "failed"
+    assert "1 invalid AI entries were ignored" in invalid.json()["partial_reason"]
 
 
 def test_scope_items_and_viewer_reads_are_household_scoped(owner_client):
@@ -1715,8 +1795,8 @@ def test_organisation_bulk_accept_and_duplicate_ai_indexes(owner_client, monkeyp
                     "reason": "Camping activity is explicit in the item name.",
                 }
             )
-        # A repeated index is ignored rather than creating a second suggestion.
-        entries.append(dict(entries[0], category={"name": "Ignored duplicate"}))
+        # A repeated, agreeing answer does not create a second suggestion.
+        entries.append(dict(entries[0]))
         return {"suggestions": entries}
 
     monkeypatch.setattr(inventory_review.ai, "complete_json", fake_complete_json)
@@ -1869,7 +1949,8 @@ def test_ai_organisation_validation_rejects_bad_taxonomy_and_keeps_offline(
         assert run["status"] == "partial"
         assert run["ai_used"] is True
         assert run["ai_item_count"] == 1
-        assert run["ai_error"]
+        assert run["ai_reviewed_count"] == 0
+        assert "1 invalid AI entries were ignored" in run["partial_reason"]
         assert organisation_suggestions(client) == []
         offline = [
             entry

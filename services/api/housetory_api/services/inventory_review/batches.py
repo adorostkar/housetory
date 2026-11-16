@@ -248,6 +248,10 @@ def advance(
             [*still_unanswered, *(child.progress_json or {}).get("ai_unanswered_ids", [])]
         )
     )
+    progress["ai_diagnostics"] = [
+        *progress.get("ai_diagnostics", []),
+        *(child.progress_json or {}).get("ai_diagnostics", []),
+    ][-MAX_AI_ITEMS:]
     child.progress_json = {**child.progress_json, "parent_id": str(run.id)}
     for field in (
         "created_suggestion_count",
@@ -287,14 +291,19 @@ def advance(
     progress["version"] += 1
     run.progress_json = progress
     unanswered = len(progress["ai_unanswered_ids"])
-    run.status = "partial" if remaining or progress["unavailable"] or unanswered else "completed"
+    diagnostics = progress["ai_diagnostics"]
+    run.status = (
+        "partial"
+        if remaining or progress["unavailable"] or unanswered or diagnostics
+        else "completed"
+    )
     reasons = [
         f"{remaining} items unfinished. Resume to continue without repeating completed batches."
         if remaining
         else f"{progress['unavailable']} items became unavailable or left the selected scope."
         if progress["unavailable"]
         else None,
-        unanswered_note(unanswered) if unanswered else None,
+        unanswered_note(unanswered, diagnostics) or None,
     ]
     run.partial_reason = " ".join(reason for reason in reasons if reason) or None
     run.completed_at = result.completed_at if not remaining else None

@@ -92,11 +92,6 @@ class AiOrganisationDecision(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
-class AiOrganisationOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    suggestions: list[AiOrganisationDecision] = Field(default_factory=list, max_length=MAX_AI_ITEMS)
-
-
 @dataclass
 class _Candidate:
     type: str
@@ -485,24 +480,31 @@ def _ai_organisation_candidates(
         raw = (ai_inference or ai.complete_json)(
             AI_REVIEW_SYSTEM, prompt, config=ai.config_for(db, household_id, AiTask.ASSISTANT.value)
         )
-        parsed = AiOrganisationOutput.model_validate(raw)
+        entries = raw.get("suggestions", []) if isinstance(raw, dict) else None
+        if not isinstance(entries, list):
+            raise ValueError("the response was not an object with a suggestions list")
         allowed_categories = {category.id: category for category in categories}
         allowed_tags = {tag.id: tag for tag in tags}
         categories_by_name = {_normalized(category.name): category for category in categories}
         tags_by_name = {_normalized(tag.name): tag for tag in tags}
         output: list[_Candidate] = []
+        diagnostics: list[str] = []
         # What the analysis concluded for each item sent, so later explanations are
         # grounded in the record rather than guessed.
         outcomes: dict[str, dict[str, Any]] = {
             str(item.id): {"result": "no_answer"} for item in selected
         }
-        seen_indexes: set[int] = set()
-        for entry in parsed.suggestions:
-            if entry.index in seen_indexes:
-                continue
-            seen_indexes.add(entry.index)
+
+        def resolve(
+            entry: AiOrganisationDecision,
+        ) -> tuple[tuple[Any, ...], dict[str, Any], _Candidate | None] | None:
+            """One entry's answer as (signature, outcome, candidate).
+
+            Returns None when the entry answers nothing; raises ValueError when
+            it refers to something that does not exist.
+            """
             if entry.index >= len(selected):
-                raise ValueError("AI returned an unknown item index.")
+                raise ValueError("unknown item index")
             item = selected[entry.index]
             category = None
             category_is_new = False
@@ -510,7 +512,7 @@ def _ai_organisation_candidates(
                 if entry.category.id is not None:
                     category = allowed_categories.get(entry.category.id)
                     if category is None:
-                        raise ValueError("AI returned an unknown existing category id.")
+                        raise ValueError("unknown existing category id")
                 else:
                     category_name = entry.category.name or ""
                     category = categories_by_name.get(_normalized(category_name))
@@ -530,7 +532,7 @@ def _ai_organisation_candidates(
                 if tag_decision.id is not None:
                     tag = allowed_tags.get(tag_decision.id)
                     if tag is None:
-                        raise ValueError("AI returned an unknown existing tag id.")
+                        raise ValueError("unknown existing tag id")
                 else:
                     tag_name = tag_decision.name or ""
                     tag = tags_by_name.get(_normalized(tag_name))
@@ -555,8 +557,13 @@ def _ai_organisation_candidates(
             declined = (entry.no_category_reason or "").strip()[:200]
             if category is None and not proposed_tags and not declined and item.category_id is None:
                 # Neither a proposal nor a reason: the item stays unanswered and retryable.
-                continue
-            outcomes[str(item.id)] = {
+                return None
+            signature = (
+                (category.id or _normalized(category.name)) if category is not None else None,
+                tuple(sorted(_normalized(tag["name"]) for tag in proposed_tags)),
+                bool(declined) and category is None,
+            )
+            outcome = {
                 "result": "category"
                 if category is not None
                 else "kept_category"
@@ -571,7 +578,7 @@ def _ai_organisation_candidates(
                 ),
             }
             if category is None and not proposed_tags:
-                continue
+                return signature, outcome, None
             before_tag_ids = sorted(str(tag.id) for tag in item.tags)
             before_tag_names = sorted(tag.name for tag in item.tags)
             if category is not None:
@@ -586,7 +593,9 @@ def _ai_organisation_candidates(
                 title = f"Assign category “{category_name}”"
             else:
                 title = "Add practical tags: " + ", ".join(tag["name"] for tag in proposed_tags)
-            output.append(
+            return (
+                signature,
+                outcome,
                 _Candidate(
                     type="organisation",
                     action_kind="apply_organisation",
@@ -618,9 +627,38 @@ def _ai_organisation_candidates(
                         "ai_confidence": entry.confidence,
                     },
                     source="ai",
-                )
+                ),
             )
-    except (ai.AiError, ValidationError, ValueError) as exc:
+
+        # Entries are validated one by one: a bad entry is reported and skipped
+        # without discarding the valid answers around it.
+        answers: dict[int, list[tuple[tuple[Any, ...], dict[str, Any], _Candidate | None]]] = (
+            defaultdict(list)
+        )
+        for position, raw_entry in enumerate(entries):
+            try:
+                entry = AiOrganisationDecision.model_validate(raw_entry)
+                resolved = resolve(entry)
+            except ValidationError as exc:
+                error = exc.errors()[0]
+                where = ".".join(str(part) for part in error["loc"]) or "entry"
+                diagnostics.append(f"entry {position}: {where}: {error['msg']}"[:160])
+                continue
+            except ValueError as exc:
+                diagnostics.append(f"entry {position}: {exc}"[:160])
+                continue
+            if resolved is not None:
+                answers[entry.index].append(resolved)
+        for index, resolved_entries in sorted(answers.items()):
+            if len({signature for signature, _outcome, _candidate in resolved_entries}) > 1:
+                # Nothing says which answer the model meant, so none is recorded.
+                diagnostics.append(f"item index {index}: conflicting duplicate answers")
+                continue
+            _signature, outcome, candidate = resolved_entries[0]
+            outcomes[str(selected[index].id)] = outcome
+            if candidate is not None:
+                output.append(candidate)
+    except (ai.AiError, ValueError) as exc:
         return (
             [],
             meta,
@@ -636,22 +674,30 @@ def _ai_organisation_candidates(
     unanswered_ids = [
         str(item.id) for item in selected if outcomes[str(item.id)]["result"] == "no_answer"
     ]
-    if unanswered_ids:
-        note = unanswered_note(len(unanswered_ids))
+    if unanswered_ids or diagnostics:
+        note = unanswered_note(len(unanswered_ids), diagnostics)
         partial = f"{partial} {note}" if partial else note
     meta["reviewed_count"] = len(answered)
     meta["unanswered_ids"] = unanswered_ids
+    meta["diagnostics"] = diagnostics[:MAX_AI_ITEMS]
     meta["outcomes"] = outcomes
     # Only answered items count as covered; the rest are sent again by a later review.
     meta["reviewed_inputs"] = {str(item.id): inputs[item.id] for item in answered}
     return output, meta, partial, None
 
 
-def unanswered_note(unanswered: int) -> str:
-    return (
-        f"AI gave no usable answer for {unanswered} of the items it was sent; "
-        "they remain unreviewed and a later review will send them again."
-    )
+def unanswered_note(unanswered: int, diagnostics: list[str] | None = None) -> str:
+    notes = []
+    if unanswered:
+        notes.append(
+            f"AI gave no usable answer for {unanswered} of the items it was sent; "
+            "they remain unreviewed and a later review will send them again."
+        )
+    if diagnostics:
+        shown = "; ".join(diagnostics[:3])
+        more = f"; and {len(diagnostics) - 3} more" if len(diagnostics) > 3 else ""
+        notes.append(f"{len(diagnostics)} invalid AI entries were ignored ({shown}{more}).")
+    return " ".join(notes)
 
 
 def _canonical_fingerprint_value(value: Any) -> Any:
