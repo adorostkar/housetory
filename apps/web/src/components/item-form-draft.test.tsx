@@ -15,6 +15,8 @@ import {
   type ItemDraftScope,
 } from "@/lib/item-drafts";
 import { NavigationGuardProvider } from "@/lib/navigation-guard";
+import { queryKeys } from "@/lib/query-keys";
+import { ItemEditPage, ItemNewPage } from "@/pages/item-form-pages";
 import type { ItemDetail } from "@/lib/types";
 
 const queryMocks = vi.hoisted(() => ({
@@ -437,3 +439,136 @@ function draftValues(name: string) {
     warrantyNotes: "",
   };
 }
+
+describe("ItemForm identity changes on the real routes", () => {
+  const drillKey = itemDraftKey(scopeFor(itemDraftFormId({ itemId: "item-2" })));
+
+  function tree(client: QueryClient) {
+    return (
+      <QueryClientProvider client={client}>
+        <BrowserRouter>
+          <NavigationGuardProvider>
+            <nav aria-label="Primary">
+              <NavLink to="/rooms">Places</NavLink>
+              <Link to="/items/item-2/edit">Edit drill</Link>
+              <Link to="/items/new?room_id=room-2">Add to kitchen</Link>
+            </nav>
+            <Routes>
+              <Route path="/items/new" element={<ItemNewPage />} />
+              <Route path="/items/:itemId/edit" element={<ItemEditPage />} />
+              <Route path="/items/:itemId" element={<p>Item detail page</p>} />
+              <Route path="/rooms" element={<p>Places page</p>} />
+            </Routes>
+          </NavigationGuardProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  // Both items are already cached, so moving between their edit pages never unmounts the page.
+  function renderRoutes(path: string) {
+    window.history.pushState(null, "", path);
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(queryKeys.item("item-1"), { item });
+    client.setQueryData(queryKeys.item("item-2"), { item: otherItem });
+    const view = render(tree(client));
+    return { client, rerender: () => view.rerender(tree(client)) };
+  }
+
+  const nameInput = () => screen.getByLabelText<HTMLInputElement>("Item name");
+  const discardDialog = () => screen.queryByRole("dialog", { name: "Discard unsaved changes?" });
+
+  it("opens the other item with its own values, draft key, dirty baseline and guard", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/items/item-1/edit");
+    await typeName(user, "Toolbox renamed");
+
+    await user.click(screen.getByRole("link", { name: "Edit drill" }));
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+    await waitFor(() => expect(nameInput()).toHaveValue("Drill"));
+    expect(screen.getByRole("heading", { name: "Drill" })).toBeVisible();
+    expect(draftKeys()).toEqual([]);
+
+    expect(discardDialog()).toBeNull();
+    // Its edits are drafted under its own key and guarded again.
+    await typeName(user, "Drill v2");
+    hidePage();
+    expect(draftKeys()).toEqual([drillKey]);
+    expect(JSON.parse(localStorage.getItem(drillKey) ?? "{}").values.name).toBe("Drill v2");
+    await user.click(screen.getByRole("link", { name: "Places" }));
+    await user.click(await screen.findByRole("button", { name: "Keep editing" }));
+    expect(nameInput()).toHaveValue("Drill v2");
+
+    vi.mocked(api.patch).mockResolvedValue({ item: { ...otherItem, name: "Drill v2" } });
+    await user.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [path, payload] = vi.mocked(api.patch).mock.calls[0]!;
+    expect(path).toBe("/items/item-2");
+    expect(payload).toMatchObject({ name: "Drill v2" });
+    expect(JSON.stringify(payload)).not.toContain("Toolbox");
+    await waitFor(() => expect(draftKeys()).toEqual([]));
+  });
+
+  it("keeps edits in progress when the same item is refreshed in the background", async () => {
+    const user = userEvent.setup();
+    const { client } = renderRoutes("/items/item-1/edit");
+    await typeName(user, "Toolbox renamed");
+    act(() => {
+      client.setQueryData(queryKeys.item("item-1"), {
+        item: { ...item, description: "Refreshed elsewhere", updated_at: "2026-03-01T00:00:00Z" },
+      });
+    });
+    expect(nameInput()).toHaveValue("Toolbox renamed");
+    hidePage();
+    expect(draftKeys()).toEqual([editItemKey]);
+  });
+
+  it("starts a new-item form afresh when its starting context changes", async () => {
+    const user = userEvent.setup();
+    renderRoutes("/items/new?room_id=room-1");
+    await typeName(user, "Lamp");
+
+    await user.click(screen.getByRole("link", { name: "Add to kitchen" }));
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+    await waitFor(() => expect(nameInput()).toHaveValue(""));
+    expect(draftKeys()).toEqual([]);
+    await typeName(user, "Kettle");
+    hidePage();
+    expect(draftKeys()).toEqual([
+      itemDraftKey(scopeFor(itemDraftFormId({ context: { room_id: "room-2" } }))),
+    ]);
+    await user.click(screen.getByRole("button", { name: /save|add/i }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0]).toEqual([
+      "/items", expect.objectContaining({ name: "Kettle", room_id: "room-2" }),
+    ]);
+  });
+
+  it("resets the form and its draft scope when the household or account changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderRoutes("/items/item-1/edit");
+    await typeName(user, "Toolbox renamed");
+
+    queryMocks.session.household.id = "household-2";
+    rerender();
+    await waitFor(() => expect(nameInput()).toHaveValue("Toolbox"));
+    // The interrupted edit stays recoverable where it was made.
+    expect(draftKeys()).toEqual([editItemKey]);
+
+    await typeName(user, "Other home toolbox");
+    hidePage();
+    const otherHome = itemDraftKey({
+      userId: "user-1", householdId: "household-2", formId: itemDraftFormId({ itemId: "item-1" }),
+    });
+    expect(draftKeys().sort()).toEqual([editItemKey, otherHome].sort());
+
+    queryMocks.session.user.id = "user-2";
+    rerender();
+    await waitFor(() => expect(nameInput()).toHaveValue("Toolbox"));
+    expect(banner()).toBeNull();
+  });
+});

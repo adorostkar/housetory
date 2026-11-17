@@ -37,7 +37,7 @@ function historyIndex(state: unknown): number | null {
  * Asks before an in-app navigation leaves a page that registered a guard with
  * `useNavigationGuard`. It sits inside the router and covers links, programmatic
  * navigation and the browser's back/forward buttons. Navigations that keep the
- * current pathname (search or hash changes) leave the page mounted and pass.
+ * current pathname and search (hash changes) leave the page as it is and pass.
  */
 export function NavigationGuardProvider({ children }: { children: React.ReactNode }) {
   const navigation = React.useContext(NavigationContext);
@@ -46,22 +46,28 @@ export function NavigationGuardProvider({ children }: { children: React.ReactNod
   const guards = React.useRef(new Set<Guard>());
   const [pending, setPending] = React.useState<{ proceed: () => void } | null>(null);
 
-  const pathname = React.useRef(location.pathname);
-  pathname.current = location.pathname;
+  const current = React.useRef({ pathname: location.pathname, search: location.search });
+  current.current = { pathname: location.pathname, search: location.search };
   const currentIndex = React.useRef<number | null>(null);
   React.useEffect(() => {
     currentIndex.current = historyIndex(window.history.state);
   }, [location]);
 
-  const blocks = React.useCallback((targetPathname: string) => {
-    if (targetPathname === pathname.current) return false;
+  const blocks = React.useCallback((targetPathname: string, targetSearch: string) => {
+    if (targetPathname === current.current.pathname && targetSearch === current.current.search) {
+      return false;
+    }
     return [...guards.current].some((guard) => guard.shouldBlock());
   }, []);
 
   const guardedNavigator = React.useMemo<Navigator>(() => {
     const attempt = (to: To, proceed: () => void) => {
-      const target = typeof to === "string" ? parsePath(to).pathname : to.pathname;
-      if (target === undefined || !blocks(target)) proceed();
+      const target = typeof to === "string" ? parsePath(to) : to;
+      // A target without a pathname keeps the current one; one without a search clears it.
+      const targetPathname = target.pathname ?? current.current.pathname;
+      const targetSearch = target.search
+        ?? (target.pathname === undefined ? current.current.search : "");
+      if (!blocks(targetPathname, targetSearch === "?" ? "" : targetSearch)) proceed();
       else setPending({ proceed });
     };
     return {
@@ -96,7 +102,7 @@ export function NavigationGuardProvider({ children }: { children: React.ReactNod
       }
       const from = currentIndex.current;
       if (from === null || to === null || to === from) return;
-      if (!blocks(window.location.pathname)) return;
+      if (!blocks(window.location.pathname, window.location.search)) return;
       event.stopImmediatePropagation();
       const delta = to - from;
       revertingTo.current = from;

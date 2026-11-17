@@ -24,6 +24,7 @@ import {
   useLocations,
   useProperties,
   useRooms,
+  useSession,
   useTags,
 } from "@/lib/queries";
 import type {
@@ -57,17 +58,7 @@ import { CONDITIONS, FormSection, OptionalFormSection } from "@/components/item-
 import { ItemDraftBanner, useItemFormProtection } from "@/components/item-form-draft";
 import { itemDraftFormId } from "@/lib/item-drafts";
 
-export function ItemForm({
-  item,
-  duplicateOf,
-  defaultPropertyId,
-  defaultRoomId,
-  defaultLocationId,
-  defaultName,
-  returnTo,
-  cancelTo,
-  origin,
-}: {
+interface ItemFormProps {
   item?: ItemDetail;
   duplicateOf?: ItemDetail;
   defaultPropertyId?: string;
@@ -77,7 +68,52 @@ export function ItemForm({
   returnTo?: string;
   cancelTo?: string;
   origin?: ItemOrigin | null;
-}) {
+}
+
+/** Which form this is: one item's edit form, or a new-item form with its starting context. */
+function itemFormId({
+  item, duplicateOf, defaultPropertyId, defaultRoomId, defaultLocationId, defaultName,
+}: ItemFormProps) {
+  return itemDraftFormId(
+    item
+      ? { itemId: item.id }
+      : {
+          context: {
+            duplicate_of: duplicateOf?.id,
+            property_id: defaultPropertyId,
+            room_id: defaultRoomId,
+            location_id: defaultLocationId,
+            name: defaultName,
+          },
+        },
+  );
+}
+
+/**
+ * The form's fields, dirty baseline, draft scope and navigation guard are all
+ * set up when it mounts. Routes reuse this component when only the item id or
+ * the new-item context changes, so it is remounted whenever the account,
+ * household or form identity changes. A background refresh of the same item
+ * keeps the identity, and with it the edits in progress.
+ */
+export function ItemForm(props: ItemFormProps) {
+  const session = useSession().data;
+  const identity = JSON.stringify([session?.user?.id, session?.household?.id, itemFormId(props)]);
+  return <ItemFormFields key={identity} {...props} />;
+}
+
+function ItemFormFields(props: ItemFormProps) {
+  const {
+    item,
+    duplicateOf,
+    defaultPropertyId,
+    defaultRoomId,
+    defaultLocationId,
+    defaultName,
+    returnTo,
+    cancelTo,
+    origin,
+  } = props;
   const navigate = useNavigate();
   const template = item ?? duplicateOf;
   const queryClient = useQueryClient();
@@ -281,19 +317,7 @@ export function ItemForm({
     Number(quantity) > 1_000_000;
 
   const protection = useItemFormProtection({
-    formId: itemDraftFormId(
-      item
-        ? { itemId: item.id }
-        : {
-            context: {
-              duplicate_of: duplicateOf?.id,
-              property_id: defaultPropertyId,
-              room_id: defaultRoomId,
-              location_id: defaultLocationId,
-              name: defaultName,
-            },
-          },
-    ),
+    formId: itemFormId(props),
     itemUpdatedAt: item?.updated_at ?? null,
     values: {
       name,
