@@ -1468,3 +1468,69 @@ def test_search_items_place_ids_take_precedence_and_are_validated_in_scope(
         assert result["facts"]["not_found_field"] == field
         assert result["facts"]["total"] == 0
         assert result["references"] == []
+
+
+def _search_only_provider(client):
+    """A household whose Search task has a model while the Assistant task has none."""
+    provider = client.post(
+        "/api/v1/ai/providers",
+        json={
+            "provider": "ollama",
+            "display_name": "Search only",
+            "base_url": "http://127.0.0.1:11434",
+            "default_model": "search-model",
+            "enabled": True,
+        },
+    )
+    assert provider.status_code == 201, provider.text
+    for task, body in (
+        ("search", {"provider_id": provider.json()["id"], "model": "search-model"}),
+        ("assistant", {"provider_id": None, "model": None}),
+    ):
+        response = client.put(f"/api/v1/ai/tasks/{task}", json={**body, "enabled": True})
+        assert response.status_code == 200, (task, response.text)
+
+
+@pytest.mark.parametrize("search_model", [False, True])
+def test_without_an_assistant_model_typed_commands_are_only_searched(
+    owner_client, monkeypatch, search_model
+):
+    _room, item = seed(owner_client, "Cordless drill")
+    if search_model:
+        _search_only_provider(owner_client)
+    assert owner_client.get("/api/v1/ai/status?task=assistant").json()["configured"] is False
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("A typed command must not reach a model without an Assistant model")
+
+    monkeypatch.setattr(ai, "complete_json", forbidden)
+    monkeypatch.setattr(ai, "complete_text", forbidden)
+
+    command = "Move Cordless drill to Tool Storage"
+    run = owner_client.post(
+        "/api/v1/assistant/runs", json={"request_id": str(uuid.uuid4()), "query": command}
+    )
+    assert run.status_code == 409, run.text
+    assert run.json()["detail"]["code"] == "assistant_tools_unavailable"
+
+    # The interpreters are gone; nothing else turns typed text into an action.
+    for path in ("intent", "interpret"):
+        gone = owner_client.post(
+            f"/api/v1/assistant/actions/{path}",
+            json={"query": command, "local_date": "2026-01-01"},
+        )
+        assert gone.status_code in {404, 405}, path
+
+    searched = owner_client.post("/api/v1/search/query", json={"query": "Cordless drill"})
+    assert searched.status_code == 200, searched.text
+    assert [entry["id"] for entry in searched.json()["items"]] == [item["id"]]
+
+    household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
+    pending = owner_client.get(
+        "/api/v1/assistant/actions/proposals/pending", params={"household_id": household}
+    )
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["total"] == 0
+    with SessionLocal() as db:
+        assert db.scalar(text("SELECT count(*) FROM assistant_action_proposals")) == 0
+        assert db.scalar(text("SELECT count(*) FROM assistant_runs")) == 0
