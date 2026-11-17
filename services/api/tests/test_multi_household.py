@@ -627,3 +627,67 @@ def test_property_scoped_search_and_assistant_do_not_leak_other_properties(owner
     ).json()
     assert natural["items"] == []
     assert "Annex" not in str(natural["facts"])
+
+
+def test_ai_status_can_be_read_for_any_household_the_caller_belongs_to(owner_client, anon_client):
+    first_id = household_id(owner_client)
+    second_id = uuid.UUID(create_household(owner_client, "Cabin")["household"]["id"])
+    switch(owner_client, first_id)
+    with SessionLocal() as db:
+        provider = AiProvider(
+            household_id=first_id,
+            provider="ollama",
+            display_name="First local",
+            base_url="http://127.0.0.1:11434",
+            default_model="llama3",
+        )
+        db.add(provider)
+        db.flush()
+        db.add(
+            AiTaskSetting(
+                household_id=first_id, task="assistant", provider_id=provider.id, enabled=True
+            )
+        )
+        db.commit()
+
+    def configured(client_headers=None, **params):
+        response = owner_client.get(
+            "/api/v1/ai/status", params={"task": "assistant", **params}, headers=client_headers
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["configured"]
+
+    # Whichever household is active, each one's own configuration is reported.
+    for active in (first_id, second_id):
+        switch(owner_client, active)
+        assert configured() is (active == first_id)
+        assert configured(household_id=str(first_id)) is True
+        assert configured(household_id=str(second_id)) is False
+
+    # The tool-run endpoint agrees with the status for the selected household.
+    for target, expected in ((second_id, "assistant_tools_unavailable"), (first_id, None)):
+        run = owner_client.post(
+            "/api/v1/assistant/runs",
+            json={
+                "request_id": str(uuid.uuid4()),
+                "query": "Move the drill",
+                "household_id": str(target),
+            },
+        )
+        assert (run.json().get("detail") or {}).get("code") == expected, run.text
+
+    stranger_headers, _user, _homes = add_membership(
+        email="status-stranger@example.com", household_names=[("Stranger home", "owner")]
+    )
+    for unauthorized in (first_id, uuid.uuid4()):
+        denied = anon_client.get(
+            "/api/v1/ai/status",
+            params={"task": "assistant", "household_id": str(unauthorized)},
+            headers=stranger_headers,
+        )
+        assert denied.status_code == 404, denied.text
+        assert denied.json()["detail"]["code"] == "household_not_found"
+    assert (
+        anon_client.get("/api/v1/ai/status", params={"household_id": str(first_id)}).status_code
+        == 401
+    )

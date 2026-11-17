@@ -502,6 +502,90 @@ describe("AssistantPage", () => {
     });
   });
 
+  describe("local-search notice follows the selected household", () => {
+    const localNote = () => screen.queryByRole("note", { name: "Local search mode" });
+    const chooseNote = () => screen.queryByRole("note", { name: "Choose a household" });
+    const statusRequests = () => vi.mocked(api.get).mock.calls
+      .map(([path]) => path).filter((path) => path.startsWith("/ai/status"));
+
+    // House A (house-1) has an Assistant model; house B (house-2) has none.
+    function twoHouseholds(activeHouseholdId: string) {
+      vi.mocked(api.get).mockImplementation(async (path) => {
+        if (path.startsWith("/assistant/runs")) return [];
+        if (path.startsWith("/search/scopes")) {
+          return { items: [
+            { id: "house-1", name: "House A", properties: [] },
+            { id: "house-2", name: "House B", properties: [] },
+          ] };
+        }
+        if (path.startsWith("/auth/session")) {
+          return { ...sessionState, household: { ...sessionState.household, id: activeHouseholdId } };
+        }
+        if (path.startsWith("/ai/status")) {
+          const household = new URL(path, "http://localhost").searchParams.get("household_id")
+            ?? activeHouseholdId;
+          return household === "house-1" ? aiStatus : unconfiguredAiStatus;
+        }
+        return aiStatus;
+      });
+    }
+
+    it.each(["house-1", "house-2"])(
+      "shows each selected household's own state whichever is active (%s active)",
+      async (activeHouseholdId) => {
+        const user = userEvent.setup();
+        twoHouseholds(activeHouseholdId);
+        renderPage("/assistant");
+        const scope = await screen.findByLabelText("Search scope");
+        await waitFor(() => expect(scope.querySelector('option[value="household:house-2"]')).not.toBeNull());
+
+        // All my places with several households: neutral guidance, no local-only claim.
+        expect(await screen.findByRole("note", { name: "Choose a household" })).toHaveTextContent(
+          "Choose one household in the scope picker to use the AI assistant for typed actions.",
+        );
+        expect(localNote()).toBeNull();
+        expect(statusRequests()).toEqual([]);
+
+        await user.selectOptions(scope, "household:house-2");
+        expect(await screen.findByRole("note", { name: "Local search mode" })).toBeVisible();
+        expect(chooseNote()).toBeNull();
+
+        await user.selectOptions(scope, "household:house-1");
+        await waitFor(() => expect(localNote()).toBeNull());
+        expect(chooseNote()).toBeNull();
+
+        await user.selectOptions(scope, "household:house-2");
+        expect(await screen.findByRole("note", { name: "Local search mode" })).toBeVisible();
+
+        expect(new Set(statusRequests())).toEqual(new Set([
+          "/ai/status?task=assistant&household_id=house-1",
+          "/ai/status?task=assistant&household_id=house-2",
+        ]));
+      },
+    );
+
+    it.each([
+      ["configured", aiStatus, false],
+      ["not configured", unconfiguredAiStatus, true],
+    ])("uses the only household for All my places when it is %s", async (_label, status, local) => {
+      vi.mocked(api.get).mockImplementation(async (path) => {
+        if (path.startsWith("/assistant/runs")) return [];
+        if (path.startsWith("/search/scopes")) {
+          return { items: [{ id: "house-1", name: "Home", properties: [] }] };
+        }
+        if (path.startsWith("/auth/session")) return sessionState;
+        return status;
+      });
+      renderPage("/assistant");
+      await waitFor(() => expect(statusRequests()).toEqual([
+        "/ai/status?task=assistant&household_id=house-1",
+      ]));
+      if (local) expect(await screen.findByRole("note", { name: "Local search mode" })).toBeVisible();
+      else await waitFor(() => expect(localNote()).toBeNull());
+      expect(chooseNote()).toBeNull();
+    });
+  });
+
   it("uses the tool engine unchanged, with no notice, when the assistant model is configured", async () => {
     const user = userEvent.setup();
     vi.mocked(createToolRun).mockReset().mockResolvedValue({

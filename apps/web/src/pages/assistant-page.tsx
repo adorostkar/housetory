@@ -103,7 +103,6 @@ export function AssistantPage({
   initialRequest?: AssistantInitialRequest | null;
   onInitialRequestHandled?: (id: string) => void;
 } = {}) {
-  const aiStatus = useAiStatus();
   const canWrite = useCanWrite();
   const {
     select: selectDocument,
@@ -208,6 +207,15 @@ export function AssistantPage({
   }, [question]);
 
   const multipleHouseholds = scope.scopes.length > 1 || (session.data?.households?.length ?? 0) > 1;
+  // The household an assistant task would run in, resolved as the server does: the
+  // selected one, or the only one the account belongs to. With several and none
+  // selected there is no single household, so no status is claimed.
+  const assistantHouseholdId = selection.householdId
+    || (!multipleHouseholds && !scopesQuery.isPending ? session.data?.household?.id : undefined);
+  const aiStatus = useAiStatus("assistant", {
+    householdId: assistantHouseholdId,
+    enabled: Boolean(assistantHouseholdId),
+  });
   const captureHousehold = selection.householdId
     || captureHouseholdId
     || (scope.scopes.length === 1 ? scope.scopes[0]?.id : undefined)
@@ -439,9 +447,11 @@ export function AssistantPage({
     ask(selection, previous.text, true, searchSession);
   };
 
-  const status = aiStatus.data;
+  const status = assistantHouseholdId ? aiStatus.data : undefined;
   // Shown from configuration alone, never from what was typed.
   const localSearchMode = status ? !status.configured : false;
+  const householdChoiceNeeded = !assistantHouseholdId && !scopesQuery.isPending
+    && Boolean(session.data);
   const lastResponse = [...messages]
     .reverse()
     .find((message) => message.response)?.response;
@@ -956,6 +966,12 @@ export function AssistantPage({
                 <span className="font-medium text-foreground">Local search mode.</span>{" "}
                 Typed actions need the AI assistant; use the item&apos;s buttons, or{" "}
                 <Link className="underline" to="/settings/ai">set up AI in Settings</Link>.
+              </p>
+            )}
+            {householdChoiceNeeded && (
+              <p role="note" aria-label="Choose a household" className="mb-2 break-words text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Searching all your places.</span>{" "}
+                Choose one household in the scope picker to use the AI assistant for typed actions.
               </p>
             )}
             <div className="max-h-[15dvh] overflow-y-auto">

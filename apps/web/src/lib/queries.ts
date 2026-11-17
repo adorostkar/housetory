@@ -582,13 +582,26 @@ export function useVoiceNote(noteId: string | undefined) {
   });
 }
 
+/**
+ * AI status for a task. Without `householdId` it describes the active household;
+ * with one, that household (the caller must be a member), cached separately.
+ */
 export function useAiStatus(
   task = "assistant",
-  options: { enabled?: boolean; refetchOnMount?: boolean | "always" } = {},
+  options: {
+    enabled?: boolean;
+    refetchOnMount?: boolean | "always";
+    householdId?: string;
+  } = {},
 ) {
+  const { householdId } = options;
   return useQuery({
-    queryKey: [...queryKeys.aiStatus, task],
-    queryFn: () => api.get<AiStatus>(`/ai/status?task=${encodeURIComponent(task)}`),
+    queryKey: householdId
+      ? [...queryKeys.aiStatus, task, householdId]
+      : [...queryKeys.aiStatus, task],
+    queryFn: () => api.get<AiStatus>(
+      `/ai/status${buildQuery({ task, household_id: householdId })}`,
+    ),
     enabled: options.enabled ?? true,
     staleTime: 30_000,
     refetchOnMount: options.refetchOnMount ?? true,

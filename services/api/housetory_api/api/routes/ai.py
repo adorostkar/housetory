@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...domain import RETIRED_AI_TASKS, RecognitionStatus
-from ...models import AiRecognition, Room
+from ...models import AiRecognition, HouseholdMember, Room
 from ...schemas.ai import (
     AiRecognitionApplyRequest,
     AiRecognitionApplyResult,
@@ -64,9 +64,22 @@ def ai_status(
         default="assistant",
         pattern=(r"^(assistant|imports|documents|search|vision|labels|transcription|item_images)$"),
     ),
+    household_id: uuid.UUID | None = None,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> AiStatus:
+    """Status for the active household, or for another household the caller belongs to."""
+    target_household_id = auth.household.id
+    if household_id is not None and household_id != auth.household.id:
+        member = db.scalar(
+            select(HouseholdMember.household_id).where(
+                HouseholdMember.user_id == auth.user.id,
+                HouseholdMember.household_id == household_id,
+            )
+        )
+        if member is None:
+            raise ApiError(404, "household_not_found", "Household not found.")
+        target_household_id = household_id
     if task in {retired.value for retired in RETIRED_AI_TASKS}:
         raise ApiError(
             410,
@@ -77,7 +90,7 @@ def ai_status(
     return ai_service.provider_status(
         probe=True,
         db=db,
-        household_id=auth.household.id,
+        household_id=target_household_id,
         task=task,
     )
 
