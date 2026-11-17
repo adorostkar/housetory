@@ -176,6 +176,10 @@ export function InventoryReview({
       ? (rawTypeFilter as ReviewSuggestionType)
       : "";
   const qParam = (searchParams.get("q") ?? "").slice(0, 160);
+  const filtersActive = statusFilter !== "pending" || Boolean(typeFilter) || Boolean(qParam);
+  const [filtersOpen, setFiltersOpen] = React.useState(filtersActive);
+  // Once a filter is in use the panel stays open, so clearing it never unmounts the control in use.
+  if (filtersActive && !filtersOpen) setFiltersOpen(true);
   const [suggestionSearch, setSuggestionSearch] = React.useState(qParam);
   const [suggestionOffset, setSuggestionOffset] = React.useState(0);
   const debouncedQuery = useDebouncedValue(qParam, 250);
@@ -459,6 +463,12 @@ export function InventoryReview({
   });
 
   const suggestions = suggestionsQuery.data?.items ?? [];
+  // Remembered across loading states so paging or rescoping does not collapse the filters.
+  const [hadSuggestions, setHadSuggestions] = React.useState(false);
+  if (!suggestionsQuery.isPending && hadSuggestions !== suggestions.length > 0) {
+    setHadSuggestions(suggestions.length > 0);
+  }
+  const filterToggleShown = !hadSuggestions && !filtersActive;
   useRestoreListScroll(suggestions.length > 0, origin);
   const actionableIds = new Set(
     suggestions
@@ -707,7 +717,7 @@ export function InventoryReview({
         title="Review"
         backTo={returnOrigin?.path}
         backLabel={returnOrigin ? `Back to ${returnOrigin.label}` : undefined}
-        description="On-demand inventory suggestions. Rule-based checks work offline; optional AI review is explicit, bounded and never changes inventory automatically."
+        description="On-demand inventory suggestions. Rule-based checks work offline; AI review is optional and bounded."
         actions={
           <Badge variant="outline">
             <ClipboardCheck className="size-3" />
@@ -734,8 +744,7 @@ export function InventoryReview({
               Review scope
             </h2>
             <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-              Analysis is read-only. Nothing is renamed, categorised, moved or merged
-              until you explicitly apply a suggestion.
+              Nothing changes until you accept a suggestion, and past decisions stay in history.
             </p>
           </div>
           <Badge variant={canWrite ? "sage" : "outline"}>
@@ -786,7 +795,7 @@ export function InventoryReview({
           </Button>
           <p className="text-2xs text-muted-foreground">
             Normal reviews reuse successful AI coverage for unchanged information.
-            Review again reassesses this scope without deleting past decisions.
+            Review again reassesses this scope.
           </p>
         </div>
         <label className="mt-3 flex items-start gap-2.5 text-xs">
@@ -795,8 +804,8 @@ export function InventoryReview({
             onChange={(event) => setReconsiderDismissed(event.target.checked)} />
           <span>Reconsider dismissed suggestions
             <span className="mt-0.5 block text-2xs text-muted-foreground">
-              Only with Review again. May create new proposals for dismissed findings;
-              original decisions stay in history. Accepted changes are not reopened.
+              Only with Review again. May create new proposals for dismissed findings.
+              Accepted changes are not reopened.
             </span>
           </span>
         </label>
@@ -974,7 +983,21 @@ export function InventoryReview({
             Showing suggestions only for the selected {pluralize(selectedItemIds.length, "item")}.
           </p>
         )}
-        {!embedded && <div className="flex flex-wrap items-end gap-3">
+        {!embedded && filterToggleShown && (
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            aria-expanded={filtersOpen}
+            aria-controls="review-filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <Filter />
+            Filter
+          </Button>
+        )}
+        {!embedded && (filtersOpen || hadSuggestions) && <div id="review-filters"
+          className={cn("flex flex-wrap items-end gap-3", filterToggleShown && "mt-3")}>
           <label className="space-y-1.5 text-2xs">
             <span className="field-label">Status</span>
             <Select
@@ -1067,11 +1090,11 @@ export function InventoryReview({
             {displayedRun?.background_active ? "Suggestions will appear here as batches finish."
               : "No pending suggestions in this scope."}
           </p> : <EmptyState
-            title={statusFilter === "pending" ? "Nothing waiting for review." : "No suggestions match."}
+            title={filtersActive ? "No suggestions match." : "Nothing waiting for review."}
             description={
-              statusFilter === "pending"
-                ? "Run an on-demand review after inventory changes. Repeating an unchanged review will not flood the queue."
-                : "Try another status, type or search."
+              filtersActive
+                ? "Try another status, type or search, or reset the filters."
+                : "Run an on-demand review after inventory changes. Repeating an unchanged review will not flood the queue."
             }
             className="py-12"
           />
@@ -1356,7 +1379,7 @@ export function InventoryReview({
         open={aiConfirmOpen}
         onOpenChange={setAiConfirmOpen}
         title="Include AI suggestions?"
-        description={`${reviewAgain ? "Review again" : "Review"} ${scopeLabel} with your configured provider, ${aiProvider}, in batches of up to 40 eligible items. ${reviewAgain ? "Unchanged items will be reassessed. " : ""}${reviewAgain && reconsiderDismissed ? "Previously dismissed findings may return as new proposals; original decisions remain. " : ""}Usage charges may apply for each batch. ${embedded ? "You can cancel unfinished work and resume later." : "You can cancel after the current batch and resume later."} Nothing changes until you approve a suggestion.`}
+        description={`${reviewAgain ? "Review again" : "Review"} ${scopeLabel} with your configured provider, ${aiProvider}, in batches of up to 40 eligible items. ${reviewAgain ? "Unchanged items will be reassessed. " : ""}${reviewAgain && reconsiderDismissed ? "Previously dismissed findings may return as new proposals. " : ""}Usage charges may apply for each batch. ${embedded ? "You can cancel unfinished work and resume later." : "You can cancel after the current batch and resume later."}`}
         confirmLabel="Run review with AI"
         onConfirm={async () => {
           runReview.mutate({ reviewAgain });

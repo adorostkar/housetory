@@ -623,6 +623,67 @@ describe("ReviewPage", () => {
     expect(screen.getByLabelText("Search suggestions")).toHaveValue("");
   });
 
+  it("collapses the filters behind a keyboard-operable toggle when there is nothing to filter", async () => {
+    suggestions = [];
+    renderPage();
+    expect(screen.queryByLabelText("Filter suggestions by status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset filters" })).toBeNull();
+    const toggle = screen.getByRole("button", { name: "Filter" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    toggle.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const status = screen.getByLabelText("Filter suggestions by status");
+    expect(status.closest(`#${toggle.getAttribute("aria-controls")}`)).not.toBeNull();
+    expect(screen.getByLabelText("Filter suggestions by type")).toBeVisible();
+    expect(screen.getByLabelText("Search suggestions")).toBeVisible();
+
+    await userEvent.click(toggle);
+    expect(screen.queryByLabelText("Filter suggestions by status")).toBeNull();
+  });
+
+  it("shows the filters without a toggle when suggestions exist", () => {
+    renderPage();
+    expect(screen.getByLabelText("Filter suggestions by status")).toBeVisible();
+    expect(screen.getByLabelText("Filter suggestions by type")).toBeVisible();
+    expect(screen.getByLabelText("Search suggestions")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
+  });
+
+  it("keeps a visible reset when an active filter returns nothing, and stays open after clearing", async () => {
+    suggestions = [];
+    renderPage("/review?suggestion_type=name");
+    expect(screen.getByText("No suggestions match.")).toBeVisible();
+    expect(screen.getByLabelText("Filter suggestions by type")).toHaveValue("name");
+
+    await userEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).not.toHaveTextContent(
+        "suggestion_type=",
+      ),
+    );
+    expect(screen.getByLabelText("Filter suggestions by type")).toHaveValue("");
+    expect(screen.getByText("Nothing waiting for review.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Filter" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("says that nothing changes without approval exactly once", async () => {
+    renderPage();
+    await userEvent.click(screen.getByText("Review again options"));
+    const reassurance =
+      /nothing (is |has been )?(changes|changed|renamed)|never changes|until you|read-only|past decisions|decisions (stay|remain)/i;
+    expect(screen.getAllByText(reassurance)).toHaveLength(1);
+    expect(
+      screen.getByText(
+        "Nothing changes until you accept a suggestion, and past decisions stay in history.",
+      ),
+    ).toBeVisible();
+  });
+
   it("preserves selected-item scope and queue filters in comparison links", async () => {
     suggestions = [duplicateSuggestion];
     renderPage(

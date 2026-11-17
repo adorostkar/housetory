@@ -160,7 +160,7 @@ export function ItemPickerDialog({
         <DialogHeader>
           <DialogTitle>Select items to review</DialogTitle>
           <DialogDescription>
-            Choose up to 100 items. Reviewing selected items never changes them.
+            Choose up to 100 items.
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
