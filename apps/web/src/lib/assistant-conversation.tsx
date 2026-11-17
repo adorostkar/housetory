@@ -276,6 +276,15 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     });
   }, [toolRuns.data, toolScope, update]);
 
+  // A task can leave a capture or a prepared action behind. Those lists poll slowly
+  // while idle, so refresh them as soon as a task appears or changes state.
+  const runStates = toolRuns.data?.map((run) => `${run.id}:${run.state}:${run.steps.length}`).join("|");
+  React.useEffect(() => {
+    if (!runStates) return;
+    void queryClient.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.pendingActionsAll });
+  }, [runStates, queryClient]);
+
   const setDraft = React.useCallback((scope: string, value: Updater<string>) => {
     update(scope, (current) => ({
       ...current,

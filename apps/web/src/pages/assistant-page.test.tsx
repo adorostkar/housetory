@@ -481,6 +481,27 @@ describe("AssistantPage", () => {
     );
   });
 
+  it("refreshes captures and prepared actions as soon as an assistant task changes", async () => {
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const run = {
+      id: "run-capture", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Add a lamp", state: "completed", generation: 1, steps: [],
+      message: "Prepared.", model_calls: 1, max_model_calls: 8, can_retry: false, worker_available: null,
+    };
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [run];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    renderPage("/assistant");
+    await waitFor(() => {
+      const keys = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+      expect(keys).toContain(JSON.stringify(["inventory-review", "captures"]));
+      expect(keys).toContain(JSON.stringify(["assistant-pending-actions"]));
+    });
+  });
+
   it("uses the tool engine unchanged, with no notice, when the assistant model is configured", async () => {
     const user = userEvent.setup();
     vi.mocked(createToolRun).mockReset().mockResolvedValue({
