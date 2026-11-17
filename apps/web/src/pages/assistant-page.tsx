@@ -29,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { looksLikeItemDescription } from "@/lib/assistant-intent";
 import { withHousehold } from "@/lib/household-links";
 import { useAiStatus, useCanWrite, useRecognition, useSelectHousehold, useSession } from "@/lib/queries";
 import { followUpSuggestions } from "@/lib/assistant-followups";
@@ -39,7 +38,7 @@ import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
 import type { SearchQueryResponse } from "@/lib/types";
-import type { AiRecognition, DocumentRecord, ImportBatchDetail } from "@/lib/types";
+import type { AiRecognition, DocumentRecord } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
 import { itemContainer, locationLabel } from "@/lib/utils";
 import { DOCUMENT_FILE_ACCEPT, documentFileError, documentFileType, documentUploadFile } from "@/lib/document-files";
@@ -120,12 +119,7 @@ export function AssistantPage({
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
-  const submitCaptureRef = React.useRef<((value: string) => Promise<void>) | null>(null);
-  const captureItem = React.useCallback((value: string) => {
-    if (!submitCaptureRef.current) throw new Error("The item capture handler is not ready.");
-    return submitCaptureRef.current(value);
-  }, []);
-  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, openAction, pending, ask, reset, startFreshTopic, clarifyAction, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, openAction, pending, ask, reset, startFreshTopic, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
   const endRef = React.useRef<HTMLDivElement>(null);
@@ -139,7 +133,7 @@ export function AssistantPage({
     if (scopesQuery.isPending) return;
     if (value.length < 2 || autoAskedRef.current === value) return;
     autoAskedRef.current = value;
-    ask(selection, value, false, searchSession, captureItem);
+    ask(selection, value, false, searchSession);
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -151,7 +145,7 @@ export function AssistantPage({
     // The URL is the handoff trigger; ask uses the current messages at
     // the moment the handoff occurs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams, scopesQuery.isPending, embedded, captureItem]);
+  }, [searchParams, setSearchParams, scopesQuery.isPending, embedded]);
 
   const paneRef = React.useRef<HTMLDivElement>(null);
   const lastAnswerRef = React.useRef<HTMLDivElement>(null);
@@ -219,12 +213,10 @@ export function AssistantPage({
     || (scope.scopes.length === 1 ? scope.scopes[0]?.id : undefined)
     || (!multipleHouseholds ? session.data?.household?.id : undefined);
 
-  const submitCapture = async (value: string, freshTopic = false) => {
-    const captureAttachment = freshTopic ? null : attachment;
-    const destinationHousehold = freshTopic
-      ? selection.householdId || (!multipleHouseholds ? session.data?.household?.id : undefined)
-      : captureHousehold;
-    if (capturePending) return;
+  const submitCapture = async (value: string) => {
+    const captureAttachment = attachment;
+    const destinationHousehold = captureHousehold;
+    if (capturePending || !captureAttachment) return;
     if (!canWrite) {
       setCaptureError("You need member access to add items or attach files.");
       return;
@@ -274,7 +266,6 @@ export function AssistantPage({
               filename: file.name,
               recognitionId: recognition.id,
             },
-            freshTopic,
           );
           return;
         }
@@ -298,25 +289,9 @@ export function AssistantPage({
             filename: file.name,
             documentId: document.id,
           },
-          freshTopic,
         );
         return;
       }
-
-      const form = new FormData();
-      form.append("text", value);
-      form.append("title", "Assistant item description");
-      form.append("assistant_capture", "true");
-      if (selection.propertyId) form.append("property_id", selection.propertyId);
-      const batch = await api.postForm<ImportBatchDetail>("/imports", form);
-      selectImport(batch.id, true);
-      recordCapture(
-        value,
-        undefined,
-        "Preparing item proposals. Edit the details and destination below, then approve to add them.",
-        { id: crypto.randomUUID(), kind: "items", importId: batch.id },
-        freshTopic,
-      );
     } catch (error) {
       setCaptureError(getApiErrorMessage(error));
       setCapturePending(false);
@@ -328,7 +303,7 @@ export function AssistantPage({
     requestedCaptureRef.current = null;
     if (attachment && !freshRequest) {
       dictation.stop();
-      void submitCapture(value, freshRequest);
+      void submitCapture(value);
       return;
     }
     if (value.length < 2) return;
@@ -340,12 +315,10 @@ export function AssistantPage({
       freshRequest
         ? { scopeKey: scopeSignature, turns: [], context: null, record: () => undefined }
         : searchSession,
-      freshRequest ? (text) => submitCapture(text, true) : captureItem,
       freshRequest,
     );
   };
 
-  submitCaptureRef.current = submitCapture;
 
   React.useEffect(() => {
     if (
@@ -463,7 +436,7 @@ export function AssistantPage({
     const last = messages[messages.length - 1];
     const previous = messages[messages.length - 2];
     if (last?.role !== "assistant" || previous?.role !== "user") return;
-    ask(selection, previous.text, true, searchSession, captureItem);
+    ask(selection, previous.text, true, searchSession);
   };
 
   const status = aiStatus.data;
@@ -689,11 +662,6 @@ export function AssistantPage({
                       <p className="break-words text-xs text-muted-foreground">
                         Scope: {message.action.proposal.scope_label}
                       </p>
-                      {message.action.clarificationLabel && (
-                        <p className="break-words text-xs text-muted-foreground">
-                          Selected: {message.action.clarificationLabel}
-                        </p>
-                      )}
                       <div className="space-y-1">
                         {message.action.proposal.targets.map((target) => (
                           <p key={target.id} className="break-words text-sm font-medium">
@@ -917,35 +885,14 @@ export function AssistantPage({
                         }
                         regenerateDisabled={pending}
                       />
-                      {message.clarification && (
-                        <div className="mt-2 flex flex-wrap gap-2" aria-label="Choose an item">
-                          {message.clarification.choices.map((choice) => (
-                            <Button
-                              key={choice.id}
-                              type="button"
-                              variant="outline"
-                              className="h-auto max-w-full whitespace-normal text-start"
-                              disabled={pending || message.clarification?.resolved}
-                              onClick={() => message.clarification && clarifyAction(message.clarification.id, choice.id, choice.name)}
-                            >
-                              {choice.name}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
                       {message.review && (
                         <div className="surface mt-2 min-w-0 p-4">
                           <InventoryReview initialRun={message.review} />
                         </div>
                       )}
-                      {message.fallback && (
-                        <Link className="mt-2 inline-flex text-sm underline" to={message.fallback.href}>
-                          {message.fallback.label}
-                        </Link>
-                      )}
                     </>
                   )}
-                  {!message.toolRunId && !message.capture && !message.action && !message.review && !message.clarification && index === messages.length - 1 && !pending && (
+                  {!message.toolRunId && !message.capture && !message.action && !message.review && index === messages.length - 1 && !pending && (
                     <FollowUps
                       suggestions={followUpSuggestions(
                         message.response,
@@ -1003,7 +950,7 @@ export function AssistantPage({
           )}
           <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3">
             <div className="max-h-[15dvh] overflow-y-auto">
-            {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && (
+            {multipleHouseholds && !selection.householdId && attachment && (
               <label className="mb-2 block text-xs text-muted-foreground">
                 Destination household
                 <Select
@@ -1082,7 +1029,7 @@ export function AssistantPage({
                 </select>
               </label>
             )}
-            {multipleHouseholds && !selection.householdId && (attachment || looksLikeItemDescription(question)) && !captureHouseholdId && (
+            {multipleHouseholds && !selection.householdId && attachment && !captureHouseholdId && (
               <p className="mb-2 text-xs text-brass">Choose a destination household; All my places will not select one automatically.</p>
             )}
             {captureError && <p role="alert" className="mb-2 text-xs text-destructive">{captureError}</p>}

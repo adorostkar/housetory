@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..domain import ItemCondition
-from .ai import SearchPageReference
 from .borrowed import BorrowedCreate, BorrowedReturnCreate
 from .bulk import BULK_ITEM_LIMIT
 from .common import Description, trimmed
@@ -199,39 +198,3 @@ class AssistantPendingActionList(BaseModel):
     total: int
     limit: int
     offset: int
-
-
-class AssistantActionInterpretRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    query: str = Field(min_length=2, max_length=4000)
-    local_date: date | None = None
-    household_id: uuid.UUID | None = None
-    scope_property_id: uuid.UUID | None = None
-    page_context: list[SearchPageReference] = Field(default_factory=list, max_length=12)
-    conversation_item_ids: list[uuid.UUID] = Field(default_factory=list, max_length=6)
-    clarified_item_id: uuid.UUID | None = None
-    clarified_item_location: trimmed(1, 120) | None = None
-
-    @model_validator(mode="after")
-    def one_clarification(self) -> "AssistantActionInterpretRequest":
-        if self.clarified_item_id and self.clarified_item_location:
-            raise ValueError("Choose either an item or a location.")
-        return self
-
-
-class AssistantActionInterpretOut(BaseModel):
-    handled: bool
-    message: str
-    proposal: AssistantActionProposalOut | None = None
-    item_choices: list[AssistantActionTarget] = Field(default_factory=list)
-    reason: (
-        Literal[
-            "model_schema",
-            "ambiguity",
-            "unsupported_semantics",
-            "domain_resolution",
-            "provider_unavailable",
-        ]
-        | None
-    ) = None

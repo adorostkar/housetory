@@ -35,10 +35,6 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/assistant-intent", () => ({
-  looksLikeItemDescription: vi.fn((value: string) => /bought|add/i.test(value)),
-}));
-
 vi.mock("@/lib/assistant-tools", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/assistant-tools")>(),
   createToolRun: vi.fn(),
@@ -434,35 +430,27 @@ describe("AssistantPage", () => {
     expect(await screen.findByText("Interpreting the inventory photo. Review the item proposal here before applying it.")).toBeVisible();
   });
 
-  it("routes an item description through the existing import review in the conversation", async () => {
+  it.each([
+    "I bought three Ethernet cables; put them in box 2.",
+    "Move the drill to the garage",
+    "Lend the drill to Sam",
+    "Delete the old lamp",
+    "Review my inventory",
+  ])("only searches typed text when no assistant model is configured: %s", async (text) => {
     const user = userEvent.setup();
-    vi.mocked(api.postForm).mockResolvedValue({ id: "batch-1" });
     renderPage("/assistant");
-    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
-    await user.type(
-      screen.getByRole("textbox", { name: "Ask the Housetory assistant" }),
-      "I bought three Ethernet cables; put them in box 2.",
-    );
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, text);
     await user.click(screen.getByRole("button", { name: "Send question" }));
 
-    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/imports", expect.any(FormData)));
-    expect(await screen.findByText("Item review batch-1")).toBeVisible();
-    expect(screen.getByText("Preparing item proposals. Edit the details and destination below, then approve to add them.")).toBeVisible();
-    vi.mocked(createToolRun).mockResolvedValue({
-      id: "capture-follow-up", parent_id: null, household_id: "house-1", property_id: null,
-      query: "What did you extract?", state: "completed", generation: 1, steps: [],
-      message: "Your capture is retained for review.", model_calls: 1, max_model_calls: 8,
-      can_retry: false, worker_available: null,
-    });
-    await user.type(
-      screen.getByRole("textbox", { name: "Ask the Housetory assistant" }), "What did you extract?",
-    );
-    await user.click(screen.getByRole("button", { name: "Send question" }));
-    await waitFor(() => expect(createToolRun).toHaveBeenLastCalledWith(
-      expect.objectContaining({ capture_context: [{ kind: "items", id: "batch-1" }] }),
-      expect.any(AbortSignal),
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/search/query", expect.objectContaining({ query: text }), expect.anything(),
     ));
-    expect(api.postForm).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(firstAnswer.answer ?? "")).toBeVisible();
+    // Nothing is interpreted, proposed, imported or reviewed on the user's behalf.
+    expect(vi.mocked(api.post).mock.calls.map(([path]) => path)).toEqual(["/search/query"]);
+    expect(api.postForm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Apply|Approve/ })).not.toBeInTheDocument();
   });
 
   it("submits a header assistant request through the existing conversation service", async () => {

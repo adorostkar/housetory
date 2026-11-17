@@ -14,8 +14,6 @@ import { useInvalidateInventory, useSession } from "@/lib/queries";
 import type { SearchTurn } from "@/lib/search-session";
 import type { ReviewRun, SearchConversationContext, SearchQueryResponse } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
-import { withHousehold } from "@/lib/household-links";
-import { looksLikeItemDescription } from "@/lib/assistant-intent";
 import { actionMessage, createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -26,9 +24,7 @@ export interface AssistantMessage {
   capture?: AssistantCaptureState;
   response?: SearchQueryResponse;
   pageReferences?: AssistantPageReference[];
-  fallback?: { href: string; label: string };
   action?: AssistantActionState;
-  clarification?: ActionClarification;
   /** A local review started for the user when AI was unavailable. */
   review?: ReviewRun;
   toolRunId?: string;
@@ -49,21 +45,6 @@ export interface AssistantCaptureState {
   error?: string;
 }
 
-interface ActionClarification {
-  id: string;
-  query: string;
-  selection: SearchScopeSelection;
-  pageReferences: AssistantPageReference[];
-  conversationItemIds: string[];
-  localDate: string;
-  choices: { id: string; name: string }[];
-  resolved: boolean;
-}
-
-type ClarificationReply =
-  | { itemId: string; text: string }
-  | { location: string; text: string };
-
 export interface AssistantActionProposal {
   id: string;
   kind: string;
@@ -80,7 +61,6 @@ interface AssistantActionState {
   originalRequest: string;
   requestId: string;
   pending: boolean;
-  clarificationLabel?: string;
   result?: string;
   conflict?: string;
   editing?: boolean;
@@ -122,13 +102,6 @@ interface AssistantMoveDestination {
   name: string;
 }
 
-interface AssistantActionInterpretResult {
-  handled: boolean;
-  message: string;
-  proposal: AssistantActionProposal | null;
-  item_choices?: { id: string; name: string }[];
-}
-
 interface Conversation {
   messages: AssistantMessage[];
   draft: string;
@@ -140,7 +113,6 @@ interface Conversation {
   captureError: string | null;
   turns: SearchTurn[];
   context: SearchConversationContext | null;
-  actionItemIds: string[] | null;
   pending: boolean;
   toolParentId: string | null;
 }
@@ -184,10 +156,8 @@ interface AssistantConversationContextValue {
     regenerate: boolean,
     session: SessionSnapshot,
     references: AssistantPageReference[],
-    onCreateItem: (value: string) => void | Promise<void>,
     freshTopic?: boolean,
   ) => void;
-  clarifyAction: (scope: string, clarificationId: string, reply: ClarificationReply) => void;
   applyAction: (scope: string, proposalId: string) => void;
   cancelAction: (scope: string, proposalId: string) => void;
   refreshAction: (scope: string, proposalId: string) => void;
@@ -216,17 +186,9 @@ const EMPTY: Conversation = {
   captureError: null,
   turns: [],
   context: null,
-  actionItemIds: null,
   pending: false,
   toolParentId: null,
 };
-
-function proposalItemIds(proposal: AssistantActionProposal): string[] {
-  if (!["edit_item", "move_items", "lend"].includes(proposal.kind) || proposal.targets.length > 6) {
-    return [];
-  }
-  return proposal.targets.map(({ id }) => id);
-}
 
 const AssistantConversationContext =
   React.createContext<AssistantConversationContextValue | null>(null);
@@ -381,7 +343,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       captureError: null,
       capturePending: false,
       context: freshTopic ? null : current.context,
-      actionItemIds: freshTopic ? null : current.actionItemIds,
       toolParentId: freshTopic ? null : current.toolParentId,
       turns: [
         ...(freshTopic ? [] : current.turns),
@@ -417,7 +378,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       ...current,
       turns: [],
       context: null,
-      actionItemIds: null,
       toolParentId: null,
     }));
   }, [update]);
@@ -429,7 +389,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     regenerate: boolean,
     session: SessionSnapshot,
     references: AssistantPageReference[],
-    onCreateItem: (value: string) => void | Promise<void>,
     freshTopic = false,
   ) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
@@ -445,45 +404,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     const context = freshTopic ? null : regenerate ? previousAnswer?.response?.context : (
       seededSession ? session.context : current.context
     );
-    const actionText = value.replace(/^\s*(?:(?:please|can you|could you|would you|i want to|i need to)\s+)*/i, "");
-    const unsupportedAccount = /^(?:change|set|reset|update)\s+(?:my\s+)?(?:password|email|account)\b/i.test(actionText);
-    const unsupportedDelete = /^(?:delete|erase)\b/i.test(actionText)
-      || /\s(?:حذف|پاک)\s+کن\s*[.!?؟]?\s*$/u.test(value);
-    const unsupportedMerge = /^merge\b/i.test(actionText);
-    const unsupportedArchive = /^(?:archive|unarchive|restore)\b/i.test(actionText);
-    const unsupportedDisposition = /^(?:sell|donate|discard|dispose of)\b/i.test(actionText);
-    const unsupportedRoomCreation = /^(?:create|add|make)\s+(?:(?:a|an|the|new)\s+)*room\b/i.test(actionText);
-    const isUnsupported = unsupportedAccount || unsupportedDelete || unsupportedMerge
-      || unsupportedArchive || unsupportedDisposition || unsupportedRoomCreation;
-    const respondUnsupported = () => {
-      const answer = unsupportedAccount
-        ? "The assistant cannot change account settings. Use the existing account settings."
-        : unsupportedRoomCreation
-        ? "The assistant cannot create rooms. Use the existing room controls."
-        : unsupportedDelete
-        ? "The assistant cannot delete items. Use the existing item controls."
-        : unsupportedMerge
-          ? "The assistant cannot merge inventory items. Use the existing item controls."
-          : unsupportedArchive
-            ? "The assistant cannot archive or restore items. Use the existing item controls."
-            : "The assistant cannot record item disposition. Use the existing item controls.";
-      const fallback = unsupportedAccount
-        ? { href: "/settings/account", label: "Open account settings" }
-        : unsupportedRoomCreation
-        ? { href: withHousehold("/rooms", selection.householdId || undefined), label: "Open rooms" }
-        : { href: withHousehold("/items", selection.householdId || undefined), label: "Open items" };
-      update(scope, (entry) => ({
-        ...entry,
-        messages: [
-          ...(regenerate ? entry.messages.slice(0, -2) : entry.messages),
-          { role: "user", text: value, pageReferences },
-          { role: "assistant", text: answer, fallback },
-        ],
-        turns: [...history, { role: "user" as const, content: value }, { role: "assistant" as const, content: answer }].slice(-8),
-        draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
-        pending: false,
-      }));
-    };
     const controller = new AbortController();
     controllers.current.add(controller);
     update(scope, (entry) => ({ ...entry, pending: true }));
@@ -498,65 +418,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       ...(selection.householdId ? { household_id: selection.householdId } : {}),
       ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
       limit: 40,
-    };
-    const isAction = /^(?:move|relocate|put|rename|lend|borrow|return)\s/i.test(actionText)
-      || /^(?:set|change)\s.+\b(?:name|description|brand|model|serial number|quantity|condition)\s+to\s/i.test(actionText)
-      || /^record\s+(?:the\s+)?return\b/i.test(actionText)
-      || /\sبه\s.+\s(?:منتقل\s+کن|ببر|ببرش)\s*[.!?؟]?\s*$/u.test(value)
-      || /\sبه\s.+\sقرض\s+بده\s*[.!?؟]?\s*$/u.test(value)
-      || /\sاز\s.+\sقرض\s+بگیر\s*[.!?؟]?\s*$/u.test(value)
-      || /\s(?:از|به)\s.+\sپس\s+(?:بگیر|بده)\s*[.!?؟]?\s*$/u.test(value)
-      || /^\s*نام\s.+\sبه\s.+\sتغییر\s+بده\s*[.!?؟]?\s*$/u.test(value);
-    const runAction = () => {
-      const localDate = localDateISO();
-      const conversationItemIds = !freshTopic && !regenerate && current.actionItemIds !== null
-        ? current.actionItemIds
-        : context?.resolved_items.map(({ id }) => id) ?? [];
-      return api.post<AssistantActionInterpretResult>(
-        "/assistant/actions/interpret",
-        {
-          query: value,
-          local_date: localDate,
-          ...(selection.householdId ? { household_id: selection.householdId } : {}),
-          ...(selection.propertyId ? { scope_property_id: selection.propertyId } : {}),
-          page_context: pageReferences.map(({ kind, id }) => ({ kind, id })),
-          conversation_item_ids: conversationItemIds,
-        },
-        { signal: controller.signal },
-      ).then((response) => {
-        if (controller.signal.aborted) return;
-        const answer = response.handled ? response.message : "I can't prepare that action yet. Use the existing inventory controls.";
-        update(scope, (entry) => ({
-          ...entry,
-          messages: [
-            ...(regenerate ? entry.messages.slice(0, -2) : entry.messages),
-            { role: "user", text: value, pageReferences },
-            {
-              role: "assistant", text: answer,
-              ...(response.proposal ? {
-                action: { proposal: response.proposal, originalRequest: value, requestId: crypto.randomUUID(), pending: false },
-              } : response.item_choices?.length ? {
-                clarification: {
-                  id: crypto.randomUUID(), query: value, selection, pageReferences,
-                  conversationItemIds, localDate, choices: response.item_choices, resolved: false,
-                },
-              } : {
-                fallback: /\b(?:lend|borrow|return|loan)\b|قرض|پس\s+(?:بگیر|بده)/u.test(value.toLowerCase())
-                  ? { href: withHousehold("/loans", selection.householdId || undefined), label: "Open loans" }
-                  : { href: withHousehold("/items", selection.householdId || undefined), label: "Open items" },
-              }),
-            },
-          ],
-          turns: [
-            ...history,
-            { role: "user" as const, content: value.slice(0, 1200) },
-            { role: "assistant" as const, content: answer.slice(0, 1200) },
-          ].slice(-8),
-          actionItemIds: response.proposal ? proposalItemIds(response.proposal) : entry.actionItemIds,
-          draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
-          pending: false,
-        }));
-      });
     };
     const runSearch = () => api.post<SearchQueryResponse>(
       "/search/query",
@@ -578,62 +439,11 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           { role: "assistant" as const, content: answer.slice(0, 1200) },
         ].slice(-8),
         context: response.context,
-        actionItemIds: null,
         draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
         pending: false,
       }));
       if (session.scopeKey === scope) session.record(value, response);
     });
-    // Without AI the request is still carried out with the local checks, and says so.
-    const isReviewRequest = /\b(?:review|categori[sz]e|organi[sz]e|tidy|declutter)\b/i.test(value)
-      && /\b(?:items?|inventory|things|stuff|everything|categor\w+|tags?|home|house)\b/i.test(value);
-    const runLocalReview = () => {
-      const finish = (message: AssistantMessage) => update(scope, (entry) => ({
-        ...entry,
-        messages: [
-          ...(regenerate ? entry.messages.slice(0, -2) : entry.messages),
-          { role: "user", text: value, pageReferences },
-          message,
-        ],
-        draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
-        pending: false,
-      }));
-      return api.post<ReviewRun>("/inventory-review/runs", {
-        scope_type: selection.propertyId ? "property" : "household",
-        scope_id: selection.propertyId || null,
-        include_ai: false, background: true, request_id: crypto.randomUUID(),
-      }, { signal: controller.signal }).then((review) => {
-        if (controller.signal.aborted) return;
-        finish({
-          role: "assistant", review,
-          text: "AI isn’t available right now, so I ran the local checks instead. They find naming, duplicate and missing-detail issues but can’t suggest categories from meaning.",
-        });
-      }).catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        finish({
-          role: "assistant",
-          text: `AI isn’t available and the local review could not start: ${getApiErrorMessage(error)}`,
-          fallback: { href: withHousehold("/review", selection.householdId || undefined), label: "Open Review" },
-        });
-      });
-    };
-    const runLegacy = () => {
-      if (isUnsupported) {
-        respondUnsupported();
-        return Promise.resolve();
-      }
-      if (isReviewRequest) return runLocalReview();
-      if (looksLikeItemDescription(value)) {
-        update(scope, (entry) => ({
-          ...entry,
-          draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
-          pending: false,
-        }));
-        void onCreateItem(value);
-        return Promise.resolve();
-      }
-      return isAction ? runAction() : runSearch();
-    };
     const request = {
       query: value,
       ...(selection.householdId ? { household_id: selection.householdId } : {}),
@@ -673,7 +483,9 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
     }).catch((error: unknown) => {
       if (error instanceof ApiError && error.code === "assistant_tools_unavailable") {
-        return runLegacy();
+        // Local search mode: without the tool engine, typed text is only searched.
+        toolRequests.current.delete(requestKey);
+        return runSearch();
       }
       if (error instanceof ApiError && error.code === "assistant_household_required") {
         // Assistant tasks work in one household. Across all of them, the lookup the
@@ -694,69 +506,6 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       toast.error(getApiErrorMessage(error));
     }).finally(() => controllers.current.delete(controller));
   }, [update, queryClient]);
-
-  const clarifyAction = React.useCallback((scope: string, clarificationId: string, reply: ClarificationReply) => {
-    const current = conversationsRef.current[scope] ?? EMPTY;
-    const clarification = current.messages.find(
-      (message) => message.clarification?.id === clarificationId,
-    )?.clarification;
-    if (!clarification || clarification.resolved || current.pending) return;
-    if ("itemId" in reply && !clarification.choices.some((candidate) => candidate.id === reply.itemId)) return;
-    const controller = new AbortController();
-    controllers.current.add(controller);
-    update(scope, (entry) => ({ ...entry, pending: true }));
-    void api.post<AssistantActionInterpretResult>(
-      "/assistant/actions/interpret",
-      {
-        query: clarification.query,
-        local_date: clarification.localDate,
-        ...(clarification.selection.householdId ? { household_id: clarification.selection.householdId } : {}),
-        ...(clarification.selection.propertyId ? { scope_property_id: clarification.selection.propertyId } : {}),
-        page_context: clarification.pageReferences.map(({ kind, id }) => ({ kind, id })),
-        conversation_item_ids: clarification.conversationItemIds,
-        ...("itemId" in reply ? { clarified_item_id: reply.itemId } : { clarified_item_location: reply.location }),
-      },
-      { signal: controller.signal },
-    ).then((response) => {
-      if (controller.signal.aborted) return;
-      const answer = response.handled ? response.message : "I can't prepare that action yet. Use the existing inventory controls.";
-      const proposal = response.proposal;
-      const target = proposal?.targets[0];
-      const choice = clarification.choices.find((candidate) => candidate.id === target?.id);
-      if (!proposal || !choice || ("itemId" in reply && reply.itemId !== choice.id)) {
-        update(scope, (entry) => ({ ...entry, pending: false }));
-        toast.error(proposal ? "The selected item changed. Please choose again." : answer);
-        return;
-      }
-      update(scope, (entry) => ({
-        ...entry,
-        messages: [
-          ...entry.messages.map((message) =>
-            message.clarification?.id === clarificationId
-              ? { ...message, clarification: { ...message.clarification, resolved: true } }
-              : message,
-          ),
-          { role: "user", text: reply.text },
-          {
-            role: "assistant", text: answer,
-            action: { proposal, originalRequest: clarification.query, requestId: crypto.randomUUID(), pending: false, clarificationLabel: choice.name },
-          },
-        ],
-        turns: [
-          ...entry.turns,
-          { role: "user" as const, content: reply.text.slice(0, 1200) },
-          { role: "assistant" as const, content: answer.slice(0, 1200) },
-        ].slice(-8),
-        actionItemIds: proposalItemIds(proposal),
-        draft: entry.draft.trim() === reply.text ? "" : entry.draft,
-        pending: false,
-      }));
-    }).catch((error: unknown) => {
-      if (controller.signal.aborted) return;
-      update(scope, (entry) => ({ ...entry, pending: false }));
-      toast.error(getApiErrorMessage(error));
-    }).finally(() => controllers.current.delete(controller));
-  }, [update]);
 
   const applyAction = React.useCallback((scope: string, proposalId: string) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
@@ -1130,14 +879,14 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     () => ({
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
-      reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     }),
     [
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
-      reset, startFreshTopic, ask, clarifyAction, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, applyAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     ],
@@ -1188,7 +937,6 @@ export function useAssistantConversation(scope: string) {
     updateCapture,
     reset: () => store.reset(scope),
     startFreshTopic: () => store.startFreshTopic(scope),
-    clarifyAction: (clarificationId: string, itemId: string, text: string) => store.clarifyAction(scope, clarificationId, { itemId, text }),
     applyAction: (proposalId: string) => store.applyAction(scope, proposalId),
     cancelAction: (proposalId: string) => store.cancelAction(scope, proposalId),
     refreshAction: (proposalId: string) => store.refreshAction(scope, proposalId),
@@ -1209,16 +957,9 @@ export function useAssistantConversation(scope: string) {
       value: string,
       regenerate: boolean,
       session: SessionSnapshot,
-      onCreateItem: (value: string) => void | Promise<void>,
       freshTopic = false,
     ) => {
-      const last = conversation.messages[conversation.messages.length - 1];
-      const match = value.trim().match(/^(?:the one (?:in|at)|in|at|(?:اون|اونی|آن|اینی)\s+(?:توی|در)|(?:توی|در))\s+(.+?)\s*[.!?؟]?\s*$/iu);
-      if (!freshTopic && !regenerate && last?.clarification && !last.clarification.resolved && match?.[1]) {
-        store.clarifyAction(scope, last.clarification.id, { location: match[1], text: value });
-        return;
-      }
-      store.ask(scope, selection, value, regenerate, session, freshTopic ? [] : references, onCreateItem, freshTopic);
+      store.ask(scope, selection, value, regenerate, session, freshTopic ? [] : references, freshTopic);
     },
   };
 }
