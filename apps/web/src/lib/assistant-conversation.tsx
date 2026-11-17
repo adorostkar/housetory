@@ -726,6 +726,17 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       if (error instanceof ApiError && error.code === "assistant_tools_unavailable") {
         return runLegacy();
       }
+      if (error instanceof ApiError && error.code === "assistant_household_required") {
+        // Assistant tasks work in one household. Across all of them, the lookup the
+        // server promises is still available, so answer with it instead of stopping.
+        toolRequests.current.delete(requestKey);
+        return runSearch().then(() => {
+          if (controller.signal.aborted) return;
+          toast.info("Searched all your places.", {
+            description: "Choose one household in the scope picker to let the assistant prepare changes.",
+          });
+        });
+      }
       throw error;
     });
     void execute.catch((error: unknown) => {

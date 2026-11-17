@@ -13,6 +13,7 @@ import { AssistantConversationProvider } from "@/lib/assistant-conversation";
 import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import type { AiStatus, ItemSummary, SearchQueryResponse } from "@/lib/types";
 import { AssistantPage } from "@/pages/assistant-page";
+import { toast } from "sonner";
 
 vi.mock("@/lib/queries", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/queries")>(),
@@ -475,6 +476,27 @@ describe("AssistantPage", () => {
       ),
     );
     expect(await screen.findByText("Where is my drill?")).toBeVisible();
+  });
+
+  it("answers with the all-places search when an assistant task needs one household", async () => {
+    vi.mocked(createToolRun).mockReset().mockRejectedValue(new ApiError(
+      409, "assistant_household_required", "Choose one household for this tool conversation.",
+    ));
+    const info = vi.spyOn(toast, "info");
+    const error = vi.spyOn(toast, "error");
+    renderPage("/assistant", { id: "header-question", text: "Where is my drill?" });
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/search/query",
+      expect.objectContaining({ query: "Where is my drill?" }),
+      expect.anything(),
+    ));
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).not.toHaveProperty("household_id");
+    expect(await screen.findByText(firstAnswer.answer ?? "")).toBeVisible();
+    await waitFor(() => expect(info).toHaveBeenCalledWith(
+      "Searched all your places.", expect.objectContaining({ description: expect.stringContaining("one household") }),
+    ));
+    expect(error).not.toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 
   it("hands a header attachment to the existing assistant composer without sending it", async () => {
