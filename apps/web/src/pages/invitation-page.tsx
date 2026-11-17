@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { clearAllItemDrafts } from "@/lib/item-drafts";
 import {
   queryKeys,
   useInvitation,
@@ -95,6 +96,7 @@ export function InvitationPage() {
   const signOut = () => {
     logout.mutate(undefined, {
       onSuccess: () => {
+        clearAllItemDrafts();
         queryClient.setQueryData(queryKeys.session, (current: SessionState | undefined) =>
           current
             ? {

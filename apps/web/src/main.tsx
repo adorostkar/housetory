@@ -7,6 +7,7 @@ import App from "@/App";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ApiError, householdScopedQueryHash } from "@/lib/api";
+import { NavigationGuardProvider } from "@/lib/navigation-guard";
 import "@/styles/globals.css";
 
 const queryClient = new QueryClient({
@@ -35,7 +36,9 @@ createRoot(rootElement).render(
       <ThemeProvider>
         <ErrorBoundary>
           <BrowserRouter>
-            <App />
+            <NavigationGuardProvider>
+              <App />
+            </NavigationGuardProvider>
           </BrowserRouter>
         </ErrorBoundary>
       </ThemeProvider>

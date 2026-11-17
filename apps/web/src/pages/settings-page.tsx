@@ -17,6 +17,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
+import { clearAllItemDrafts } from "@/lib/item-drafts";
 import { CURRENCIES } from "@/lib/labels";
 import {
   queryKeys,
@@ -488,6 +489,7 @@ export function SettingsPage() {
             onClick={() =>
               logout.mutate(undefined, {
                 onSuccess: () => {
+                  clearAllItemDrafts();
                   toast.success("Signed out");
                   navigate("/login", { replace: true });
                 },

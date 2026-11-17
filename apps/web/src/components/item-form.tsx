@@ -54,6 +54,8 @@ import {
   roomPath,
 } from "@/lib/utils";
 import { CONDITIONS, FormSection, OptionalFormSection } from "@/components/item-form-sections";
+import { ItemDraftBanner, useItemFormProtection } from "@/components/item-form-draft";
+import { itemDraftFormId } from "@/lib/item-drafts";
 
 export function ItemForm({
   item,
@@ -278,6 +280,96 @@ export function ItemForm({
     !/^\d+$/.test(quantity) ||
     Number(quantity) > 1_000_000;
 
+  const protection = useItemFormProtection({
+    formId: itemDraftFormId(
+      item
+        ? { itemId: item.id }
+        : {
+            context: {
+              duplicate_of: duplicateOf?.id,
+              property_id: defaultPropertyId,
+              room_id: defaultRoomId,
+              location_id: defaultLocationId,
+              name: defaultName,
+            },
+          },
+    ),
+    itemUpdatedAt: item?.updated_at ?? null,
+    values: {
+      name,
+      description,
+      brand,
+      model,
+      serialNumber,
+      quantity,
+      condition,
+      propertyId,
+      roomId,
+      locationId,
+      categoryId,
+      tagIds,
+      vendor,
+      purchaseDate,
+      totalPrice,
+      editedUnitPrice,
+      currency,
+      currencyTouched,
+      priceBasis,
+      orderNumber,
+      purchaseNotes,
+      receiptDocumentId,
+      purchaseInfoStatus,
+      warrantyProvider,
+      warrantyStart,
+      warrantyDuration,
+      warrantyEnd,
+      warrantyReminder,
+      warrantyDocumentId,
+      warrantyNotes,
+    },
+  });
+  const restoreDraft = () => {
+    const draft = protection.restoreDraft();
+    if (!draft) return;
+    setName(draft.name);
+    setDescription(draft.description);
+    setBrand(draft.brand);
+    setModel(draft.model);
+    setSerialNumber(draft.serialNumber);
+    if (!storageLocked) setQuantity(draft.quantity);
+    const draftCondition = CONDITIONS.find((value) => value === draft.condition);
+    if (draftCondition) setCondition(draftCondition);
+    setPropertyId(draft.propertyId);
+    setRoomId(draft.roomId);
+    setLocationId(draft.locationId);
+    setCategoryId(draft.categoryId);
+    setTagIds(draft.tagIds);
+    setVendor(draft.vendor);
+    setPurchaseDate(draft.purchaseDate);
+    setTotalPrice(draft.totalPrice);
+    setEditedUnitPrice(draft.editedUnitPrice);
+    setCurrency(draft.currency);
+    setCurrencyTouched(draft.currencyTouched);
+    setPriceBasis(draft.priceBasis);
+    setOrderNumber(draft.orderNumber);
+    setPurchaseNotes(draft.purchaseNotes);
+    setReceiptDocumentId(draft.receiptDocumentId);
+    if (
+      draft.purchaseInfoStatus === "auto" ||
+      draft.purchaseInfoStatus === "unknown" ||
+      draft.purchaseInfoStatus === "not_applicable"
+    ) {
+      setPurchaseInfoStatus(draft.purchaseInfoStatus);
+    }
+    setWarrantyProvider(draft.warrantyProvider);
+    setWarrantyStart(draft.warrantyStart);
+    setWarrantyDuration(draft.warrantyDuration);
+    setWarrantyEnd(draft.warrantyEnd);
+    setWarrantyReminder(draft.warrantyReminder);
+    setWarrantyDocumentId(draft.warrantyDocumentId);
+    setWarrantyNotes(draft.warrantyNotes);
+  };
+
   const save = useMutation({
     mutationFn: (payload: ItemInput) =>
       item
@@ -286,6 +378,7 @@ export function ItemForm({
     onSuccess: (response) => {
       invalidate();
       toast.success(item ? "Item updated" : "Item added");
+      protection.markSaved();
       navigate(
         item && returnTo
           ? returnTo
@@ -478,6 +571,14 @@ export function ItemForm({
     <>
       <form onSubmit={submit} className="space-y-6" noValidate>
         {generalError && <FormError message={generalError} />}
+        {protection.draftOffer && (
+          <ItemDraftBanner
+            savedAt={protection.draftOffer.savedAt}
+            itemChanged={protection.draftOffer.itemChanged}
+            onRestore={restoreDraft}
+            onDiscard={protection.discardDraft}
+          />
+        )}
 
         <FormSection
           title="The essentials"
@@ -1112,13 +1213,14 @@ export function ItemForm({
           <Button
             type="button"
             variant="ghost"
-            onClick={() =>
+            onClick={() => {
+              protection.discardChanges();
               navigate(
                 item
                   ? cancelTo ?? `/items/${item.id}`
                   : cancelTo ?? origin?.path ?? "/items",
-              )
-            }
+              );
+            }}
           >
             Cancel
           </Button>

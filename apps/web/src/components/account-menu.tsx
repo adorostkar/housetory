@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { HouseholdCreateDialog } from "@/components/household-switcher";
 import { getApiErrorMessage } from "@/lib/api";
+import { clearAllItemDrafts } from "@/lib/item-drafts";
 import { useLogout, useSelectHousehold, useSession } from "@/lib/queries";
 import { cn, initials } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
   const onLogout = () => {
     logout.mutate(undefined, {
       onSuccess: () => {
+        clearAllItemDrafts();
         toast.success("Signed out");
         navigate("/login", { replace: true });
       },

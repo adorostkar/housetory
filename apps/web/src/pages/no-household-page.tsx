@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { getApiErrorMessage } from "@/lib/api";
+import { clearAllItemDrafts } from "@/lib/item-drafts";
 import { useCreateHousehold, useLogout, useSession } from "@/lib/queries";
 
 export function NoHouseholdPage() {
@@ -86,7 +87,10 @@ export function NoHouseholdPage() {
           disabled={logout.isPending}
           onClick={() =>
             logout.mutate(undefined, {
-              onSuccess: () => navigate("/login", { replace: true }),
+              onSuccess: () => {
+                clearAllItemDrafts();
+                navigate("/login", { replace: true });
+              },
             })
           }
         >
