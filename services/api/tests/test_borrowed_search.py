@@ -73,32 +73,35 @@ def test_search_reports_exact_owned_total_and_separate_borrowed_records(owner_cl
     assert borrowed_quick[0]["url"] == f"/borrowed/{borrowed_one['id']}"
 
     # Bounded structured search reports the exact match count and an explicit cap.
-    bounded = owner_client.post("/api/v1/assistant/query", json={"question": "List cable"})
+    bounded = owner_client.post(
+        "/api/v1/search/query", json={"query": "List cable", "explicit_ask": True}
+    )
     assert bounded.status_code == 200, bounded.text
     bounded_body = bounded.json()
     assert bounded_body["tool"] == "search_items"
-    assert bounded_body["facts"]["total"] == 51
+    assert bounded_body["facts"]["partitions"][0]["total"] == 51
     assert bounded_body["facts"]["quantity_total"] == 51
     assert "Found 51 matching owned items" in bounded_body["answer"]
     assert "first 30 are listed" in bounded_body["answer"]
 
     natural_bounded = owner_client.post(
-        "/api/v1/search/natural", json={"question": "List cable", "limit": 30}
+        "/api/v1/search/query", json={"query": "List cable", "limit": 30}
     )
     assert natural_bounded.status_code == 200, natural_bounded.text
     natural_body = natural_bounded.json()
-    assert natural_body["total"] == 51
+    assert natural_body["facts"]["partitions"][0]["total"] == 51
     assert len(natural_body["items"]) == 30
-    assert "Found 51 owned items" in (natural_body["answer"] or "")
+    assert "Found 51 matching owned items" in (natural_body["answer"] or "")
 
     # Only the owned records count as owned units; borrowed quantity is separate.
     summary = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "How many cables do I have?"}
+        "/api/v1/search/query", json={"query": "How many cables do I have?", "explicit_ask": True}
     )
     assert summary.status_code == 200, summary.text
     summary_body = summary.json()
     assert summary_body["tool"] == "count_items"
-    assert summary_body["facts"]["total"] == 51
+    assert summary_body["facts"]["partitions"][0]["total"] == 51
+    assert "51 units across 51 matching item records" in summary_body["answer"]
     assert summary_body["facts"]["quantity_total"] == 51
     assert summary_body["facts"]["borrowed_total"] == 2
     assert summary_body["facts"]["borrowed_outstanding_quantity"] == 3
@@ -129,11 +132,11 @@ def test_deterministic_borrowed_questions_need_no_ai(owner_client):
     assert owned.status_code == 201, owned.text
 
     need_return = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "What do I need to return?"}
+        "/api/v1/search/query", json={"query": "What do I need to return?", "explicit_ask": True}
     )
     assert need_return.status_code == 200, need_return.text
     return_body = need_return.json()
-    assert return_body["mode"] == "deterministic"
+    assert return_body["ai_used"] is False
     assert return_body["tool"] == "list_borrowed_items"
     assert return_body["borrowed"][0]["id"] == record["id"]
     assert "belongs to Ali" in return_body["answer"]
@@ -143,35 +146,35 @@ def test_deterministic_borrowed_questions_need_no_ai(owner_client):
     assert reference["url"] == f"/borrowed/{record['id']}"
 
     who_owns = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "Who owns the borrowed ladder?"},
+        "/api/v1/search/query",
+        json={"query": "Who owns the borrowed ladder?", "explicit_ask": True},
     )
     assert who_owns.status_code == 200, who_owns.text
     owner_body = who_owns.json()
-    assert owner_body["mode"] == "deterministic"
+    assert owner_body["ai_used"] is False
     assert owner_body["tool"] == "find_borrowed_owner"
     assert "Ali" in owner_body["answer"]
     assert "household also owns" in owner_body["answer"]
     assert owner_body["facts"]["borrowed_total"] == 1
     assert owner_body["facts"]["owned_item_total"] == 1
 
-    natural = owner_client.post(
-        "/api/v1/search/natural", json={"question": "What do I need to return?"}
-    )
+    natural = owner_client.post("/api/v1/search/query", json={"query": "What do I need to return?"})
     assert natural.status_code == 200, natural.text
     natural_body = natural.json()
     assert natural_body["tool"] == "list_borrowed_items"
     assert natural_body["borrowed_total"] == 1
     assert natural_body["borrowed"][0]["owner_name"] == "Ali"
-    assert natural_body["mode"] == "deterministic"
+    assert natural_body["ai_used"] is False
 
-    keyword_ask = owner_client.post("/api/v1/search/natural", json={"question": "Ali"})
+    keyword_ask = owner_client.post("/api/v1/search/query", json={"query": "Ali"})
     assert keyword_ask.status_code == 200, keyword_ask.text
     keyword_body = keyword_ask.json()
     assert keyword_body["borrowed_total"] == 1
     assert keyword_body["borrowed"][0]["id"] == record["id"]
 
-    on_loan = owner_client.post("/api/v1/assistant/query", json={"question": "What is on loan?"})
+    on_loan = owner_client.post(
+        "/api/v1/search/query", json={"query": "What is on loan?", "explicit_ask": True}
+    )
     assert on_loan.status_code == 200, on_loan.text
     on_loan_body = on_loan.json()
     assert on_loan_body["tool"] == "list_outstanding_loans"

@@ -451,7 +451,8 @@ def test_property_scoped_search_stocktake_evidence_and_assistant_paths(owner_cli
     assert preview_item["full_location_path"].startswith("Cabin / Kitchen")
 
     answer = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "Where is my Lantern?", "history": []}
+        "/api/v1/search/query",
+        json={"query": "Where is my Lantern?", "history": [], "explicit_ask": True},
     )
     assert answer.status_code == 200, answer.text
     body = answer.json()

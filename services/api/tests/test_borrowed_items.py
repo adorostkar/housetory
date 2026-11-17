@@ -233,7 +233,7 @@ def test_borrowed_record_is_not_owned_stock_and_partial_returns_are_append_only(
     assert "previously kept at" in (returned_result["context"] or "")
     assert "kept at" not in (returned_result["context"] or "").replace("previously kept at", "")
     returned_owner = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "Who owns the Borrowed drill?"}
+        "/api/v1/search/query", json={"query": "Who owns the Borrowed drill?", "explicit_ask": True}
     ).json()
     assert returned_owner["tool"] == "find_borrowed_owner"
     assert "previously kept at" in returned_owner["answer"]

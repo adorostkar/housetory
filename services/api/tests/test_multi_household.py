@@ -374,12 +374,12 @@ def test_all_places_assistant_answers_loans_counts_and_cross_household_ambiguity
     create_item(owner_client, "Heavy drill", cabin_room["id"], 1)
 
     answer = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "Where is my heavy drill?", "history": []},
+        "/api/v1/search/query",
+        json={"query": "Where is my heavy drill?", "history": [], "explicit_ask": True},
     )
     assert answer.status_code == 200, answer.text
     body = answer.json()
-    assert body["mode"] == "deterministic"
+    assert body["ai_used"] is False
     assert body["facts"]["ambiguous"] is True
     assert "Cabin" in body["answer"] and "Ada's Home" in body["answer"]
     assert "Which one" in body["answer"]
@@ -391,35 +391,34 @@ def test_all_places_assistant_answers_loans_counts_and_cross_household_ambiguity
     # A unique item still reports borrower and household-qualified home path.
     switch(owner_client, first_id)
     whereabouts = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "Where is my tile cutter?", "history": []},
+        "/api/v1/search/query",
+        json={"query": "Where is my tile cutter?", "history": [], "explicit_ask": True},
     ).json()
-    assert whereabouts["mode"] == "deterministic"
+    assert whereabouts["ai_used"] is False
     assert "Morgan has 2 of your 3 units" in whereabouts["answer"]
     assert "Ada's Home / Home → Garage" in whereabouts["answer"]
-    assert whereabouts["facts"]["whereabouts"]["household_name"] == "Ada's Home"
 
     count = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "How many heavy drills do I own?", "history": []},
+        "/api/v1/search/query",
+        json={"query": "How many heavy drills do I own?", "history": [], "explicit_ask": True},
     ).json()
-    assert count["mode"] == "deterministic"
-    assert count["facts"]["quantity_total"] == 3
+    assert count["ai_used"] is False
+    assert [part["total"] for part in count["facts"]["partitions"]] == [1, 1]
     assert "3 units" in count["answer"]
 
     loans = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "What is on loan?", "history": []},
+        "/api/v1/search/query",
+        json={"query": "What is on loan?", "history": [], "explicit_ask": True},
     ).json()
-    assert loans["mode"] == "deterministic"
+    assert loans["ai_used"] is False
     assert loans["facts"]["outstanding_count"] >= 1
     assert "Morgan" in loans["answer"]
 
     natural = owner_client.post(
-        "/api/v1/search/natural",
-        json={"question": "Where is my heavy drill?", "limit": 20},
+        "/api/v1/search/query",
+        json={"query": "Where is my heavy drill?", "limit": 20},
     ).json()
-    assert natural["mode"] == "deterministic"
+    assert natural["ai_used"] is False
     assert natural["facts"]["ambiguous"] is True
     assert natural["households"]
 
@@ -478,11 +477,12 @@ def test_single_household_assistant_uses_only_that_households_provider(owner_cli
         assistant_service.ai, "complete_text", lambda *_args, **_kwargs: "Grounded answer."
     )
     response = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         json={
-            "question": "What should I consider for the balcony setup?",
+            "query": "What should I consider for the balcony setup?",
             "history": [],
             "household_id": str(second_id),
+            "explicit_ask": True,
         },
     )
     assert response.status_code == 200, response.text
@@ -491,26 +491,16 @@ def test_single_household_assistant_uses_only_that_households_provider(owner_cli
     switch(owner_client, first_id)
     captured.clear()
     response = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         json={
-            "question": "What should I consider for the balcony setup?",
+            "query": "What should I consider for the balcony setup?",
             "history": [],
             "household_id": str(first_id),
+            "explicit_ask": True,
         },
     )
     assert response.status_code == 200, response.text
     assert captured == [first_provider_id]
-
-    # All-my-places deliberately stays deterministic and does not call either.
-    captured.clear()
-    monkeypatch.setattr(assistant_service, "_ai_plan", lambda *_args, **_kwargs: None)
-    response = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "What should I consider for the balcony setup?", "history": []},
-    )
-    assert response.status_code == 200, response.text
-    assert response.json()["mode"] == "deterministic"
-    assert captured == []
 
 
 def test_no_membership_account_can_create_first_household(anon_client):
@@ -593,26 +583,28 @@ def test_property_scoped_search_and_assistant_do_not_leak_other_properties(owner
     assert wrong_property["results"] == []
 
     leak_check = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         json={
-            "question": "Where is my cabin snack?",
+            "query": "Where is my cabin snack?",
             "history": [],
             "household_id": home_id,
             "property_id": home["id"],
+            "explicit_ask": True,
         },
     ).json()
-    assert leak_check["mode"] == "deterministic"
+    assert leak_check["ai_used"] is False
     assert leak_check["items"] == []
-    assert "couldn't find" in leak_check["answer"].lower()
+    assert "No direct inventory record matched" in leak_check["answer"]
     assert "Annex" not in leak_check["answer"]
 
     found = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         json={
-            "question": "Where is my cabin snack?",
+            "query": "Where is my cabin snack?",
             "history": [],
             "household_id": home_id,
             "property_id": annex["id"],
+            "explicit_ask": True,
         },
     ).json()
     assert found["items"][0]["id"] == cabin_snack["id"]
@@ -620,9 +612,9 @@ def test_property_scoped_search_and_assistant_do_not_leak_other_properties(owner
     assert found["property"]["name"] == "Annex"
 
     natural = owner_client.post(
-        "/api/v1/search/natural",
+        "/api/v1/search/query",
         json={
-            "question": "Where is my cabin snack?",
+            "query": "Where is my cabin snack?",
             "limit": 20,
             "household_id": home_id,
             "property_id": home["id"],

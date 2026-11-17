@@ -461,8 +461,8 @@ def test_overview_and_assistant_read_outstanding_loans(owner_client):
     assert overview["on_loan_quantity"] == 2
 
     answer = owner_client.post(
-        "/api/v1/assistant/query",
-        json={"question": "What is on loan?"},
+        "/api/v1/search/query",
+        json={"query": "What is on loan?", "explicit_ask": True},
     )
     assert answer.status_code == 200, answer.text
     body = answer.json()

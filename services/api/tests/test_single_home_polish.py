@@ -51,13 +51,13 @@ def return_loan(client, loan_id: str, quantity: int):
 
 
 def ask(client, question: str):
-    response = client.post("/api/v1/assistant/query", json={"question": question})
+    response = client.post("/api/v1/search/query", json={"query": question, "explicit_ask": True})
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def natural_search(client, question: str):
-    response = client.post("/api/v1/search/natural", json={"question": question})
+    response = client.post("/api/v1/search/query", json={"query": question})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -167,13 +167,15 @@ def test_exact_heavy_drill_whereabouts_is_loan_first_and_quantity_accurate(owner
     assert search_body["facts"]["whereabouts"]["on_loan_quantity"] == 2
 
     followup = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         json={
-            "question": "when is it due?",
+            "query": "when is it due?",
             "history": [
                 {"role": "user", "content": "where is my heavy drill"},
                 {"role": "assistant", "content": body["answer"]},
             ],
+            "context": body["context"],
+            "explicit_ask": True,
         },
     )
     assert followup.status_code == 200, followup.text
@@ -270,7 +272,7 @@ def test_fully_loaned_returned_no_due_date_and_ambiguous_whereabouts(owner_clien
 
     missing = ask(owner_client, "where is my jetpack?")
     assert missing["facts"]["total"] == 0
-    assert "couldn't find" in missing["answer"]
+    assert "No direct inventory record matched" in missing["answer"]
     assert missing["items"] == []
 
 
@@ -287,9 +289,9 @@ def test_whereabouts_and_unified_search_are_household_scoped_and_viewer_safe(own
 
     other = _other_household_headers()
     other_answer = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         headers=other,
-        json={"question": "where is my heavy drill"},
+        json={"query": "where is my heavy drill", "explicit_ask": True},
     ).json()
     assert other_answer["facts"]["total"] == 0
     assert "Heavy drill" not in other_answer["answer"]
@@ -302,9 +304,9 @@ def test_whereabouts_and_unified_search_are_household_scoped_and_viewer_safe(own
 
     viewer = _viewer_headers(owner_client)
     viewer_answer = owner_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         headers=viewer,
-        json={"question": "where is my heavy drill"},
+        json={"query": "where is my heavy drill", "explicit_ask": True},
     )
     assert viewer_answer.status_code == 200
     assert "Alex" in viewer_answer.json()["answer"]
@@ -399,7 +401,7 @@ def test_purchase_information_states_are_explicit_and_consistent(owner_client):
     assert "Inherited table" not in answer["answer"]
 
     search = natural_search(owner_client, "Which items have no purchase information?")
-    assert search["filters"]["missing_purchase"] is True
+    assert search["tool"] == "find_missing_information"
     assert {item["name"] for item in search["items"]} == answer_names
 
     overview = owner_client.get("/api/v1/financial-overview").json()
@@ -458,7 +460,6 @@ def test_natural_search_falls_back_cleanly_when_ai_output_is_invalid(owner_clien
 
     monkeypatch.setattr(assistant_service.ai, "complete_json", invalid)
     body = natural_search(owner_client, "Find camera")
-    assert body["mode"] == "deterministic"
-    assert "AI interpretation unavailable" in body["interpretation"]
+    assert body["ai_used"] is False
     assert body["items"]
     assert body["answer"]

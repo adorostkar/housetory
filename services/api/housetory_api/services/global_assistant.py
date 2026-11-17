@@ -14,26 +14,19 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..domain import AiTask
 from ..models import Household
 from ..schemas.ai import (
     AiStatus,
     AssistantReference,
-    AssistantRequest,
-    AssistantResponse,
-    NaturalSearchFilters,
-    NaturalSearchResponse,
 )
-from . import ai
 from .ai_tools import ToolResult, _human_date
 from .ai_tools.references import _location_display, dedupe_by_id, dedupe_references
 from .assistant import (
     _followup_plan,
-    _plan_interpretation,
     deterministic_plan,
     structured_plan,
 )
-from .global_search import SearchScope, scope_households, scope_property
+from .global_search import SearchScope
 
 PROPERTY_AWARE_TOOLS = {
     "search_items",
@@ -633,111 +626,3 @@ def execute_all_places(
         use_only_structured=structured_exists,
     )
     return executions, notices, structured_exists
-
-
-def _response_scope(scope: SearchScope) -> dict[str, Any]:
-    return {
-        "scope_label": scope.label,
-        "households": scope_households(scope),
-        "property": scope_property(scope.property),
-    }
-
-
-def answer_all_places(
-    db: Session,
-    scope: SearchScope,
-    request: AssistantRequest,
-) -> AssistantResponse:
-    executions, notices, _structured = execute_all_places(
-        db,
-        scope,
-        question=request.question,
-        history=request.history,
-    )
-    items = _dedupe_items(executions)[:50]
-    borrowed = _dedupe_borrowed(executions)[:50]
-    references = _dedupe_references(executions)[:50]
-    if not executions:
-        answer = "No current household could answer that request."
-        tool = "search_items"
-        facts: dict[str, Any] = {"total": 0}
-    else:
-        tool, answer, facts = _global_answer(executions)
-    facts = {**facts, **_scope_facts(scope, executions)}
-    return AssistantResponse(
-        answer=answer,
-        mode="deterministic",
-        tool=tool,
-        filters={"scope": facts["scope"]},
-        items=items,
-        borrowed=borrowed,
-        documents=[document for execution in executions for document in execution.result.documents],
-        locations=[location for execution in executions for location in execution.result.locations],
-        references=references,
-        notices=[*_scope_notices(scope, executions), *notices],
-        facts=facts,
-        ai_status=deterministic_status(),
-        **_response_scope(scope),
-    )
-
-
-def natural_search_all_places(
-    db: Session,
-    scope: SearchScope,
-    question: str,
-    *,
-    limit: int = 30,
-) -> NaturalSearchResponse:
-    executions, notices, structured = execute_all_places(
-        db,
-        scope,
-        question=question,
-        history=[],
-    )
-    items = _dedupe_items(executions)[:limit]
-    borrowed = _dedupe_borrowed(executions)[:limit]
-    references = _dedupe_references(executions)
-    if not executions:
-        tool = "search_items"
-        answer = "No current household could answer that request."
-        facts: dict[str, Any] = {"total": 0}
-    else:
-        tool, answer, facts = _global_answer(executions)
-    total = int(facts.get("total", len(items)))
-    facts = {**facts, **_scope_facts(scope, executions)}
-    interpretations = []
-    for household, _role in scope.households:
-        if structured:
-            plan = structured_plan(db, household.id, question)
-            if plan is None:
-                continue
-        else:
-            plan = deterministic_plan(db, household.id, question)
-        label = _plan_interpretation(plan)
-        if label not in interpretations:
-            interpretations.append(label)
-    return NaturalSearchResponse(
-        question=question,
-        interpretation="; ".join(interpretations) or "all my places keyword search",
-        filters=NaturalSearchFilters(
-            property_id=scope.property.id if scope.property is not None else None
-        ),
-        items=items,
-        borrowed=borrowed,
-        borrowed_total=int(facts.get("borrowed_total", len(borrowed))),
-        total=total,
-        mode="deterministic",
-        ai_available=any(
-            ai.status_for(db, household.id, AiTask.SEARCH.value, probe=False).configured
-            for household, _role in scope.households
-        ),
-        answer=answer,
-        answer_kind=tool,
-        tool=tool,
-        facts=facts,
-        notices=[*_scope_notices(scope, executions), *notices],
-        references=references,
-        needs_assistant=total == 0 and not borrowed,
-        suggested_question=question,
-        **_response_scope(scope),
-    )

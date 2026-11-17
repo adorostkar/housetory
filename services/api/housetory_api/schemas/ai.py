@@ -166,13 +166,6 @@ class AssistantHistoryMessage(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
-class AssistantRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=2000)
-    history: list[AssistantHistoryMessage] = Field(default_factory=list, max_length=20)
-    household_id: uuid.UUID | None = None
-    property_id: uuid.UUID | None = None
-
-
 class AssistantPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -237,75 +230,6 @@ class AiDocumentMetadata(BaseModel):
     serial_numbers: list[str] | None = Field(default=None, max_length=50)
     brand: str | None = Field(default=None, max_length=120)
     model: str | None = Field(default=None, max_length=120)
-
-
-class AiSearchPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    q: str | None = Field(default=None, max_length=400)
-    room_name: str | None = Field(default=None, max_length=200)
-    location_name: str | None = Field(default=None, max_length=200)
-    category_name: str | None = Field(default=None, max_length=120)
-    tag: str | None = Field(default=None, max_length=80)
-    missing_purchase: bool | None = None
-    missing_purchase_date: bool | None = None
-    missing_purchase_price: bool | None = None
-    purchase_info_status: PurchaseInfoFilter | None = None
-    missing_serial: bool | None = None
-    warranty_status: Literal["active", "expiring", "expired"] | None = None
-    purchased_after: date | None = None
-    purchased_before: date | None = None
-    min_purchase_cents: int | None = Field(default=None, ge=0, le=10**12)
-    max_purchase_cents: int | None = Field(default=None, ge=0, le=10**12)
-    sort: Literal["relevance", "purchase_desc", "purchase_asc", "name_asc"] | None = None
-
-
-class NaturalSearchRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=1000)
-    limit: int = Field(default=30, ge=1, le=100)
-    household_id: uuid.UUID | None = None
-    property_id: uuid.UUID | None = None
-
-
-class NaturalSearchResponse(BaseModel):
-    question: str
-    interpretation: str
-    filters: NaturalSearchFilters
-    items: list[ItemSummary]
-    borrowed: list[BorrowedOut] = Field(default_factory=list)
-    borrowed_total: int = 0
-    total: int
-    mode: Literal["deterministic", "ai"]
-    ai_available: bool
-    answer: str | None = None
-    answer_kind: str | None = None
-    tool: str | None = None
-    facts: dict[str, Any] = Field(default_factory=dict)
-    notices: list[str] = Field(default_factory=list)
-    references: list[AssistantReference] = Field(default_factory=list)
-    needs_assistant: bool = False
-    suggested_question: str | None = None
-    scope_label: str = "All my places"
-    households: list[SearchHousehold] = Field(default_factory=list)
-    property: SearchProperty | None = None
-
-
-class AssistantResponse(BaseModel):
-    answer: str
-    mode: Literal["deterministic", "ai"]
-    tool: str | None = None
-    filters: dict[str, Any] = Field(default_factory=dict)
-    items: list[ItemSummary] = Field(default_factory=list)
-    borrowed: list[BorrowedOut] = Field(default_factory=list)
-    documents: list[dict[str, Any]] = Field(default_factory=list)
-    locations: list[dict[str, Any]] = Field(default_factory=list)
-    references: list[AssistantReference] = Field(default_factory=list)
-    notices: list[str] = Field(default_factory=list)
-    facts: dict[str, Any] = Field(default_factory=dict)
-    ai_status: AiStatus
-    scope_label: str = "All my places"
-    households: list[SearchHousehold] = Field(default_factory=list)
-    property: SearchProperty | None = None
 
 
 class SearchContextItemRef(BaseModel):

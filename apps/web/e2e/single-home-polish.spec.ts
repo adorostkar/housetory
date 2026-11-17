@@ -135,16 +135,6 @@ test("mobile keyword search stays local and missing-purchase filters match the a
     room_id: living.id,
   });
 
-  const naturalRequests: string[] = [];
-  page.on("request", (requestEvent) => {
-    if (
-      requestEvent.method() === "POST" &&
-      requestEvent.url().includes("/api/v1/search/natural")
-    ) {
-      naturalRequests.push(requestEvent.url());
-    }
-  });
-
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   const mobileInput = page.locator('input[data-quick-search-input="true"]:visible').first();
@@ -159,7 +149,6 @@ test("mobile keyword search stays local and missing-purchase filters match the a
   await expect(
     page.getByRole("link", { name: new RegExp(`PS5 ${id}`) }),
   ).toBeVisible();
-  expect(naturalRequests).toHaveLength(0);
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(

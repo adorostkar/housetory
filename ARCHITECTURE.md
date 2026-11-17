@@ -146,12 +146,12 @@ All application endpoints are versioned under `/api/v1`.
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Insurance | `POST /insurance-valuations/scope-preview`, `POST/GET /insurance-valuations/batches/{request_id}`, cancel, `POST/GET /insurance-lists/{job_id}`, PDF/CSV downloads |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
-| Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/natural` is the explicit answer/filter flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
+| Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/query` is the explicit search and answer flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}` (recording, upload and transcription only; the transcript is handed to the assistant or Add items) |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
-| AI | `GET /ai/status?task=`, `POST /assistant/query` and `POST /search/natural` (compatibility endpoints with no caller in the web app; they share services with `POST /search/query`), recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
+| AI | `GET /ai/status?task=`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
 
 OpenAPI documentation is available in development at `/api/docs`. It is

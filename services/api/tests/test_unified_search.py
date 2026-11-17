@@ -153,7 +153,7 @@ def test_persian_drill_question_uses_configured_ai_with_or_without_punctuation(
 
     for question in ("دریل من کجاست؟", "دریل من کجاست"):
         body = query(owner_client, {"query": question})
-        assert body["mode"] == "ai"
+        assert body["ai_used"] is True
         assert body["ai_used"] is True
         assert body["items"][0]["id"] == drill["id"]
         assert "محسن" in (body["answer"] or "")
@@ -182,7 +182,7 @@ def test_explicit_ask_bypasses_a_confident_direct_match(owner_client, monkeypatc
 
     body = query(owner_client, {"query": "Monitor", "explicit_ask": True})
     assert calls["plan"] == 1
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert body["items"][0]["id"] == item["id"]
 
 
@@ -281,7 +281,7 @@ def test_four_turn_dialogue_uses_context_and_fresh_loan_facts(owner_client, monk
             "context": context,
         },
     )
-    assert second["mode"] == "ai"
+    assert second["ai_used"] is True
     assert second["ai_used"] is True
     loan_history = second["facts"]["loan_history"]
     assert {entry["borrower_name"] for entry in loan_history} == {"Mohsen", "Sam"}
@@ -303,7 +303,7 @@ def test_four_turn_dialogue_uses_context_and_fresh_loan_facts(owner_client, monk
             "context": second["context"],
         },
     )
-    assert third["mode"] == "ai"
+    assert third["ai_used"] is True
     names = {item["name"] for item in third["items"]}
     assert "Heavy drill" in names
     assert "Impact drill" in names
@@ -324,7 +324,7 @@ def test_four_turn_dialogue_uses_context_and_fresh_loan_facts(owner_client, monk
             "context": third["context"],
         },
     )
-    assert fourth["mode"] == "ai"
+    assert fourth["ai_used"] is True
     entries = fourth["facts"]["loan_history"]
     assert len(entries) == 1
     assert entries[0]["borrower_name"] == "Mohsen"
@@ -361,7 +361,7 @@ def test_multiple_mohsen_candidates_are_surfaced_not_guessed(owner_client, monke
         owner_client,
         {"query": "Check the one that Mohsen had and tell me how long he has had it."},
     )
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert body["ambiguous"] is True
     assert body["needs_clarification"] is True
     assert len(body["facts"]["loan_history"]) == 2
@@ -422,7 +422,7 @@ def test_all_places_ai_is_per_household_and_never_crosses_provider_boundaries(
     )
 
     body = query(owner_client, {"query": "دریل من کجاست؟"})
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert {item["id"] for item in body["items"]} == {first_item["id"], second_item["id"]}
     assert {provider_id for provider_id, _prompt in captured} == {
         first_provider,
@@ -458,7 +458,7 @@ def test_all_places_without_second_household_provider_does_not_fall_back(owner_c
     monkeypatch.setattr(ai_module, "complete_text", lambda *_a, **_k: "Answer.")
 
     body = query(owner_client, {"query": "دریل من کجاست؟"})
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert [provider_id for provider_id, _prompt in captured] == [first_provider]
     assert "دریل B beta" not in captured[0][1]
     # The unconfigured household still returns authorised deterministic direct
@@ -505,7 +505,7 @@ def test_property_scoped_ai_respects_the_property_boundary(owner_client, monkeyp
             "property_id": annex["id"],
         },
     )
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert [item["id"] for item in body["items"]] == [annex_item["id"]]
     assert body["property"]["id"] == annex["id"]
     assert captured[0][0] == provider_id
@@ -981,17 +981,19 @@ def test_legacy_multilingual_assistant_and_natural_routes_share_the_flow(owner_c
         "complete_text",
         lambda *_a, **_k: "دریل شما در کارگاه است.",
     )
-    assistant = owner_client.post("/api/v1/assistant/query", json={"question": "دریل من کجاست؟"})
+    assistant = owner_client.post(
+        "/api/v1/search/query", json={"query": "دریل من کجاست؟", "explicit_ask": True}
+    )
     assert assistant.status_code == 200, assistant.text
     assistant_body = assistant.json()
-    assert assistant_body["mode"] == "ai"
+    assert assistant_body["ai_used"] is True
     assert assistant_body["items"][0]["id"] == drill["id"]
     assert "دریل" in assistant_body["answer"]
 
-    natural = owner_client.post("/api/v1/search/natural", json={"question": "دریل من کجاست؟"})
+    natural = owner_client.post("/api/v1/search/query", json={"query": "دریل من کجاست؟"})
     assert natural.status_code == 200, natural.text
     natural_body = natural.json()
-    assert natural_body["mode"] == "ai"
+    assert natural_body["ai_used"] is True
     assert natural_body["items"][0]["id"] == drill["id"]
     assert natural_body["answer"] == "دریل شما در کارگاه است."
 
@@ -1089,7 +1091,7 @@ def test_provider_payloads_are_partitioned_by_household_and_property(owner_clien
             "context": context,
         },
     )
-    assert body["mode"] == "ai"
+    assert body["ai_used"] is True
     assert {provider_id for provider_id, _system, _user in plan_calls} == {
         first_provider,
         second_provider,
@@ -1198,7 +1200,7 @@ def test_provider_payloads_are_partitioned_by_household_and_property(owner_clien
             "context": property_context,
         },
     )
-    assert property_body["mode"] == "ai"
+    assert property_body["ai_used"] is True
     assert len(plan_calls) == 1
     assert len(answer_calls) == 1
     for _provider_id, system, user in [*plan_calls, *answer_calls]:
@@ -1288,7 +1290,7 @@ def test_mixed_scope_memory_preserves_prior_constraint_without_foreign_broadcast
         owner_client,
         {"query": "I need the corded drill, not the battery drill."},
     )
-    assert first["mode"] == "ai"
+    assert first["ai_used"] is True
     assert first["context"]["dialogue_memory"]
     history = [
         {"role": "user", "content": "I need the corded drill, not the battery drill."},
@@ -1304,7 +1306,7 @@ def test_mixed_scope_memory_preserves_prior_constraint_without_foreign_broadcast
             "context": first["context"],
         },
     )
-    assert followup["mode"] == "ai"
+    assert followup["ai_used"] is True
     assert {item["name"] for item in followup["items"]} == {
         "Corded drill",
         "B-only drill",
@@ -1384,7 +1386,7 @@ def test_property_scope_memory_preserves_constraint_and_redacts_other_property(
             "property_id": first_property["id"],
         },
     )
-    assert first["mode"] == "ai"
+    assert first["ai_used"] is True
     assert first["context"]["dialogue_memory"]
     turn["value"] = 2
     plan_calls.clear()
@@ -1403,7 +1405,7 @@ def test_property_scope_memory_preserves_constraint_and_redacts_other_property(
             "property_id": first_property["id"],
         },
     )
-    assert followup["mode"] == "ai"
+    assert followup["ai_used"] is True
     assert {item["name"] for item in followup["items"]} == {"Corded drill"}
     assert plan_calls
     for _provider_id, prompt in plan_calls:
@@ -1436,7 +1438,7 @@ def test_default_all_places_with_one_household_keeps_relevant_recent_dialogue(
         owner_client,
         {"query": "Look only at the corded drill and not the battery drill."},
     )
-    assert first["mode"] == "ai"
+    assert first["ai_used"] is True
     prompts.clear()
     query(
         owner_client,

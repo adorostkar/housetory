@@ -302,13 +302,13 @@ def test_cross_room_move_preserves_identity_contents_and_derived_views(owner_cli
     assert charger["container"] == "BOX-001"
 
     assistant = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "Where is the Camera Charger?"}
+        "/api/v1/search/query", json={"query": "Where is the Camera Charger?", "explicit_ask": True}
     ).json()
     assert assistant["items"][0]["room"]["name"] == "Attic"
     assert assistant["items"][0]["location"]["identifier"] == "BOX-001"
 
     container_answer = owner_client.post(
-        "/api/v1/assistant/query", json={"question": "What is in BOX-001?"}
+        "/api/v1/search/query", json={"query": "What is in BOX-001?", "explicit_ask": True}
     ).json()
     assert container_answer["tool"] == "get_container_contents"
     assert "USB-C Cable" in container_answer["answer"]
@@ -318,9 +318,8 @@ def test_cross_room_move_preserves_identity_contents_and_derived_views(owner_cli
     )
 
     smart = owner_client.post(
-        "/api/v1/search/natural", json={"question": "Find items in BOX-001"}
+        "/api/v1/search/query", json={"query": "Find items in BOX-001"}
     ).json()
-    assert smart["filters"]["location_id"] == box["id"]
     assert {entry["name"] for entry in smart["items"]} == {"Camera Charger", "USB-C Cable"}
 
 

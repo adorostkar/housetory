@@ -475,13 +475,12 @@ def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
     assert anon_client.get("/api/v1/exports/inventory.csv").status_code == 401
     assert (
         anon_client.post(
-            "/api/v1/assistant/query", json={"question": "Where is my camera?"}
+            "/api/v1/search/query", json={"query": "Where is my camera?", "explicit_ask": True}
         ).status_code
         == 401
     )
     assert (
-        anon_client.post("/api/v1/search/natural", json={"question": "Find cameras"}).status_code
-        == 401
+        anon_client.post("/api/v1/search/query", json={"query": "Find cameras"}).status_code == 401
     )
     assert (
         anon_client.post("/api/v1/imports", data={"text": "Camera in the attic"}).status_code == 401

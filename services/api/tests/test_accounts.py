@@ -111,9 +111,9 @@ def test_viewer_and_member_role_boundaries(owner_client, anon_client):
     )
     assert anon_client.get("/api/v1/ai/settings", headers=viewer).status_code == 403
     assistant = anon_client.post(
-        "/api/v1/assistant/query",
+        "/api/v1/search/query",
         headers=viewer,
-        json={"question": "What is in my home?"},
+        json={"query": "What is in my home?", "explicit_ask": True},
     )
     assert assistant.status_code != 403
 
