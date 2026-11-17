@@ -69,6 +69,11 @@ const aiStatus: AiStatus = {
     "Local inference is used. Household content stays on this host.",
 };
 
+const unconfiguredAiStatus: AiStatus = {
+  ...aiStatus, configured: false, available: false, model: null,
+  error: "Configure an Assistant model to use AI for typed requests.",
+};
+
 const item: ItemSummary = {
   id: "item-drill",
   name: "Heavy drill",
@@ -438,6 +443,12 @@ describe("AssistantPage", () => {
     "Review my inventory",
   ])("only searches typed text when no assistant model is configured: %s", async (text) => {
     const user = userEvent.setup();
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return unconfiguredAiStatus;
+    });
     renderPage("/assistant");
     const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
     await user.type(input, text);
@@ -451,6 +462,44 @@ describe("AssistantPage", () => {
     expect(vi.mocked(api.post).mock.calls.map(([path]) => path)).toEqual(["/search/query"]);
     expect(api.postForm).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Apply|Approve/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("note", { name: "Local search mode" })).toHaveTextContent(
+      "Local search mode. Typed actions need the AI assistant; use the item's buttons, or set up AI in Settings.",
+    );
+  });
+
+  it("shows the local-search-mode notice from configuration alone, before anything is typed", async () => {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return unconfiguredAiStatus;
+    });
+    renderPage("/assistant");
+    const notice = await screen.findByRole("note", { name: "Local search mode" });
+    expect(within(notice).getByRole("link", { name: "set up AI in Settings" })).toHaveAttribute(
+      "href", "/settings/ai",
+    );
+  });
+
+  it("uses the tool engine unchanged, with no notice, when the assistant model is configured", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createToolRun).mockReset().mockResolvedValue({
+      id: "run-configured", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Move the drill to the garage", state: "completed", generation: 1, steps: [],
+      message: "I prepared the move for your review.", model_calls: 1, max_model_calls: 8,
+      can_retry: false, worker_available: null,
+    });
+    renderPage("/assistant");
+    const input = await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.type(input, "Move the drill to the garage");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+
+    await waitFor(() => expect(createToolRun).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "Move the drill to the garage" }), expect.any(AbortSignal),
+    ));
+    expect(await screen.findByText("I prepared the move for your review.")).toBeVisible();
+    expect(api.post).not.toHaveBeenCalledWith("/search/query", expect.anything(), expect.anything());
+    expect(screen.queryByRole("note", { name: "Local search mode" })).not.toBeInTheDocument();
   });
 
   it("submits a header assistant request through the existing conversation service", async () => {

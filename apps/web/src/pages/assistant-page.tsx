@@ -440,6 +440,8 @@ export function AssistantPage({
   };
 
   const status = aiStatus.data;
+  // Shown from configuration alone, never from what was typed.
+  const localSearchMode = status ? !status.configured : false;
   const lastResponse = [...messages]
     .reverse()
     .find((message) => message.response)?.response;
@@ -949,6 +951,13 @@ export function AssistantPage({
             </div>
           )}
           <section className="surface bg-card/95 p-2.5 shadow-lg sm:p-3">
+            {localSearchMode && (
+              <p role="note" aria-label="Local search mode" className="mb-2 break-words text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Local search mode.</span>{" "}
+                Typed actions need the AI assistant; use the item&apos;s buttons, or{" "}
+                <Link className="underline" to="/settings/ai">set up AI in Settings</Link>.
+              </p>
+            )}
             <div className="max-h-[15dvh] overflow-y-auto">
             {multipleHouseholds && !selection.householdId && attachment && (
               <label className="mb-2 block text-xs text-muted-foreground">
