@@ -630,6 +630,18 @@ deployment.
   handoff. The dedicated Assistant keeps the conversation, shows provider/privacy
   details in a secondary disclosure and passes the prior turns for context.
   Filters and result counts remain server-derived and household-scoped.
+- Typed commands (move, lend, borrow, return, rename, set a field, start a
+  review) are understood only by the AI tool engine (`POST /assistant/runs`,
+  `services/assistant_tools` + `services/ai_tools`), which prepares reviewed
+  proposals through `/assistant/actions/proposals` (create, edit, apply, refresh,
+  cancel, pending; stale checks and idempotent apply). There is no AI intent
+  classifier and no phrase interpreter: `/assistant/actions/intent` and
+  `/assistant/actions/interpret` were removed. Without an Assistant model the
+  run is refused with `assistant_tools_unavailable`, the web app sends the text
+  to `POST /search/query` only and shows a persistent "Local search mode"
+  notice; a Search-only model does not enable typed commands. Those actions
+  stay available through the normal buttons and forms, and reviews start from
+  the Review page.
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
 - Sparse overviews collapse empty value/warranty sections while recent items, rooms

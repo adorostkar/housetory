@@ -1,5 +1,11 @@
 # Stage D: whole-journey validation and release assessment
 
+> **Superseded in part:** the action interpretation contract described below
+> (the model-based `_natural_action` planner, `/assistant/actions/intent` and the
+> offline phrase fallback in `/assistant/actions/interpret`) was removed. Typed
+> commands are now understood only by the AI tool engine; without an Assistant
+> model the input searches only. The tests named in that section no longer exist.
+
 **Recommendation: not ready for release approval.** The offline and synthetic
 checks below are encouraging, but a real configured provider, representative
 end-to-end latency percentiles, and physical mobile devices remain unverified.

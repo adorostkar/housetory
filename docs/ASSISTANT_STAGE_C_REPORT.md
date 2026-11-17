@@ -1,5 +1,14 @@
 # Stage C: reviewed inventory actions — review report
 
+> **Superseded:** the AI intent classifier (`/assistant/actions/intent`) and the
+> deterministic phrase interpreter (`/assistant/actions/interpret`) described in
+> this report were removed. Typed commands are now understood only by the AI
+> tool engine; without an Assistant model the input searches only ("local
+> search mode"). The reviewed-proposal machinery (create, edit, apply, refresh,
+> cancel, stale checks, idempotent apply) is unchanged. The "Intent routing" and
+> "Manual/offline" rows and the limitation about fallback patterns no longer
+> describe the product.
+
 Branch: `feature/integrated-assistant`, based on the Stage B correction
 `a658d0e`. This report records the supported journeys and their limits;
 it is not evidence of deployment or real-provider validation.

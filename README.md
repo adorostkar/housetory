@@ -314,7 +314,11 @@ Tailscale is optional.
   pages, results page and secondary Assistant. Typing shows cheap direct
   item/container/place matches; Enter submits one flow that resolves direct
   inventory first and automatically uses the configured consented assistant only
-  when interpretation or fallback matching is needed. Persian/Arabic question
+  when interpretation or fallback matching is needed. Typed actions (move, lend,
+  borrow, return, rename, set a field, start a review) need the AI assistant:
+  without an Assistant model the input runs in **local search mode**, which
+  searches and answers questions but does not interpret actions; use the
+  item's buttons and forms, or the Review page, instead. Persian/Arabic question
   marks, letter variants and ZWNJ are normalised without stripping scripts;
   plain multilingual questions need no punctuation. Answers are in the user's
   language, preserve original names/models/IDs and are grounded only in current
@@ -873,7 +877,8 @@ assumed. There is no automatic model download and no GPU requirement.
 Environment-based `AI_PROVIDER`/`AI_CLOUD_*` configuration remains available for
 bootstrap or administrator-managed deployments, but a database provider takes
 precedence. If no database provider exists, deterministic imports, search,
-recognition fallback and assistant answers continue to work. Ollama setup:
+recognition fallback and assistant answers continue to work; typed actions are
+not interpreted without an Assistant model. Ollama setup:
 `ollama serve`, `ollama pull <chosen model>`, then configure the endpoint in the
 UI (`http://host.docker.internal:11434` from Compose).
 
