@@ -118,6 +118,9 @@ def process_transcription(note_id: uuid.UUID | str) -> dict[str, Any] | None:
             VoiceNoteStatus.REVIEW.value,
         }:
             return {"voice_note_id": str(note.id), "skipped": True}
+        if note.status == VoiceNoteStatus.FAILED.value:
+            # A failed note is final; a repeated job must not transcribe leftover audio.
+            return {"voice_note_id": str(note.id), "skipped": True}
         if not note.audio_storage_key:
             note.status = VoiceNoteStatus.FAILED.value
             note.transcript_error = "The recording is no longer available. Record the note again."
@@ -153,25 +156,37 @@ def process_transcription(note_id: uuid.UUID | str) -> dict[str, Any] | None:
             note.transcript_model = config.model
             note.transcript_mode = config.mode
             note.transcript_error = None
+            db.commit()
+            logger.info("Voice note %s transcribed (%s characters)", note.id, len(text))
+            outcome = {"voice_note_id": str(note.id), "transcribed": True}
+        except Exception as exc:  # noqa: BLE001 - recorded on the note
+            db.rollback()
+            logger.warning("Voice note %s transcription failed (%s)", note_id, type(exc).__name__)
+            note = db.get(VoiceNote, note_id)
+            if note is None or note.status == VoiceNoteStatus.CANCELLED.value:
+                return {"voice_note_id": str(note_id), "failed": True}
+            note.status = VoiceNoteStatus.FAILED.value
+            note.transcript_error = _safe_transcription_error(exc)
+            db.commit()
+            outcome = {"voice_note_id": str(note_id), "failed": True}
+        # The outcome above is committed. Nothing can retry a finished note, so its
+        # audio is removed either way; a cleanup problem never changes the outcome.
+        _delete_audio(db, note_id, key)
+        return outcome
+
+
+def _delete_audio(db: Session, note_id: uuid.UUID | str, key: str) -> None:
+    """Remove a finished note's audio; on failure keep the key so the file stays traceable."""
+    try:
+        storage.delete_import_key(key)
+        note = db.get(VoiceNote, note_id)
+        if note is not None and note.audio_storage_key == key:
             note.audio_storage_key = None
             note.audio_deleted_at = _now()
             db.commit()
-            storage.delete_import_key(key)
-            logger.info("Voice note %s transcribed (%s characters)", note.id, len(text))
-            return {"voice_note_id": str(note.id), "transcribed": True}
-        except Exception as exc:  # noqa: BLE001 - persisted for retry
-            db.rollback()
-            note = db.get(VoiceNote, note_id)
-            if note is not None and note.status != VoiceNoteStatus.CANCELLED.value:
-                note.status = VoiceNoteStatus.FAILED.value
-                note.transcript_error = _safe_transcription_error(exc)
-                # Nothing can retry a failed note, so its audio is not kept.
-                note.audio_storage_key = None
-                note.audio_deleted_at = _now()
-                db.commit()
-                storage.delete_import_key(key)
-            logger.warning("Voice note %s transcription failed (%s)", note_id, type(exc).__name__)
-            return {"voice_note_id": str(note_id), "failed": True}
+    except Exception:  # noqa: BLE001 - cleanup must not affect the transcription result
+        db.rollback()
+        logger.exception("Voice note %s audio could not be deleted", note_id)
 
 
 def active_voice_note_count(db: Session, household_id: uuid.UUID) -> int:

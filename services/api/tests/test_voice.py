@@ -1,5 +1,7 @@
 import uuid
 
+import pytest
+
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
 from housetory_api.models import Household, HouseholdMember, User
@@ -105,6 +107,50 @@ def test_failed_transcription_deletes_audio_and_does_not_block_new_notes(
     assert failed["audio_retained"] is False
     assert list(imports_root.rglob("*.webm")) == []
     upload_voice(owner_client, monkeypatch)
+
+
+@pytest.mark.parametrize("transcription_fails", [False, True])
+def test_audio_cleanup_failure_does_not_change_the_transcription_outcome(
+    owner_client, monkeypatch, transcription_fails
+):
+    note = upload_voice(owner_client, monkeypatch)
+    calls = []
+
+    def transcribe(*_args, **_kwargs):
+        calls.append(1)
+        if transcription_fails:
+            raise voice_service.ai.AiUnavailable("The transcription provider is unreachable.")
+        return "Box two has three ethernet cables."
+
+    def broken_delete(_key):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(voice_service.transcription, "transcribe_audio", transcribe)
+    monkeypatch.setattr(voice_service.storage, "delete_import_key", broken_delete)
+
+    # The job returns normally, so the worker records success and does not retry it.
+    result = voice_service.process_transcription(note["id"])
+    assert result == {
+        "voice_note_id": note["id"],
+        ("failed" if transcription_fails else "transcribed"): True,
+    }
+    stored = owner_client.get(f"/api/v1/voice/{note['id']}").json()
+    if transcription_fails:
+        assert stored["status"] == "failed"
+        assert stored["transcript_error"] == "The transcription provider is unreachable."
+        assert stored["transcript"] is None
+    else:
+        assert stored["status"] == "transcribed"
+        assert stored["transcript"] == "Box two has three ethernet cables."
+        assert stored["transcript_error"] is None
+    # The file is still there, and the note says so instead of losing track of it.
+    assert stored["audio_retained"] is True
+
+    # A repeated job neither transcribes again nor changes the outcome.
+    assert voice_service.process_transcription(note["id"])["skipped"] is True
+    assert len(calls) == 1
+    again = owner_client.get(f"/api/v1/voice/{note['id']}").json()
+    assert (again["status"], again["transcript"]) == (stored["status"], stored["transcript"])
 
 
 def test_interpretation_and_confirmation_routes_are_gone(owner_client, monkeypatch):
