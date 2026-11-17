@@ -8,7 +8,6 @@ from ...db import get_db
 from ...schemas.ai import SearchQueryRequest, SearchQueryResponse
 from ...schemas.search import (
     QuickSearchResponse,
-    SearchItemList,
     SearchScopeList,
 )
 from ...services import global_search, unified_search
@@ -89,36 +88,3 @@ def quick_search(
         property=global_search.scope_property(scope.property),
         notices=notices,
     )
-
-
-@router.get("/items", response_model=SearchItemList)
-def search_items(
-    q: Annotated[str | None, Query(max_length=200)] = None,
-    household_id: uuid.UUID | None = None,
-    property_id: uuid.UUID | None = None,
-    sort: Annotated[
-        str,
-        Query(pattern="^(relevance|name_asc|name_desc|created_desc|created_asc|updated_desc)$"),
-    ] = "relevance",
-    limit: Annotated[int, Query(ge=1, le=100)] = 30,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    account: AccountContext = Depends(require_account),
-    db: Session = Depends(get_db),
-) -> SearchItemList:
-    enforce_search_limit(account.user.id)
-    scope = global_search.resolve_search_scope(
-        db,
-        account.user.id,
-        household_id=household_id,
-        property_id=property_id,
-    )
-    result, _notices = global_search.search_items(
-        db,
-        scope,
-        q=q,
-        include_archived=False,
-        sort=sort,
-        limit=limit,
-        offset=offset,
-    )
-    return result

@@ -4,9 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .borrowed import BorrowedOut
-from .items import ItemSummary
-
 
 class SearchHousehold(BaseModel):
     id: uuid.UUID
@@ -56,25 +53,11 @@ class QuickSearchResponse(BaseModel):
     notices: list[str] = Field(default_factory=list)
 
 
-class SearchItemList(BaseModel):
-    items: list[ItemSummary]
-    total: int
-    limit: int
-    offset: int
-    borrowed: list[BorrowedOut] = Field(default_factory=list)
-    borrowed_total: int = 0
-    scope_label: str = "All my places"
-    households: list[SearchHousehold] = Field(default_factory=list)
-    property: SearchProperty | None = None
-    notices: list[str] = Field(default_factory=list)
-
-
 __all__ = [
     "QuickSearchLoan",
     "QuickSearchResponse",
     "QuickSearchResult",
     "SearchHousehold",
-    "SearchItemList",
     "SearchProperty",
     "SearchScopeHousehold",
     "SearchScopeList",

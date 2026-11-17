@@ -141,7 +141,6 @@ def require_writer(auth: AuthContext = Depends(require_auth)) -> AuthContext:
 
 
 READ_ONLY_POST_SUFFIXES = (
-    "/search/items",
     "/manual-questions",
     "/manual-questions/online",
 )

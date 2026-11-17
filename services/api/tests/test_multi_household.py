@@ -313,8 +313,9 @@ def test_all_my_places_search_returns_authorised_households_with_full_labels(
     assert [entry["id"] for entry in scoped["results"]] == [second_item["id"]]
     assert scoped["scope_label"] == "Cabin"
 
-    items = owner_client.get("/api/v1/search/items?q=Cordless%20drill").json()
+    items = owner_client.post("/api/v1/search/query", json={"query": "Cordless drill"}).json()
     assert items["total"] == 2
+    assert items["scope_label"] == "All my places"
     assert {item["household"]["name"] for item in items["items"]} == {
         "Ada's Home",
         "Cabin",
@@ -323,11 +324,11 @@ def test_all_my_places_search_returns_authorised_households_with_full_labels(
         "Home",
         "Cabin property",
     }
-    page_one = owner_client.get("/api/v1/search/items?q=Cordless%20drill&limit=1&offset=0").json()
-    page_two = owner_client.get("/api/v1/search/items?q=Cordless%20drill&limit=1&offset=1").json()
-    assert page_one["total"] == 2 and page_two["total"] == 2
-    assert page_one["items"] and page_two["items"]
-    assert page_one["items"][0]["id"] != page_two["items"][0]["id"]
+    one_home = owner_client.post(
+        "/api/v1/search/query", json={"query": "Cordless drill", "household_id": str(second_id)}
+    ).json()
+    assert [item["id"] for item in one_home["items"]] == [second_item["id"]]
+    assert one_home["scope_label"] == "Cabin"
 
     stranger_headers, _stranger, stranger_households = add_membership(
         email="stranger-search@example.com",
@@ -340,12 +341,16 @@ def test_all_my_places_search_returns_authorised_households_with_full_labels(
         == 404
     )
     assert (
-        owner_client.get(f"/api/v1/search/items?q=Cordless&household_id={uuid.uuid4()}").status_code
+        owner_client.post(
+            "/api/v1/search/query",
+            json={"query": "Cordless", "household_id": str(uuid.uuid4())},
+        ).status_code
         == 404
     )
     assert (
-        anon_client.get(
-            f"/api/v1/search/items?q=Cordless&household_id={first_id}",
+        anon_client.post(
+            "/api/v1/search/query",
+            json={"query": "Cordless", "household_id": str(first_id)},
             headers=stranger_headers,
         ).status_code
         == 404

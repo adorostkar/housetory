@@ -52,7 +52,7 @@ def test_search_reports_exact_owned_total_and_separate_borrowed_records(owner_cl
         due_on=None,
     )
 
-    searched = owner_client.get("/api/v1/search/items", params={"q": "Cable", "limit": 50})
+    searched = owner_client.post("/api/v1/search/query", json={"query": "Cable", "limit": 50})
     assert searched.status_code == 200, searched.text
     body = searched.json()
     assert body["total"] == 51

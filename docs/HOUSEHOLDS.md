@@ -107,9 +107,9 @@ household/property choice in local storage and the URL.
 - Keyword search works without AI. Results include the household, property, room
   and place path. Same item or room names in different households are distinct
   results, not merged.
-- `GET /search/items` paginates across all authorized households. Totals are the
-  sum of authorized household totals. The search window is bounded, and
-  per-household queries use joins rather than per-row N+1 lookups.
+- `POST /search/query` searches across all authorized households. The search
+  window is bounded, and per-household queries use joins rather than per-row
+  N+1 lookups.
 - `GET /search/quick` powers the compact search panel and returns the same
   household labels and loan context.
 - Search is rate-limited per account in-process (300 requests per minute for this

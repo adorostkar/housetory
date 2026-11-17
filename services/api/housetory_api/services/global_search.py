@@ -21,19 +21,16 @@ from ..models import (
     StorageLocation,
     Tag,
 )
-from ..schemas.ai import NaturalSearchFilters
 from ..schemas.search import (
     QuickSearchLoan,
     QuickSearchResult,
     SearchHousehold,
-    SearchItemList,
     SearchProperty,
     SearchScopeHousehold,
     SearchScopeList,
 )
 from . import auth as auth_service
 from . import borrowed as borrowed_service
-from .ai_tools import _summaries_with_paths, search_inventory
 from .ai_tools.references import _borrowed_place, _location_display
 from .container_serializers import location_path_map
 from .hierarchy import descendant_ids
@@ -635,87 +632,5 @@ def quick_search(
             *containers[:limit],
             *locations[:limit],
         ],
-        scope.notices,
-    )
-
-
-def _sort_summaries(items: list[Any], sort: str) -> list[Any]:
-    if sort == "name_asc":
-        return sorted(items, key=lambda item: item.name.lower())
-    if sort == "name_desc":
-        return sorted(items, key=lambda item: item.name.lower(), reverse=True)
-    if sort == "created_asc":
-        return sorted(items, key=lambda item: item.created_at)
-    if sort == "created_desc":
-        return sorted(items, key=lambda item: item.created_at, reverse=True)
-    return sorted(items, key=lambda item: item.updated_at, reverse=True)
-
-
-def search_items(
-    db: Session,
-    scope: SearchScope,
-    *,
-    q: str | None,
-    include_archived: bool,
-    sort: str,
-    limit: int,
-    offset: int,
-) -> tuple[SearchItemList, list[str]]:
-    if offset + limit > MAX_SEARCH_WINDOW:
-        raise ApiError(
-            422,
-            "search_window_too_large",
-            f"Search pagination is limited to the first {MAX_SEARCH_WINDOW} results. "
-            "Narrow the scope or query.",
-        )
-    summaries: list[Any] = []
-    borrowed: list[Any] = []
-    total = 0
-    borrowed_total = 0
-    for household, _role in scope.households:
-        filters = NaturalSearchFilters(
-            q=(q or "").strip() or None,
-            property_id=scope.property.id if scope.property is not None else None,
-            sort="name_asc" if sort.startswith("name") else "relevance",
-        )
-        items, household_total = search_inventory(
-            db,
-            household.id,
-            filters,
-            household_reminder_days=household.warranty_reminder_days,
-            limit=offset + limit,
-        )
-        total += household_total
-        summaries.extend(
-            _summaries_with_paths(
-                db,
-                household.id,
-                items,
-                household_reminder_days=household.warranty_reminder_days,
-            )
-        )
-        borrowed_rows, household_borrowed_total = borrowed_service.quick_search_records(
-            db,
-            household.id,
-            q=(q or "").strip(),
-            limit=limit if offset == 0 else 1,
-            property_id=scope.property.id if scope.property is not None else None,
-        )
-        if offset == 0:
-            borrowed.extend(borrowed_rows)
-        borrowed_total += household_borrowed_total
-    ordered = _sort_summaries(summaries, sort)
-    return (
-        SearchItemList(
-            items=ordered[offset : offset + limit],
-            total=total,
-            limit=limit,
-            offset=offset,
-            borrowed=borrowed[:limit],
-            borrowed_total=borrowed_total,
-            scope_label=scope.label,
-            households=scope_households(scope),
-            property=scope_property(scope.property),
-        ),
         scope.notices,
     )
