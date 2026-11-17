@@ -205,7 +205,7 @@ export function useItemLoans(itemId: string | undefined, enabled = true) {
 
 export function useItemLoanOptions(itemId: string | undefined, enabled = true) {
   return useQuery({
-    queryKey: ["items", itemId ?? "", "loan-options"],
+    queryKey: queryKeys.itemLoanOptions(itemId ?? ""),
     queryFn: () =>
       api.get<LoanOptions>(
         `/items/${itemId}/loan-options${buildQuery({ on_date: localDateISO() })}`,
@@ -628,9 +628,10 @@ const inventoryResources = [
   "overview", "rooms", "properties", "locations", "items", "item", "categories",
   "tags", "documents", "document", "purchases", "purchase", "warranties",
   "financial", "imports", "recognitions", "containers", "stocktake", "inventory-review",
+  "loans", "borrowed", "photos", "search",
 ] as const;
 
-export type InventoryResource = typeof inventoryResources[number] | "loans" | "borrowed";
+export type InventoryResource = typeof inventoryResources[number];
 
 export function useInvalidateInventory(
   resources: readonly InventoryResource[] = inventoryResources,

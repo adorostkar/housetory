@@ -23,13 +23,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
-import { queryKeys, useBorrowedRecord, useCanWrite } from "@/lib/queries";
+import { useBorrowedRecord, useCanWrite } from "@/lib/queries";
 import {
   borrowedLocationHeading,
   borrowedPlaceLabel,
   borrowedWhereLabel,
 } from "@/lib/borrowed";
 import { formatDate } from "@/lib/utils";
+import { onLoansChanged } from "@/lib/cache-refresh";
 
 export function BorrowedDetailPage() {
   const { borrowedId = "" } = useParams();
@@ -49,8 +50,7 @@ export function BorrowedDetailPage() {
 
   const refresh = () => {
     void recordQuery.refetch();
-    void queryClient.invalidateQueries({ queryKey: queryKeys.borrowed });
-    void queryClient.invalidateQueries({ queryKey: ["loans"] });
+    onLoansChanged(queryClient);
   };
 
   if (recordQuery.isPending) return <BorrowedDetailSkeleton />;

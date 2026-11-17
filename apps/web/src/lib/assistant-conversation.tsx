@@ -17,6 +17,7 @@ import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
 import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
 import { actionMessage, createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
+import { queryKeys } from "@/lib/query-keys";
 
 export interface AssistantMessage {
   role: "user" | "assistant";
@@ -247,7 +248,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     (message) => message.toolRun && ["queued", "running"].includes(message.toolRun.state),
   ));
   const toolRuns = useQuery({
-    queryKey: ["assistant-runs", selection?.householdId, selection?.propertyId],
+    queryKey: queryKeys.assistantRuns(selection?.householdId, selection?.propertyId),
     queryFn: () => {
       const params = new URLSearchParams();
       if (selection?.householdId) params.set("household_id", selection.householdId);
@@ -355,7 +356,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   }, [update]);
 
   const pendingActionsChanged = React.useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["assistant-pending-actions"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.pendingActionsAll });
   }, [queryClient]);
 
   const recordCapture = React.useCallback((
@@ -721,7 +722,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
           draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
         };
       });
-      void queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
     }).catch((error: unknown) => {
       if (error instanceof ApiError && error.code === "assistant_tools_unavailable") {
         return runLegacy();

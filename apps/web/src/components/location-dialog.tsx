@@ -77,7 +77,7 @@ export function LocationDialog({
         ? api.patch<StorageLocation>(`/storage-locations/${location.id}`, payload)
         : api.post<StorageLocation>("/storage-locations", payload),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
       toast.success(location ? "Location updated" : "Location added");

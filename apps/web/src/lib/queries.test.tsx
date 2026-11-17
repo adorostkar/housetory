@@ -77,6 +77,18 @@ describe("inventory requests", () => {
     hook.unmount();
     client.clear();
   });
+
+  it("includes loans, borrowed records, photos and search in the full inventory refresh", () => {
+    const { client, wrapper } = setup();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const hook = renderHook(() => useInvalidateInventory(), { wrapper });
+    act(() => hook.result.current());
+    expect(invalidate.mock.calls.map(([options]) => options?.queryKey)).toEqual(
+      expect.arrayContaining([["loans"], ["borrowed"], ["photos"], ["search"], ["rooms"], ["locations"]]),
+    );
+    hook.unmount();
+    client.clear();
+  });
 });
 
 describe("app-wide status polling", () => {

@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useItems, useLocations, useRooms } from "@/lib/queries";
 import { flattenLocations, flattenRoomTree, itemContainer, locationLabel } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 function newRequestId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -120,7 +121,7 @@ export function StocktakeUnexpectedDialog({
         notes: notes.trim() || null,
       });
       requestId.current = newRequestId();
-      await queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
       toast.success("Unexpected finding saved");
       onSaved();
       onOpenChange(false);

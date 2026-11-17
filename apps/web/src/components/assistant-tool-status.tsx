@@ -10,6 +10,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { assistantAnswerText, startedReview, type AssistantToolRun } from "@/lib/assistant-tools";
 import { withHousehold } from "@/lib/household-links";
 import { useSelectHousehold, useSession } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-keys";
 
 export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const queryClient = useQueryClient();
@@ -29,7 +30,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
     setBusy(true);
     try {
       await api.post(`/assistant/runs/${run.id}/${action}`, {});
-      await queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
     } catch (error) {
       toast.error(getApiErrorMessage(error));
     } finally {

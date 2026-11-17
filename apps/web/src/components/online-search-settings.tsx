@@ -79,7 +79,7 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
     void queryClient.invalidateQueries({ queryKey: queryKeys.onlineSearchSettings });
     void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatus });
     void queryClient.invalidateQueries({ queryKey: queryKeys.systemStatusSummary });
-    void queryClient.invalidateQueries({ queryKey: ["items"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.items });
   };
 
   const save = useMutation({

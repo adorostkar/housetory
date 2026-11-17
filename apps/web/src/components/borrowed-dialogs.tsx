@@ -170,7 +170,7 @@ export function BorrowRecordDialog({
       }
     },
     onSuccess: (record) => {
-      invalidateBorrowed(client, record.id);
+      invalidateBorrowed(client);
       toast.success(
         `Recorded ${record.quantity} × ${record.item_name} borrowed from ${record.owner_name}`,
       );
@@ -357,7 +357,7 @@ export function ReturnBorrowedDialog({
         request_id: requestId,
       }),
     onSuccess: (updated) => {
-      invalidateBorrowed(client, updated.id);
+      invalidateBorrowed(client);
       toast.success(
         updated.outstanding_quantity === 0
           ? `Returned everything to ${updated.owner_name}`
@@ -511,7 +511,7 @@ export function CorrectBorrowedDialog({
         request_id: requestId,
       }),
     onSuccess: (updated) => {
-      invalidateBorrowed(client, updated.id);
+      invalidateBorrowed(client);
       toast.success("Borrowed record corrected and added to history");
       onCorrected?.(updated);
       onOpenChange(false);
@@ -654,7 +654,7 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
       return api.postForm<BorrowedDetail>(`/borrowed/${record.id}/photo`, form);
     },
     onSuccess: () => {
-      invalidateBorrowed(client, record.id);
+      invalidateBorrowed(client);
       toast.success("Borrowed-item photo saved privately");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
@@ -663,7 +663,7 @@ export function BorrowedPhotoPanel({ record }: { record: BorrowedRecord }) {
   const remove = useMutation({
     mutationFn: () => api.delete<BorrowedDetail>(`/borrowed/${record.id}/photo`),
     onSuccess: () => {
-      invalidateBorrowed(client, record.id);
+      invalidateBorrowed(client);
       toast.success("Borrowed-item photo removed");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
@@ -780,7 +780,7 @@ export function CancelBorrowedDialog({
         request_id: requestId,
       }),
     onSuccess: (updated) => {
-      invalidateBorrowed(client, updated.id);
+      invalidateBorrowed(client);
       toast.success("Borrowed record cancelled");
       onCancelled?.(updated);
       onOpenChange(false);

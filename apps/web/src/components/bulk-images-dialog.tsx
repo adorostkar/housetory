@@ -60,7 +60,7 @@ export function BulkImagesDialog({
   }, [open]);
 
   const previewQuery = useQuery({
-    queryKey: ["items", "images", "batch-preview", itemIds, action],
+    queryKey: queryKeys.itemImageBatchPreview(itemIds, action),
     queryFn: () =>
       api.post<ItemImageBatchPreview>("/items/images/batch/preview", {
         item_ids: itemIds,
@@ -87,7 +87,7 @@ export function BulkImagesDialog({
   });
 
   const jobQuery = useQuery({
-    queryKey: ["items", "images", "batch-job", job?.job_id ?? ""],
+    queryKey: queryKeys.itemImageBatchJob(job?.job_id ?? ""),
     queryFn: () => api.get<ItemImageBatchJob>(`/items/images/batch/${job?.job_id}`),
     enabled: Boolean(job && !terminal(job.status)),
     refetchInterval: (query) => {
@@ -103,7 +103,7 @@ export function BulkImagesDialog({
     if (!currentStatus || !terminal(currentStatus)) return;
     invalidateRef.current();
     void queryClient.invalidateQueries({ queryKey: queryKeys.items });
-    void queryClient.invalidateQueries({ queryKey: ["item"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.itemAll });
   }, [currentStatus, queryClient]);
 
   const cancel = useMutation({

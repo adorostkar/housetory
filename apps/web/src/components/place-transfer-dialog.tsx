@@ -25,7 +25,6 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
-  useInvalidateInventory,
   useLocations,
   usePlaceTransferPreview,
   useRooms,
@@ -39,6 +38,7 @@ import {
   roomDescendantsWithDepth,
   roomPath,
 } from "@/lib/utils";
+import { onItemsMoved } from "@/lib/cache-refresh";
 
 export interface PlaceTransferSource {
   kind: "location" | "room";
@@ -88,7 +88,6 @@ export function PlaceTransferDialog({
 }) {
   const roomsQuery = useRooms();
   const locationsQuery = useLocations();
-  const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const [destinationRoomId, setDestinationRoomId] = React.useState("");
   const [destinationLocationId, setDestinationLocationId] = React.useState("");
@@ -153,8 +152,7 @@ export function PlaceTransferDialog({
       );
     },
     onSuccess: (result) => {
-      invalidate();
-      void queryClient.invalidateQueries({ queryKey: ["place-transfer-preview"] });
+      onItemsMoved(queryClient);
       toast.success(
         result.deleted
           ? `Moved ${pluralize(result.total_items_preserved, "item")} and deleted ${result.source_label}`

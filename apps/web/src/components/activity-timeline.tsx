@@ -17,13 +17,13 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { queryKeys } from "@/lib/queries";
 import type {
   ActivityEvent,
   RestoreAssistedUndo,
   UndoResult,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { onUndo } from "@/lib/cache-refresh";
 
 const UNDOABLE_ACTIONS = new Set([
   "item.moved",
@@ -169,12 +169,7 @@ export function ActivityTimeline({
         request_id: undoTarget?.requestId,
       }),
     onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.loans });
-      void queryClient.invalidateQueries({ queryKey: ["items"] });
-      void queryClient.invalidateQueries({ queryKey: ["item"] });
-      void queryClient.invalidateQueries({ queryKey: ["containers"] });
-      void queryClient.invalidateQueries({ queryKey: ["container"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      onUndo(queryClient);
       onChanged?.();
       toast.success(result.message);
       setUndoTarget(null);
@@ -188,12 +183,7 @@ export function ActivityTimeline({
         { request_id: restoreTarget?.requestId },
       ),
     onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.loans });
-      void queryClient.invalidateQueries({ queryKey: ["items"] });
-      void queryClient.invalidateQueries({ queryKey: ["item"] });
-      void queryClient.invalidateQueries({ queryKey: ["containers"] });
-      void queryClient.invalidateQueries({ queryKey: ["container"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
+      onUndo(queryClient);
       onChanged?.();
       toast.success(result.message);
       setRestoreTarget(null);

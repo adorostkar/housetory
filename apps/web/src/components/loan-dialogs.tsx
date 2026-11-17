@@ -21,6 +21,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useItemLoanOptions } from "@/lib/queries";
 import type { Loan, LoanDetail } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
+import { onLoansChanged } from "@/lib/cache-refresh";
 
 function useRequestId(open: boolean) {
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
@@ -31,14 +32,9 @@ function useRequestId(open: boolean) {
 }
 
 function invalidateLoans(client: ReturnType<typeof useQueryClient>, itemId?: string | null) {
-  void client.invalidateQueries({ queryKey: ["loans"] });
-  void client.invalidateQueries({ queryKey: ["items"] });
-  void client.invalidateQueries({ queryKey: ["item"] });
-  if (itemId) {
-    void client.invalidateQueries({ queryKey: queryKeys.itemLoans(itemId) });
-    void client.invalidateQueries({ queryKey: ["items", itemId, "loan-options"] });
-  }
-  void client.invalidateQueries({ queryKey: queryKeys.overview });
+  onLoansChanged(client);
+  // Loan options are kept fresh for a minute; drop them at once for this item.
+  if (itemId) void client.invalidateQueries({ queryKey: queryKeys.itemLoanOptions(itemId) });
 }
 
 export function LendLoanDialog({

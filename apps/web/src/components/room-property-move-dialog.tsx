@@ -17,9 +17,10 @@ import {
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { queryKeys, useInvalidateInventory, useProperties } from "@/lib/queries";
+import { queryKeys, useProperties } from "@/lib/queries";
 import type { Room, RoomPropertyMoveResponse } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
+import { onItemsMoved } from "@/lib/cache-refresh";
 
 function newRequestId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -37,7 +38,6 @@ export function RoomPropertyMoveDialog({
   room: Room;
 }) {
   const propertiesQuery = useProperties();
-  const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
   const properties = propertiesQuery.data?.items ?? [];
   const destinationOptions = properties.filter(
@@ -58,7 +58,7 @@ export function RoomPropertyMoveDialog({
   }, [open, room.id]);
 
   const previewQuery = useQuery({
-    queryKey: ["rooms", room.id, "property-move", destinationId],
+    queryKey: queryKeys.roomPropertyMovePreview(room.id, destinationId),
     queryFn: () =>
       api.get<RoomPropertyMoveResponse["preview"]>(
         `/rooms/${room.id}/property-move/preview?property_id=${destinationId}`,
@@ -77,9 +77,7 @@ export function RoomPropertyMoveDialog({
         request_id: requestId.current,
       }),
     onSuccess: () => {
-      invalidate();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.properties });
-      void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+      onItemsMoved(queryClient);
       toast.success("Room subtree moved to the selected property");
       onOpenChange(false);
     },

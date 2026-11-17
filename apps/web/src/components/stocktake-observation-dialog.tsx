@@ -23,6 +23,7 @@ import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import { useRooms, useLocations } from "@/lib/queries";
 import type { StocktakeItem, StocktakeObservationStatus } from "@/lib/types";
 import { flattenLocations, flattenRoomTree, pluralize } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 export type ItemObservationStatus = Exclude<StocktakeObservationStatus, "unexpected">;
 
@@ -139,7 +140,7 @@ export function StocktakeObservationDialog({
         expected_on_loan_quantity: onLoan,
       });
       requestId.current = newRequestId();
-      await queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
       toast.success(`${row.item_name}: ${ACTION_LABELS[status].toLowerCase()} saved`);
       onSaved();
       onOpenChange(false);

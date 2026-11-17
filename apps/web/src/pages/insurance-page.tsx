@@ -27,6 +27,7 @@ import type {
   ItemValuationPreview,
 } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 type ScopeType = "household" | "property" | "room" | "container" | "items";
 type DraftValue = {
@@ -125,7 +126,7 @@ export function InsurancePage() {
     ? ["completed", "partial", "cancelled"].includes(batch.status)
     : true;
   const batchQuery = useQuery({
-    queryKey: ["insurance-batch", batch?.request_id],
+    queryKey: queryKeys.insuranceBatch(batch?.request_id),
     queryFn: () =>
       api.get<InsuranceBatch>(`/insurance-valuations/batches/${batch!.request_id}`),
     enabled: Boolean(batch?.request_id) && !batchTerminal,
@@ -158,7 +159,7 @@ export function InsurancePage() {
   }, [batch]);
 
   const listQuery = useQuery({
-    queryKey: ["insurance-list", list?.id],
+    queryKey: queryKeys.insuranceList(list?.id),
     queryFn: () => api.get<InsuranceJob>(`/insurance-lists/${list!.id}`),
     enabled: Boolean(list?.id) && list?.status !== "succeeded" && list?.status !== "failed" && list?.status !== "cancelled",
     refetchInterval: 1000,

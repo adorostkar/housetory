@@ -22,6 +22,7 @@ import { appendOrigin, itemOrigin, rememberListScroll } from "@/lib/navigation";
 import type { ItemList, ItemSummary, ReviewSuggestion } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
 import { STATUS_VARIANTS, TYPE_LABELS } from "@/pages/review-page-helpers";
+import { queryKeys } from "@/lib/query-keys";
 
 export function SuggestionStatusBadge({ suggestion }: { suggestion: ReviewSuggestion }) {
   return (
@@ -127,7 +128,7 @@ export function ItemPickerDialog({
   const debounced = useDebouncedValue(search, 250);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const query = useQuery({
-    queryKey: ["inventory-review", "picker", debounced],
+    queryKey: queryKeys.reviewPicker(debounced),
     queryFn: () => {
       const params = new URLSearchParams({ limit: "100", sort: "name_asc" });
       if (debounced.trim()) params.set("q", debounced.trim());

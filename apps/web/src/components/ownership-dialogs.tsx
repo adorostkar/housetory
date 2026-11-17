@@ -79,7 +79,7 @@ export function ItemStorageDialog({
       }),
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.item(item.id) });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
       invalidate();
       toast.success(
@@ -226,7 +226,7 @@ export function ContainerOwnershipDialog({
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.container(container.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       invalidate();
       toast.success("Ownership details added to the storage place");
       const ownerId = updated.owner_item?.id;

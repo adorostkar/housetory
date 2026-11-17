@@ -32,6 +32,7 @@ import {
   CONTAINER_TYPE_LABELS,
   flattenLocations,
 } from "@/lib/utils";
+import { onItemsMoved } from "@/lib/cache-refresh";
 
 const CONTAINER_TYPES: ContainerType[] = ["box", "bin", "crate", "suitcase", "bag", "other"];
 
@@ -97,8 +98,8 @@ export function ContainerCreateDialog({
     },
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-      void queryClient.invalidateQueries({ queryKey: ["containers"] });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
       void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
       toast.success(
@@ -272,12 +273,7 @@ export function ContainerMoveDialog({
         parent_id: parentId || null,
       }),
     onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.container(container.id) });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.overview });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.items });
+      onItemsMoved(queryClient);
       toast.success(`${container.identifier ?? container.name} moved`);
       onMoved?.(updated);
       onOpenChange(false);

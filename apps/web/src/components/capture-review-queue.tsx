@@ -7,6 +7,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { useAssistantDocuments } from "@/lib/assistant-documents";
 import * as React from "react";
 import { PENDING_ACTIONS_PAGE, useCanWrite, useCaptureReviews, usePendingActions } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-keys";
 
 const ACTION_LABELS: Record<string, string> = {
   edit_item: "Edit", move_items: "Move", lend: "Lend", borrow: "Borrow",
@@ -60,8 +61,8 @@ function PreparedActions() {
                 onClick={() => void api.post(`/assistant/actions/proposals/${action.id}/cancel`)
                   .then(() => {
                     toast.success("Prepared action cancelled. Nothing was changed.");
-                    void queryClient.invalidateQueries({ queryKey: ["assistant-pending-actions"] });
-                    void queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.pendingActionsAll });
+                    void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
                   })
                   .catch((error: unknown) => toast.error(getApiErrorMessage(error)))}>Cancel</Button>
             </div>

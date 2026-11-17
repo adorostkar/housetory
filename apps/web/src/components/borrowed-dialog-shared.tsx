@@ -3,8 +3,9 @@ import * as React from "react";
 
 import { Field } from "@/components/form-field";
 import { Select } from "@/components/ui/select";
-import { queryKeys, useLocations, useProperties, useRooms } from "@/lib/queries";
+import { useLocations, useProperties, useRooms } from "@/lib/queries";
 import type { BorrowedRecord } from "@/lib/types";
+import { onLoansChanged } from "@/lib/cache-refresh";
 
 export function useRequestId(open: boolean) {
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
@@ -14,16 +15,8 @@ export function useRequestId(open: boolean) {
   return requestId;
 }
 
-export function invalidateBorrowed(
-  client: ReturnType<typeof useQueryClient>,
-  recordId?: string,
-) {
-  void client.invalidateQueries({ queryKey: queryKeys.borrowed });
-  void client.invalidateQueries({ queryKey: ["loans"] });
-  void client.invalidateQueries({ queryKey: ["search"] });
-  if (recordId) {
-    void client.invalidateQueries({ queryKey: queryKeys.borrowedRecord(recordId) });
-  }
+export function invalidateBorrowed(client: ReturnType<typeof useQueryClient>) {
+  onLoansChanged(client);
 }
 
 export function KeepingPlaceFields({

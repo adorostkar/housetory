@@ -43,6 +43,7 @@ import type {
   StocktakeSession,
 } from "@/lib/types";
 import { cn, formatDate, pluralize } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 const STATUS_LABELS: Record<StocktakeObservationStatus, string> = {
   present: "Present",
@@ -120,11 +121,11 @@ export function StocktakePage() {
   const session = query.data;
   const back = session ? sessionBack(session) : { to: "/items", label: "Back to items" };
   const refresh = React.useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
-    void queryClient.invalidateQueries({ queryKey: ["items"] });
-    void queryClient.invalidateQueries({ queryKey: ["item"] });
-    void queryClient.invalidateQueries({ queryKey: ["rooms"] });
-    void queryClient.invalidateQueries({ queryKey: ["containers"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.items });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.itemAll });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.rooms });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
     void query.refetch();
   }, [queryClient, query]);
 

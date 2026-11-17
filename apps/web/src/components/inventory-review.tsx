@@ -145,14 +145,14 @@ export function InventoryReview({
   const [lastRun, setLastRun] = React.useState<ReviewRun | null>(null);
   const selectedRunId = lastRun?.id ?? initialRunId ?? urlParams.get("run_id") ?? undefined;
   const runQuery = useQuery({
-    queryKey: ["inventory-review", "run", selectedRunId],
+    queryKey: queryKeys.reviewRun(selectedRunId),
     queryFn: () => api.get<ReviewRun>(`/inventory-review/runs/${selectedRunId}`),
     enabled: Boolean(selectedRunId),
     refetchInterval: (query) => query.state.data?.background_active ? 1000 : false,
   });
   React.useEffect(() => {
     if (embedded && runQuery.data) {
-      void queryClient.invalidateQueries({ queryKey: ["inventory-review", "suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSummary });
     }
   }, [embedded, runQuery.data, queryClient]);
@@ -313,7 +313,7 @@ export function InventoryReview({
   const refreshReview = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSummary });
     void queryClient.invalidateQueries({
-      queryKey: ["inventory-review", "suggestions"],
+      queryKey: queryKeys.reviewSuggestionsAll,
     });
     void queryClient.invalidateQueries({ queryKey: queryKeys.aiStatus });
   };
@@ -364,7 +364,7 @@ export function InventoryReview({
       setRequestId(crypto.randomUUID());
       setSelectedSuggestionIds(new Set());
       refreshReview();
-      if (assistantRunId) void queryClient.invalidateQueries({ queryKey: ["assistant-runs"] });
+      if (assistantRunId) void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
       const prefix = run.background_active ? "Review queued" : run.status === "partial" ? "Review paused" : "Review complete";
       toast.success(
         `${prefix}: ${pluralize(run.created_suggestion_count, "new suggestion")}, ${run.existing_suggestion_count} already queued.`,
@@ -497,7 +497,7 @@ export function InventoryReview({
         version: displayedRun.batch_version,
       });
       setLastRun(result);
-      queryClient.setQueryData(["inventory-review", "run", result.id], result);
+      queryClient.setQueryData(queryKeys.reviewRun(result.id), result);
       refreshReview();
     } catch (error) {
       setRunError(getApiErrorMessage(error));

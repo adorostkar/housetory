@@ -18,6 +18,7 @@ import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import { useStocktakeReview } from "@/lib/queries";
 import type { StocktakeApplyResult } from "@/lib/types";
 import { pluralize } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 function newRequestId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -65,7 +66,7 @@ export function StocktakeReviewDialog({
         },
       );
       requestId.current = newRequestId();
-      await queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
       onApplied(result);
       onOpenChange(false);
     } catch (caught) {

@@ -26,6 +26,7 @@ import { api, getApiErrorMessage } from "@/lib/api";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useCanWrite, useLoan } from "@/lib/queries";
 import { formatDate } from "@/lib/utils";
+import { onLoansChanged } from "@/lib/cache-refresh";
 
 export function LoanDetailPage() {
   const { loanId = "" } = useParams();
@@ -52,9 +53,7 @@ export function LoanDetailPage() {
         request_id: cancelRequestId,
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["loans"] });
-      void queryClient.invalidateQueries({ queryKey: ["items"] });
-      void queryClient.invalidateQueries({ queryKey: ["item"] });
+      onLoansChanged(queryClient);
       setCancelOpen(false);
       toast.success("Loan cancelled and recorded in history");
     },

@@ -22,6 +22,7 @@ import {
 } from "@/lib/queries";
 import type { StocktakeSession } from "@/lib/types";
 import { cn, formatDate, pluralize } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 const STATUS_LABELS: Record<string, string> = {
   in_progress: "In progress",
@@ -70,7 +71,7 @@ export function StocktakeEntry({
   );
 
   const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
   };
 
   const start = async () => {

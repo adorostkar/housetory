@@ -82,7 +82,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.item(item.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       invalidate();
       toast.success("Storage restored with its existing identifier and QR code");
     },
@@ -94,7 +94,7 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.item(item.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.containers });
-      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
       invalidate();
       setRemoveOpen(false);
       toast.success("Storage removed; its identifier and history remain recoverable");

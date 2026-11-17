@@ -255,7 +255,7 @@ export function ImportDetailPage({
       kind: "other",
       parent_id: parentId,
     });
-    void queryClient.invalidateQueries({ queryKey: ["locations"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.locationsAll });
     return location;
   };
 

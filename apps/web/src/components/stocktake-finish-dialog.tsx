@@ -17,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import type { StocktakeSession } from "@/lib/types";
 import { cn, pluralize } from "@/lib/utils";
+import { queryKeys } from "@/lib/query-keys";
 
 function newRequestId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -74,7 +75,7 @@ export function StocktakeFinishDialog({
             : {}),
         },
       );
-      await queryClient.invalidateQueries({ queryKey: ["stocktake"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
       toast.success(mode === "complete" ? "Stocktake completed" : "Stocktake abandoned");
       onCompleted(result);
       onOpenChange(false);

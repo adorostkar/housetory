@@ -10,6 +10,7 @@ import { PasswordInput } from "@/components/password-input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 
 export function ResetPasswordPage() {
   const { token } = useParams();
@@ -17,7 +18,7 @@ export function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [complete, setComplete] = React.useState(false);
   const status = useQuery({
-    queryKey: ["password-reset", token ?? ""],
+    queryKey: queryKeys.passwordReset(token ?? ""),
     queryFn: () =>
       api.get<{ valid: boolean; expires_at: string | null }>(
         `/auth/password-reset/${encodeURIComponent(token ?? "")}`,

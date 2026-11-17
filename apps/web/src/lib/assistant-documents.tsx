@@ -128,7 +128,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     setImportState((current) => ({ ...current, activeId: null }));
     if (userInitiated) {
       createdCaptures.current.add(`${householdId}:document:${id}`);
-      void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
     }
     setState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
@@ -146,7 +146,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     setState((current) => ({ ...current, activeId: null }));
     if (userInitiated) {
       createdCaptures.current.add(`${householdId}:import:${id}`);
-      void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
     }
     setImportState((current) => {
       const currentIds = current.householdId === householdId ? current.ids : [];
@@ -165,7 +165,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
     setState((current) => ({ ...current, activeId: null }));
     setImportState((current) => ({ ...current, activeId: null }));
     if (userInitiated) createdCaptures.current.add(`${householdId}:photo:${id}`);
-    void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
     void api.get<AiRecognition>(`/ai/recognitions/${id}`).then((recognition) => {
       if (selection.current.householdId !== householdId || selection.current.version !== version) return;
       const importId = recognition.result?._add_items?.import_batch_id;
@@ -180,7 +180,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       await api.post(`/inventory-review/captures/${review.kind}/${review.id}/undo`, {
         dismissal_id: review.dismissal_id ?? null,
       });
-      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      await client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
       toast.success("Review restored");
     } catch (error) {
       toast.error(getApiErrorMessage(error));
@@ -198,8 +198,8 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         `/inventory-review/captures/${review.kind}/${review.id}/dismiss`,
         { generation: review.generation },
       );
-      await client.cancelQueries({ queryKey: ["inventory-review", "captures"] });
-      client.setQueryData<CaptureReview[]>(["inventory-review", "captures", householdId],
+      await client.cancelQueries({ queryKey: queryKeys.captureReviewsAll });
+      client.setQueryData<CaptureReview[]>(queryKeys.captureReviews(householdId),
         (current) => current?.filter((entry) => entry.kind !== review.kind || entry.id !== review.id));
       if (review.kind === "document") setState((current) => ({
         ...current, activeId: current.activeId === review.id ? null : current.activeId,
@@ -212,14 +212,14 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         setActivePhotoId(null);
       }
       toast.dismiss(assistantTaskKey({ ...review, householdId }));
-      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      await client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
       toast.success("Review dismissed", {
         description: "Source files, history and inventory are unchanged.",
         action: { label: "Undo", onClick: () => void undoReview(result) },
       });
     } catch (error) {
       toast.error(getApiErrorMessage(error));
-      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      await client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
     } finally {
       mutationRunning.current = false;
       setReviewMutationPending(false);
@@ -234,7 +234,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         : review.kind === "photo" ? `/ai/recognitions/${review.id}/retry`
         : `/imports/${review.id}/${review.retry === "enhancement" ? "enhancement/retry" : "retry"}`;
       await api.post(path);
-      await client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+      await client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
       await client.invalidateQueries({ queryKey: review.kind === "photo" ? queryKeys.recognition(review.id)
         : review.kind === "document" ? queryKeys.document(review.id) : queryKeys.importBatch(review.id) });
       toast.success("New review attempt started");
@@ -251,7 +251,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
       createdCaptures.current.clear();
       baselineAfter.current = Date.now();
       if (document.visibilityState === "visible") {
-        void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+        void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
       }
     };
     window.addEventListener("focus", restoreSilently);
@@ -340,7 +340,7 @@ export function AssistantDocumentsProvider({ children }: { children: React.React
         <div key={`${householdId}:${review.id}`} hidden={review.id !== activePhotoId}>
           <PhotoTask id={review.id} onSelectImport={(id) => {
             if (selection.current.householdId === householdId && selection.current.photoId === review.id) selectImport(id);
-            void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+            void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
           }} />
         </div>
       )), photoNode)}
@@ -355,7 +355,7 @@ function PhotoTask({ id, onSelectImport }: { id: string; onSelectImport: (id: st
   const client = useQueryClient();
   const onChange = React.useCallback((patch: Partial<AssistantCaptureState>) => {
     setCapture((current) => ({ ...current, ...patch }));
-    void client.invalidateQueries({ queryKey: ["inventory-review", "captures"] });
+    void client.invalidateQueries({ queryKey: queryKeys.captureReviewsAll });
   }, [client]);
   return <AssistantPhotoProgress capture={capture} onChange={onChange} onSelectImport={onSelectImport} />;
 }

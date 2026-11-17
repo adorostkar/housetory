@@ -35,6 +35,7 @@ import type {
   Tag,
 } from "@/lib/types";
 import { cn, locationPath, pluralize, roomPath } from "@/lib/utils";
+import { onItemsMoved } from "@/lib/cache-refresh";
 
 function useRequestId(open: boolean) {
   const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
@@ -88,8 +89,8 @@ function useBulkInvalidation(kind: "move" | "tags" | "category" = "move") {
   );
   const client = useQueryClient();
   return () => {
-    invalidate();
-    if (kind === "move") void client.invalidateQueries({ queryKey: ["loans"] });
+    if (kind === "move") onItemsMoved(client);
+    else invalidate();
   };
 }
 
