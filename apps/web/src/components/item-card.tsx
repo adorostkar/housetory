@@ -1,7 +1,9 @@
 import { ClipboardCheck, HandCoins, ShieldCheck } from "lucide-react";
+import * as React from "react";
 import { Link } from "react-router-dom";
 
 import { CategoryIcon } from "@/components/category-icon";
+import { itemLocationPath, useItemPathScope } from "@/components/item-location-path";
 import { Badge } from "@/components/ui/badge";
 import { ITEM_DISPOSITION_LABELS } from "@/lib/labels";
 import { itemHref, rememberListScroll, type ItemOrigin } from "@/lib/navigation";
@@ -12,7 +14,6 @@ import {
   formatCurrency,
   formatDate,
   itemContainer,
-  locationLabel,
 } from "@/lib/utils";
 
 interface ItemSelection {
@@ -36,7 +37,9 @@ export function ItemCard({
 }) {
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
-  const container = itemContainer(item);
+  const place = itemContainer(item) ?? item.location;
+  const path = itemLocationPath(item, useItemPathScope(), place ? [place] : []);
+  const shortened = path.short !== path.full;
   const price = item.purchase?.price_cents;
   const warrantyActive =
     item.warranty?.status === "active" || item.warranty?.status === "expiring";
@@ -183,28 +186,26 @@ export function ItemCard({
               {item.last_verified.stale ? " · changed" : ""}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-            {item.household && <span className="truncate">{item.household.name}</span>}
-            {item.household && (item.property || item.room || container || item.location) && (
-              <span className="text-border">/</span>
-            )}
-            {item.property && <span className="truncate">{item.property.name}</span>}
-            {item.property && (item.room || container || item.location) && (
-              <span className="text-border">/</span>
-            )}
-            {item.room && <span className="truncate">{item.room.name}</span>}
-            {item.room && (container || item.location) && (
-              <span className="text-border">/</span>
-            )}
-            {container ? (
-              <span className="truncate font-medium text-foreground/75">
-                {locationLabel(container)}
-              </span>
-            ) : (
-              item.location && (
-                <span className="truncate">{locationLabel(item.location)}</span>
-              )
-            )}
+          <div
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground"
+            title={path.full || undefined}
+          >
+            {shortened && <span className="sr-only">{path.full}</span>}
+            <span className="contents" aria-hidden={shortened || undefined}>
+              {path.segments.map((segment, index) => (
+                <React.Fragment key={segment.key}>
+                  {index > 0 && <span className="text-border">/</span>}
+                  <span
+                    className={cn(
+                      "truncate",
+                      segment.place?.is_container && "font-medium text-foreground/75",
+                    )}
+                  >
+                    {segment.text}
+                  </span>
+                </React.Fragment>
+              ))}
+            </span>
             {!item.room && !item.location && (
               <span className="italic opacity-80">No place assigned</span>
             )}
@@ -273,24 +274,11 @@ export function ItemRow({
   const photo = item.primary_photo;
   const representative = item.representative_image ?? null;
   const onLoan = item.on_loan_quantity ?? 0;
-  const path =
-    item.location_path.length > 0
-      ? [
-          item.household?.name,
-          item.property?.name,
-          item.room?.name,
-          ...item.location_path.map((entry) => locationLabel(entry)),
-        ]
-          .filter(Boolean)
-          .join(" / ")
-      : [
-          item.household?.name,
-          item.property?.name,
-          item.room?.name,
-          item.location ? locationLabel(item.location) : null,
-        ]
-          .filter(Boolean)
-          .join(" / ");
+  const path = itemLocationPath(
+    item,
+    useItemPathScope(),
+    item.location_path.length > 0 ? item.location_path : item.location ? [item.location] : [],
+  );
   const row = (
     <Link
       to={itemHref(item.id, origin, item.household?.id)}
@@ -346,8 +334,18 @@ export function ItemRow({
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 truncate text-2xs text-muted-foreground">
-          {path || "No location"}
+        <p
+          className="mt-0.5 truncate text-2xs text-muted-foreground"
+          title={path.full || undefined}
+        >
+          {path.short !== path.full ? (
+            <>
+              <span className="sr-only">{path.full}</span>
+              <span aria-hidden>{path.short || "No location"}</span>
+            </>
+          ) : (
+            path.short || "No location"
+          )}
           {item.category ? ` · ${item.category.name}` : ""}{" "}
           {item.purchase?.price_cents != null && (
             <span className="text-muted-foreground">

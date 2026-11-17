@@ -1,9 +1,42 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderWithoutProviders, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import { ItemCard, ItemRow } from "@/components/item-card";
-import type { ItemSummary } from "@/lib/types";
+import { queryKeys } from "@/lib/query-keys";
+import type { HouseholdMembership, ItemSummary, SearchScopeHousehold } from "@/lib/types";
+
+function membership(id: string, name: string, propertyCount = 1): HouseholdMembership {
+  return {
+    id,
+    name,
+    default_currency: "USD",
+    warranty_reminder_days: 30,
+    role: "owner",
+    property_count: propertyCount,
+    is_current: id === "household-1",
+  };
+}
+
+function render(
+  ui: ReactElement,
+  households: HouseholdMembership[] = [membership("household-1", "Home")],
+  scopes: SearchScopeHousehold[] = [],
+) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(queryKeys.session, {
+    authenticated: true,
+    setup_required: false,
+    user: null,
+    household: households[0],
+    role: "owner",
+    households,
+  });
+  client.setQueryData(queryKeys.searchScopes, { items: scopes });
+  return renderWithoutProviders(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 const item: ItemSummary = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -109,6 +142,128 @@ describe("ItemCard", () => {
     );
     expect(screen.getByRole("img", { name: "Category icon" })).toBeVisible();
     expect(screen.getByText("Kitchenware")).toBeInTheDocument();
+  });
+});
+
+describe("item location breadcrumb", () => {
+  const placed: ItemSummary = {
+    ...item,
+    household: { id: "household-1", name: "Home" },
+    property: { id: "property-1", name: "Flat", is_archived: false },
+  };
+  const fullPath = "Home / Flat / Kitchen / SHELF-001 · Coffee Shelf";
+  const hallwayPlace = { ...item.location!, name: "hallway ", identifier: "HAL-001" };
+  const hallway: ItemSummary = {
+    ...placed,
+    room: { id: "room-2", name: "Hallway" },
+    location: hallwayPlace,
+    location_path: [hallwayPlace],
+  };
+
+  function renderBoth(
+    entry: ItemSummary,
+    households?: HouseholdMembership[],
+    scopes?: SearchScopeHousehold[],
+  ) {
+    const shownBy = (Component: typeof ItemCard | typeof ItemRow) => {
+      const view = render(
+        <MemoryRouter>
+          <Component item={entry} />
+        </MemoryRouter>,
+        households,
+        scopes,
+      );
+      const crumb = screen.getByTitle(/Kitchen|Hallway/);
+      const shown = {
+        visible: crumb.querySelector("[aria-hidden]")?.textContent,
+        title: crumb.getAttribute("title"),
+        accessible: crumb.querySelector(".sr-only")?.textContent,
+      };
+      expect(screen.getByRole("link")).toContainElement(crumb);
+      view.unmount();
+      return shown;
+    };
+    const card = shownBy(ItemCard);
+    const row = shownBy(ItemRow);
+    expect(card.title).toBe(row.title);
+    expect(card.accessible).toBe(card.title);
+    expect(row.accessible).toBe(row.title);
+    return { cardText: card.visible, rowText: row.visible, title: card.title };
+  }
+
+  it("omits the household and property when there is only one of each", () => {
+    const shown = renderBoth(placed);
+    expect(shown.cardText).toBe("Kitchen/SHELF-001 · Coffee Shelf");
+    expect(shown.rowText).toBe("Kitchen / SHELF-001 · Coffee Shelf");
+    expect(shown.title).toBe(fullPath);
+  });
+
+  it("keeps the household when the user belongs to several", () => {
+    const shown = renderBoth(placed, [
+      membership("household-1", "Home"),
+      membership("household-2", "Cabin"),
+    ]);
+    expect(shown.cardText).toBe("Home/Kitchen/SHELF-001 · Coffee Shelf");
+    expect(shown.rowText).toBe("Home / Kitchen / SHELF-001 · Coffee Shelf");
+    expect(shown.title).toBe(fullPath);
+  });
+
+  it("keeps the property when its household has several active ones", () => {
+    const shown = renderBoth(
+      placed,
+      [membership("household-1", "Home", 2)],
+      [
+        {
+          id: "household-1",
+          name: "Home",
+          role: "owner",
+          properties: [
+            { id: "property-1", name: "Flat", is_archived: false },
+            { id: "property-2", name: "Cabin", is_archived: false },
+          ],
+        },
+      ],
+    );
+    expect(shown.cardText).toBe("Flat/Kitchen/SHELF-001 · Coffee Shelf");
+    expect(shown.rowText).toBe("Flat / Kitchen / SHELF-001 · Coffee Shelf");
+    expect(shown.title).toBe(fullPath);
+  });
+
+  it("does not count archived properties, but still names an archived one", () => {
+    const households = [membership("household-1", "Home", 2)];
+    const scopes: SearchScopeHousehold[] = [
+      {
+        id: "household-1",
+        name: "Home",
+        role: "owner",
+        properties: [{ id: "property-1", name: "Flat", is_archived: false }],
+      },
+    ];
+    expect(renderBoth(placed, households, scopes).rowText).toBe(
+      "Kitchen / SHELF-001 · Coffee Shelf",
+    );
+    const archived = {
+      ...placed,
+      property: { id: "property-2", name: "Old flat", is_archived: true },
+    };
+    expect(renderBoth(archived, households, scopes).rowText).toBe(
+      "Old flat / Kitchen / SHELF-001 · Coffee Shelf",
+    );
+  });
+
+  it("shows a place named like its room once, with an identifier hint", () => {
+    const shown = renderBoth(hallway);
+    expect(shown.cardText).toBe("Hallway · HAL-001");
+    expect(shown.rowText).toBe("Hallway · HAL-001");
+    expect(shown.title).toBe("Home / Flat / Hallway / HAL-001 · hallway ");
+  });
+
+  it("falls back to the place type when the same-named place has no identifier", () => {
+    const place = { ...hallway.location!, name: "Hallway", identifier: null };
+    const shown = renderBoth({ ...hallway, location: place, location_path: [place] });
+    expect(shown.cardText).toBe("Hallway · shelf");
+    expect(shown.rowText).toBe("Hallway · shelf");
+    expect(shown.title).toBe("Home / Flat / Hallway / Hallway");
   });
 });
 
