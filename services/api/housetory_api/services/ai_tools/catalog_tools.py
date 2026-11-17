@@ -156,30 +156,31 @@ def tool_search_items(
         max_purchase_cents=args.get("max_purchase_cents"),
         sort=args.get("sort") or "relevance",
     )
-    for field, places in (
-        (
-            "room_name",
-            _match_rooms(
-                db, household_id, property_id=filters.property_id, name=filters.room_name
-            )
-            if filters.room_id is None
-            else [],
-        ),
-        (
-            "location_name",
-            _match_locations(
-                db, household_id, property_id=filters.property_id, name=filters.location_name
-            )
-            if filters.location_id is None
-            else [],
-        ),
+    # An explicit id takes precedence over a name: it is validated inside the
+    # household and property scope and any name supplied with it is not consulted.
+    for kind, id_field, name_field, match, id_argument in (
+        ("room", "room_id", "room_name", _match_rooms, "room_id"),
+        ("storage place", "location_id", "location_name", _match_locations, "location_id"),
     ):
-        if getattr(filters, field) and not places:
-            kind = "room" if field == "room_name" else "storage place"
+        place_id = getattr(filters, id_field)
+        name = getattr(filters, name_field)
+        if place_id is None and not name:
+            continue
+        by_id = place_id is not None
+        places = match(
+            db,
+            household_id,
+            property_id=filters.property_id,
+            **({id_argument: place_id} if by_id else {"name": name}),
+        )
+        field = ("room_id" if kind == "room" else "container_id") if by_id else name_field
+        if not places:
             return ToolResult(
                 tool="search_items",
                 summary=(
-                    f"No {kind} named “{getattr(filters, field)}” was found"
+                    f"No {kind} "
+                    + (f"with id {place_id}" if by_id else f"named “{name}”")
+                    + " was found"
                     + (" in this property" if filters.property_id is not None else "")
                     + ". Nothing was searched elsewhere; use search_locations to find the place."
                 ),
@@ -188,7 +189,7 @@ def tool_search_items(
                     "total": 0,
                     "place_not_found": True,
                     "not_found_field": field,
-                    "query": getattr(filters, field),
+                    "query": str(place_id) if by_id else name,
                 },
             )
         if len(places) > 1:
@@ -197,7 +198,7 @@ def tool_search_items(
                 household_id,
                 tool="search_items",
                 field=field,
-                query=getattr(filters, field),
+                query=name,
                 places=places,
                 filters=filters.model_dump(mode="json", exclude_none=True),
             )

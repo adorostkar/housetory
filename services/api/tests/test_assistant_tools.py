@@ -1414,3 +1414,57 @@ def test_place_names_are_matched_literally_not_as_wildcards(
     for result in results[8:]:
         assert result["error"] is None
         assert [ref["title"] for ref in result["references"]] == ["Scarf"]
+
+
+def test_search_items_place_ids_take_precedence_and_are_validated_in_scope(
+    owner_client, configured_ai, monkeypatch
+):
+    homes = two_homes(owner_client)
+    town, cabin = homes["Town house"], homes["Lake cabin"]
+    room_id, shelf_id = town["kitchen"]["id"], town["spices"]["id"]
+
+    *valid, unknown_room, unknown_shelf = tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            # The matching name alone is ambiguous across the two homes; the id decides.
+            call("search_items", room_id=room_id, room_name="Kitchen"),
+            call("search_items", container_id=shelf_id, location_name="Spice shelf"),
+            # A valid id is not rejected because of the name supplied with it.
+            call("search_items", room_id=room_id, room_name="Garage"),
+            call("search_items", container_id=shelf_id, location_name="Tool chest"),
+            call("search_items", room_id=str(uuid.uuid4()), room_name="Kitchen"),
+            call("search_items", container_id=str(uuid.uuid4()), location_name="Spice shelf"),
+        ],
+    )
+    for result in valid:
+        assert result["error"] is None
+        assert result["facts"]["total"] == 1
+        assert [ref["title"] for ref in result["references"]] == ["Town house pepper mill"]
+
+    in_scope_room, in_scope_shelf, other_room, other_shelf = tool_results(
+        owner_client,
+        monkeypatch,
+        [
+            call("search_items", room_id=room_id),
+            call("search_items", container_id=shelf_id),
+            # Ids from the other property are out of scope, even with a name that
+            # would match inside it.
+            call("search_items", room_id=cabin["kitchen"]["id"], room_name="Kitchen"),
+            call("search_items", container_id=cabin["spices"]["id"], location_name="Spice shelf"),
+        ],
+        property_id=town["id"],
+    )
+    for result in (in_scope_room, in_scope_shelf):
+        assert [ref["title"] for ref in result["references"]] == ["Town house pepper mill"]
+    for result, field in (
+        (unknown_room, "room_id"),
+        (unknown_shelf, "container_id"),
+        (other_room, "room_id"),
+        (other_shelf, "container_id"),
+    ):
+        assert result["error"] is None
+        assert result["facts"]["place_not_found"] is True
+        assert result["facts"]["not_found_field"] == field
+        assert result["facts"]["total"] == 0
+        assert result["references"] == []
