@@ -70,10 +70,6 @@ export interface AiRecognition {
   original_url: string;
 }
 
-export interface AiRecognitionList {
-  items: AiRecognition[];
-}
-
 export interface AiProviderRecord {
   id: UUID;
   provider: string;

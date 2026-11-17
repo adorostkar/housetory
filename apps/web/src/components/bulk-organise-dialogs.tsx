@@ -83,7 +83,7 @@ function SelectionSummary({ items }: { items: ItemListEntry[] }) {
 function useBulkInvalidation(kind: "move" | "tags" | "category" = "move") {
   const invalidate = useInvalidateInventory(
     kind === "move" ? undefined : [
-      "items", "item", "overview", "financial", "stocktake", "inventory-review",
+      "items", "item", "overview", "stocktake", "inventory-review",
       "loans", kind === "tags" ? "tags" : "categories",
     ],
   );

@@ -11,7 +11,6 @@ import { captureInProgress, type CaptureReview } from "@/lib/assistant-task-even
 import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
-  AiRecognitionList,
   AiSettings,
   BorrowedDetail,
   BorrowedFilters,
@@ -31,7 +30,6 @@ import type {
   EvidenceOptions,
   EvidencePreview,
   EvidenceScope,
-  FinancialOverview,
   ItemManuals,
   ManualCandidateList,
   ImportBatchDetail,
@@ -536,13 +534,6 @@ export function useWarranties(status: WarrantyStatus | "all" = "all") {
   });
 }
 
-export function useFinancialOverview() {
-  return useQuery({
-    queryKey: queryKeys.financial,
-    queryFn: () => api.get<FinancialOverview>("/financial-overview"),
-  });
-}
-
 export function useImports(limit = 50) {
   return useQuery({
     queryKey: [...queryKeys.imports, limit],
@@ -605,13 +596,6 @@ export function useAiStatus(
   });
 }
 
-export function useRecognitions(limit = 20) {
-  return useQuery({
-    queryKey: [...queryKeys.recognitions, limit],
-    queryFn: () => api.get<AiRecognitionList>(`/ai/recognitions${buildQuery({ limit })}`),
-  });
-}
-
 export function useRecognition(recognitionId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.recognition(recognitionId ?? ""),
@@ -627,7 +611,7 @@ export function useRecognition(recognitionId: string | undefined) {
 const inventoryResources = [
   "overview", "rooms", "properties", "locations", "items", "item", "categories",
   "tags", "documents", "document", "purchases", "purchase", "warranties",
-  "financial", "imports", "recognitions", "containers", "stocktake", "inventory-review",
+  "imports", "containers", "stocktake", "inventory-review",
   "loans", "borrowed", "photos", "search",
 ] as const;
 
@@ -639,9 +623,7 @@ export function useInvalidateInventory(
   const queryClient = useQueryClient();
   return () => {
     for (const resource of new Set(resources)) {
-      void queryClient.invalidateQueries({
-        queryKey: resource === "recognitions" ? ["ai", "recognitions"] : [resource],
-      });
+      void queryClient.invalidateQueries({ queryKey: [resource] });
     }
   };
 }

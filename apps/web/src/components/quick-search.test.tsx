@@ -68,11 +68,12 @@ function renderSearch(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  const required = { onAsk: vi.fn(), onOpenAssistant: vi.fn() };
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <div hidden={responsive}><QuickSearch {...callbacks} /></div>
-        {responsive && <QuickSearch variant="mobile" {...callbacks} />}
+        <div hidden={responsive}><QuickSearch {...required} {...callbacks} /></div>
+        {responsive && <QuickSearch variant="mobile" {...required} {...callbacks} />}
         {responsive && <BookmarkedSearchButton />}
         <LocationProbe maxChanges={responsive ? 10 : Infinity} />
       </MemoryRouter>
@@ -176,7 +177,7 @@ describe("QuickSearch", () => {
     );
   });
 
-  it("sends every query to the same submit-time result flow", async () => {
+  it("shows loan context while typing a question and hands it to the assistant on Enter", async () => {
     vi.mocked(api.get).mockImplementation(async (path) => {
       const query = queryFromPath(path);
       return {
@@ -195,7 +196,8 @@ describe("QuickSearch", () => {
         ],
       };
     });
-    renderSearch();
+    const onAsk = vi.fn();
+    renderSearch("/", false, { onAsk });
     const input = screen.getByRole("combobox", {
       name: "Search or ask about your inventory",
     });
@@ -204,19 +206,9 @@ describe("QuickSearch", () => {
       name: "Quick search results",
     });
     expect(within(panel).getByText(/On loan to Alex/)).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Ask Housetory" }),
-    ).toBeVisible();
     await userEvent.keyboard("{Enter}");
-    await waitFor(() => {
-      const url = new URL(
-        screen.getByTestId("location").textContent ?? "/",
-        "http://localhost",
-      );
-      expect(url.pathname).toBe("/items");
-      expect(url.searchParams.get("q")).toBe("where is my heavy drill");
-      expect(url.searchParams.get("ask")).toBeNull();
-    });
+    expect(onAsk).toHaveBeenCalledWith("where is my heavy drill", input);
+    expect(screen.getByTestId("location")).toHaveTextContent("/");
   });
 
   it("submits a normal header query to the assistant while keeping quick matches selectable", async () => {
@@ -235,33 +227,12 @@ describe("QuickSearch", () => {
     expect(onAsk).toHaveBeenCalledWith("Where is my drill?", input);
   });
 
-  it("offers an explicit Ask path that bypasses heuristics", async () => {
-    vi.mocked(api.get).mockImplementation(async (path) => {
-      const query = queryFromPath(path);
-      return response(query, [result({ title: "Heavy drill" })]);
-    });
-    renderSearch();
-    const input = screen.getByRole("combobox", {
-      name: "Search or ask about your inventory",
-    });
-    await userEvent.type(input, "where is my heavy drill");
-    const ask = await screen.findByRole("button", { name: "Ask Housetory" });
-    await userEvent.click(ask);
-    await waitFor(() => {
-      const url = new URL(
-        screen.getByTestId("location").textContent ?? "/",
-        "http://localhost",
-      );
-      expect(url.pathname).toBe("/assistant");
-      expect(url.searchParams.get("q")).toBe("where is my heavy drill");
-    });
-  });
-
   it("adds a final keyboard-reachable ask-the-assistant row", async () => {
     vi.mocked(api.get).mockImplementation(async (path) =>
       response(queryFromPath(path), [result({ title: "Heavy drill" })]),
     );
-    renderSearch();
+    const onAsk = vi.fn();
+    renderSearch("/", false, { onAsk });
     const input = screen.getByRole("combobox", {
       name: "Search or ask about your inventory",
     });
@@ -272,11 +243,7 @@ describe("QuickSearch", () => {
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     expect(row).toHaveAttribute("aria-selected", "true");
     await userEvent.keyboard("{Enter}");
-    await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent(
-        "/assistant?q=heavy%20drill%3F",
-      ),
-    );
+    expect(onAsk).toHaveBeenCalledWith("heavy drill?", input);
   });
 
   it("hands an assistant submission to the conversational panel when provided", async () => {
@@ -329,22 +296,16 @@ describe("QuickSearch", () => {
     expect(onAttach).not.toHaveBeenCalled();
   });
 
-  it("opens all results with Enter before selecting a result and preserves the query", async () => {
+  it("asks with Enter before any result has arrived and preserves the query", async () => {
     const pending = new Promise<QuickSearchResponse>(() => undefined);
     vi.mocked(api.get).mockReturnValue(pending);
-    renderSearch();
+    const onAsk = vi.fn();
+    renderSearch("/", false, { onAsk });
     const input = screen.getByRole("combobox", { name: "Search or ask about your inventory" });
     await userEvent.type(input, "Blue box");
     expect(await screen.findByText("Searching your places…")).toBeVisible();
     await userEvent.keyboard("{Enter}");
-    await waitFor(() => {
-      const url = new URL(
-        screen.getByTestId("location").textContent ?? "/",
-        "http://localhost",
-      );
-      expect(url.pathname).toBe("/items");
-      expect(url.searchParams.get("q")).toBe("Blue box");
-    });
+    expect(onAsk).toHaveBeenCalledWith("Blue box", input);
   });
 
   it("closes on Escape, clears stale state and handles empty and error states", async () => {

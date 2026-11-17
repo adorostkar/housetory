@@ -22,17 +22,6 @@ function decode(value: string) {
   return { householdId: "", propertyId: "" };
 }
 
-export function SearchScopeSelect({
-  className,
-  compact = false,
-}: {
-  className?: string;
-  compact?: boolean;
-}) {
-  const scope = useSearchScope(true);
-  return <SearchScopeControl scope={scope} className={className} compact={compact} />;
-}
-
 export function SearchScopeControl({
   scope: { selection, setSelection, scopes, label },
   className,

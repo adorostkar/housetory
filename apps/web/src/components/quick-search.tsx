@@ -98,9 +98,9 @@ export function QuickSearch({
 }: {
   variant?: "top" | "mobile";
   className?: string;
-  onAsk?: (query: string, trigger: HTMLElement) => void;
+  onAsk: (query: string, trigger: HTMLElement) => void;
   onAttach?: (file: File, trigger: HTMLElement, query: string) => void;
-  onOpenAssistant?: (trigger: HTMLElement) => void;
+  onOpenAssistant: (trigger: HTMLElement) => void;
   reviewCount?: number;
 }) {
   const navigate = useNavigate();
@@ -411,8 +411,7 @@ export function QuickSearch({
   const askAssistant = () => {
     setFocused(false);
     pendingEditRef.current = null;
-    if (onAsk && inputRef.current) onAsk(term, inputRef.current);
-    else navigate(`/assistant?q=${encodeURIComponent(term)}`);
+    if (inputRef.current) onAsk(term, inputRef.current);
   };
 
   const choose = (result: QuickSearchResult) => {
@@ -454,7 +453,6 @@ export function QuickSearch({
       const active = flatResults[activeIndex];
       if (active && !event.shiftKey) choose(active);
       else if (
-        onAsk &&
         term.length >= 2 &&
         (event.shiftKey ||
           !(
@@ -548,17 +546,6 @@ export function QuickSearch({
                   Press Enter to ask Housetory. Straightforward item searches
                   stay local and open a match directly.
                 </p>
-                {!onAsk && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => submitToResults(true)}
-                  >
-                    <Sparkles />
-                    Ask Housetory
-                  </Button>
-                )}
                 <div
                   role="listbox"
                   id="quick-search-results"
@@ -629,18 +616,6 @@ export function QuickSearch({
                     {search.data?.scope_label ? ` · ${search.data.scope_label}` : ""}
                   </span>
                   <div className="flex items-center gap-1">
-                    {!onAsk && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-2xs"
-                        onClick={() => submitToResults(true)}
-                      >
-                        <Sparkles className="size-3" />
-                        Ask Housetory
-                      </Button>
-                    )}
                     <Button
                       type="button"
                       variant="ghost"
@@ -670,11 +645,7 @@ export function QuickSearch({
         className="absolute left-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         onClick={() => {
           setFocused(false);
-          if (onOpenAssistant && assistantButtonRef.current) {
-            onOpenAssistant(assistantButtonRef.current);
-          } else {
-            navigate("/assistant");
-          }
+          if (assistantButtonRef.current) onOpenAssistant(assistantButtonRef.current);
         }}
       >
         <Bot className="size-[1.05rem]" />

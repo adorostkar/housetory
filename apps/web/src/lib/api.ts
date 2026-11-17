@@ -11,10 +11,6 @@ export function setActiveHouseholdId(householdId: string | null) {
   activeHouseholdId = householdId;
 }
 
-export function getActiveHouseholdId() {
-  return activeHouseholdId;
-}
-
 export function householdScopedQueryHash(queryKey: readonly unknown[]) {
   if (queryKey[0] === "session") return JSON.stringify(queryKey);
   return `${activeHouseholdId ?? "none"}:${JSON.stringify(queryKey)}`;

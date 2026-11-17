@@ -2,7 +2,6 @@ import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  getActiveHouseholdId,
   householdScopedQueryHash,
   setActiveHouseholdId,
 } from "@/lib/api";
@@ -60,7 +59,7 @@ describe("household query isolation", () => {
     setActiveHouseholdId("home-2");
     const second = householdScopedQueryHash(["items", { q: "drill" }]);
     expect(first).not.toBe(second);
-    expect(getActiveHouseholdId()).toBe("home-2");
+    expect(householdScopedQueryHash(["items"])).toMatch(/^home-2:/);
   });
 
   it("clears old caches, remembered filters and sets the new session", () => {
@@ -81,6 +80,6 @@ describe("household query isolation", () => {
     expect(client.getQueryData(queryKeys.items)).toBeUndefined();
     expect(window.localStorage.getItem("housetory-property-filter")).toBeNull();
     expect(window.localStorage.getItem("housetory-search-scope")).toBeNull();
-    expect(getActiveHouseholdId()).toBe("home-2");
+    expect(householdScopedQueryHash(["items"])).toMatch(/^home-2:/);
   });
 });

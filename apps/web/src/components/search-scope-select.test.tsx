@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-import { SearchScopeSelect } from "@/components/search-scope-select";
+import { SearchScopeControl } from "@/components/search-scope-select";
+import { useSearchScope } from "@/hooks/use-search-scope";
 
 vi.mock("@/lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/queries")>();
@@ -44,11 +45,15 @@ function LocationProbe() {
   );
 }
 
-describe("SearchScopeSelect", () => {
+function SearchScope() {
+  return <SearchScopeControl scope={useSearchScope(true)} />;
+}
+
+describe("SearchScopeControl", () => {
   it("defaults to All my places and remembers a household/property scope in the URL", async () => {
     render(
       <MemoryRouter initialEntries={["/search?q=drill"]}>
-        <SearchScopeSelect />
+        <SearchScope />
         <LocationProbe />
       </MemoryRouter>,
     );

@@ -34,7 +34,7 @@ export function DocumentLinkDialog({
 }) {
   const invalidate = useInvalidateInventory([
     "overview", "documents", "document", "items", "item", "purchases",
-    "purchase", "financial", "warranties", "inventory-review",
+    "purchase", "warranties", "inventory-review",
   ]);
   const canWrite = useCanWrite();
   const documentsQuery = useDocuments({}, 100, open);

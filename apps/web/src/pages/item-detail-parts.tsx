@@ -1,5 +1,4 @@
 
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export function InfoRow({
@@ -45,25 +44,6 @@ export function LoanQuantity({
       >
         {value}
       </p>
-    </div>
-  );
-}
-
-export function ItemDetailSkeleton() {
-  return (
-    <div>
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="mt-4 h-12 w-1/2 max-w-md" />
-      <div className="mt-10 grid gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(330px,1fr)]">
-        <div className="space-y-6">
-          <Skeleton className="aspect-[4/3] rounded-2xl" />
-          <Skeleton className="h-32 rounded-2xl" />
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-64 rounded-2xl" />
-          <Skeleton className="h-40 rounded-2xl" />
-        </div>
-      </div>
     </div>
   );
 }
