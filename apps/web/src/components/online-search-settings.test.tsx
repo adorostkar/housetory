@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OnlineSearchSettingsCard } from "@/components/online-search-settings";
@@ -82,16 +83,22 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-function renderCard(isOwner = true) {
+function renderCard(isOwner = true, entry = "/settings") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <OnlineSearchSettingsCard isOwner={isOwner} />
+      <MemoryRouter initialEntries={[entry]}>
+        <OnlineSearchSettingsCard isOwner={isOwner} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return client;
+}
+
+async function expand(name: string) {
+  await userEvent.click(screen.getByRole("heading", { name, level: 3 }));
 }
 
 beforeEach(() => {
@@ -113,9 +120,11 @@ describe("OnlineSearchSettingsCard", () => {
 
   it("saves domain and channel edits while leaving a blank key untouched", async () => {
     renderCard();
+    await expand("Reference-image search");
     await userEvent.click(
       screen.getByRole("checkbox", { name: "Enable reference-image search" }),
     );
+    await expand("Brave Search connection");
     const domains = screen.getByLabelText(
       "Optional source restriction (advanced)",
     );
@@ -182,6 +191,7 @@ describe("OnlineSearchSettingsCard", () => {
 
   it("treats a typed replacement key as write-only input", async () => {
     renderCard();
+    await expand("Brave Search connection");
     await userEvent.type(
       screen.getByLabelText("Replace Brave Search API key"),
       "brave-replacement-secret",
@@ -217,6 +227,7 @@ describe("OnlineSearchSettingsCard", () => {
       return removed;
     });
     renderCard();
+    await expand("Brave Search connection");
     await userEvent.click(screen.getByRole("button", { name: "Remove key" }));
     const dialog = screen.getByRole("dialog");
     expect(
@@ -260,7 +271,7 @@ describe("OnlineSearchSettingsCard", () => {
     ).toBeVisible();
   });
 
-  it("explains when the installation fallback is active", () => {
+  it("explains when the installation fallback is active", async () => {
     settings = {
       ...baseSettings,
       credential_source: "environment",
@@ -282,20 +293,86 @@ describe("OnlineSearchSettingsCard", () => {
       environment_reference_available: true,
     };
     renderCard();
+    expect(screen.getByText("Installation fallback is active.")).not.toBeVisible();
+    await expand("Brave Search connection");
     expect(screen.getByText("Installation fallback is active.")).toBeVisible();
     expect(screen.getByText(/Saving this card overrides/)).toBeVisible();
   });
 
   it("does not render for members or viewers", () => {
     renderCard(false);
-    expect(screen.queryByText("Online search")).not.toBeInTheDocument();
+    expect(screen.queryByText("Online lookups")).not.toBeInTheDocument();
   });
 
   it("shows a loading error without exposing configuration", () => {
     settings = null;
     queryError = new Error("Settings unavailable");
     renderCard();
-    expect(screen.getByText("Online search")).toBeVisible();
+    expect(screen.getByText("Online lookups")).toBeVisible();
     expect(screen.getByText("Settings unavailable")).toBeVisible();
+  });
+
+  it("groups the lookups under one heading with collapsed rows showing their state", () => {
+    renderCard();
+    expect(
+      screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent),
+    ).toEqual(["Online lookups"]);
+    expect(
+      screen.getAllByRole("heading", { level: 3 }).map((node) => node.textContent),
+    ).toEqual([
+      "Online manual search",
+      "Reference-image search",
+      "Brave Search connection",
+    ]);
+    expect(screen.getAllByText("Ready")).toHaveLength(2);
+    expect(screen.getByText(/send item search terms.*to Brave Search/)).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Enable online manual search", hidden: true }),
+    ).not.toBeVisible();
+    expect(screen.getByLabelText("Replace Brave Search API key")).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "Save online search" })).toBeVisible();
+  });
+
+  it("reaches every setting and the privacy and evidence text after expanding", async () => {
+    renderCard();
+    await expand("Online manual search");
+    expect(
+      screen.getByRole("checkbox", { name: "Enable online manual search" }),
+    ).toBeVisible();
+    await expand("Reference-image search");
+    expect(
+      screen.getByRole("checkbox", { name: "Enable reference-image search" }),
+    ).toBeVisible();
+    expect(screen.getByText(/Actual photos always take priority/)).toBeVisible();
+    await expand("Brave Search connection");
+    expect(screen.getByLabelText("Replace Brave Search API key")).toBeVisible();
+    expect(
+      screen.getByLabelText("Optional source restriction (advanced)"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
+    expect(
+      screen.getByText(/Source page, retrieval time and any known\s+license metadata are recorded/),
+    ).toBeVisible();
+    expect(screen.getByText("Installation fallback and advanced gateway")).toBeVisible();
+  });
+
+  it("opens the targeted rows for deep links", () => {
+    renderCard(true, "/settings#online-search");
+    expect(document.getElementById("online-search")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Enable online manual search" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Enable reference-image search" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Replace Brave Search API key")).toBeVisible();
+  });
+
+  it("opens only the targeted row for a row anchor", () => {
+    renderCard(true, "/settings#reference-image-search");
+    expect(
+      screen.getByRole("checkbox", { name: "Enable reference-image search" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Replace Brave Search API key")).not.toBeVisible();
   });
 });

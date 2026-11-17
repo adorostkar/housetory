@@ -1,12 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  ChevronDown,
   Globe2,
-  KeyRound,
   Trash2,
   Wifi,
 } from "lucide-react";
 import * as React from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -48,8 +49,74 @@ function domainList(value: string): string[] {
     .filter(Boolean);
 }
 
+const LOOKUP_ROWS = [
+  "online-search-connection",
+  "online-manual-search",
+  "reference-image-search",
+] as const;
+type LookupRowId = (typeof LOOKUP_ROWS)[number];
+
+// "#online-search" is the section anchor other pages link to; it opens every row.
+function rowsForHash(hash: string): LookupRowId[] {
+  const target = hash.replace(/^#/, "");
+  if (target === "online-search") return [...LOOKUP_ROWS];
+  return LOOKUP_ROWS.filter((id) => id === target);
+}
+
+function LookupRow({
+  id,
+  title,
+  state,
+  stateVariant,
+  open,
+  onOpenChange,
+  children,
+}: {
+  id: LookupRowId;
+  title: string;
+  state: string;
+  stateVariant: "sage" | "brass" | "outline";
+  open: boolean;
+  onOpenChange: (id: LookupRowId, open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      id={id}
+      className="group scroll-mt-32"
+      open={open}
+      onToggle={(event) => onOpenChange(id, event.currentTarget.open)}
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-2 [&::-webkit-details-marker]:hidden">
+        <h3 className="min-w-0 text-sm font-medium">{title}</h3>
+        <span className="flex shrink-0 items-center gap-2">
+          <Badge variant={stateVariant}>{state}</Badge>
+          <ChevronDown
+            aria-hidden
+            className="size-4 text-muted-foreground transition-transform group-open:rotate-180"
+          />
+        </span>
+      </summary>
+      <div className="pb-4">{children}</div>
+    </details>
+  );
+}
+
 export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
   const queryClient = useQueryClient();
+  const location = useLocation();
+  const [openRows, setOpenRows] = React.useState<LookupRowId[]>(() =>
+    rowsForHash(location.hash),
+  );
+  const setRowOpen = React.useCallback((id: LookupRowId, open: boolean) => {
+    setOpenRows((current) =>
+      open === current.includes(id)
+        ? current
+        : open
+          ? [...current, id]
+          : current.filter((entry) => entry !== id),
+    );
+  }, []);
   const settingsQuery = useOnlineSearchSettings(isOwner);
   const settings = settingsQuery.data;
   const [apiKey, setApiKey] = React.useState("");
@@ -135,19 +202,29 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
+  const loaded = Boolean(settings);
+  React.useEffect(() => {
+    const targets = rowsForHash(location.hash);
+    if (!loaded || targets.length === 0) return;
+    setOpenRows((current) => [...new Set([...current, ...targets])]);
+    document
+      .getElementById(location.hash.slice(1))
+      ?.scrollIntoView?.({ block: "start" });
+  }, [loaded, location.hash, location.key]);
+
   if (!isOwner) return null;
 
   if (settingsQuery.isPending) {
     return (
-      <section id="online-search" className="surface p-5 sm:p-6">
-        <p className="text-xs text-muted-foreground">Loading online search settings…</p>
+      <section id="online-search" className="surface scroll-mt-32 p-5 sm:p-6">
+        <p className="text-xs text-muted-foreground">Loading online lookup settings…</p>
       </section>
     );
   }
   if (settingsQuery.isError || !settings) {
     return (
-      <section id="online-search" className="surface p-5 sm:p-6">
-        <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Online search</h2>
+      <section id="online-search" className="surface scroll-mt-32 p-5 sm:p-6">
+        <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">Online lookups</h2>
         <FormError message={getApiErrorMessage(settingsQuery.error)} />
       </section>
     );
@@ -164,87 +241,51 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
   return (
     <section
       id="online-search"
-      className="surface p-5 sm:p-6"
+      className="surface scroll-mt-32 p-5 sm:p-6"
       aria-labelledby="online-search-heading"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2
-            id="online-search-heading"
-            className="flex items-center gap-2 font-display text-[1.35rem] tracking-[-0.02em]"
-          >
-            <Globe2 className="size-4 text-brass" />
-            Online search
-          </h2>
-          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-            One Brave Search API credential can power online manual discovery and
-            reference-image lookup. The key is encrypted at rest, write-only from this
-            screen and never returned to the browser.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Badge variant="brass">Brave</Badge>
-          <Badge variant={sourceVariant(settings.credential_source)}>
-            {sourceLabel(settings.credential_source)}
-          </Badge>
-        </div>
-      </div>
-
-      <details
-        className="mt-3"
-        open={settings.has_api_key || settings.credential_source === "environment"}
+      <h2
+        id="online-search-heading"
+        className="flex items-center gap-2 font-display text-[1.35rem] tracking-[-0.02em]"
       >
-      <summary className="min-h-11 cursor-pointer py-3 text-xs text-muted-foreground">
-        Online search settings
-      </summary>
+        <Globe2 className="size-4 text-brass" />
+        Online lookups
+      </h2>
+      <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+        Enabled lookups send item search terms (name, brand, model or description)
+        to Brave Search, an external service. The key is encrypted at rest,
+        write-only from this screen and never returned to the browser.
+      </p>
+
       {settings.warning && (
         <p className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/40 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
           {settings.warning}
         </p>
       )}
 
-      {settings.credential_source === "environment" && (
-        <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
-          <p className="font-medium text-foreground/85">Installation fallback is active.</p>
-          <p className="mt-1">
-            This household has no saved online-search settings, so the server
-            environment fallback is being used. Saving this card overrides the
-            fallback for this household; saving with both controls off suppresses it.
-          </p>
-        </div>
-      )}
-
-      {settings.credential_source === "household" &&
-        !settings.has_api_key &&
-        settings.environment_api_key_available && (
-          <div className="mt-4 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
-            Household settings are authoritative. The installation fallback key is
-            ignored while this household configuration exists.
-          </div>
-        )}
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-border/65 bg-background/35 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Online manual search</h3>
-            <Badge variant={settings.manual.configured ? "sage" : "outline"}>
-              {settings.manual.configured ? "Ready" : "Not configured"}
-            </Badge>
-          </div>
-          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+      <div className="mt-4 divide-y divide-border/60 border-y border-border/60">
+        <LookupRow
+          id="online-manual-search"
+          title="Online manual search"
+          state={settings.manual.configured ? "Ready" : "Not configured"}
+          stateVariant={settings.manual.configured ? "sage" : "outline"}
+          open={openRows.includes("online-manual-search")}
+          onOpenChange={setRowOpen}
+        >
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             Find exact manufacturer/model manuals from online sources. Manual uploads
             and attached-manual questions continue to work without it.
           </p>
-          <label className="mt-3 flex items-start gap-2.5 text-xs">
+          <label className="mt-1 flex min-h-11 items-center gap-2.5 text-xs">
             <input
               type="checkbox"
-              className="mt-0.5 size-4 rounded border-border"
+              className="size-4 rounded border-border"
               checked={manualEnabled}
               onChange={(event) => setManualEnabled(event.target.checked)}
             />
             <span>Enable online manual search</span>
           </label>
-          <p className="mt-2 text-2xs text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Source: {sourceLabel(settings.manual.source)}
             {settings.manual.provider_label ? ` · ${settings.manual.provider_label}` : ""}
           </p>
@@ -253,31 +294,32 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
               {settings.manual.reason}
             </p>
           )}
-        </div>
+        </LookupRow>
 
-        <div className="rounded-xl border border-border/65 bg-background/35 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Reference-image search</h3>
-            <Badge variant={settings.reference.configured ? "sage" : "outline"}>
-              {settings.reference.configured ? "Ready" : "Not configured"}
-            </Badge>
-          </div>
-          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+        <LookupRow
+          id="reference-image-search"
+          title="Reference-image search"
+          state={settings.reference.configured ? "Ready" : "Not configured"}
+          stateVariant={settings.reference.configured ? "sage" : "outline"}
+          open={openRows.includes("reference-image-search")}
+          onOpenChange={setRowOpen}
+        >
+          <p className="text-2xs leading-relaxed text-muted-foreground">
             Searches public websites and automatically selects one suitable product
             image from the item name, brand or description. Exact model is not
             required for a representative image. Actual photos always take priority;
             a selected reference can be replaced or removed.
           </p>
-          <label className="mt-3 flex items-start gap-2.5 text-xs">
+          <label className="mt-1 flex min-h-11 items-center gap-2.5 text-xs">
             <input
               type="checkbox"
-              className="mt-0.5 size-4 rounded border-border"
+              className="size-4 rounded border-border"
               checked={referenceEnabled}
               onChange={(event) => setReferenceEnabled(event.target.checked)}
             />
             <span>Enable reference-image search</span>
           </label>
-          <p className="mt-2 text-2xs text-muted-foreground">
+          <p className="text-2xs text-muted-foreground">
             Source: {sourceLabel(settings.reference.source)}
             {settings.reference.provider_label
               ? ` · ${settings.reference.provider_label}`
@@ -288,71 +330,124 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
               {settings.reference.reason}
             </p>
           )}
-        </div>
-      </div>
+        </LookupRow>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <Field
-          label={settings.has_api_key ? "Replace Brave Search API key" : "Brave Search API key"}
-          htmlFor="online-search-key"
-          hint={settings.has_api_key ? "Blank keeps the saved key" : "Write-only"}
+        <LookupRow
+          id="online-search-connection"
+          title="Brave Search connection"
+          state={
+            settings.has_api_key
+              ? `Key saved · v${settings.api_key_version}`
+              : sourceLabel(settings.credential_source)
+          }
+          stateVariant={sourceVariant(settings.credential_source)}
+          open={openRows.includes("online-search-connection")}
+          onOpenChange={setRowOpen}
         >
-          <Input
-            id="online-search-key"
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={
-              settings.has_api_key
-                ? `Saved key · v${settings.api_key_version}. Enter a replacement.`
-                : "Paste the Brave Search subscription token"
-            }
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
-            {settings.has_api_key ? (
-              <>
-                <Badge variant="sage">
-                  <KeyRound className="size-3" /> Key saved · v{settings.api_key_version}
-                </Badge>
+          <p className="text-2xs leading-relaxed text-muted-foreground">
+            One Brave Search API credential powers both lookups. Brave is the only
+            supported provider in this release.
+          </p>
+
+          {settings.credential_source === "environment" && (
+            <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
+              <p className="font-medium text-foreground/85">Installation fallback is active.</p>
+              <p className="mt-1">
+                This household has no saved online-search settings, so the server
+                environment fallback is being used. Saving this card overrides the
+                fallback for this household; saving with both controls off suppresses it.
+              </p>
+            </div>
+          )}
+
+          {settings.credential_source === "household" &&
+            !settings.has_api_key &&
+            settings.environment_api_key_available && (
+              <div className="mt-3 rounded-xl border border-brass/25 bg-brass-soft/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
+                Household settings are authoritative. The installation fallback key is
+                ignored while this household configuration exists.
+              </div>
+            )}
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <Field
+              label={settings.has_api_key ? "Replace Brave Search API key" : "Brave Search API key"}
+              htmlFor="online-search-key"
+              hint={settings.has_api_key ? "Blank keeps the saved key" : "Write-only"}
+            >
+              <Input
+                id="online-search-key"
+                type="password"
+                autoComplete="new-password"
+                spellCheck={false}
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={
+                  settings.has_api_key
+                    ? `Saved key · v${settings.api_key_version}. Enter a replacement.`
+                    : "Paste the Brave Search subscription token"
+                }
+              />
+              {settings.has_api_key ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
+                  className="mt-2"
                   onClick={() => setRemoveOpen(true)}
                   disabled={removeKey.isPending}
                 >
                   {removeKey.isPending ? <Spinner /> : <Trash2 />}
                   Remove key
                 </Button>
-              </>
-            ) : (
-              <span>No household Brave key saved.</span>
-            )}
-          </div>
-        </Field>
+              ) : (
+                <p className="mt-2 text-2xs text-muted-foreground">
+                  No household Brave key saved.
+                </p>
+              )}
+            </Field>
 
-        <Field
-          label="Optional source restriction (advanced)"
-          htmlFor="online-search-domains"
-          hint="Leave blank for the public web"
-        >
-          <Textarea
-            id="online-search-domains"
-            className="min-h-28 font-mono text-2xs"
-            value={domainsText}
-            onChange={(event) => setDomainsText(event.target.value)}
-            placeholder={"Leave blank to search public websites\nexample.com (optional)"}
-          />
-          <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
-            Empty is the default and allows suitable images from public websites.
-            Enter registrable domains only if you deliberately want to narrow
-            downloads to those sites. Source page, retrieval time and any known
-            license metadata are recorded; unknown reuse permission is labelled
-            honestly.
-          </p>
-        </Field>
+            <Field
+              label="Optional source restriction (advanced)"
+              htmlFor="online-search-domains"
+              hint="Leave blank for the public web"
+            >
+              <Textarea
+                id="online-search-domains"
+                className="min-h-28 font-mono text-2xs"
+                value={domainsText}
+                onChange={(event) => setDomainsText(event.target.value)}
+                placeholder={"Leave blank to search public websites\nexample.com (optional)"}
+              />
+              <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
+                Empty is the default and allows suitable images from public websites.
+                Enter registrable domains only if you deliberately want to narrow
+                downloads to those sites. Source page, retrieval time and any known
+                license metadata are recorded; unknown reuse permission is labelled
+                honestly.
+              </p>
+            </Field>
+          </div>
+
+          <details className="mt-4 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
+            <summary className="cursor-pointer font-medium text-foreground/80">
+              Installation fallback and advanced gateway
+            </summary>
+            <p className="mt-2 [&_code]:break-all">
+              If no household online-search settings have been saved, the installation
+              environment can supply <code>BRAVE_SEARCH_API_KEY</code>, its enable flags
+              and an optional <code>ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS</code> restriction.
+              Saving this card makes household settings authoritative, including explicit
+              disable and key removal. The advanced <code>MANUAL_SEARCH_URL</code> gateway
+              remains an operator-only installation fallback and is not edited here.
+            </p>
+            <p className="mt-1">
+              Public-address/redirect validation, byte/dimension limits, decodable-image
+              re-encoding and source attribution continue to apply independently of any
+              optional domain restriction.
+            </p>
+          </details>
+        </LookupRow>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -372,9 +467,6 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
           {testConnection.isPending ? <Spinner /> : <Wifi />}
           Test connection
         </Button>
-        <span className="text-2xs text-muted-foreground">
-          Brave is the only supported provider in this release.
-        </span>
       </div>
 
       {keyMissing && (
@@ -395,26 +487,6 @@ export function OnlineSearchSettingsCard({ isOwner }: { isOwner: boolean }) {
         </p>
       )}
 
-      <details className="mt-4 rounded-xl border border-border/60 bg-background/30 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
-        <summary className="cursor-pointer font-medium text-foreground/80">
-          Installation fallback and advanced gateway
-        </summary>
-        <p className="mt-2 [&_code]:break-all">
-          If no household online-search settings have been saved, the installation
-          environment can supply <code>BRAVE_SEARCH_API_KEY</code>, its enable flags
-          and an optional <code>ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS</code> restriction.
-          Saving this card makes household settings authoritative, including explicit
-          disable and key removal. The advanced <code>MANUAL_SEARCH_URL</code> gateway
-          remains an operator-only installation fallback and is not edited here.
-        </p>
-        <p className="mt-1">
-          Public-address/redirect validation, byte/dimension limits, decodable-image
-          re-encoding and source attribution continue to apply independently of any
-          optional domain restriction.
-        </p>
-      </details>
-
-      </details>
       <ConfirmDialog
         open={testConfirmOpen}
         onOpenChange={setTestConfirmOpen}

@@ -128,7 +128,10 @@ test("owner can configure online search without env vars or plaintext key exposu
   await page.goto("/settings");
   const card = page.locator("#online-search");
   await card.scrollIntoViewIfNeeded();
-  await expect(card.getByRole("heading", { name: "Online search" })).toBeVisible();
+  await expect(card.getByRole("heading", { name: "Online lookups" })).toBeVisible();
+  for (const row of ["Online manual search", "Reference-image search", "Brave Search connection"]) {
+    await card.getByRole("heading", { name: row }).click();
+  }
   await expect(card.getByText("No household Brave key saved.")).toBeVisible();
   await expect(card.getByText(/Brave is the only supported provider/)).toBeVisible();
   await expect(
@@ -187,6 +190,9 @@ test("saved public-web settings refresh the system health summary without a doma
   await page.goto("/settings");
   const card = page.locator("#online-search");
   await card.scrollIntoViewIfNeeded();
+  for (const row of ["Online manual search", "Reference-image search", "Brave Search connection"]) {
+    await card.getByRole("heading", { name: row }).click();
+  }
   const key = card.getByLabel(/Brave Search API key|Replace Brave Search API key/);
   await key.fill("fixture-public-web-key-not-a-real-credential");
   await card.getByLabel("Enable online manual search").check();

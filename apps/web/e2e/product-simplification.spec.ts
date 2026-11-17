@@ -137,9 +137,9 @@ for (const mobile of [false, true]) {
     if (shots) await page.screenshot({ path: `${shots}/${size}-overview.png` });
     await page.keyboard.press("Escape");
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Online search" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Online lookups" })).toBeVisible();
     await expect(page.getByLabel(/Brave Search API key/)).toBeHidden();
-    await page.getByText("Online search settings", { exact: true }).click();
+    await page.getByRole("heading", { name: "Brave Search connection" }).click();
     await expect(page.getByLabel(/Brave Search API key/)).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/${size}-settings.png`, fullPage: true });
 

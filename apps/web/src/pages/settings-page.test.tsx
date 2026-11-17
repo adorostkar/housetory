@@ -7,7 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/components/theme-provider";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
-import type { AiStatus, Household, Overview, SessionState } from "@/lib/types";
+import type {
+  AiStatus,
+  Household,
+  OnlineSearchSettings,
+  Overview,
+  SessionState,
+} from "@/lib/types";
 import { SettingsPage } from "@/pages/settings-page";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -289,5 +295,55 @@ describe("SettingsPage Intelligence summary", () => {
     expect(screen.getByText("AI is disabled for this task.")).toBeVisible();
     expect(screen.queryByText("Model not listed")).not.toBeInTheDocument();
     expect(screen.queryByText(/models listed/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage online lookups", () => {
+  it("shows one Online lookups section instead of separate lookup sections", async () => {
+    mockApi(() => baseStatus);
+    const fallback = vi.mocked(api.get).getMockImplementation()!;
+    const channel = {
+      enabled: false,
+      configured: false,
+      source: "none",
+      provider: "brave",
+      provider_label: null,
+      reason: null,
+    };
+    const onlineSearch = {
+      provider: "brave",
+      supported_providers: ["brave"],
+      manual_enabled: false,
+      reference_enabled: false,
+      has_api_key: false,
+      environment_api_key_available: false,
+      credential_source: "none",
+      api_key_version: 0,
+      credential_storage_ready: true,
+      permitted_source_domains: [],
+      max_permitted_domains: 50,
+      manual: channel,
+      reference: { ...channel, permitted_source_domains: [], policy_configured: true },
+      environment_manual_available: false,
+      environment_reference_available: false,
+      updated_at: null,
+      warning: null,
+    } as unknown as OnlineSearchSettings;
+    vi.mocked(api.get).mockImplementation(((path: string) =>
+      path === "/settings/online-search"
+        ? Promise.resolve(onlineSearch)
+        : fallback(path)) as typeof api.get);
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "Online manual search", level: 3 }),
+    ).toBeVisible();
+    const sections = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((node) => node.textContent);
+    expect(sections.filter((name) => name === "Online lookups")).toHaveLength(1);
+    expect(sections).not.toContain("Online search");
+    expect(sections).not.toContain("Online manual search");
+    expect(sections).not.toContain("Reference-image search");
   });
 });
