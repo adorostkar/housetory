@@ -2,13 +2,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from ..domain import ContainerType
 from ..schemas.common import Description, trimmed
 from ..schemas.imports import (
     DuplicateCandidate,
-    LocationCandidate,
     LocationProposal,
     NamedMatch,
 )
@@ -32,54 +31,6 @@ VoiceSuggestionState = Literal[
     "rejected",
     "failed",
 ]
-
-
-class AiVoiceMention(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: trimmed(1, 200) | None = None
-    quantity: int | None = Field(default=None, ge=0, le=1_000_000)
-    variant: trimmed(1, 160) | None = None
-    description: Description | None = None
-    category: trimmed(1, 80) | None = None
-    brand: trimmed(1, 120) | None = None
-    model: trimmed(1, 120) | None = None
-    serial_number: trimmed(1, 200) | None = None
-    room: trimmed(1, 120) | None = None
-    storage_location: trimmed(1, 120) | None = None
-    tags: list[str] = Field(default_factory=list, max_length=20)
-    notes: Description | None = None
-    evidence: trimmed(1, 2000)
-    role: Literal["item", "summary", "correction"] = "item"
-    target: trimmed(1, 200) | None = None
-    confidence: int | None = Field(default=None, ge=0, le=100)
-
-    @model_validator(mode="after")
-    def _name_required_for_non_correction(self) -> "AiVoiceMention":
-        if self.role in {"item", "summary"} and not self.name:
-            raise ValueError("Item and summary mentions require a name.")
-        if self.role == "correction" and not self.name and self.target is None:
-            # A bare correction such as "actually four" is valid; the server
-            # applies it to the most recent item mention.
-            return self
-        return self
-
-
-class AiVoiceMove(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    text: trimmed(1, 1000)
-    item: trimmed(1, 200) | None = None
-    from_location: trimmed(1, 200) | None = None
-    to_location: trimmed(1, 200) | None = None
-
-
-class AiVoiceResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mentions: list[AiVoiceMention] = Field(default_factory=list, max_length=200)
-    moves: list[AiVoiceMove] = Field(default_factory=list, max_length=50)
-    warnings: list[str] = Field(default_factory=list, max_length=50)
 
 
 class VoiceSourceSpan(BaseModel):
@@ -169,42 +120,9 @@ class VoiceNoteOut(BaseModel):
     updated_at: datetime
 
 
-class VoiceTranscriptRequest(BaseModel):
-    transcript: str = Field(min_length=1, max_length=50_000)
-
-
-class VoiceApplyEntry(VoiceSuggestionEdit):
-    action: Literal["import", "skip", "reject"] = "import"
-    duplicate_resolution: Literal["new", "add_quantity", "skip"] | None = None
-    merge_item_id: uuid.UUID | None = None
-
-
-class VoiceApplyRequest(BaseModel):
-    entries: list[VoiceApplyEntry] = Field(min_length=1, max_length=100)
-
-
-class VoiceApplyFailure(BaseModel):
-    suggestion_id: uuid.UUID
-    message: str
-
-
-class VoiceApplyResult(BaseModel):
-    note: VoiceNoteOut
-    created: int
-    added_quantity: int
-    skipped: int
-    rejected: int
-    failed: int
-    failures: list[VoiceApplyFailure]
-
-
 class VoiceConfigOut(BaseModel):
     transcription_configured: bool
     max_duration_seconds: int
     max_upload_mb: int
     supported_formats: list[str]
     retention_note: str
-
-
-class VoiceLocationCandidate(LocationCandidate):
-    pass

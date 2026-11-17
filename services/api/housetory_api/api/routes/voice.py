@@ -9,25 +9,13 @@ from ...config import get_settings
 from ...db import get_db
 from ...domain import VoiceNoteStatus
 from ...models import Property, Room, StorageLocation, VoiceNote
-from ...schemas.voice import (
-    VoiceApplyRequest,
-    VoiceApplyResult,
-    VoiceConfigOut,
-    VoiceNoteOut,
-    VoiceTranscriptRequest,
-)
+from ...schemas.voice import VoiceConfigOut, VoiceNoteOut
 from ...services import properties as property_service
 from ...services import storage
 from ...services.voice import (
     active_voice_note_count,
-    apply_voice_note,
-    cancel_voice_note,
-    enqueue_interpretation,
     enqueue_transcription,
     get_voice_note,
-    has_applied_suggestions,
-    interpretation_config,
-    retry_transcription,
     serialize_voice_note,
     transcription_config,
 )
@@ -114,9 +102,8 @@ def voice_config(
         max_upload_mb=settings.voice_max_upload_mb,
         supported_formats=SUPPORTED_AUDIO_FORMATS,
         retention_note=(
-            "Audio is deleted after a successful transcript or when you cancel. "
-            "A failed recording is kept privately so you can retry; cancel it to delete "
-            "the audio immediately."
+            "Audio is deleted as soon as it has been transcribed, or when transcription "
+            "fails. Only the transcript is kept."
         ),
     )
 
@@ -152,7 +139,7 @@ def create_voice_note(
         raise ApiError(
             429,
             "too_many_voice_notes",
-            "Too many voice notes are waiting for review. Finish or cancel one first.",
+            "Too many voice notes are being transcribed. Wait for one to finish.",
         )
     property_record, room, location = _context(
         db, auth.household.id, room_id, location_id, property_id
@@ -201,88 +188,3 @@ def read_voice_note(
     db: Session = Depends(get_db),
 ) -> VoiceNoteOut:
     return _note_out(get_voice_note(db, auth.household.id, note_id))
-
-
-@router.post("/{note_id}/interpret", response_model=VoiceNoteOut)
-def interpret_voice_note(
-    note_id: uuid.UUID,
-    payload: VoiceTranscriptRequest,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> VoiceNoteOut:
-    settings = get_settings()
-    note = get_voice_note(db, auth.household.id, note_id, for_update=True)
-    if note.status == VoiceNoteStatus.CONFIRMED.value:
-        raise ApiError(409, "voice_note_confirmed", "This voice note was already applied.")
-    if note.status in {
-        VoiceNoteStatus.QUEUED.value,
-        VoiceNoteStatus.TRANSCRIBING.value,
-        VoiceNoteStatus.INTERPRETING.value,
-        VoiceNoteStatus.APPLYING.value,
-    }:
-        raise ApiError(409, "voice_note_busy", "Wait for the current step to finish.")
-    if has_applied_suggestions(note):
-        raise ApiError(
-            409,
-            "voice_note_already_reviewed",
-            "This voice note already has applied suggestions.",
-        )
-    transcript = payload.transcript.strip()
-    if not transcript:
-        raise ApiError(422, "transcript_required", "Enter a transcript first.")
-    if len(transcript) > settings.voice_max_transcript_chars:
-        raise ApiError(
-            422,
-            "transcript_too_long",
-            f"Transcripts are limited to {settings.voice_max_transcript_chars} characters.",
-        )
-    config = interpretation_config(db, auth.household.id)
-    if not config.configured:
-        raise ApiError(
-            422,
-            "interpretation_not_configured",
-            config.error
-            or "Choose a Smart imports task provider in AI settings before interpreting.",
-        )
-    note.transcript = transcript
-    note.suggestions = []
-    note.warnings = []
-    note.interpretation_error = None
-    enqueue_interpretation(db, note)
-    db.refresh(note)
-    return _note_out(note)
-
-
-@router.post("/{note_id}/transcription/retry", response_model=VoiceNoteOut)
-def retry_voice_transcription(
-    note_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> VoiceNoteOut:
-    note = get_voice_note(db, auth.household.id, note_id, for_update=True)
-    retry_transcription(db, note)
-    db.refresh(note)
-    return _note_out(note)
-
-
-@router.post("/{note_id}/confirm", response_model=VoiceApplyResult)
-def confirm_voice_note(
-    note_id: uuid.UUID,
-    payload: VoiceApplyRequest,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> VoiceApplyResult:
-    note = get_voice_note(db, auth.household.id, note_id)
-    result = apply_voice_note(db, note, payload.entries)
-    return VoiceApplyResult.model_validate(result)
-
-
-@router.post("/{note_id}/cancel", response_model=VoiceNoteOut)
-def cancel_voice_note_route(
-    note_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> VoiceNoteOut:
-    note = get_voice_note(db, auth.household.id, note_id)
-    cancelled = cancel_voice_note(db, note)
-    return _note_out(cancelled)

@@ -91,13 +91,7 @@ from housetory_api.services.recognition import (
     run_job as run_recognition_job,
 )
 from housetory_api.services.voice import (
-    INTERPRET_TASK as VOICE_INTERPRET_TASK,
-)
-from housetory_api.services.voice import (
     TRANSCRIBE_TASK as VOICE_TRANSCRIBE_TASK,
-)
-from housetory_api.services.voice import (
-    process_interpretation as run_voice_interpretation,
 )
 from housetory_api.services.voice import (
     process_transcription as run_voice_transcription,
@@ -113,6 +107,8 @@ logger = logging.getLogger("housetory.worker")
 PRUNE_TASK = "maintenance.prune_expired_sessions"
 PRUNE_FINISHED_TASK = "maintenance.prune_finished_jobs"
 PRUNE_ITEM_IMAGES_TASK = "maintenance.prune_item_images"
+# Voice interpretation was removed; jobs queued before that finish without doing anything.
+RETIRED_VOICE_INTERPRET_TASK = "voice.interpret"
 HEARTBEAT_FILE = Path(
     os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/housetory-worker-heartbeat")
 )
@@ -359,9 +355,10 @@ HANDLERS = {
     VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(
         payload.get("voice_note_id")
     ),
-    VOICE_INTERPRET_TASK: lambda payload: run_voice_interpretation(
-        payload.get("voice_note_id")
-    ),
+    RETIRED_VOICE_INTERPRET_TASK: lambda payload: {
+        "status": "retired",
+        "message": "Voice interpretation was retired; the transcript is preserved.",
+    },
     ITEM_IMAGE_NEW_ITEM_TASK: run_item_image_new_item,
     ITEM_IMAGE_BATCH_TASK: lambda payload: run_item_image_batch(
         payload, uuid.UUID(str(payload["job_id"]))

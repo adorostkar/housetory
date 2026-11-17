@@ -148,7 +148,7 @@ All application endpoints are versioned under `/api/v1`.
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/natural` is the explicit answer/filter flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
 | Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
-| Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}`, `POST /voice/{id}/interpret`, transcription retry, explicit confirm and cancel |
+| Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}` (recording, upload and transcription only; the transcript is handed to the assistant or Add items) |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
 | AI | `GET /ai/status?task=`, `POST /assistant/query` and `POST /search/natural` (compatibility endpoints with no caller in the web app; they share services with `POST /search/query`), recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
@@ -444,12 +444,11 @@ Key decisions:
   fabricating per-item move events. Undo is a new compensating event with a unique
   original-event constraint.
 - **Voice-note records** store household scope, creator, status, private audio
-  metadata/storage key, room/container context, transcript and provider metadata,
-  validated structured suggestions with source spans, deterministic grouping and
-  location/duplicate metadata, warnings, applied-item links and lifecycle
-  timestamps. Audio is removed after successful transcription or cancellation;
-  failed audio is retained only for retry. Confirmation is separate and
-  idempotent, and reuses the existing item/location services.
+  metadata/storage key, room/container context, transcript and provider metadata
+  and lifecycle timestamps. Audio is removed once transcription succeeds or
+  fails. The former interpret/confirm flow is removed; its columns (suggestions,
+  warnings, applied items, interpretation metadata) are kept for existing rows
+  and no longer written.
 - **AI recognition records** store a private normalized/original photo, status,
   validated suggestions, model metadata, actual processing mode, optional
   destination room/container, applied-item provenance and errors.
@@ -569,8 +568,8 @@ deployment.
 - The worker writes a heartbeat file; its Docker health check fails if the
   heartbeat is stale.
 - Current handlers: prune expired sessions, prune old finished jobs,
-  `documents.ocr`, `imports.process`, `ai.recognize`, `voice.transcribe` and
-  `voice.interpret`. A maintenance job is enqueued every six hours. OCR jobs are
+  `documents.ocr`, `imports.process`, `ai.recognize`, `voice.transcribe`
+  (`voice.interpret` is retired: jobs queued earlier finish as a no-op). A maintenance job is enqueued every six hours. OCR jobs are
   enqueued in the same transaction as an upload, claimable by the worker, and
   retried with backoff. The handler marks the document processing, extracts text
   with embedded PDF text or Tesseract/Poppler, stores proposals in JSONB, and

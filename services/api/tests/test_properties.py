@@ -721,12 +721,10 @@ def test_migration_backfills_one_property_per_existing_household_without_touchin
             connection.execute(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
 
 
-def test_import_and_voice_location_matching_stay_inside_the_selected_property(
+def test_import_location_matching_stays_inside_the_selected_property(
     owner_client,
 ):
-    from housetory_api.schemas.voice import AiVoiceMention, AiVoiceResult
     from housetory_api.services.import_pipeline import process_import_batch
-    from housetory_api.services.voice import build_voice_suggestions
 
     home = owner_client.get("/api/v1/properties").json()["items"][0]
     cabin = create_property(owner_client, "Cabin")
@@ -765,42 +763,3 @@ def test_import_and_voice_location_matching_stay_inside_the_selected_property(
     assert applied.status_code == 200, applied.text
     imported = owner_client.get(f"/api/v1/items?property_id={cabin['id']}").json()["items"]
     assert any(item["name"] == "Winter clothes" for item in imported)
-
-    transcript = "Kettle in the Kitchen Drawer."
-    result = AiVoiceResult(
-        mentions=[
-            AiVoiceMention(
-                name="Kettle",
-                room="Kitchen",
-                storage_location="Drawer",
-                evidence="Kettle in the Kitchen Drawer",
-            )
-        ]
-    )
-    household = household_id(owner_client)
-    home_kitchen = create_room(owner_client, "Kitchen", home["id"]).json()
-    cabin_kitchen = create_room(owner_client, "Kitchen", cabin["id"]).json()
-    with SessionLocal() as db:
-        suggestions, _warnings = build_voice_suggestions(
-            db,
-            household,
-            transcript,
-            result,
-            default_property_id=uuid.UUID(cabin["id"]),
-        )
-        assert suggestions[0].room is not None
-        assert str(suggestions[0].room.matched_id) == cabin_kitchen["id"]
-
-        ambiguous, warnings = build_voice_suggestions(
-            db,
-            household,
-            transcript,
-            result,
-            default_property_id=None,
-        )
-        assert ambiguous[0].room is not None
-        assert ambiguous[0].room.status == "ambiguous"
-        assert any(
-            str(candidate.id) == home_kitchen["id"] for candidate in ambiguous[0].room.candidates
-        )
-        assert len(ambiguous[0].room.candidates) >= 2

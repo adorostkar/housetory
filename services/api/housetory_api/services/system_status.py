@@ -34,7 +34,7 @@ from .inventory_review_schedule import schedule_summary
 TASK_ORDER = tuple(task.value for task in ACTIVE_AI_TASKS)
 # These handlers are retained only so historical rows can be retried safely.
 # Their old failures must not keep the live system in a core-attention state.
-RETIRED_JOB_TASKS = frozenset({"maintenance.prune_item_images"})
+RETIRED_JOB_TASKS = frozenset({"maintenance.prune_item_images", "voice.interpret"})
 # Payload fields that identify "the same work" for a task. A failed job only
 # becomes history when a newer job for the same task and the same values is
 # queued, running or succeeded. Tasks not listed here (and not maintenance

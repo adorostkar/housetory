@@ -328,12 +328,9 @@ Tailscale is optional.
   distinct. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
-  microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio, edit the transcript,
-  then review structured item groups. Repeated mentions such as “ethernet cable,
-  ethernet cable, another ethernet cable” become one suggestion with quantity 3.
-  Explicit counts, corrections, recap summaries, variants, rooms/containers,
-  duplicate decisions and grouped-suggestion splitting are supported. Audio is
-  deleted after transcription; nothing is written before explicit confirmation.
+  microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio; the transcript is
+  placed in the Add items or search input for you to edit and submit. Audio is
+  deleted after transcription; a transcript alone never writes inventory.
   See [`docs/VOICE_NOTES.md`](docs/VOICE_NOTES.md).
 - Search examples, Enter submission and debounced typing keep one URL/query source
   of truth, preserve scope parameters and avoid stale async results. The offline

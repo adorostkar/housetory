@@ -1,5 +1,14 @@
 # Voice-note inventory entry
 
+> **Status:** the app records or uploads audio and transcribes it; the transcript
+> is then placed in the Add items or search input. The separate
+> interpret → review → confirm flow described below (and its
+> `/voice/{id}/interpret`, `/confirm`, `/cancel` and `/transcription/retry`
+> endpoints) was never reachable from the UI and has been removed. Audio is
+> deleted when transcription succeeds or fails. The sections on interpretation,
+> grouping, confirmation, retry and cancellation are kept as a historical design
+> record only.
+
 Voice notes are another route through **Add items**. The flow is deliberately
 review-first:
 
