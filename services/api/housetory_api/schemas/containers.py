@@ -217,9 +217,3 @@ class LabelPrintRequest(BaseModel):
         if len(set(self.location_ids)) * self.copies > 1000:
             raise ValueError("A single print job is limited to 1000 labels.")
         return self
-
-
-class ContainerQrConfig(BaseModel):
-    base_url: str
-    warning: str | None = None
-    local_only: bool

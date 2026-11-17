@@ -157,10 +157,6 @@ class AiRecognitionOut(ORMModel):
     original_url: str
 
 
-class AiRecognitionList(BaseModel):
-    items: list[AiRecognitionOut]
-
-
 class AssistantHistoryMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=4000)

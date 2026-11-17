@@ -396,7 +396,6 @@ def test_empty_room_with_only_tombstones_can_be_deleted(owner_client):
         )
     assert client.get(f"/api/v1/rooms/{office['id']}").status_code == 404
     assert client.get(f"/api/v1/containers/{box['id']}").status_code == 410
-    assert client.get(f"/api/v1/containers/lookup/{box['identifier']}").status_code == 410
     containers = client.get(
         "/api/v1/containers",
         params={"q": box["identifier"], "include_fixed": True},
@@ -732,9 +731,6 @@ def test_tombstones_are_excluded_from_active_lists_search_counts_and_qr(owner_cl
     deleted = client.get(f"/api/v1/containers/{box['id']}")
     assert deleted.status_code == 410
     assert deleted.json()["detail"]["code"] == "container_deleted"
-    lookup = client.get(f"/api/v1/containers/lookup/{box['identifier']}")
-    assert lookup.status_code == 410
-    assert lookup.json()["detail"]["code"] == "container_deleted"
     qr = client.get(f"/api/v1/containers/{box['id']}/qr.svg")
     assert qr.status_code == 410
     location_detail = client.get(f"/api/v1/storage-locations/{box['id']}")

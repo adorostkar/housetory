@@ -131,7 +131,7 @@ All application endpoints are versioned under `/api/v1`.
 | Household | `GET /household`, `PATCH /household` |
 | Rooms | `GET/POST /rooms`, `GET/PATCH/DELETE /rooms/{id}` |
 | Storage | `GET/POST /storage-locations`, `GET/PATCH/DELETE /storage-locations/{id}` |
-| Containers | `GET/POST /containers`, `POST /containers/bulk`, `POST /containers/convert`, `GET /containers/lookup/{identifier}`, `GET/PATCH /containers/{id}`, `POST /containers/{id}/move`, `POST /containers/{id}/identifier`, summary regenerate/edit/AI, `GET /containers/{id}/qr.svg`, `GET /containers/qr-config` |
+| Containers | `GET/POST /containers`, `POST /containers/bulk`, `POST /containers/convert`, `GET/PATCH /containers/{id}`, `POST /containers/{id}/move`, `POST /containers/{id}/identifier`, summary regenerate/edit/AI, `GET /containers/{id}/qr.svg` |
 | Labels | `GET /labels/templates`, `POST /labels/pdf`, `GET/POST /labels/calibration.pdf` |
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
@@ -140,7 +140,7 @@ All application endpoints are versioned under `/api/v1`.
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Document scans | `POST/GET/DELETE /documents/scans`, add/update/delete/reorder pages, authenticated original/cleaned page files, idempotent `POST /documents/scans/{id}/commit` |
-| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/refine`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
+| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items and reviewed per-item allocations |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
@@ -151,7 +151,7 @@ All application endpoints are versioned under `/api/v1`.
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}` (recording, upload and transcription only; the transcript is handed to the assistant or Add items) |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
-| AI | `GET /ai/status?task=`, recognition create/list/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
+| AI | `GET /ai/status?task=`, recognition create/detail/retry/apply, provider settings CRUD, model discovery, connection test, task defaults and credential rotation |
 | AI settings | `GET /ai/settings`, `POST/PATCH/DELETE /ai/providers`, `GET /ai/providers/{id}/models`, `POST /ai/providers/{id}/test`, `PUT /ai/tasks/{task}`, `POST /ai/credentials/rotate` (owner only) |
 
 OpenAPI documentation is available in development at `/api/docs`. It is

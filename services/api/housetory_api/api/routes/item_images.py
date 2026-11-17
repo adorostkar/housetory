@@ -109,15 +109,6 @@ def remove_item_image(
     return _state(db, item)
 
 
-@router.post("/items/{item_id}/image/reset", response_model=ItemImageState)
-def reset_item_image(
-    item_id: uuid.UUID,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ItemImageState:
-    return remove_item_image(item_id, auth, db)
-
-
 @router.delete("/items/{item_id}/images/{image_id}", response_model=ItemImageState)
 def delete_item_image(
     item_id: uuid.UUID,

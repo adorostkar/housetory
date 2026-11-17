@@ -12,7 +12,6 @@ from ...models import AiRecognition, Room
 from ...schemas.ai import (
     AiRecognitionApplyRequest,
     AiRecognitionApplyResult,
-    AiRecognitionList,
     AiRecognitionOut,
     AiStatus,
     DocumentRelations,
@@ -146,26 +145,6 @@ def create_recognition(
         raise
     db.refresh(recognition)
     return serialize_recognition(recognition, db, auth.household.id)
-
-
-@router.get("/ai/recognitions", response_model=AiRecognitionList)
-def list_recognitions(
-    limit: Annotated[int, Query(ge=1, le=50)] = 20,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> AiRecognitionList:
-    recognitions = db.scalars(
-        select(AiRecognition)
-        .where(AiRecognition.household_id == auth.household.id)
-        .order_by(AiRecognition.created_at.desc())
-        .limit(limit)
-    ).all()
-    return AiRecognitionList(
-        items=[
-            serialize_recognition(recognition, db, auth.household.id)
-            for recognition in recognitions
-        ]
-    )
 
 
 @router.get("/ai/recognitions/{recognition_id}", response_model=AiRecognitionOut)

@@ -157,10 +157,10 @@ def test_container_creation_identifiers_and_non_reuse(owner_client):
     assert renamed.json()["identifier"] == "BOX-001"
     assert renamed.json()["name"] == "Winter clothing"
 
-    lookup = owner_client.get("/api/v1/containers/lookup/box-001")
-    assert lookup.status_code == 200, lookup.text
-    assert lookup.json()["id"] == box["id"]
-    assert owner_client.get("/api/v1/containers/lookup/NOPE-1").status_code == 422
+    # The identifier still finds its container, whatever the case typed.
+    found = owner_client.get("/api/v1/containers", params={"q": "box-001"})
+    assert found.status_code == 200, found.text
+    assert [entry["id"] for entry in found.json()["items"]] == [box["id"]]
 
 
 def test_identifier_allocation_is_concurrent_and_atomic(owner_client):

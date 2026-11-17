@@ -147,7 +147,6 @@ def test_every_household_endpoint_rejects_cross_household_access(
     assert anon_client.get("/api/v1/purchases", headers=headers).json()["items"] == []
     assert anon_client.get("/api/v1/warranties", headers=headers).json()["items"] == []
     assert anon_client.get("/api/v1/imports", headers=headers).json()["items"] == []
-    assert anon_client.get("/api/v1/ai/recognitions", headers=headers).json()["items"] == []
     financial = anon_client.get("/api/v1/financial-overview", headers=headers).json()
     assert financial["item_count"] == 0
     assert financial["currency_totals"] == []
@@ -449,7 +448,6 @@ def test_unauthenticated_files_and_sensitive_routes_are_rejected(anon_client):
         "/api/v1/financial-overview",
         "/api/v1/imports",
         "/api/v1/ai/status",
-        "/api/v1/ai/recognitions",
         "/api/v1/exports/documents.csv",
         "/api/v1/exports/purchases.csv",
         "/api/v1/exports/warranties.csv",

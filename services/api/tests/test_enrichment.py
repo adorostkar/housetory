@@ -20,6 +20,7 @@ from tests.test_document_extraction import (
     _headers,
     _refinement_payload,
     ocr_document,
+    refine_extraction,
     upload_document,
 )
 from tests.test_hierarchy_imports import process, upload_markdown
@@ -680,7 +681,7 @@ def test_identical_document_refinement_completes_without_outstanding_suggestions
             "reason": "no_changes",
         }
     else:
-        result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+        result = refine_extraction(owner_client, document["id"])
         assert result.status_code == 200, result.text
         assert result.json()["ai_used"] is False
         assert result.json()["version"] == review["version"]
@@ -778,7 +779,7 @@ def test_cancelled_document_refinement_cannot_publish_late_suggestions(
             "reason": "superseded",
         }
     else:
-        result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+        result = refine_extraction(owner_client, document["id"])
         assert result.status_code == 409, result.text
         assert result.json()["detail"]["code"] == "refinement_stale"
     after = owner_client.get(f"/api/v1/documents/{document['id']}/extraction").json()

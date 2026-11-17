@@ -125,6 +125,37 @@ def _headers(token: str) -> dict[str, str]:
     return {"Cookie": f"housetory_session={token}"}
 
 
+
+class ServiceResult:
+    """A service call's outcome, shaped like an HTTP response for the assertions."""
+
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self.text = str(body)
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def refine_extraction(client, document_id):
+    """Refine through the service the enrichment worker uses."""
+    from housetory_api.api.errors import ApiError
+    from housetory_api.services import document_refinement
+
+    household = uuid.UUID(client.get("/api/v1/auth/session").json()["household"]["id"])
+    with SessionLocal() as db:
+        document = db.get(Document, uuid.UUID(document_id))
+        try:
+            result = document_refinement.refine_extraction(db, household, document)
+        except ApiError as exc:
+            db.rollback()
+            return ServiceResult(
+                exc.status_code, {"detail": {"code": exc.code, "message": exc.message}}
+            )
+        return ServiceResult(200, result.model_dump(mode="json"))
+
+
 def test_receipt_extraction_keeps_line_quantities_money_and_evidence(owner_client):
     document = upload_document(owner_client)
     response = ocr_document(owner_client, document["id"])
@@ -739,7 +770,7 @@ def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
         return _refinement_payload()
 
     monkeypatch.setattr(document_refinement.ai, "complete_json", complete_json)
-    first = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    first = refine_extraction(owner_client, document["id"])
     assert first.status_code == 200, first.text
     refinement = first.json()
     assert refinement["ai_used"] is True
@@ -759,7 +790,7 @@ def test_ai_refinement_is_versioned_evidence_validated_and_apply_uses_its_lines(
     stored = owner_client.get(f"/api/v1/documents/{document['id']}").json()
     assert refinement["version"] in stored["extracted_metadata"]["extraction_refinements"]
 
-    replay = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    replay = refine_extraction(owner_client, document["id"])
     assert replay.status_code == 200
     assert replay.json()["version"] == refinement["version"]
 
@@ -810,7 +841,7 @@ def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
             ],
         },
     )
-    invalid = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    invalid = refine_extraction(owner_client, document["id"])
     assert invalid.status_code == 422
     assert invalid.json()["detail"]["code"] == "ai_refinement_invalid"
     stored = owner_client.get(f"/api/v1/documents/{document['id']}").json()
@@ -821,7 +852,7 @@ def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
         "status_for",
         lambda *args, **kwargs: _ai_status(configured=False, available=False),
     )
-    unavailable = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    unavailable = refine_extraction(owner_client, document["id"])
     assert unavailable.status_code == 409
     assert unavailable.json()["detail"]["code"] == "ai_refinement_unavailable"
 
@@ -830,7 +861,7 @@ def test_ai_refinement_rejects_unsupported_evidence_and_provider_falls_back(
         "status_for",
         lambda *args, **kwargs: _ai_status(mode="cloud", cloud_consent=False),
     )
-    consent = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    consent = refine_extraction(owner_client, document["id"])
     assert consent.status_code == 409
     assert consent.json()["detail"]["code"] == "ai_refinement_consent_required"
 
@@ -850,7 +881,7 @@ def test_ai_refinement_rejects_malformed_schema(owner_client, monkeypatch, confi
         "complete_json",
         lambda *args, **kwargs: {"fields": {}, "lines": [{"description": "No kind"}]},
     )
-    result = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    result = refine_extraction(owner_client, document["id"])
     assert result.status_code == 422
     assert result.json()["detail"]["code"] == "ai_refinement_failed"
 
@@ -872,7 +903,7 @@ def test_ai_refinement_rejects_supported_amounts_with_inconsistent_line_arithmet
         lambda *args, **kwargs: payload,
     )
 
-    response = owner_client.post(f"/api/v1/documents/{document['id']}/extraction/refine")
+    response = refine_extraction(owner_client, document["id"])
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "ai_refinement_invalid"

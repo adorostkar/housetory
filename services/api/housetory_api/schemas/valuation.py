@@ -84,17 +84,8 @@ class ItemValuationPreviewOut(BaseModel):
     disclaimer: str
 
 
-class ItemValuationApplyIn(BaseModel):
-    estimate_id: uuid.UUID | None = None
-    purpose: ValuationPurpose
-    amount_cents: int = Field(ge=0, le=MAX_VALUATION_CENTS)
-    currency: str = Field(pattern=r"^[A-Z]{3}$")
-    expected_fingerprint: str = Field(min_length=64, max_length=64)
-
-
 __all__ = [
     "ItemValueEstimateOut",
-    "ItemValuationApplyIn",
     "ItemValuationEstimateIn",
     "ItemValuationPreviewOut",
     "MAX_VALUATION_CENTS",

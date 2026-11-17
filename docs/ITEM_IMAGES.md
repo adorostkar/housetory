@@ -320,7 +320,6 @@ delete media, change item/photo IDs, or alter existing provider/task choices.
   availability.
 - `POST /items/{id}/image/find` — automatic reference lookup/selection.
 - `DELETE /items/{id}/image` — remove the selected non-actual source.
-- `POST /items/{id}/image/reset` — reset to fallback.
 - `POST /items/images/batch/preview` / `POST /items/images/batch` /
   `GET /items/images/batch/{job_id}` / `.../cancel` — explicit reference-image
   batch workflow.

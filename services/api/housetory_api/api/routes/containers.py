@@ -19,7 +19,6 @@ from ...schemas.containers import (
     ContainerMove,
     ContainerOut,
     ContainerOwnershipCreate,
-    ContainerQrConfig,
     ContainerUpdate,
 )
 from ...services import properties as property_service
@@ -68,17 +67,6 @@ def _deleted_error(location: StorageLocation) -> ApiError:
             f"Container {location.identifier or location.name} was deleted. "
             "Its item move history may offer a restore-assisted undo."
         ),
-    )
-
-
-@router.get("/qr-config", response_model=ContainerQrConfig)
-def qr_config(auth: AuthContext = Depends(require_auth)) -> ContainerQrConfig:
-    settings = get_settings()
-    return ContainerQrConfig(
-        base_url=settings.qr_effective_base_url,
-        warning=settings.qr_base_url_warning,
-        local_only=settings.qr_base_url_warning is not None
-        and "localhost" in settings.qr_base_url_warning.lower(),
     )
 
 
@@ -230,36 +218,6 @@ def convert_existing_location(
         db.rollback()
         raise
     location = _get(db, auth.household.id, location.id)
-    return serialize_container(db, auth.household.id, location)
-
-
-@router.get("/lookup/{identifier}", response_model=ContainerOut)
-def lookup_identifier(
-    identifier: str,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ContainerOut:
-    normalized = identifier.strip().upper()
-    if not re.fullmatch(r"[A-Z]{2,12}-[0-9]{3,6}", normalized):
-        raise ApiError(422, "invalid_identifier", "Use an identifier such as BOX-001.")
-    location = db.scalar(
-        select(StorageLocation).where(
-            StorageLocation.household_id == auth.household.id,
-            StorageLocation.active(),
-            func.upper(StorageLocation.identifier) == normalized,
-        )
-    )
-    if location is None:
-        deleted = db.scalar(
-            select(StorageLocation).where(
-                StorageLocation.household_id == auth.household.id,
-                StorageLocation.deleted_at.is_not(None),
-                func.upper(StorageLocation.identifier) == normalized,
-            )
-        )
-        if deleted is not None:
-            raise _deleted_error(deleted)
-        raise ApiError(404, "container_not_found", "No container has that identifier.")
     return serialize_container(db, auth.household.id, location)
 
 
