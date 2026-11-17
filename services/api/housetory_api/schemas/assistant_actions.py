@@ -220,28 +220,6 @@ class AssistantActionInterpretRequest(BaseModel):
         return self
 
 
-class AssistantIntentRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    query: str = Field(min_length=2, max_length=4000)
-    household_id: uuid.UUID | None = None
-    scope_property_id: uuid.UUID | None = None
-
-
-class AssistantIntentOut(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    intent: Literal[
-        "question",
-        "supported_action",
-        "unsupported_action",
-        "ambiguous",
-        "create_item",
-        "unavailable",
-    ]
-    form: Literal["items", "rooms", "loans", "documents", "account"] | None = None
-
-
 class AssistantActionInterpretOut(BaseModel):
     handled: bool
     message: str

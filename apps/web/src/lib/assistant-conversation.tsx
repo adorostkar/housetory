@@ -15,7 +15,7 @@ import type { SearchTurn } from "@/lib/search-session";
 import type { ReviewRun, SearchConversationContext, SearchQueryResponse } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
 import { withHousehold } from "@/lib/household-links";
-import { classifyAssistantIntent, looksLikeItemDescription } from "@/lib/assistant-intent";
+import { looksLikeItemDescription } from "@/lib/assistant-intent";
 import { actionMessage, createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -617,75 +617,23 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
         });
       });
     };
-    const runLegacy = () => classifyAssistantIntent(
-      value, selection.householdId, selection.propertyId, controller.signal,
-    ).catch((error: unknown) => {
-      if (!controller.signal.aborted && error instanceof ApiError
-        && (error.code === "intent_unavailable" || error.code === "intent_invalid")) {
-        toast.error("AI intent interpretation is unavailable; using local routing.");
-        return { intent: "unavailable" as const, form: null };
+    const runLegacy = () => {
+      if (isUnsupported) {
+        respondUnsupported();
+        return Promise.resolve();
       }
-      throw error;
-    }).then((intent) => {
-      if (controller.signal.aborted) return;
-      const captureItem = () => {
+      if (isReviewRequest) return runLocalReview();
+      if (looksLikeItemDescription(value)) {
         update(scope, (entry) => ({
           ...entry,
           draft: !freshTopic && !regenerate && entry.draft.trim() === value ? "" : entry.draft,
           pending: false,
         }));
         void onCreateItem(value);
-      };
-      if (intent.intent === "create_item") {
-        captureItem();
-        return;
+        return Promise.resolve();
       }
-      if (intent.intent === "unavailable") {
-        if (isUnsupported) {
-          respondUnsupported();
-          return;
-        }
-        if (isReviewRequest) return runLocalReview();
-        if (looksLikeItemDescription(value)) {
-          captureItem();
-          return;
-        }
-        return isAction ? runAction() : runSearch();
-      }
-      if (intent.intent === "question") return runSearch();
-      if (intent.intent === "supported_action") return runAction();
-      const answer = intent.intent === "ambiguous"
-        ? "What would you like to change?"
-        : "The assistant cannot perform that action. Use the existing controls.";
-      const forms = {
-        items: { href: "/items", label: "Open items" },
-        rooms: { href: "/rooms", label: "Open rooms" },
-        loans: { href: "/loans", label: "Open loans" },
-        documents: { href: "/documents", label: "Open documents" },
-        account: { href: "/settings/account", label: "Open account settings" },
-      };
-      const form = forms[intent.form ?? "items"];
-      update(scope, (entry) => ({
-        ...entry,
-        messages: [
-          ...(regenerate ? entry.messages.slice(0, -2) : entry.messages),
-          { role: "user", text: value, pageReferences },
-          {
-            role: "assistant", text: answer,
-            ...(intent.intent === "unsupported_action"
-              ? { fallback: { ...form, href: withHousehold(form.href, selection.householdId || undefined) } }
-              : {}),
-          },
-        ],
-        turns: [
-          ...history,
-          { role: "user" as const, content: value.slice(0, 1200) },
-          { role: "assistant" as const, content: answer },
-        ].slice(-8),
-        draft: !regenerate && entry.draft.trim() === value ? "" : entry.draft,
-        pending: false,
-      }));
-    });
+      return isAction ? runAction() : runSearch();
+    };
     const request = {
       query: value,
       ...(selection.householdId ? { household_id: selection.householdId } : {}),

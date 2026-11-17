@@ -831,6 +831,7 @@ export function AiSettingsPage() {
           One provider and model for the Assistant, document interpretation, smart
           imports and natural-language search. Capability-specific vision and voice
           remain separate below. Advanced text overrides keep their own settings.
+          Configure the Assistant task to use AI for typed requests.
         </p>
         {settings.providers.length === 0 ? (
           <p className="mt-4 rounded-xl border border-dashed border-border/70 px-4 py-4 text-2xs text-muted-foreground">
