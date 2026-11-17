@@ -18,6 +18,13 @@ export interface AssistantTaskCompletion {
   householdId: string;
 }
 
+export const CAPTURE_SETTLED_STATUSES = ["review", "ready", "failed", "needs_attention", "cancelled"];
+
+/** A capture that is still queued or being processed, so its status will change soon. */
+export function captureInProgress(review: Pick<CaptureReview, "status">) {
+  return !CAPTURE_SETTLED_STATUSES.includes(review.status);
+}
+
 export const ASSISTANT_TASK_COMPLETED_EVENT = "housetory:assistant-task-completed";
 
 export function assistantTaskKey(task: Pick<AssistantTaskCompletion, "householdId" | "kind" | "id" | "generation">) {

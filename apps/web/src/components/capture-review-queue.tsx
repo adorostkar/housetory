@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useAssistantDocuments } from "@/lib/assistant-documents";
 import * as React from "react";
-import { PENDING_ACTIONS_PAGE, useCanWrite, usePendingActions } from "@/lib/queries";
+import { PENDING_ACTIONS_PAGE, useCanWrite, useCaptureReviews, usePendingActions } from "@/lib/queries";
 
 const ACTION_LABELS: Record<string, string> = {
   edit_item: "Edit", move_items: "Move", lend: "Lend", borrow: "Borrow",
@@ -90,13 +90,16 @@ export function CaptureReviewQueue() {
 
 function PendingCaptures() {
   const {
-    pendingReviews, dismissedReviews, reviewsError, select, selectImport, selectPhoto,
+    pendingReviews, reviewsError, select, selectImport, selectPhoto,
     dismissReview, undoReview, retryReview, reviewMutationPending,
   } = useAssistantDocuments();
+  // Loaded only here, where the dismissed list is shown; it does not poll.
+  const dismissed = useCaptureReviews(true);
+  const dismissedReviews = dismissed.data ?? [];
   const location = useLocation();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
-  if (reviewsError) return <p role="alert" className="text-xs">Pending captures could not be loaded. Refresh or retry when online.</p>;
+  if (reviewsError || dismissed.isError) return <p role="alert" className="text-xs">Pending captures could not be loaded. Refresh or retry when online.</p>;
   if (!pendingReviews.length && !dismissedReviews.length) return null;
   return (
     <section aria-label="Pending captures" className="surface space-y-2 p-3">

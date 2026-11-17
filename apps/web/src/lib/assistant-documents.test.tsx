@@ -15,11 +15,12 @@ const mockState: {
   reviews: CaptureReview[];
   updatedAt: number;
   fetching: boolean;
-} = vi.hoisted(() => ({ householdId: "house-1", render: vi.fn<(id: string, enabled: boolean) => void>(), reviews: [], updatedAt: 0, fetching: false }));
+  dismissedListRequested: boolean;
+} = vi.hoisted(() => ({ householdId: "house-1", render: vi.fn<(id: string, enabled: boolean) => void>(), reviews: [], updatedAt: 0, fetching: false, dismissedListRequested: false }));
 vi.mock("@/lib/queries", () => ({
   useSession: () => ({ data: { household: { id: mockState.householdId } } }),
   useCaptureReviews: (dismissed = false) => ({
-    data: dismissed ? [] : mockState.reviews, isError: false,
+    data: dismissed ? (mockState.dismissedListRequested = true, []) : mockState.reviews, isError: false,
     dataUpdatedAt: mockState.updatedAt, isFetching: mockState.fetching,
   }),
 }));
@@ -145,4 +146,14 @@ it("keeps document review mounted without losing edits and clears it on a househ
   mockState.householdId = "house-2";
   rendered.rerender(tree());
   expect(screen.queryByLabelText("Review draft")).toBeNull();
+});
+
+it("does not load the dismissed list app-wide", () => {
+  const client = new QueryClient();
+  render(
+    <QueryClientProvider client={client}>
+      <AssistantDocumentsProvider><Fixture /></AssistantDocumentsProvider>
+    </QueryClientProvider>,
+  );
+  expect(mockState.dismissedListRequested).toBe(false);
 });

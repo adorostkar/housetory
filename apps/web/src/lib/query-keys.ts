@@ -29,6 +29,16 @@ export const queryKeys = {
     roomId: string,
     locationId: string,
   ) => ["place-transfer-preview", kind, id, roomId, locationId] as const,
+  captureReviewsAll: ["inventory-review", "captures"] as const,
+  captureReviews: (householdId: string | undefined, dismissed = false) => (dismissed
+    ? ["inventory-review", "captures", householdId, "dismissed"] as const
+    : ["inventory-review", "captures", householdId] as const),
+  pendingActionsAll: ["assistant-pending-actions"] as const,
+  pendingActions: (householdId: string | undefined, offset: number) =>
+    ["assistant-pending-actions", householdId, offset] as const,
+  assistantRunsAll: ["assistant-runs"] as const,
+  assistantRuns: (householdId: string | undefined, propertyId: string | null | undefined) =>
+    ["assistant-runs", householdId, propertyId] as const,
   reviewSummary: ["inventory-review", "summary"] as const,
   reviewSchedule: ["inventory-review", "schedule"] as const,
   reviewSuggestions: (filters: Record<string, string>) =>

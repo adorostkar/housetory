@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 
 import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
-import type { CaptureReview } from "@/lib/assistant-task-events";
+import { captureInProgress, type CaptureReview } from "@/lib/assistant-task-events";
 import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
@@ -804,14 +804,34 @@ export function useReviewSummary(enabled = true) {
   });
 }
 
+/** How often app-wide status queries poll while nothing is queued or running. */
+export const IDLE_POLL_MS = 30_000;
+const CAPTURE_ACTIVE_POLL_MS = 1500;
+const PENDING_ACTIONS_ACTIVE_POLL_MS = 5000;
+
+export function fetchCaptureReviews(dismissed: boolean, signal?: AbortSignal) {
+  return api.get<CaptureReview[]>(
+    `/inventory-review/captures${dismissed ? "?dismissed=true" : ""}`, { signal },
+  );
+}
+
+/**
+ * Active captures poll quickly only while one is queued or processing; otherwise
+ * slowly, on window focus, and not at all while the tab is hidden. The dismissed
+ * list never polls: mount it only where that list is shown.
+ */
 export function useCaptureReviews(dismissed = false) {
   const session = useSession();
   const householdId = session.data?.household?.id;
   return useQuery({
-    queryKey: dismissed ? ["inventory-review", "captures", householdId, "dismissed"] : ["inventory-review", "captures", householdId],
-    queryFn: ({ signal }) => api.get<CaptureReview[]>(`/inventory-review/captures${dismissed ? "?dismissed=true" : ""}`, { signal }),
+    queryKey: queryKeys.captureReviews(householdId, dismissed),
+    queryFn: ({ signal }) => fetchCaptureReviews(dismissed, signal),
     enabled: Boolean(householdId),
-    refetchInterval: 1500,
+    staleTime: 0,
+    refetchInterval: dismissed ? false : (query) =>
+      query.state.data?.some(captureInProgress) ? CAPTURE_ACTIVE_POLL_MS : IDLE_POLL_MS,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
     retry: false,
   });
 }
@@ -822,8 +842,17 @@ export const PENDING_ACTIONS_PAGE = 20;
 export function usePendingActions(offset = 0) {
   const session = useSession();
   const householdId = session.data?.household?.id;
+  const queryClient = useQueryClient();
+  // Prepared actions come from assistant tasks and captures, so only those being
+  // queued or running make a new one likely within seconds.
+  const workInProgress = () =>
+    queryClient.getQueriesData<{ state: string }[]>({ queryKey: queryKeys.assistantRunsAll })
+      .some(([, runs]) => Array.isArray(runs)
+        && runs.some((run) => run.state === "queued" || run.state === "running"))
+    || Boolean(queryClient.getQueryData<CaptureReview[]>(queryKeys.captureReviews(householdId))
+      ?.some(captureInProgress));
   return useQuery({
-    queryKey: ["assistant-pending-actions", householdId, offset],
+    queryKey: queryKeys.pendingActions(householdId, offset),
     queryFn: ({ signal }) => api.get<{
       items: { id: string; kind: string; state: string; targets: { id: string; name: string }[] }[];
       total: number;
@@ -833,7 +862,10 @@ export function usePendingActions(offset = 0) {
     ),
     placeholderData: (previous) => previous,
     enabled: Boolean(householdId),
-    refetchInterval: 5000,
+    staleTime: 0,
+    refetchInterval: () => (workInProgress() ? PENDING_ACTIONS_ACTIVE_POLL_MS : IDLE_POLL_MS),
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
     retry: false,
   });
 }

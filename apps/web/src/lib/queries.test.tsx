@@ -3,7 +3,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { useDocuments, useInvalidateInventory, useItemHistory, useItems } from "@/lib/queries";
+import {
+  useCaptureReviews, useDocuments, useInvalidateInventory, useItemHistory, useItems, usePendingActions,
+} from "@/lib/queries";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -74,5 +76,63 @@ describe("inventory requests", () => {
     ]);
     hook.unmount();
     client.clear();
+  });
+});
+
+describe("app-wide status polling", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  });
+
+  /** Renders the two app-wide status queries and counts their requests over a period. */
+  async function poll(captures: { status: string }[], { hidden = false, seconds = 60 } = {}) {
+    vi.useFakeTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(String(url));
+      const body = String(url).includes("/auth/session") ? { user: { id: "user-1" }, household: { id: "house-1" } }
+        : String(url).includes("/captures") ? captures : { items: [], total: 0 };
+      return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+    }));
+    const hook = renderHook(() => ({ captures: useCaptureReviews(), actions: usePendingActions() }), { wrapper });
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(hook.result.current.captures.isSuccess && hook.result.current.actions.isSuccess).toBe(true);
+    if (hidden) {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }
+    requests.length = 0;
+    await act(() => vi.advanceTimersByTimeAsync(seconds * 1000));
+    hook.unmount();
+    client.clear();
+    return {
+      captures: requests.filter((url) => url.includes("/captures")),
+      actions: requests.filter((url) => url.includes("/proposals/pending")),
+    };
+  }
+
+  it("polls slowly when nothing is queued or running and never loads dismissed captures", async () => {
+    const idle = await poll([{ status: "review" }, { status: "failed" }]);
+    // Previously 40 active + 40 dismissed capture requests and 12 pending-action requests a minute.
+    expect(idle.captures).toHaveLength(2);
+    expect(idle.actions).toHaveLength(2);
+    expect(idle.captures.some((url) => url.includes("dismissed"))).toBe(false);
+  });
+
+  it("polls quickly while a capture is still processing", async () => {
+    const busy = await poll([{ status: "processing" }], { seconds: 15 });
+    expect(busy.captures.length).toBeGreaterThanOrEqual(9);
+    expect(busy.actions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("stops polling while the tab is hidden", async () => {
+    const hidden = await poll([{ status: "processing" }], { hidden: true });
+    expect(hidden.captures).toHaveLength(0);
+    expect(hidden.actions).toHaveLength(0);
   });
 });
