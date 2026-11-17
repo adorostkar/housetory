@@ -200,14 +200,68 @@ async function fixture(
   simulateDocumentRetry = false,
 ) {
   const errors: string[] = [];
-  let creationQuery = "";
   let activeImportBatch = importBatch;
   const capturedBatches = new Map<string, typeof importBatch>();
+  /** The import batch the tool engine queues for a typed item description. */
+  const captureItems = (query: string) => {
+    const name = /Ethernet/i.test(query) ? "Ethernet cables" : "Validation Monitor";
+    const quantity = /(?:three|3)\s+/i.test(query) ? 3 : 1;
+    const destinationName = /box 2/i.test(query) ? "Box 2" : "Storage";
+    activeImportBatch = {
+      ...importBatch,
+      id: /Alpha|Beta/.test(query)
+        ? /Alpha/.test(query) ? "00000000-0000-0000-0000-000000000021" : "00000000-0000-0000-0000-000000000022"
+        : importBatch.id,
+      title: /Alpha|Beta/.test(query) ? /Alpha/.test(query) ? "Alpha" : "Beta" : importBatch.title,
+      status: simulateImportCompletion ? "processing" : "review",
+      entries: importBatch.entries.map((entry) => ({
+        ...entry,
+        id: /Alpha|Beta/.test(query)
+          ? /Alpha/.test(query) ? "00000000-0000-0000-0000-000000000023" : "00000000-0000-0000-0000-000000000024"
+          : entry.id,
+        source_excerpt: query,
+        proposed: {
+          ...entry.proposed,
+          name,
+          quantity,
+          room: {
+            text: "Utility Room",
+            entity_type: "room",
+            identifier: null,
+            status: "matched",
+            matched_id: "00000000-0000-0000-0000-000000000010",
+            name: "Utility Room",
+            room_id: "00000000-0000-0000-0000-000000000010",
+            parent_id: null,
+            suggested_parent_id: null,
+            candidates: [],
+          },
+          storage_location: {
+            text: destinationName,
+            entity_type: "storage_location",
+            identifier: null,
+            status: "matched",
+            matched_id: "00000000-0000-0000-0000-000000000011",
+            name: destinationName,
+            room_id: "00000000-0000-0000-0000-000000000010",
+            parent_id: null,
+            suggested_parent_id: null,
+            candidates: [],
+          },
+          purchase: null,
+        },
+      })),
+    };
+    if (/Alpha|Beta/.test(query)) {
+      activeImportBatch.entries[0]!.proposed.name = /Alpha/.test(query) ? "Alpha cable" : "Beta adapter";
+    }
+    capturedBatches.set(activeImportBatch.id, activeImportBatch);
+    return activeImportBatch;
+  };
   let documentPending = false;
   let documentStage = simulateDocumentRetry ? "failed" : "ready";
   let documentGeneration = "synthetic-document-processing";
   let recoveryPolls = 0;
-  let importCompletionPolls = 0;
   let voiceReads = 0;
   let recoveryBatch = {
     ...importBatch,
@@ -260,11 +314,17 @@ async function fixture(
     }
     if (url.pathname === "/api/v1/inventory-review/captures") {
       if (url.searchParams.get("dismissed") === "true") return route.fulfill({ json: [] });
+      const imports = [...capturedBatches.values()].filter((batch) => batch.status !== "completed").map((batch) => ({
+        id: batch.id, kind: "import", title: batch.title, status: batch.status,
+        generation: "synthetic-import-attempt-1",
+      }));
+      // A queued capture finishes processing once the review queue has shown it in progress.
+      if (simulateImportCompletion && capturedBatches.get(activeImportBatch.id)?.status === "processing") {
+        activeImportBatch = { ...activeImportBatch, status: "review" };
+        capturedBatches.set(activeImportBatch.id, activeImportBatch);
+      }
       return route.fulfill({ json: [
-        ...[...capturedBatches.values()].filter((batch) => batch.status !== "completed").map((batch) => ({
-          id: batch.id, kind: "import", title: batch.title, status: batch.status,
-          generation: "synthetic-import-attempt-1",
-        })),
+        ...imports,
         ...(documentPending ? [{
           id: assistantDocumentId, kind: "document", title: assistantDocument.title,
           status: documentStage, generation: documentGeneration,
@@ -368,43 +428,58 @@ async function fixture(
         },
       });
     }
-    if (url.pathname === "/api/v1/assistant/actions/intent") {
-      const { query } = route.request().postDataJSON() as { query: string };
-      if (/^(?:(?:please|could you|can you|would you)\s+)*(?:add|create)\b|(?:bought|purchased)\b|اضافه\s+کن/iu.test(query)) {
-        creationQuery = query;
-        return route.fulfill({
-          json: aiAvailable
-            ? { intent: "create_item", form: null }
-            : { intent: "unavailable", form: null },
-        });
+    if (url.pathname === "/api/v1/assistant/runs") {
+      if (route.request().method() === "GET") return route.fulfill({ json: [] });
+      if (!aiAvailable) {
+        return route.fulfill({ status: 409, json: { detail: {
+          code: "assistant_tools_unavailable", message: "Configure AI before retrying.",
+        } } });
       }
-      return route.fulfill({
-        json: /^(?:Transfer|Shift)\b|دریل را به انبار منتقل کن/u.test(query)
-          ? { intent: "supported_action", form: null }
-          : { intent: "unavailable", form: null },
+      // The synthetic tool engine: creation becomes an item capture, Transfer a move proposal.
+      const request = route.request().postDataJSON() as { query: string; parent_id?: string };
+      const prepared = (name: string, result: Record<string, unknown>) => ({
+        state: "awaiting_approval", message: "Prepared for your review.", answer: "",
+        steps: [{ call: { name, arguments: {} }, result: { references: [], ...result } }],
       });
-    }
-    if (url.pathname === "/api/v1/assistant/actions/interpret") {
+      const outcome = /^(?:(?:please|could you|can you|would you)\s+)*(?:add|create)\b|(?:bought|purchased)\b/i.test(request.query)
+        ? prepared("prepare_item_capture", {
+            summary: "Item capture queued. Review extracted proposals before saving.",
+            capture: { kind: "items", id: captureItems(request.query).id },
+          })
+        : /^Transfer\b/.test(request.query)
+          ? prepared("prepare_action", {
+              summary: "Move proposal prepared.",
+              proposal: {
+                id: "00000000-0000-0000-0000-000000000006",
+                kind: "move_items",
+                state: "ready",
+                scope_label: household.name,
+                targets: [{
+                  id: "00000000-0000-0000-0000-000000000007",
+                  name: "Validation Hammer Drill",
+                }],
+                destination: {
+                  id: "00000000-0000-0000-0000-000000000008",
+                  name: "Storage",
+                },
+                changes: {},
+                before: {},
+              },
+            })
+          : { state: "completed", message: `Synthetic answer for ${request.query}`, answer: null, steps: [] };
       return route.fulfill({
         json: {
-          handled: true,
-          message: "Move proposal ready for review.",
-          proposal: {
-            id: "00000000-0000-0000-0000-000000000006",
-            kind: "move",
-            state: "proposed",
-            scope_label: household.name,
-            targets: [{
-              id: "00000000-0000-0000-0000-000000000007",
-              name: "Validation Hammer Drill",
-            }],
-            destination: {
-              id: "00000000-0000-0000-0000-000000000008",
-              name: "Storage",
-            },
-            changes: {},
-            before: {},
-          },
+          id: crypto.randomUUID(),
+          parent_id: request.parent_id ?? null,
+          household_id: household.id,
+          property_id: null,
+          query: request.query,
+          generation: 1,
+          model_calls: outcome.steps.length + 1,
+          max_model_calls: 8,
+          can_retry: false,
+          worker_available: true,
+          ...outcome,
         },
       });
     }
@@ -421,7 +496,7 @@ async function fixture(
             household: null,
             loan: null,
           }]
-        : /^(?:transfer|shift)\b/i.test(query)
+        : /^transfer\b/i.test(query)
           ? [{
               id: "00000000-0000-0000-0000-000000000007",
               kind: "item",
@@ -504,68 +579,6 @@ async function fixture(
         },
       });
     }
-    if (
-      url.pathname === "/api/v1/imports" &&
-      route.request().method() === "POST"
-    ) {
-      const name = /Ethernet/i.test(creationQuery)
-        ? "Ethernet cables"
-        : /کابل اترنت/u.test(creationQuery)
-          ? "کابل اترنت"
-          : "Validation Monitor";
-      const quantity = /(?:three|3|سه)\s+/iu.test(creationQuery) ? 3 : 1;
-      const destinationName = /box 2/i.test(creationQuery) ? "Box 2" : "Storage";
-      activeImportBatch = {
-        ...importBatch,
-        id: /Alpha|Beta/.test(creationQuery)
-          ? /Alpha/.test(creationQuery) ? "00000000-0000-0000-0000-000000000021" : "00000000-0000-0000-0000-000000000022"
-          : importBatch.id,
-        title: /Alpha|Beta/.test(creationQuery) ? /Alpha/.test(creationQuery) ? "Alpha" : "Beta" : importBatch.title,
-        status: simulateImportCompletion ? "processing" : "review",
-        entries: importBatch.entries.map((entry) => ({
-          ...entry,
-          id: /Alpha|Beta/.test(creationQuery)
-            ? /Alpha/.test(creationQuery) ? "00000000-0000-0000-0000-000000000023" : "00000000-0000-0000-0000-000000000024"
-            : entry.id,
-          source_excerpt: creationQuery,
-          proposed: {
-            ...entry.proposed,
-            name,
-            quantity,
-            room: {
-              text: "Utility Room",
-              entity_type: "room",
-              identifier: null,
-              status: "matched",
-              matched_id: "00000000-0000-0000-0000-000000000010",
-              name: "Utility Room",
-              room_id: "00000000-0000-0000-0000-000000000010",
-              parent_id: null,
-              suggested_parent_id: null,
-              candidates: [],
-            },
-            storage_location: {
-              text: destinationName,
-              entity_type: "storage_location",
-              identifier: null,
-              status: "matched",
-              matched_id: "00000000-0000-0000-0000-000000000011",
-              name: destinationName,
-              room_id: "00000000-0000-0000-0000-000000000010",
-              parent_id: null,
-              suggested_parent_id: null,
-              candidates: [],
-            },
-            purchase: null,
-          },
-        })),
-      };
-      if (/Alpha|Beta/.test(creationQuery)) {
-        activeImportBatch.entries[0]!.proposed.name = /Alpha/.test(creationQuery) ? "Alpha cable" : "Beta adapter";
-      }
-      capturedBatches.set(activeImportBatch.id, activeImportBatch);
-      return route.fulfill({ json: activeImportBatch });
-    }
     const batchMatch = url.pathname.match(/^\/api\/v1\/imports\/([^/]+)(\/apply)?$/);
     const storedBatch = batchMatch?.[1] ? capturedBatches.get(batchMatch[1]) : undefined;
     if (storedBatch && batchMatch?.[2]) {
@@ -627,14 +640,6 @@ async function fixture(
       return route.fulfill({ json: recoveryBatch });
     }
     if (url.pathname === `/api/v1/imports/${activeImportBatch.id}`) {
-      if (simulateImportCompletion) {
-        importCompletionPolls += 1;
-        if (importCompletionPolls > 1) {
-          activeImportBatch = { ...activeImportBatch, status: "review" };
-          capturedBatches.set(activeImportBatch.id, activeImportBatch);
-        }
-        return route.fulfill({ json: activeImportBatch });
-      }
       if (simulateImportRecovery) {
         recoveryPolls += 1;
         if (recoveryPolls === 1) {
@@ -796,7 +801,9 @@ test("header dictation transcribes into an editable query without auto-submittin
   let uploadCount = 0;
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/v1/search/query") submittedQueries.push(request.postDataJSON().query);
+    if (request.method() === "POST" && ["/api/v1/assistant/runs", "/api/v1/search/query"].includes(url.pathname)) {
+      submittedQueries.push(request.postDataJSON().query);
+    }
     if (url.pathname === "/api/v1/voice" && request.method() === "POST") uploadCount += 1;
   });
 
@@ -833,7 +840,7 @@ test("cancelling header dictation sends no audio or search", async ({ page }) =>
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.pathname === "/api/v1/voice" && request.method() === "POST") uploads += 1;
-    if (url.pathname === "/api/v1/search/query") searches += 1;
+    if (request.method() === "POST" && ["/api/v1/assistant/runs", "/api/v1/search/query"].includes(url.pathname)) searches += 1;
   });
   await mic.click();
   await expect(page.getByRole("group", { name: "Recording voice search" })).toBeVisible();
@@ -890,11 +897,11 @@ test("the header entry opens the assistant panel without separate assistant navi
   await expect(page.getByRole("button", { name: "Add items" })).toBeVisible();
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("Where is my drill?");
-  const intentRequest = page.waitForRequest((request) =>
-    new URL(request.url()).pathname === "/api/v1/assistant/actions/intent",
+  const assistantRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/v1/assistant/runs" && request.method() === "POST",
   );
   await page.getByRole("option", { name: /Ask the assistant:/ }).click();
-  await intentRequest;
+  await assistantRequest;
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(page).toHaveURL(/\/#assistant$/);
@@ -912,7 +919,7 @@ test("assistant launcher resumes without typing, shows unresolved reviews, and c
   let reviewWrites = 0;
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/assistant/actions/intent") interpreted += 1;
+    if (path === "/api/v1/assistant/runs" && request.method() === "POST") interpreted += 1;
     if (path === "/api/v1/search/query") searches += 1;
     if (path.startsWith("/api/v1/inventory-review/suggestions") && request.method() !== "GET") reviewWrites += 1;
   });
@@ -988,16 +995,20 @@ test("mobile search entry stays reachable while scrolling and the assistant shee
 });
 
 test("completed item capture notifies once and opens its review without resolving it", async ({ page }) => {
+  await page.clock.install();
   const errors = await fixture(page, "/", undefined, true, false, true);
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("Add a Validation Monitor to Storage");
   await headerSearch.press("Enter");
   const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByText(/Preparing item proposals/)).toBeVisible();
+  await expect(panel.getByLabel("Assistant capture status"))
+    .toContainText("Item capture queued. Review extracted proposals before saving.");
   await panel.getByRole("button", { name: "Close assistant" }).click();
   await page.getByRole("link", { name: "Items", exact: true }).click();
   await expect(page).toHaveURL(/\/items$/);
 
+  // A capture queued by the tool engine is first noticed by the review queue's idle poll.
+  await page.clock.fastForward(30_000);
   await expect(page.getByText("Assistant item description ready for review")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("Assistant item description ready for review")).toHaveCount(1);
   await page.getByRole("button", { name: "Review", exact: true }).click();
@@ -1086,7 +1097,7 @@ test("ordinary lookup submitted from Overview uses results without opening conve
   let interpreted = 0;
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/search/query" || path === "/api/v1/assistant/actions/intent") interpreted += 1;
+    if (request.method() === "POST" && ["/api/v1/search/query", "/api/v1/assistant/runs"].includes(path)) interpreted += 1;
   });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("drill");
@@ -1103,7 +1114,7 @@ test("selecting a quick match opens its item record without assistant interpreta
   let interpreted = 0;
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
-    if (path === "/api/v1/search/query" || path === "/api/v1/assistant/actions/intent") interpreted += 1;
+    if (request.method() === "POST" && ["/api/v1/search/query", "/api/v1/assistant/runs"].includes(path)) interpreted += 1;
   });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("drill");
@@ -1136,127 +1147,64 @@ test("question submitted from Items enters conversation on ordinary Enter", asyn
   expect(errors).toEqual([]);
 });
 
-test("creation request submitted from Overview enters the reviewed conversation flow", async ({ page }) => {
-  const errors = await fixture(page, "/");
-  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-  await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
-  await headerSearch.press("Enter");
-  const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await panel.getByRole("button", { name: "Review fields" }).click();
-  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cables");
-  expect(errors).toEqual([]);
-});
-
-test("creation request submitted from Items enters the reviewed conversation flow", async ({ page }) => {
-  const errors = await fixture(page, "/items");
-  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-  await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
-  await headerSearch.press("Enter");
-  const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await panel.getByRole("button", { name: "Review fields" }).click();
-  await expect(panel.getByLabel("Item name")).toHaveValue("Ethernet cables");
-  expect(errors).toEqual([]);
-});
-
-const creationJourneys = [
-  {
-    query: "Add a Validation Monitor to Storage",
-    name: "Validation Monitor",
-    quantity: 1,
-    destination: "Storage",
-  },
-  {
-    query: "Add one Validation Monitor to Storage",
-    name: "Validation Monitor",
-    quantity: 1,
-    destination: "Storage",
-  },
-  {
-    query: "Could you add a Validation Monitor to Storage?",
-    name: "Validation Monitor",
-    quantity: 1,
-    destination: "Storage",
-  },
-  {
-    query: "Create a Validation Monitor in Storage.",
-    name: "Validation Monitor",
-    quantity: 1,
-    destination: "Storage",
-  },
-  {
-    query: "I bought three Ethernet cables; put them in box 2.",
-    name: "Ethernet cables",
-    quantity: 3,
-    destination: "Box 2",
-  },
-  {
-    query: "سه کابل اترنت را به Storage اضافه کن",
-    name: "کابل اترنت",
-    quantity: 3,
-    destination: "Storage",
-  },
-];
-
-for (const journey of creationJourneys) {
-  test(`natural creation proposes and explicitly applies ${journey.query}`, async ({ page }) => {
-    const errors = await fixture(page, "/", undefined, true);
-    const intentQueries: string[] = [];
-    const captureBodies: string[] = [];
-    const applyBodies: Array<{ entries: Array<{ action: string; proposed: { name: string; quantity: number } }> }> = [];
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (url.pathname === "/api/v1/assistant/actions/intent") {
-        intentQueries.push(request.postDataJSON().query);
-      }
-      if (url.pathname === "/api/v1/imports" && request.method() === "POST") {
-        captureBodies.push(request.postData() ?? "");
-      }
-      if (/\/api\/v1\/imports\/[^/]+\/apply$/.test(url.pathname)) {
-        applyBodies.push(request.postDataJSON());
-      }
-    });
-
-    const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-    await headerSearch.fill(journey.query);
-    expect(intentQueries).toEqual([]);
-    await headerSearch.press("Enter");
-
-    const panel = page.getByTestId("assistant-panel");
-    const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
-    await expect(composer).toBeVisible();
-    await panel.getByRole("button", { name: "Review fields" }).click();
-    const itemName = panel.getByLabel("Item name");
-    await expect(itemName).toHaveValue(journey.name);
-    await expect(panel.getByLabel("Quantity")).toHaveValue(String(journey.quantity));
-    await expect(panel.getByText(new RegExp(`Utility Room.*${journey.destination}`))).toBeVisible();
-    expect(intentQueries).toEqual([journey.query]);
-    expect(captureBodies).toHaveLength(1);
-    expect(captureBodies[0]).toContain('name="assistant_capture"');
-    expect(captureBodies[0]).toContain("\r\n\r\ntrue\r\n");
-    expect(applyBodies).toEqual([]);
-
-    const reviewedName = `Reviewed ${journey.name}`;
-    await itemName.fill(reviewedName);
-    await panel.getByRole("checkbox", { name: `Include ${reviewedName}` }).check();
-    await panel.getByRole("button", { name: "Approve selected" }).click();
-    await expect(page.getByText("1 imported · 0 skipped · 0 failed", { exact: true })).toBeVisible();
-    expect(applyBodies).toHaveLength(1);
-    expect(applyBodies[0].entries[0]).toMatchObject({
-      action: "import",
-      proposed: { name: reviewedName, quantity: journey.quantity },
-    });
-    expect(errors).toEqual([]);
-  });
-}
-
-test("manual creation fallback still reaches review when intent AI is unavailable", async ({ page }) => {
-  const errors = await fixture(page, "/", undefined, false);
-  const intentQueries: string[] = [];
+test("an item capture prepared by the assistant is reviewed and explicitly applied", async ({ page }) => {
+  const errors = await fixture(page, "/", undefined, true);
+  const query = "I bought three Ethernet cables; put them in box 2.";
+  const assistantQueries: string[] = [];
+  const legacyRequests: string[] = [];
+  const applyBodies: Array<{ entries: Array<{ action: string; proposed: { name: string; quantity: number } }> }> = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/assistant/runs" && request.method() === "POST") {
+      assistantQueries.push(request.postDataJSON().query);
+    }
+    // The browser neither searches the text nor uploads it as an import itself.
+    if (request.method() === "POST" && ["/api/v1/search/query", "/api/v1/imports"].includes(url.pathname)) {
+      legacyRequests.push(url.pathname);
+    }
+    if (/\/api\/v1\/imports\/[^/]+\/apply$/.test(url.pathname)) {
+      applyBodies.push(request.postDataJSON());
+    }
+  });
+
+  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+  await headerSearch.fill(query);
+  expect(assistantQueries).toEqual([]);
+  await headerSearch.press("Enter");
+
+  const panel = page.getByTestId("assistant-panel");
+  const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
+  await expect(composer).toBeVisible();
+  await panel.getByRole("button", { name: "Review items" }).click();
+  await panel.getByRole("button", { name: "Review fields" }).click();
+  const itemName = panel.getByLabel("Item name");
+  await expect(itemName).toHaveValue("Ethernet cables");
+  await expect(panel.getByLabel("Quantity")).toHaveValue("3");
+  await expect(panel.getByText(/Utility Room.*Box 2/)).toBeVisible();
+  await expect(panel.getByRole("note", { name: "Local search mode" })).toHaveCount(0);
+  expect(assistantQueries).toEqual([query]);
+  expect(legacyRequests).toEqual([]);
+  expect(applyBodies).toEqual([]);
+
+  await itemName.fill("Reviewed Ethernet cables");
+  await panel.getByRole("checkbox", { name: "Include Reviewed Ethernet cables" }).check();
+  await panel.getByRole("button", { name: "Approve selected" }).click();
+  await expect(page.getByText("1 imported · 0 skipped · 0 failed", { exact: true })).toBeVisible();
+  expect(applyBodies).toHaveLength(1);
+  expect(applyBodies[0].entries[0]).toMatchObject({
+    action: "import",
+    proposed: { name: "Reviewed Ethernet cables", quantity: 3 },
+  });
+  expect(errors).toEqual([]);
+});
+
+test("without an assistant model a typed item description is only searched", async ({ page }) => {
+  const errors = await fixture(page, "/", undefined, false);
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && ["/api/v1/assistant/runs", "/api/v1/search/query", "/api/v1/imports"].includes(path)) {
+      requests.push(path);
     }
   });
   const query = "Add one Validation Monitor to Storage";
@@ -1264,8 +1212,10 @@ test("manual creation fallback still reaches review when intent AI is unavailabl
   await headerSearch.fill(query);
   await headerSearch.press("Enter");
   const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByRole("button", { name: "Review fields" })).toBeVisible();
-  expect(intentQueries).toEqual([query]);
+  await expect(panel.getByText(`Synthetic answer for ${query}`)).toBeVisible();
+  await expect(panel.getByRole("note", { name: "Local search mode" })).toBeVisible();
+  await expect(panel.getByLabel("Assistant capture status")).toHaveCount(0);
+  expect(requests).toEqual(["/api/v1/assistant/runs", "/api/v1/search/query"]);
   expect(errors).toEqual([]);
 });
 
@@ -1328,13 +1278,13 @@ test("assistant composer and Send stay inside short desktop and keyboard-sized m
 });
 
 test("Transfer action submitted from Items reaches review without applying automatically", async ({ page }) => {
-  const errors = await fixture(page, "/items");
-  const intentQueries: string[] = [];
+  const errors = await fixture(page, "/items", undefined, true);
+  const assistantQueries: string[] = [];
   const applyRequests: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
+    if (url.pathname === "/api/v1/assistant/runs" && request.method() === "POST") {
+      assistantQueries.push(request.postDataJSON().query);
     }
     if (/\/api\/v1\/assistant\/actions\/proposals\/[^/]+\/apply$/.test(url.pathname)) {
       applyRequests.push(url.pathname);
@@ -1344,70 +1294,25 @@ test("Transfer action submitted from Items reaches review without applying autom
   const query = "Transfer Validation Hammer Drill to Storage";
   await headerSearch.fill(query);
   await expect(page.getByRole("option", { name: /^Validation Hammer Drill/ })).toBeVisible();
-  expect(intentQueries).toEqual([]);
+  expect(assistantQueries).toEqual([]);
   await headerSearch.press("Enter");
 
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
   await expect(panel.getByLabel("Action review")).toContainText("Storage");
   await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
-  await expect(page).toHaveURL(/\/items(?:\?|$)/);
-  expect(intentQueries).toEqual([query]);
+  await expect(page).toHaveURL(/\/items(?:\?|#|$)/);
+  expect(assistantQueries).toEqual([query]);
   expect(applyRequests).toEqual([]);
-  expect(errors).toEqual([]);
-});
-
-test("Shift paraphrase submitted from Overview uses the same reviewed action flow", async ({ page }) => {
-  const errors = await fixture(page, "/");
-  const intentQueries: string[] = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
-    }
-  });
-  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-  const query = "Shift Validation Hammer Drill to Storage";
-  await headerSearch.fill(query);
-  await expect(page.getByRole("option", { name: /^Validation Hammer Drill/ })).toBeVisible();
-  expect(intentQueries).toEqual([]);
-  await headerSearch.press("Enter");
-
-  const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
-  await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
-  await expect(page).toHaveURL(/\/#assistant$/);
-  expect(intentQueries).toEqual([query]);
-  expect(errors).toEqual([]);
-});
-
-test("markless multilingual transfer submitted from Items reaches action interpretation", async ({ page }) => {
-  const errors = await fixture(page, "/items");
-  const intentQueries: string[] = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
-    }
-  });
-  const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
-  const query = "دریل را به انبار منتقل کن";
-  await headerSearch.fill(query);
-  await expect(page.getByText(/No quick matches for/)).toBeVisible();
-  expect(intentQueries).toEqual([]);
-  await headerSearch.press("Enter");
-
-  const panel = page.getByTestId("assistant-panel");
-  await expect(panel.getByLabel("Action review")).toContainText("Validation Hammer Drill");
-  await expect(panel.getByRole("button", { name: "Apply" })).toBeVisible();
-  expect(intentQueries).toEqual([query]);
   expect(errors).toEqual([]);
 });
 
 test("record player remains a lightweight lookup from Items", async ({ page }) => {
   const errors = await fixture(page, "/items");
-  const intentQueries: string[] = [];
+  const assistantQueries: string[] = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
+    if (new URL(request.url()).pathname === "/api/v1/assistant/runs" && request.method() === "POST") {
+      assistantQueries.push(request.postDataJSON().query);
     }
   });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
@@ -1417,16 +1322,16 @@ test("record player remains a lightweight lookup from Items", async ({ page }) =
 
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
   await expect(page).toHaveURL(/\/items\?/);
-  expect(intentQueries).toEqual([]);
+  expect(assistantQueries).toEqual([]);
   expect(errors).toEqual([]);
 });
 
 test("record player remains a lightweight lookup from Overview", async ({ page }) => {
   const errors = await fixture(page, "/");
-  const intentQueries: string[] = [];
+  const assistantQueries: string[] = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/assistant/actions/intent") {
-      intentQueries.push(request.postDataJSON().query);
+    if (new URL(request.url()).pathname === "/api/v1/assistant/runs" && request.method() === "POST") {
+      assistantQueries.push(request.postDataJSON().query);
     }
   });
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
@@ -1436,7 +1341,7 @@ test("record player remains a lightweight lookup from Overview", async ({ page }
 
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
   await expect(page).toHaveURL(/\/items\?/);
-  expect(intentQueries).toEqual([]);
+  expect(assistantQueries).toEqual([]);
   expect(errors).toEqual([]);
 });
 
@@ -1491,13 +1396,14 @@ test("fresh header requests start without prior turns while panel follow-ups ret
 });
 
 test("item review edits survive closing the panel and switching views", async ({ page }) => {
-  const errors = await fixture(page, "/");
+  const errors = await fixture(page, "/", undefined, true);
   const headerSearch = page.getByRole("combobox", { name: "Search or ask about your inventory" });
   await headerSearch.fill("I bought three Ethernet cables; put them in box 2.");
   await headerSearch.press("Enter");
 
   const panel = page.getByTestId("assistant-panel");
   const itemName = panel.getByLabel("Item name");
+  await panel.getByRole("button", { name: "Review items" }).click();
   await panel.getByRole("button", { name: "Review fields" }).click();
   await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("Blue Ethernet cable");
@@ -1548,7 +1454,7 @@ test("attaching from the header keeps the accompanying text in the capture compo
 });
 
 test("parked attachment survives a fresh header question without uploading or consuming the draft", async ({ page }) => {
-  const errors = await fixture(page, "/");
+  const errors = await fixture(page, "/", undefined, true);
   let documentUploads = 0;
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/api/v1/documents" && request.method() === "POST") {
@@ -1577,6 +1483,7 @@ test("parked attachment survives a fresh header question without uploading or co
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
   await headerSearch.fill("Add one Validation Monitor to Storage");
   await headerSearch.press("Enter");
+  await panel.getByRole("button", { name: "Review items" }).click();
   await panel.getByRole("button", { name: "Review fields" }).click();
   await expect(panel.getByLabel("Item name")).toHaveValue("Validation Monitor");
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
@@ -1586,15 +1493,20 @@ test("parked attachment survives a fresh header question without uploading or co
 });
 
 test("multiple captures restore after reload and an older notification opens its exact review until Apply resolves it", async ({ page }) => {
+    await page.clock.install();
     const errors = await fixture(page, "/", undefined, true);
     const header = page.getByRole("combobox", { name: "Search or ask about your inventory" });
     const panel = page.getByTestId("assistant-panel");
     await header.fill("Add an Alpha cable to Storage");
     await header.press("Enter");
-    await expect(page.getByText("Alpha ready for review", { exact: true })).toBeVisible();
+    await expect(panel.getByLabel("Assistant capture status")).toBeVisible();
     await panel.getByRole("button", { name: "Close assistant" }).click();
     await header.fill("Add a Beta adapter to Storage");
     await header.press("Enter");
+    await expect(panel.getByLabel("Assistant capture status")).toHaveCount(2);
+    // Captures queued by the tool engine are first noticed by the review queue's idle poll.
+    await page.clock.fastForward(30_000);
+    await expect(page.getByText("Alpha ready for review", { exact: true })).toBeVisible();
     await expect(page.getByText("Beta ready for review", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
     await page.locator("[data-sonner-toast][data-front='true']").hover();

@@ -156,9 +156,9 @@ for (const mobile of [false, true]) {
       data: { version: earlierRun.batch_version },
     });
     expect(earlierBatch.ok(), await earlierBatch.text()).toBeTruthy();
-    const legacy: string[] = [];
+    const searched: string[] = [];
     page.on("request", (req) => {
-      if (/\/assistant\/actions\/intent|\/assistant\/actions\/interpret|\/search\/query/.test(req.url())) legacy.push(req.url());
+      if (/\/search\/query/.test(req.url())) searched.push(req.url());
     });
     await page.goto("/items");
     const question = `Where is my ${itemName}?`;
@@ -276,7 +276,7 @@ for (const mobile of [false, true]) {
     await page.screenshot({ path: test.info().outputPath(`review-proposals-${mobile ? "mobile" : "desktop"}.png`) });
     await suggestion.getByRole("button", { name: "Accept organisation", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/items/${itemId}`)).json()).item.tags.map((tag: { name: string }) => tag.name)).toEqual(["tools"]);
-    expect(legacy).toEqual([]);
+    expect(searched).toEqual([]);
     if (mobile) {
       const box = await page.getByRole("button", { name: "Send question", exact: true }).boundingBox();
       expect(box!.width).toBeGreaterThanOrEqual(44);

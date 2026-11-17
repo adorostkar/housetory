@@ -7,6 +7,18 @@ const household = {
   warranty_reminder_days: 30,
 };
 
+interface ToolRequest {
+  query: string;
+  household_id?: string;
+  property_id?: string;
+  parent_id?: string;
+  local_date: string;
+  page_context: { kind: string; id: string }[];
+}
+
+type ToolOutcome = { proposal: { id: string; kind: string } } | { answer: string };
+
+/** No Assistant model is configured: typed text can only be searched. */
 async function fixture(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -25,8 +37,14 @@ async function fixture(page: Page) {
     if (url.pathname === "/api/v1/ai/status") {
       return route.fulfill({ json: { configured: false, available: false, data_leaves_server: false, privacy_note: "AI off" } });
     }
-    if (url.pathname === "/api/v1/assistant/actions/intent") {
-      return route.fulfill({ json: { intent: "unavailable", form: null } });
+    if (url.pathname === "/api/v1/assistant/runs") {
+      if (route.request().method() === "GET") return route.fulfill({ json: [] });
+      return route.fulfill({ status: 409, json: { detail: {
+        code: "assistant_tools_unavailable", message: "Configure AI before retrying.",
+      } } });
+    }
+    if (url.pathname === "/api/v1/assistant/actions/proposals/pending") {
+      return route.fulfill({ json: { items: [], total: 0 } });
     }
     if (url.pathname === "/api/v1/search/query") {
       const { query } = route.request().postDataJSON();
@@ -49,187 +67,114 @@ async function fixture(page: Page) {
   return errors;
 }
 
-test("action follow-up carries the conversation item after reopening the panel", async ({ page }) => {
-  await fixture(page);
-  const itemId = "00000000-0000-0000-0000-000000000010";
-  await page.route("**/api/v1/search/query", (route) => route.fulfill({ json: {
-    query: "Where is the drill?", mode: "fallback", ai_used: false, ai_attempted: false,
-    direct_match: false, ambiguous: false, needs_clarification: false,
-    answer: "The drill is in Storage.", answer_kind: "fallback", interpretation: "",
-    filters: {}, items: [], quick_results: [], borrowed: [], borrowed_total: 0, total: 0,
-    documents: [], locations: [], references: [], notices: [], facts: {}, tool: "fallback",
-    ai_status: { configured: false },
-    context: { scope_key: "|", resolved_items: [{ id: itemId, name: "Drill" }], candidate_items: [], loans: [], dialogue_memory: [] },
-    scope_label: "All my places", households: [], property: null,
+/** Configures an Assistant model whose tool engine answers every typed request with `respond`. */
+async function assistantModel(page: Page, respond: (request: ToolRequest) => ToolOutcome | Promise<ToolOutcome>) {
+  await page.route("**/api/v1/ai/status**", (route) => route.fulfill({ json: {
+    configured: true, available: true, data_leaves_server: false, privacy_note: "Synthetic AI",
   } }));
-  let received: string[] | undefined;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    received = route.request().postDataJSON().conversation_item_ids;
-    return route.fulfill({ json: { handled: true, message: "Review the move.", proposal: null } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  let dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Where is the drill?");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The drill is in Storage.")).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move it to Kitchen");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the move.")).toBeVisible();
-  expect(received).toEqual([itemId]);
-});
-
-test("a reviewed action becomes the target of an action follow-up", async ({ page }) => {
-  await fixture(page);
-  const itemId = "00000000-0000-0000-0000-000000000010";
-  let followupIds: string[] | undefined;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    const body = route.request().postDataJSON() as { query: string; conversation_item_ids: string[] };
-    if (body.query === "Move it to Kitchen") {
-      followupIds = body.conversation_item_ids;
-      return route.fulfill({ json: { handled: true, message: "Move review.", proposal: null } });
-    }
+  await page.route("**/api/v1/assistant/runs", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const request = route.request().postDataJSON() as ToolRequest;
+    const outcome = await respond(request);
+    const proposal = "proposal" in outcome ? outcome.proposal : null;
+    const answer = "answer" in outcome ? outcome.answer : "";
     return route.fulfill({ json: {
-      handled: true, message: "Edit review.", proposal: {
-        id: "00000000-0000-0000-0000-000000000099", kind: "edit_item", state: "ready",
-        scope_label: "Synthetic household", targets: [{ id: itemId, name: "Drill" }],
-        destination: null, changes: { name: "Cordless drill" }, before: { name: "Drill" },
-      },
+      id: crypto.randomUUID(), parent_id: request.parent_id ?? null,
+      household_id: request.household_id ?? household.id, property_id: request.property_id ?? null,
+      query: request.query, state: proposal ? "awaiting_approval" : "completed", generation: 1,
+      message: proposal ? "The change is ready for your approval." : answer, answer,
+      steps: proposal ? [{
+        call: { name: "prepare_action", arguments: {} },
+        result: { summary: "Proposal prepared.", references: [], proposal },
+      }] : [],
+      model_calls: proposal ? 2 : 1, max_model_calls: 8, can_retry: false, worker_available: true,
     } });
   });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
-  await input.fill("Rename Drill to Cordless drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByLabel("Action review")).toBeVisible();
-  await expect(dialog.getByLabel("Action review")).toContainText("Original request");
-  await expect(dialog.getByLabel("Action review")).toContainText("Rename Drill to Cordless drill");
-  await input.fill("Move it to Kitchen");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Move review.")).toBeVisible();
-  expect(followupIds).toEqual([itemId]);
-});
+}
 
-test("duplicate action targets can be clarified after reopening the assistant", async ({ page }) => {
-  await fixture(page);
-  const first = "00000000-0000-0000-0000-000000000010";
-  const second = "00000000-0000-0000-0000-000000000011";
-  let clarified: { query: string; clarified_item_id?: string } | undefined;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    const body = route.request().postDataJSON() as { query: string; clarified_item_id?: string };
-    if (!body.clarified_item_id) {
-      return route.fulfill({ json: {
-        handled: true, message: "Which item should I change?", proposal: null,
-        item_choices: [{ id: first, name: "Drill · Office" }, { id: second, name: "Drill · Garage" }],
-      } });
+const launcher = (page: Page) => page.getByRole("button", { name: /^Open assistant/ });
+
+async function openAssistant(page: Page) {
+  await launcher(page).click();
+  return page.getByRole("dialog", { name: "Assistant" });
+}
+
+/** Typed requests that reach the assistant or the search, and anything touching action proposals. */
+function trackTypedRequests(page: Page) {
+  const typed: string[] = [];
+  const actions: string[] = [];
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (request.method() === "POST" && ["/api/v1/assistant/runs", "/api/v1/search/query"].includes(pathname)) {
+      typed.push(pathname);
     }
-    clarified = body;
-    return route.fulfill({ json: {
-      handled: true, message: "Review the move before applying it.", item_choices: [],
-      proposal: {
-        id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
-        scope_label: "Synthetic household", targets: [{ id: first, name: "Drill" }],
-        destination: { id: "00000000-0000-0000-0000-000000000012", name: "Kitchen" },
-        changes: {}, before: {},
-      },
-    } });
+    // The shell always reads the pending list for its badge; that read prepares nothing.
+    if (pathname.startsWith("/api/v1/assistant/actions/") && !(
+      request.method() === "GET" && pathname === "/api/v1/assistant/actions/proposals/pending"
+    )) actions.push(`${request.method()} ${pathname}`);
   });
+  return { typed, actions };
+}
+
+test("without an assistant model a typed action is only searched in local search mode", async ({ page }) => {
+  await fixture(page);
+  const { typed, actions } = trackTypedRequests(page);
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  let dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Drill to Kitchen");
+  const dialog = await openAssistant(page);
+  const note = dialog.getByRole("note", { name: "Local search mode" });
+  await expect(note).toHaveText(
+    "Local search mode. Typed actions need the AI assistant; use the item's buttons, or set up AI in Settings.",
+  );
+  await expect(note.getByRole("link", { name: "set up AI in Settings" })).toHaveAttribute("href", "/settings/ai");
+  expect(typed).toEqual([]);
+  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move the drill to the garage");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Which item should I change?")).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Drill · Office" }).click();
-  await expect(dialog.getByLabel("Action review")).toContainText("Kitchen");
-  await expect(dialog.getByLabel("Action review")).toContainText("Original request");
-  await expect(dialog.getByLabel("Action review")).toContainText("Move Drill to Kitchen");
-  await expect(dialog.getByLabel("Action review")).toContainText("Selected: Drill · Office");
-  await expect(dialog.getByRole("button", { name: "Drill · Office" })).toBeDisabled();
-  expect(clarified).toMatchObject({ query: "Move Drill to Kitchen", clarified_item_id: first });
+  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
+  await expect(dialog.getByLabel("Action review")).toHaveCount(0);
+  await expect(note).toBeVisible();
+  expect(typed).toEqual(["/api/v1/assistant/runs", "/api/v1/search/query"]);
+  expect(actions).toEqual([]);
 });
 
-test("a location follow-up clarifies an ambiguous action", async ({ page }) => {
+test("with an assistant model a typed action goes only to the tool engine and opens its review card", async ({ page }) => {
   await fixture(page);
-  const first = "00000000-0000-0000-0000-000000000010";
-  let clarified: { query: string; clarified_item_location?: string } | undefined;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    const body = route.request().postDataJSON() as { query: string; clarified_item_location?: string };
-    if (!body.clarified_item_location) {
-      return route.fulfill({ json: {
-        handled: true, message: "Which item?", proposal: null,
-        item_choices: [{ id: first, name: "Drill · Office" }, { id: "00000000-0000-0000-0000-000000000011", name: "Drill · Garage" }],
-      } });
-    }
-    clarified = body;
-    return route.fulfill({ json: {
-      handled: true, message: "Review the move.", item_choices: [],
-      proposal: {
-        id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
-        scope_label: "Synthetic household", targets: [{ id: first, name: "Drill" }],
-        destination: { id: "00000000-0000-0000-0000-000000000012", name: "Kitchen" },
-        changes: {}, before: {},
-      },
-    } });
-  });
+  await assistantModel(page, () => ({ proposal: {
+    id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
+    scope_label: "Synthetic household",
+    targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Drill" }],
+    destination: { id: "00000000-0000-0000-0000-000000000011", name: "Garage" },
+    changes: {}, before: {},
+  } }));
+  const { typed, actions } = trackTypedRequests(page);
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
-  await input.fill("Move Drill to Kitchen");
+  const configured = page.waitForResponse((response) => response.url().includes("/api/v1/ai/status?task=assistant"));
+  const dialog = await openAssistant(page);
+  await configured;
+  const note = dialog.getByRole("note", { name: "Local search mode" });
+  await expect(dialog.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+  await expect(note).toHaveCount(0);
+  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move the drill to the garage");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Which item?")).toBeVisible();
-  await input.fill("the one in Office");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByLabel("Action review")).toContainText("Selected: Drill · Office");
-  expect(clarified).toMatchObject({ query: "Move Drill to Kitchen", clarified_item_location: "Office" });
-});
-
-test("Persian borrowing and returns reach the action interpreter", async ({ page }) => {
-  await fixture(page);
-  const queries: string[] = [];
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    queries.push(route.request().postDataJSON().query as string);
-    return route.fulfill({ json: { handled: true, message: "Review available.", proposal: null } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
-  const requests = ["نردبان رو از سارا قرض بگیر", "۱ دریل رو از علی پس بگیر", "۱ نردبان رو به سارا پس بده"];
-  for (const [index, query] of requests.entries()) {
-    await input.fill(query);
-    await dialog.getByRole("button", { name: "Send question" }).click();
-    await expect.poll(() => queries.length).toBe(index + 1);
-    await expect(dialog.getByText("Review available.")).toHaveCount(index + 1);
-  }
-  expect(queries).toEqual(requests);
+  const review = dialog.getByLabel("Action review");
+  await expect(review.getByText("Drill", { exact: true })).toBeVisible();
+  await expect(review.getByText("Garage", { exact: true })).toBeVisible();
+  await expect(review.getByRole("button", { name: "Apply" })).toBeEnabled();
+  await expect(note).toHaveCount(0);
+  expect(typed).toEqual(["/api/v1/assistant/runs"]);
+  expect(actions).toEqual([]);
 });
 
 test("reviewed assistant move remains pending until explicitly applied", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 844 });
   await fixture(page);
   let applied = 0;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: {
-      handled: true, message: "Review the move before applying it.",
-      proposal: {
-        id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
-        scope_label: "Synthetic household · Home",
-        targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Synthetic drill" }],
-        destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
-        changes: { room_id: "00000000-0000-0000-0000-000000000011" }, before: {},
-      },
-    } }),
-  );
+  await assistantModel(page, () => ({ proposal: {
+    id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
+    scope_label: "Synthetic household · Home",
+    targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Synthetic drill" }],
+    destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
+    changes: { room_id: "00000000-0000-0000-0000-000000000011" }, before: {},
+  } }));
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) => {
     applied += 1;
     return route.fulfill({ json: {
@@ -238,11 +183,10 @@ test("reviewed assistant move remains pending until explicitly applied", async (
     } });
   });
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Synthetic drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the move before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review the destination, then Apply to move these items.")).toBeVisible();
   await expect(dialog.getByText("Scope: Synthetic household · Home")).toBeVisible();
   await expect(dialog.getByText("Synthetic drill", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Kitchen", { exact: true })).toBeVisible();
@@ -262,9 +206,7 @@ test("pending apply cannot be discarded by starting a new conversation", async (
     destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
     changes: {}, before: {},
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the move before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   let release: () => void = () => {};
   const wait = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", async (route) => {
@@ -272,10 +214,10 @@ test("pending apply cannot be discarded by starting a new conversation", async (
     await route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Moved 1 item(s)." } });
   });
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
+  await expect(dialog.getByRole("button", { name: "New conversation" })).toBeEnabled();
   await dialog.getByRole("button", { name: "Apply" }).click();
   await expect(dialog.getByRole("button", { name: "New conversation" })).toBeDisabled();
   release();
@@ -292,33 +234,22 @@ test("a later answer retains an action result that arrived while it was pending"
     destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
     changes: {}, before: {},
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the move before applying it.", proposal } }),
-  );
+  let release: () => void = () => {};
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  await assistantModel(page, async ({ query }) => {
+    if (query !== "How many drills?") return { proposal };
+    await wait;
+    return { answer: "There is one drill." };
+  });
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) =>
     route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Moved 1 item(s)." } }),
   );
-  let release: () => void = () => {};
-  const wait = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/api/v1/search/query", async (route) => {
-    await wait;
-    await route.fulfill({ json: {
-      answer: "There is one drill.", query: "How many drills?", mode: "fallback",
-      ai_used: false, ai_attempted: false, direct_match: false, ambiguous: false,
-      needs_clarification: false, answer_kind: "fallback", interpretation: "", filters: {},
-      items: [], quick_results: [], borrowed: [], borrowed_total: 0, total: 0, documents: [],
-      locations: [], references: [], notices: [], facts: {}, tool: "fallback",
-      ai_status: { configured: false }, context: { scope_key: "|", resolved_items: [], candidate_items: [], loans: [], dialogue_memory: [] },
-      scope_label: "All my places", households: [], property: null,
-    } });
-  });
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
   await input.fill("Move Drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the move before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review the destination, then Apply to move these items.")).toBeVisible();
   await input.fill("How many drills?");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await dialog.getByRole("button", { name: "Apply" }).click();
@@ -338,11 +269,9 @@ test("item rename is reviewed and editable before applying", async ({ page }) =>
     destination: null, changes: { name: "Cordless drill" },
     before: { name: "Drill", description: null, brand: null, model: null, serial_number: null, quantity: 1, condition: "good" },
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the item edit before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   await page.route("**/api/v1/assistant/actions/proposals/*", (route) => {
-    expect(route.request().method()).toBe("PATCH");
+    if (route.request().method() !== "PATCH") return route.fallback();
     expect(route.request().postDataJSON()).toEqual({ changes: { name: "New drill", brand: "Bosch", quantity: 2, condition: "fair" } });
     return route.fulfill({ json: { ...proposal, changes: { name: "New drill", brand: "Bosch", quantity: 2, condition: "fair" } } });
   });
@@ -352,11 +281,10 @@ test("item rename is reviewed and editable before applying", async ({ page }) =>
     return route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Updated New drill." } });
   });
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Rename Drill to Cordless drill");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the item edit before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review the change below, then Apply to save it.")).toBeVisible();
   await expect(dialog.getByText("Cordless drill", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("link", { name: "Open full item editor" }))
     .toHaveAttribute("href", "/items/00000000-0000-0000-0000-000000000010/edit");
@@ -375,296 +303,13 @@ test("item rename is reviewed and editable before applying", async ({ page }) =>
   expect(applied).toBe(1);
 });
 
-test("item detail requests reach the reviewed-action interface", async ({ page }) => {
-  await fixture(page);
-  let query = "";
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    query = route.request().postDataJSON().query;
-    return route.fulfill({ json: { handled: true, message: "Review the item edit.", proposal: null } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Set Drill brand to Bosch");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the item edit.")).toBeVisible();
-  expect(query).toBe("Set Drill brand to Bosch");
-});
-
 test("privacy information explains reviewed writes", async ({ page }) => {
   await fixture(page);
   await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("button", { name: "Privacy & model" }).click();
   await expect(dialog.getByText("Changes require your review and explicit Apply.")).toBeVisible();
   await expect(dialog.getByText("The assistant never creates, edits or deletes inventory from this conversation.")).toHaveCount(0);
-});
-
-test("natural action phrasing reaches the action interpreter", async ({ page }) => {
-  await fixture(page);
-  let query = "";
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    query = route.request().postDataJSON().query;
-    return route.fulfill({ json: { handled: true, message: "Review the move.", proposal: null } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Could you please move Drill into Kitchen?");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the move.")).toBeVisible();
-  expect(query).toBe("Could you please move Drill into Kitchen?");
-});
-
-test("a natural offline move request reaches the reviewed-action interface", async ({ page }) => {
-  await fixture(page);
-  let query = "";
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    query = route.request().postDataJSON().query;
-    return route.fulfill({ json: { handled: true, message: "Review the move.", proposal: null } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("I want to move Drill to Kitchen");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the move.")).toBeVisible();
-  expect(query).toBe("I want to move Drill to Kitchen");
-});
-
-test("unsupported deletion offers the existing item controls without pretending success", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("I want to delete Drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot delete items. Use the existing item controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open items" })).toHaveAttribute("href", "/items");
-  expect(searchCalls).toBe(0);
-});
-
-test("unsupported Persian deletion offers existing item controls", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("دریل رو حذف کن");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot delete items. Use the existing item controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open items" })).toHaveAttribute("href", "/items");
-  expect(searchCalls).toBe(0);
-});
-
-test("unsupported merge requests offer existing item controls", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Merge these items");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot merge inventory items. Use the existing item controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open items" })).toHaveAttribute("href", "/items");
-  expect(searchCalls).toBe(0);
-});
-
-test("unsupported archive requests offer the existing item controls", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Archive Drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot archive or restore items. Use the existing item controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open items" })).toHaveAttribute("href", "/items");
-  expect(searchCalls).toBe(0);
-});
-
-test("unsupported selling offers item controls instead of searching", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Sell my drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot record item disposition. Use the existing item controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open items" })).toHaveAttribute("href", "/items");
-  expect(searchCalls).toBe(0);
-});
-
-test("unsupported room creation offers the existing room form", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Create a new room");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot create rooms. Use the existing room controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open rooms" })).toHaveAttribute("href", "/rooms");
-  expect(searchCalls).toBe(0);
-});
-
-test("AI identifies an unsupported action without sending it to search", async ({ page }) => {
-  await fixture(page);
-  let searchCalls = 0;
-  await page.route("**/api/v1/search/query", (route) => {
-    searchCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected search" });
-  });
-  await page.route("**/api/v1/assistant/actions/intent", (route) =>
-    route.fulfill({ json: { intent: "unsupported_action", form: "rooms" } }),
-  );
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Set up a nursery for me");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot perform that action. Use the existing controls.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open rooms" })).toHaveAttribute("href", "/rooms");
-  expect(searchCalls).toBe(0);
-});
-
-test("AI-routed questions use normal search while ambiguous actions ask once", async ({ page }) => {
-  await fixture(page);
-  await page.route("**/api/v1/assistant/actions/intent", (route) => {
-    const { query } = route.request().postDataJSON();
-    return route.fulfill({ json: {
-      intent: query === "Where is my drill?" ? "question" : "ambiguous",
-      form: null,
-    } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
-  await input.fill("Where is my drill?");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
-  await expect(dialog.getByText("Read-only answer. No changes were made.")).toBeVisible();
-  await input.fill("Do something with my drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("What would you like to change?")).toBeVisible();
-});
-
-test("unreachable intent provider preserves read-only search and reports the limitation", async ({ page }) => {
-  await fixture(page);
-  await page.route("**/api/v1/assistant/actions/intent", (route) =>
-    route.fulfill({ status: 503, json: { detail: { code: "intent_unavailable", message: "Intent provider unavailable." } } }),
-  );
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Where is my drill?");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
-  await expect(dialog.getByText("Read-only answer. No changes were made.")).toBeVisible();
-  await expect(page.getByText("AI intent interpretation is unavailable; using local routing.")).toBeVisible();
-});
-
-test("AI identifies an action-word lookup as a question", async ({ page }) => {
-  await fixture(page);
-  let actionCalls = 0;
-  await page.route("**/api/v1/assistant/actions/intent", (route) =>
-    route.fulfill({ json: { intent: "question", form: null } }),
-  );
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    actionCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected action" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move history for Drill");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
-  expect(actionCalls).toBe(0);
-});
-
-test("AI-routed supported action opens review before any apply", async ({ page }) => {
-  await fixture(page);
-  let applies = 0;
-  const interpreted: string[] = [];
-  await page.route("**/api/v1/assistant/actions/intent", (route) =>
-    route.fulfill({ json: { intent: "supported_action", form: null } }),
-  );
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    interpreted.push(route.request().postDataJSON().query);
-    return route.fulfill({ json: {
-      handled: true,
-      message: "Review the move before applying it.",
-      proposal: {
-        id: "proposal-1", kind: "move_items", state: "ready", scope_label: "Home",
-        targets: [{ id: "item-1", name: "Drill" }],
-        destination: { id: "room-1", name: "Kitchen" },
-        changes: {}, before: {},
-      },
-    } });
-  });
-  await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) => {
-    applies += 1;
-    return route.fulfill({ json: { message: "Moved 1 item(s)." } });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Transfer Drill to Kitchen");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  const review = dialog.getByLabel("Action review");
-  await expect(review.getByText("Drill", { exact: true })).toBeVisible();
-  await expect(review.getByText("Kitchen", { exact: true })).toBeVisible();
-  expect(interpreted).toEqual(["Transfer Drill to Kitchen"]);
-  expect(applies).toBe(0);
-  await review.getByRole("button", { name: "Apply" }).click();
-  await expect(review.getByRole("status")).toContainText("Moved");
-  expect(applies).toBe(1);
-});
-
-test("unsupported account changes offer account settings instead of inventory actions", async ({ page }) => {
-  await fixture(page);
-  let actionCalls = 0;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    actionCalls += 1;
-    return route.fulfill({ status: 500, body: "Unexpected action" });
-  });
-  await page.goto("/items");
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Change my password");
-  await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("The assistant cannot change account settings. Use the existing account settings.")).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Open account settings" })).toHaveAttribute("href", "/settings/account");
-  expect(actionCalls).toBe(0);
 });
 
 test("lending review shows and edits borrower, quantity and dates before apply", async ({ page }) => {
@@ -679,11 +324,12 @@ test("lending review shows and edits borrower, quantity and dates before apply",
       quantity: 1, lent_on: "2025-01-03", due_on: null, notes: null, include_contents: false,
     }, before: { available_quantity: 3 },
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) => {
-    expect(route.request().postDataJSON().local_date).toMatch(/^\d{4}-\d\d-\d\d$/);
-    return route.fulfill({ json: { handled: true, message: "Review the loan before applying it.", proposal } });
+  await assistantModel(page, (request) => {
+    expect(request.local_date).toMatch(/^\d{4}-\d\d-\d\d$/);
+    return { proposal };
   });
   await page.route("**/api/v1/assistant/actions/proposals/*", (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
     expect(route.request().postDataJSON()).toEqual({
       borrower_name: "Alex", quantity: 2, lent_on: "2025-01-04", due_on: "2025-01-10",
     });
@@ -697,11 +343,10 @@ test("lending review shows and edits borrower, quantity and dates before apply",
     return route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Recorded loan of Drill to Alex." } });
   });
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Lend Drill to Sam");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the loan before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review the lending details, then Apply to record them.")).toBeVisible();
   await expect(dialog.getByText("Sam", { exact: true })).toBeVisible();
   await expect(dialog.getByText("2025-01-03", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Edit loan" }).click();
@@ -726,10 +371,9 @@ test("borrowing review shows and edits the item and owner before apply", async (
     changes: { item_name: "Ladder", owner_name: "Sam", quantity: 2, borrowed_on: "2025-01-03", due_on: null },
     before: {},
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the borrowing before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   await page.route("**/api/v1/assistant/actions/proposals/*", (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
     expect(route.request().postDataJSON()).toEqual({
       item_name: "Step ladder", owner_name: "Alex", quantity: 1, borrowed_on: "2025-01-04", due_on: null,
     });
@@ -743,11 +387,10 @@ test("borrowing review shows and edits the item and owner before apply", async (
     return route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Recorded borrowing Step ladder from Alex." } });
   });
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Borrow 2 Ladder from Sam");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the borrowing before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review the lending details, then Apply to record them.")).toBeVisible();
   await expect(dialog.getByText("Ladder", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Sam", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Edit borrowing" }).click();
@@ -773,10 +416,9 @@ test("return review edits quantity and date before apply", async ({ page }) => {
     destination: null, changes: { quantity: 2, returned_on: "2025-01-04" },
     before: { outstanding_quantity: 3 },
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the return before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   await page.route("**/api/v1/assistant/actions/proposals/*", (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
     expect(route.request().postDataJSON()).toEqual({ quantity: 1, returned_on: "2025-01-05" });
     return route.fulfill({ json: { ...proposal, changes: { quantity: 1, returned_on: "2025-01-05" } } });
   });
@@ -786,11 +428,10 @@ test("return review edits quantity and date before apply", async ({ page }) => {
     return route.fulfill({ json: { proposal_id: proposal.id, request_id: route.request().postDataJSON().request_id, message: "Recorded return of Drill." } });
   });
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Return 2 Drill from Sam");
   await dialog.getByRole("button", { name: "Send question" }).click();
-  await expect(dialog.getByText("Review the return before applying it.")).toBeVisible();
+  await expect(dialog.getByText("Review this return, then Apply to record it.")).toBeVisible();
   await expect(dialog.getByText("Drill · Sam", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Edit return" }).click();
   await dialog.getByLabel("Return quantity").fill("1");
@@ -807,18 +448,13 @@ test("cancelling an assistant proposal never applies it", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await fixture(page);
   let applied = 0;
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: {
-      handled: true, message: "Review the move before applying it.",
-      proposal: {
-        id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
-        scope_label: "Synthetic household · Home",
-        targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Synthetic drill" }],
-        destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
-        changes: {}, before: {},
-      },
-    } }),
-  );
+  await assistantModel(page, () => ({ proposal: {
+    id: "00000000-0000-0000-0000-000000000099", kind: "move_items", state: "ready",
+    scope_label: "Synthetic household · Home",
+    targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Synthetic drill" }],
+    destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
+    changes: {}, before: {},
+  } }));
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) => {
     applied += 1;
     return route.fulfill({ status: 500 });
@@ -827,8 +463,7 @@ test("cancelling an assistant proposal never applies it", async ({ page }) => {
     route.fulfill({ json: { id: "00000000-0000-0000-0000-000000000099", state: "cancelled" } }),
   );
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Synthetic drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await dialog.getByRole("button", { name: "Cancel proposal" }).click();
@@ -847,9 +482,7 @@ test("assistant move review edits the destination without changing its target", 
     destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
     changes: { room_id: "00000000-0000-0000-0000-000000000011" }, before: {},
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the move before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   await page.route("**/api/v1/assistant/actions/proposals/*/destinations", (route) =>
     route.fulfill({ json: { items: [
       { room_id: proposal.destination.id, storage_location_id: null, name: "Kitchen" },
@@ -857,15 +490,14 @@ test("assistant move review edits the destination without changing its target", 
     ] } }),
   );
   await page.route("**/api/v1/assistant/actions/proposals/*", (route) => {
-    expect(route.request().method()).toBe("PATCH");
+    if (route.request().method() !== "PATCH") return route.fallback();
     expect(route.request().postDataJSON().room_id).toBe("00000000-0000-0000-0000-000000000012");
     return route.fulfill({ json: { ...proposal, destination: {
       id: "00000000-0000-0000-0000-000000000012", name: "Garage",
     } } });
   });
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Synthetic drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await dialog.getByRole("button", { name: "Edit destination" }).click();
@@ -874,7 +506,7 @@ test("assistant move review edits the destination without changing its target", 
   await expect(dialog.getByText("Scope: Synthetic household · Home")).toBeVisible();
   await expect(dialog.getByText("Garage", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Synthetic drill", { exact: true })).toBeVisible();
-  await expect(dialog.getByLabel("Action review")).toContainText("Move Synthetic drill to Kitchen");
+  await expect(dialog.getByText("Move Synthetic drill to Kitchen", { exact: true })).toBeVisible();
 });
 
 test("a stale move must be refreshed and reviewed before applying", async ({ page }) => {
@@ -887,9 +519,7 @@ test("a stale move must be refreshed and reviewed before applying", async ({ pag
     destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
     changes: {}, before: {},
   };
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: { handled: true, message: "Review the move before applying it.", proposal } }),
-  );
+  await assistantModel(page, () => ({ proposal }));
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) =>
     route.fulfill({ status: 409, json: { detail: {
       code: "proposal_stale", message: "The selected items changed. Refresh the proposal.",
@@ -900,8 +530,7 @@ test("a stale move must be refreshed and reviewed before applying", async ({ pag
       targets: [{ ...proposal.targets[0], name: "Updated drill" }] } }),
   );
   await page.goto("/items");
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAssistant(page);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Synthetic drill to Kitchen");
   await dialog.getByRole("button", { name: "Send question" }).click();
   await dialog.getByRole("button", { name: "Apply" }).click();
@@ -909,7 +538,7 @@ test("a stale move must be refreshed and reviewed before applying", async ({ pag
   await expect(dialog.getByRole("button", { name: "Apply" })).toBeDisabled();
   await dialog.getByRole("button", { name: "Refresh proposal" }).click();
   await expect(dialog.getByText("Updated drill", { exact: true })).toBeVisible();
-  await expect(dialog.getByLabel("Action review")).toContainText("Move Synthetic drill to Kitchen");
+  await expect(dialog.getByText("Move Synthetic drill to Kitchen", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Apply" })).toBeEnabled();
 });
 
@@ -924,25 +553,23 @@ test("pending proposal retains its original scope across a scope switch", async 
   );
   const proposalId = "00000000-0000-0000-0000-000000000099";
   let appliedUrl = "";
-  await page.route("**/api/v1/assistant/actions/interpret", (route) =>
-    route.fulfill({ json: {
-      handled: true, message: "Review move.", proposal: {
-        id: proposalId, kind: "move_items", state: "ready", scope_label: "Home A",
-        targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Drill" }],
-        destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
-        changes: {}, before: {},
-      },
-    } }),
-  );
+  await assistantModel(page, (request) => {
+    expect(request.household_id).toBe(household.id);
+    return { proposal: {
+      id: proposalId, kind: "move_items", state: "ready", scope_label: "Home A",
+      targets: [{ id: "00000000-0000-0000-0000-000000000010", name: "Drill" }],
+      destination: { id: "00000000-0000-0000-0000-000000000011", name: "Kitchen" },
+      changes: {}, before: {},
+    } };
+  });
   await page.route("**/api/v1/assistant/actions/proposals/*/apply", (route) => {
     appliedUrl = route.request().url();
     return route.fulfill({ json: {
       proposal_id: proposalId, request_id: route.request().postDataJSON().request_id, message: "Moved 1 item(s).",
     } });
   });
-  await page.goto(`/search?household_id=${household.id}`);
-  await page.getByRole("button", { name: "Open assistant panel" }).click();
-  const dialog = page.getByRole("dialog");
+  await page.goto("/items?sort=name_asc");
+  const dialog = await openAssistant(page);
   const scope = dialog.getByLabel("Search scope");
   await scope.selectOption(`household:${household.id}`);
   await dialog.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("Move Drill to Kitchen");
@@ -950,10 +577,10 @@ test("pending proposal retains its original scope across a scope switch", async 
   await expect(dialog.getByLabel("Action review")).toContainText("Scope: Home A");
   await scope.selectOption(`household:${secondHousehold}`);
   await expect(dialog.getByLabel("Action review")).toHaveCount(0);
-  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  expect(new URL(page.url()).search).toBe("?sort=name_asc");
   await scope.selectOption(`household:${household.id}`);
   await expect(dialog.getByLabel("Action review")).toContainText("Scope: Home A");
-  await expect(dialog.getByLabel("Action review")).toContainText("Move Drill to Kitchen");
+  await expect(dialog.getByText("Move Drill to Kitchen", { exact: true })).toBeVisible();
   await dialog.getByLabel("Action review").getByRole("button", { name: "Apply" }).click();
   await expect(dialog.getByLabel("Action review").getByRole("status")).toContainText("Moved");
   expect(appliedUrl).toContain(`/proposals/${proposalId}/apply`);
@@ -971,9 +598,9 @@ test("assistant retains a selected household scope when reopened over scoped pag
   );
   await page.goto(`/search?household_id=${household.id}`);
   expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
-  const trigger = page.getByRole("button", { name: "Open assistant panel" });
+  const trigger = launcher(page);
   await trigger.click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: "Assistant" });
   const scope = dialog.getByLabel("Search scope");
   await expect(scope.getByRole("option", { name: "Home B — all properties" })).toHaveCount(1);
   expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
@@ -1032,9 +659,9 @@ test("property scope and in-flight response survive reopening and full-page hand
     } });
   });
   await page.goto(`/search?household_id=${household.id}&property_id=${propertyA}`);
-  const trigger = page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" });
+  const trigger = launcher(page);
   await trigger.click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: "Assistant" });
   const scope = dialog.getByLabel("Search scope");
   await expect(scope.getByRole("option", { name: "Home B · Property B" })).toHaveCount(1);
   await scope.selectOption(`household:${secondHousehold}|property:${propertyB}`);
@@ -1077,11 +704,9 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     const errors = await fixture(page);
     await page.goto("/items?sort=name_asc");
-    const trigger = width < 1024
-      ? page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" })
-      : page.getByRole("button", { name: "Open assistant panel" });
+    const trigger = launcher(page);
     await trigger.click();
-    const dialog = page.getByRole("dialog");
+    const dialog = page.getByRole("dialog", { name: "Assistant" });
     await expect(dialog).toBeVisible();
     expect(await page.evaluate(() => ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? ""))).toBe(false);
     const input = dialog.getByRole("textbox", { name: "Ask the Housetory assistant" });
@@ -1136,11 +761,7 @@ for (const width of [390, 1440]) {
     await page.goto("/items");
     await page.getByRole("checkbox", { name: "Select Synthetic drill" }).check();
     await page.getByRole("checkbox", { name: "Select Synthetic ladder" }).check();
-    const trigger = width < 1024
-      ? page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" })
-      : page.getByRole("button", { name: "Open assistant panel" });
-    await trigger.click();
-    const dialog = page.getByRole("dialog");
+    const dialog = await openAssistant(page);
     await expect(dialog.getByLabel("Current assistant context")).toContainText("Selection: 2 items");
     await dialog.getByText("View", { exact: true }).click();
     await expect(dialog.getByText("Synthetic drill", { exact: true })).toBeVisible();

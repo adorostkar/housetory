@@ -151,20 +151,30 @@ for (const mobile of [false, true]) {
     await expect(page.getByRole("button", { name: "Review again", exact: true })).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/${size}-review.png`, fullPage: true });
 
-    // Without AI, a review request still runs: local checks, stated plainly.
+    // Without AI, a typed review request is only searched: reviews start from the Review page.
     await page.goto("/items");
     await page.locator('button[title="Open assistant"]').first().click();
     const offlinePanel = page.getByTestId("assistant-panel");
+    await expect(offlinePanel.getByRole("note", { name: "Local search mode" })).toContainText(
+      "Typed actions need the AI assistant; use the item's buttons, or set up AI in Settings.",
+    );
+    const startedReviews: string[] = [];
+    page.on("request", (sent) => {
+      if (sent.method() === "POST" && new URL(sent.url()).pathname === "/api/v1/inventory-review/runs") {
+        startedReviews.push(sent.url());
+      }
+    });
+    const searched = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/v1/search/query" && response.request().method() === "POST");
     await offlinePanel.getByRole("textbox", { name: "Ask the Housetory assistant" })
       .fill("Review my items and suggest categories.");
     await offlinePanel.getByRole("button", { name: "Send question", exact: true }).click();
-    await expect(offlinePanel.getByText(/AI isn’t available right now, so I ran the local checks instead/)).toBeVisible();
-    const localReview = offlinePanel.getByRole("region", { name: "Inventory review", exact: true }).last();
-    await expect(localReview.getByRole("status")).toContainText("Local checks finished");
-    await expect(localReview.getByRole("status")).toContainText(/Nothing has been changed/);
-    await expect(localReview.getByLabel("AI analysis")).toContainText("AI analysis isn’t set up, so only local checks ran.");
-    await expect(localReview.getByRole("button", { name: "Run AI analysis" })).toHaveCount(0);
-    if (shots) await page.screenshot({ path: `${shots}/${size}-offline-review.png` });
+    expect((await searched).ok()).toBeTruthy();
+    await expect(offlinePanel.getByRole("button", { name: "Copy answer" }).last()).toBeVisible();
+    await expect(offlinePanel.getByRole("region", { name: "Inventory review", exact: true })).toHaveCount(0);
+    await expect(offlinePanel.getByLabel("Action review")).toHaveCount(0);
+    expect(startedReviews).toEqual([]);
+    if (shots) await page.screenshot({ path: `${shots}/${size}-local-search-mode.png` });
     await offlinePanel.getByRole("button", { name: "Close assistant", exact: true }).click();
 
     await page.goto("/imports");
