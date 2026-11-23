@@ -1,5 +1,5 @@
 import type { AssistantMessage, AssistantActionProposal } from "@/lib/assistant-conversation";
-import type { ReviewRun } from "@/lib/types";
+import type { ManualCitation, ReviewRun } from "@/lib/types";
 import { api } from "@/lib/api";
 
 export interface AssistantToolRequest {
@@ -17,6 +17,15 @@ export function createToolRun(request: AssistantToolRequest, signal: AbortSignal
   return api.post<AssistantToolRun>("/assistant/runs", request, { signal });
 }
 
+/** A manual the assistant found: its document page and its file, never a review. */
+export interface AssistantManualLink {
+  document_id: string;
+  title: string;
+  url: string;
+  download_url: string;
+  state: "readable" | "ocr_pending" | "ocr_failed" | "no_text";
+}
+
 export interface AssistantToolOutput {
   summary: string;
   error?: string | null;
@@ -24,6 +33,8 @@ export interface AssistantToolOutput {
   proposal?: AssistantActionProposal | null;
   capture?: { kind: "items" | "document" | "photo"; id: string } | null;
   review?: ReviewRun | null;
+  manuals?: AssistantManualLink[];
+  citations?: ManualCitation[];
 }
 
 export interface AssistantToolRun {

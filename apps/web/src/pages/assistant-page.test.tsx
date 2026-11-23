@@ -349,6 +349,65 @@ describe("AssistantPage", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  it("shows a found manual with direct links and page citations, never as a capture review", async () => {
+    const manual = {
+      document_id: "doc-manual", title: "ASIM6K0R-EN-v2", url: "/documents/doc-manual",
+      download_url: "/api/v1/documents/doc-manual/file", state: "readable" as const,
+    };
+    const scan = {
+      document_id: "doc-scan", title: "Quick start scan", url: "/documents/doc-scan",
+      download_url: "/api/v1/documents/doc-scan/file", state: "ocr_failed" as const,
+    };
+    const references = [
+      { id: "item-meter", title: "Multimeter", url: "/items/item-meter" },
+      { id: "doc-manual", title: "ASIM6K0R-EN-v2", url: "/documents/doc-manual" },
+      { id: "doc-scan", title: "Quick start scan", url: "/documents/doc-scan" },
+    ];
+    const answer = "Turn the dial to 10A and use the 10A jack (ASIM6K0R-EN-v2, page 12).";
+    vi.mocked(createToolRun).mockResolvedValue({
+      id: "run-manual", parent_id: null, household_id: "house-1", property_id: null,
+      query: "How do I check amperage?", state: "completed", generation: 1,
+      message: answer, answer,
+      steps: [{
+        call: { name: "read_manual", arguments: { item_id: "item-meter", question: "measure current" } },
+        result: {
+          summary: "1 passage matches in ASIM6K0R-EN-v2.", references,
+          manuals: [manual, scan],
+          citations: [{
+            document_id: "doc-manual", document_title: "ASIM6K0R-EN-v2", page: 12,
+            section: "CURRENT MEASUREMENT", excerpt: "To measure current, turn the rotary dial to 10A.",
+            url: "/api/v1/documents/doc-manual/file#page=12",
+          }],
+        },
+      }],
+      model_calls: 2, max_model_calls: 8, can_retry: false, worker_available: null,
+    });
+    renderPage("/assistant", { id: "manual-question", text: "How do I check amperage?" });
+    expect(await screen.findByText(answer)).toBeVisible();
+
+    const manuals = screen.getByRole("list", { name: "Manuals" });
+    expect(within(manuals).getByRole("link", { name: "Open ASIM6K0R-EN-v2" }))
+      .toHaveAttribute("href", "/documents/doc-manual?household_id=house-1");
+    expect(await within(manuals).findByRole("link", { name: "Download ASIM6K0R-EN-v2" }))
+      .toHaveAttribute("href", "/api/v1/documents/doc-manual/file");
+    // A manual whose text could not be read is still one click away.
+    expect(within(manuals).getByText("Text could not be read")).toBeVisible();
+    expect(within(manuals).getByRole("link", { name: "Open Quick start scan" })).toBeVisible();
+
+    const citations = screen.getByRole("list", { name: "Manual citations" });
+    expect(within(citations).getByRole("link", { name: "ASIM6K0R-EN-v2, page 12" }))
+      .toHaveAttribute("href", "/api/v1/documents/doc-manual/file#page=12");
+    expect(within(citations).getByText(/turn the rotary dial to 10A/)).toBeVisible();
+
+    // Manuals are not repeated as generic record chips, and no review is opened.
+    expect(within(screen.getByLabelText("Tool source records")).getAllByRole("link")
+      .map((link) => link.textContent)).toEqual(["Multimeter"]);
+    expect(screen.queryByLabelText("Assistant capture status")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Document review/)).not.toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+    expect(api.postForm).not.toHaveBeenCalled();
+  });
+
   it("restores a queued tool task without submitting it again and exposes cancellation", async () => {
     const run = {
       id: "restored-run", parent_id: null, household_id: "house-1", property_id: null,

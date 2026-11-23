@@ -7,10 +7,19 @@ import { Button } from "@/components/ui/button";
 import { AnswerText } from "@/components/answer-text";
 import { InventoryReview } from "@/components/inventory-review";
 import { api, getApiErrorMessage } from "@/lib/api";
-import { assistantAnswerText, startedReview, type AssistantToolRun } from "@/lib/assistant-tools";
+import {
+  assistantAnswerText, startedReview, type AssistantManualLink, type AssistantToolRun,
+} from "@/lib/assistant-tools";
 import { withHousehold } from "@/lib/household-links";
 import { useSelectHousehold, useSession } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-keys";
+
+const MANUAL_STATES: Record<AssistantManualLink["state"], string | null> = {
+  readable: null,
+  ocr_pending: "Text is still being read",
+  ocr_failed: "Text could not be read",
+  no_text: "No text read yet",
+};
 
 export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const queryClient = useQueryClient();
@@ -20,6 +29,18 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const active = ["queued", "running"].includes(run.state);
   const references = [...new Map(run.steps.flatMap(({ result }) =>
     result.references ?? []).map((reference) => [reference.id, reference])).values()];
+  // Manuals are shown with their own open and download links, not as a review.
+  const manuals = [...new Map(run.steps.flatMap(({ result }) =>
+    result.manuals ?? []).map((manual) => [manual.document_id, manual])).values()];
+  const citations = [...new Map(run.steps.flatMap(({ result }) => result.citations ?? [])
+    .map((citation) => [
+      `${citation.document_id}:${citation.page ?? citation.section}:${citation.excerpt.slice(0, 60)}`,
+      citation,
+    ])).values()];
+  // File links are served for the active household only.
+  const sameHousehold = session.data?.household?.id === run.household_id;
+  const sourceReferences = references.filter((reference) =>
+    !manuals.some((manual) => manual.document_id === reference.id));
   const reviews = [...new Map(run.steps.flatMap((step) => {
     const review = startedReview(step);
     return review ? [review] : [];
@@ -57,9 +78,51 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
         {run.can_retry && <Link className="inline-flex min-h-11 items-center px-3 text-xs underline"
           to={withHousehold("/items", run.household_id)}>Local inventory controls</Link>}
       </div>}
-      {references.length > 0 && (
+      {manuals.length > 0 && (
+        <ul className="space-y-1" aria-label="Manuals">
+          {manuals.map((manual) => (
+            <li key={manual.document_id} className="flex flex-wrap items-center gap-x-3 text-xs">
+              <span className="min-w-0 break-words font-medium">{manual.title}</span>
+              <Link to={withHousehold(manual.url, run.household_id)}
+                className="inline-flex min-h-11 items-center underline"
+                aria-label={`Open ${manual.title}`}>Open</Link>
+              {sameHousehold && (
+                <a href={manual.download_url} className="inline-flex min-h-11 items-center underline"
+                  aria-label={`Download ${manual.title}`}>Download</a>
+              )}
+              {MANUAL_STATES[manual.state] && (
+                <span className="text-muted-foreground">{MANUAL_STATES[manual.state]}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {citations.length > 0 && (
+        <ul className="space-y-2" aria-label="Manual citations">
+          {citations.map((citation, index) => {
+            const place = citation.page ? `page ${citation.page}`
+              : citation.section ?? `excerpt ${index + 1}`;
+            const label = `${citation.document_title}, ${place}`;
+            return (
+              <li key={index} className="rounded-md border px-3 py-2">
+                {sameHousehold ? (
+                  <a href={citation.url} target="_blank" rel="noreferrer"
+                    className="text-xs font-medium underline">{label}</a>
+                ) : (
+                  <Link to={withHousehold(`/documents/${citation.document_id}`, run.household_id)}
+                    className="text-xs font-medium underline">{label}</Link>
+                )}
+                <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-2xs text-muted-foreground">
+                  {citation.excerpt}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {sourceReferences.length > 0 && (
         <div className="flex flex-wrap gap-2" aria-label="Tool source records">
-          {references.map((reference) => (
+          {sourceReferences.map((reference) => (
             <Link key={reference.id} to={withHousehold(reference.url, run.household_id)}
               className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs underline">
               {reference.title}
