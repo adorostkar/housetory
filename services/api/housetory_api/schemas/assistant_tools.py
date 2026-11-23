@@ -7,11 +7,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from .ai import AssistantReference, SearchPageReference
 from .assistant_actions import AssistantActionProposalOut
 from .inventory_review import ReviewRunOut
+from .manuals import ManualCitationOut
 
 
 class CaptureLink(BaseModel):
     kind: Literal["items", "document", "photo"]
     id: uuid.UUID
+
+
+class ManualLink(BaseModel):
+    """A manual the application links to directly: its viewer page and its file."""
+
+    document_id: uuid.UUID
+    title: str
+    url: str
+    download_url: str
+    state: Literal["readable", "ocr_pending", "ocr_failed", "no_text"]
 
 
 class RunRequest(BaseModel):
@@ -36,6 +47,8 @@ class ToolOutput(BaseModel):
     proposal: AssistantActionProposalOut | None = None
     capture: CaptureLink | None = None
     review: ReviewRunOut | None = None
+    manuals: list[ManualLink] = Field(default_factory=list, max_length=8)
+    citations: list[ManualCitationOut] = Field(default_factory=list, max_length=4)
     error: str | None = None
 
 

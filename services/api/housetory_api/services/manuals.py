@@ -18,13 +18,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import Headers
 
 from ..api.errors import ApiError
 from ..config import get_settings
-from ..domain import AiTask, DocumentType
+from ..domain import AiTask, DocumentType, OcrStatus
 from ..models import (
     Document,
     Item,
@@ -51,9 +51,18 @@ from .documents import create_document, get_document
 from .serializers import document_out
 
 MAX_EVIDENCE = 4
-MAX_CHUNKS_PER_DOCUMENT = 40
+# Enough for all the text OCR stores for one document (40 pages, 180,000 characters).
+MAX_CHUNKS_PER_DOCUMENT = 400
 MAX_CHUNK_CHARS = 1200
 EXCERPT_CHARS = 700
+MAX_MANUAL_SOURCES = 8
+# Documentation a household files on an item. Purchase and warranty paperwork is
+# never read as a manual.
+MANUAL_SOURCE_TYPES = (
+    DocumentType.MANUAL.value,
+    DocumentType.SPECIFICATION.value,
+    DocumentType.OTHER.value,
+)
 STOPWORDS = {
     "a",
     "about",
@@ -223,6 +232,49 @@ def manual_documents(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
             .order_by(Document.created_at.desc(), Document.title.asc())
         ).all()
     )
+
+
+def item_manual_sources(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> list[Document]:
+    """Every document that can serve as this item's manual, Manual-library ones first.
+
+    ``manual_documents`` is the strict Manual-library view the item page lists. A
+    manual also reaches an item in two other ways. A reviewed online download
+    records the item in ``manual_search_candidates``; the file may already have
+    been stored under another type, and its item link can be removed later. The
+    item page's plain upload attaches documentation as "other" or "specification".
+    """
+    downloaded = select(ManualSearchCandidate.document_id).where(
+        ManualSearchCandidate.household_id == household_id,
+        ManualSearchCandidate.item_id == item_id,
+        ManualSearchCandidate.document_id.is_not(None),
+    )
+    return list(
+        db.scalars(
+            select(Document)
+            .where(
+                Document.household_id == household_id,
+                Document.document_type.in_(MANUAL_SOURCE_TYPES),
+                or_(Document.items.any(Item.id == item_id), Document.id.in_(downloaded)),
+            )
+            .order_by(
+                case((Document.document_type == DocumentType.MANUAL.value, 0), else_=1),
+                Document.created_at.desc(),
+                Document.title.asc(),
+            )
+            .limit(MAX_MANUAL_SOURCES)
+        ).all()
+    )
+
+
+def reading_state(document: Document) -> str:
+    """Whether a document's stored text can be searched and, if not, why."""
+    if _page_texts(document):
+        return "readable"
+    if document.ocr_status in {OcrStatus.QUEUED.value, OcrStatus.PROCESSING.value}:
+        return "ocr_pending"
+    if document.ocr_status == OcrStatus.FAILED.value:
+        return "ocr_failed"
+    return "no_text"
 
 
 def _search_status(
@@ -507,6 +559,19 @@ def _citation(chunk: dict[str, Any], index: int) -> ManualCitationOut:
     )
 
 
+def manual_evidence(
+    documents: list[Document], question: str
+) -> tuple[list[tuple[ManualCitationOut, str]], list[str]]:
+    """The few stored passages that match a question. No model is used.
+
+    Each entry is the citation shown to the user and the whole passage it was cut from.
+    """
+    chunks, notices = _select_evidence(documents, question)
+    return [
+        (_citation(chunk, index), chunk["text"]) for index, chunk in enumerate(chunks, start=1)
+    ], notices
+
+
 def _extractive_answer(citations: list[ManualCitationOut]) -> str:
     if not citations:
         return (
@@ -631,8 +696,8 @@ def ask_manual_question(
             notices=["Attached-manual answers use only permitted household manuals."],
             ai_status=status,
         )
-    chunks, notices = _select_evidence(documents, question)
-    citations = [_citation(chunk, index) for index, chunk in enumerate(chunks, start=1)]
+    evidence, notices = manual_evidence(documents, question)
+    citations = [citation for citation, _passage in evidence]
     if not citations:
         missing_text = [
             document.title for document in documents if not (document.extracted_text or "").strip()
