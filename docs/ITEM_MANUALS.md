@@ -65,6 +65,74 @@ from general explanation, reports missing evidence, and warns when evidence come
 from multiple manuals or when page-level text is unavailable. This milestone
 does not claim semantic conflict detection beyond that warning.
 
+## Manuals in the assistant
+
+The assistant can find, open and read manuals. It uses two read-only tools in
+its tool registry (`services/assistant_tools/registry.py`). Both tools use the
+same discovery and retrieval code as the item page (`services/manuals.py`). They
+make no extra model call: the tool returns passages, and the assistant's own
+model writes the answer.
+
+- `find_manuals` lists the manuals of an item, or one manual by document ID. For
+  each manual the conversation shows an **Open** link (the document page) and a
+  **Download** link (the stored file). The tool reads no text. It never opens an
+  extraction review, an import or a capture. If the model calls
+  `get_capture_status` for a Manual document, it gets the same links, not a
+  review.
+- `read_manual` returns the passages that match a question: at most four, at
+  most two per manual, each up to 1,200 characters. Each passage has the
+  document title and the real page when page text exists. The conversation shows
+  them as citations with a link to that page.
+
+Three kinds of document count as an item's manual:
+
+1. Manual-library documents linked to the item. This is the list the item page
+   shows.
+2. Documents that a reviewed online download saved for the item. They are found
+   through `manual_search_candidates`. This also works when the item link was
+   removed later, or when the file was first stored under another type.
+3. Other documentation attached to the item with the type **Specification** or
+   **Other**. The item page's plain **Upload document** files a manual as
+   **Other**, so such a manual must still be found.
+
+Receipts, invoices and warranty certificates are never read as manuals. A
+Manual-library document with no linked item can still be opened and read by its
+document ID, after `search_documents` finds it. `search_documents` and
+`get_item_details` give the model each document's title and type, never its
+text.
+
+When there is no answer, the tool says why. The assistant repeats that reason
+and offers the matching existing action:
+
+| Condition | Meaning | Action offered |
+| --- | --- | --- |
+| `no_manual` | Nothing is attached to the item. | **Add manual**, **Link existing** or **Find manual** on the item page. |
+| `ocr_pending` | The text is still being read. | Wait. The document page shows the progress. |
+| `ocr_failed` | Reading failed, or found no readable text. | **Run OCR** on the document page (**Clean up scan** first for unclear pages). |
+| `no_text` | No text is stored for the file. | **Run OCR** on the document page. |
+| `no_relevant_passage` | The stored text has no passage for the question. | Ask with other words, or open the manual. |
+
+In every case except `no_manual` the manual keeps its links, and the assistant
+is told not to ask for a new upload.
+
+Limits:
+
+- Manual text is untrusted data. It reaches the model only as passage text
+  inside a tool result.
+- Later turns always keep the item and manual IDs. They repeat an earlier tool
+  result only when it is short (up to 1,500 characters), so long passages are
+  not sent again. A follow-up such as “How do I check amperage?” reads the
+  manual again for the new question.
+- Household and property scope are checked on every call. A manual outside the
+  conversation's property is reported as not found.
+- The final wording comes from the model. Unlike **Ask about this item**, code
+  does not check page numbers in that wording. The citation list always shows
+  the passages that were really retrieved.
+- Text is stored for the first pages of a file only: up to 40 pages of a PDF with
+  a text layer, and up to `OCR_MAX_PDF_PAGES` pages (default 5) of a scanned PDF.
+  The tool says so when a manual is longer, because later pages cannot be
+  searched.
+
 ## Confirming the product identity
 
 Online search, online download and online item questions use one server-side
@@ -372,7 +440,8 @@ search results or require a paid provider.
   excerpt itself is the authoritative source.
 - The retrieval is lexical and bounded, not a full document QA model. A question
   that does not share useful terms with the text may return no evidence rather
-  than guess.
+  than guess. All stored text of a manual is searched (earlier, only its first
+  40 chunks, about 48,000 characters, were); at most four passages are used.
 
 ## Permissions and retention
 

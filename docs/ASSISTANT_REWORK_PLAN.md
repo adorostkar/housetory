@@ -79,7 +79,8 @@ is not advertised as an assistant capability in this stage.
 
 ### Implemented contract and operating limits
 
-The registry currently exposes **22 tools**: the 16 audited reads, item history,
+The registry currently exposes **24 tools**: the 16 audited reads, item history,
+finding and reading item manuals (see [`ITEM_MANUALS.md`](ITEM_MANUALS.md)),
 editable action preparation, AI-first text capture, starting/polling inventory
 review, and capture status. The schemas are executable Pydantic contracts in
 `services/assistant_tools/registry.py`, published through `/api/v1/assistant/tools`.

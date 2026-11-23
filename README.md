@@ -168,7 +168,9 @@ Tailscale is optional.
   existing and Find manual without a second duplicate document/manual list.
   Answers use the attached manuals' actual text, cite real pages when page-level
   OCR exists and explicit sections/excerpts otherwise, and fall back to extractive
-  evidence without AI. Online search and download require a deliberate,
+  evidence without AI. The assistant can open an item's manual (direct open and
+  download links, never a review) and answer questions from its text with page
+  citations. Online search and download require a deliberate,
   server-enforced manufacturer + complete model confirmation, reviewed candidates
   and a configured search provider. The owner adds one encrypted Brave Search API
   key and enables manual discovery in **Settings → Online search**; an

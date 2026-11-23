@@ -642,6 +642,11 @@ deployment.
   notice; a Search-only model does not enable typed commands. Those actions
   stay available through the normal buttons and forms, and reviews start from
   the Review page.
+- The tool engine also opens and reads item manuals. `find_manuals` returns
+  direct document-page and file links, which the conversation shows, and
+  `read_manual` returns a few cited passages of stored manual text for the model
+  to answer from. A Manual document is never opened as a capture or extraction
+  review. See [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
 - Sparse overviews collapse empty value/warranty sections while recent items, rooms
