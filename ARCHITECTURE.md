@@ -655,9 +655,13 @@ deployment.
   stored file and the document page. `read_manual` returns the map and page
   text (the whole manual when it is short, chosen pages otherwise),
   `search_manual` points to pages, `look_at_manual_page` lets a vision model
-  read one page, and `process_manual` queues missing reading. The assistant is
-  the only place where a manual is interpreted; answers cite pages a tool
-  really returned. An item and a document given
+  read one page, and `process_manual` queues missing reading. A page whose
+  reading failed is kept as failed, not as read; it is tried again only on
+  request, at most three times in all. Words OCR was unsure about are kept with
+  the page, and pages an answer cites that have such words are looked at by a
+  vision model before the answer is shown. The assistant is
+  the only place where a manual is interpreted; answers cite only pages a tool
+  returned in the same request. An item and a document given
   together must belong together in stored records. A Manual document is never
   opened as a capture or extraction review. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).

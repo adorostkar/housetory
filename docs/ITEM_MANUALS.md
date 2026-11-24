@@ -68,10 +68,28 @@ the same rows. Nothing is read twice.
 - The job works in small batches (8 scanned pages or 90 seconds) and queues
   the next batch itself, so one long manual does not block other work. It reads
   up to 500 pages.
-- One page that cannot be read is stored as unreadable and the job goes on. If
-  the OCR tools are missing, the job stops and keeps the reason.
+- One page that cannot be read does not stop the job. The page is stored as
+  **failed** (`source = "unreadable"`) with the reason and the number of tries.
+  If the OCR tools are missing, the job stops and keeps the reason.
 - Replacing a document's file starts a new generation. Text from the old file
   no longer counts.
+
+**Tried is not the same as read.** A failed page has no text. It is not
+counted as read, the manual is not called complete, and the page cannot be
+cited. The progress reports both numbers: pages read, and pages whose reading
+failed.
+
+A failed page is tried again only when someone asks:
+
+- the assistant calls `process_manual`, or
+- a person uses **Run OCR** on the **Details** page.
+
+Each request tries each failed page once. A page that fails again is not tried
+again in the same request. After three tries in all (`MAX_PAGE_ATTEMPTS`) a
+page is left alone, and the report says so. Pages that were read are never
+read again. Nothing retries by itself, so there is no retry loop. **Clean up
+scan** replaces the file's content, which starts fresh. The assistant can also
+read a failed page from its picture with `look_at_manual_page`.
 
 The job is queued after the first reading (also when that reading failed), when
 a manual is linked to an item, and when the assistant asks for it. A manual
@@ -101,7 +119,9 @@ the file is replaced.
   start of each page, in at most six requests.
 - Every page number is checked. Pages that do not exist or were not read are
   dropped. A section whose title stands alone on a line of one page is moved to
-  that page. Page numbers printed inside the text are not trusted.
+  that page: models are often one page off. A contents page prints every title
+  too, so a page that lists three or more section titles is not counted as the
+  place of a heading. Page numbers printed inside the text are not trusted.
 - The map helps to find pages. It is never shown as a source and never cited.
 
 ### The assistant's tools
@@ -115,7 +135,7 @@ The tools are in `services/assistant_tools/registry.py` and
 | `read_manual` | Without `pages`: the map and, if the manual is short enough (about 30,000 characters), its complete text. A longer manual returns the map, or its first pages when no map exists. With `pages` (“11”, “9-12”, “3,7-9”): the text of those pages. |
 | `search_manual` | Finds pages that contain given words and shows the matching lines. It points to pages; it returns no page text. |
 | `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The result is stored with the page. |
-| `process_manual` | Queues the reading of missing pages, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
+| `process_manual` | Queues the reading of pages that were not tried yet, one more try of pages whose reading failed, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
 
 The assistant is told to read further when the pages it has do not answer the
 question, and that a word search that finds nothing proves nothing. Search and
@@ -124,6 +144,23 @@ the map are aids. They do not limit what the assistant may read.
 `look_at_manual_page` uses the assistant's own model when it can read pictures.
 Otherwise it uses the model of the **Vision** task. If neither exists, the tool
 says so and the stored text stays readable.
+
+**Words OCR was unsure about.** Tesseract gives every word a confidence. Words
+below 60 (of 100) are stored with the page and given to the assistant as
+`ocr_unsure_words`. On a scanned manual these are mostly symbols, units and
+the labels of dials and sockets, which OCR reads as nonsense words. The
+assistant is told not to guess what such a word stands for, and to look at the
+page with `look_at_manual_page` when its answer depends on one. Once a vision
+model has read a page, its reading is given instead of the warning.
+
+**The application looks by itself before an answer is shown.** A real model
+did not always follow that instruction: it guessed a socket label from the
+misread words. So when an answer cites pages that still list unsure words, and
+a model that reads pictures is set up, the application calls
+`look_at_manual_page` for those pages (at most two) and asks the model to
+correct its answer with the readings. This happens once per request. The
+reading is stored with the page, so later questions about the same page need
+no new look.
 
 Both `find_manuals` and `read_manual` take an item ID, a document ID, or both.
 When both are given, the document must belong to the item: it is linked to the
@@ -150,6 +187,7 @@ The tool result always says what the situation is, and the assistant repeats it:
 | Only some pages read | The result starts with “INCOMPLETE: only N of M pages…”. Call `process_manual` (owner or member), or say that an owner or member has to start it. |
 | Pages are being read | Wait. The request continues when reading is done. |
 | Reading failed | The stored reason is given, for example that the OCR tools are missing. |
+| Reading failed on some pages | “READING FAILED on page N…” with the recorded reason. The pages can be tried again with `process_manual`, or it says that they failed three times and are not tried again. The assistant must tell the user which pages could not be read. |
 | Manual too long to return whole | Choose pages from the map, or search. |
 | No vision model | The page cannot be looked at. Its stored text can still be read. |
 
@@ -161,10 +199,17 @@ told not to ask for a new upload.
 An answer names the pages it rests on. The model lists them in `sources`
 (document, pages and an optional short quote).
 
-- A page is kept as a citation only if a tool returned its text in this request
-  or in one of the four turns before it.
+- A page is kept as a citation only if a tool returned its text **in this
+  request**. Pages read in an earlier turn do not count: their text is not kept
+  in the conversation, so a new answer was not written from them. A page that
+  gave no text (reading failed, or an empty page) cannot be cited either.
+- An answer that names manual pages although none of them was returned in this
+  request is sent back to the model once, with the instruction to read the
+  pages first. If the model still does not read them, its answer is shown
+  without page links.
 - A quote is shown only when its words really stand on that page. The words are
-  taken from the stored page, not from the model.
+  taken from the stored page, not from the model. A quote that is too long is
+  cut; a badly formed source is dropped. Neither makes the answer invalid.
 - Each citation links to `/documents/{id}/view?page=N`, the file viewer at that
   page.
 - The wording of the answer comes from the model and is not checked sentence by
@@ -527,6 +572,21 @@ search results or require a paid provider.
 - `search_manual` matches the start of words. It does not know synonyms. That
   is why it is only an aid and the assistant may always read pages directly.
 - No answer is produced without an AI provider.
+- **Slow providers.** The assistant gives each attempt 90 seconds, and one AI
+  request gets `AI_TIMEOUT_SECONDS` (default 90). A cloud model stays well
+  inside both. A large local model may not: in a test with a local 32B vision
+  model (about 10 words per second) the map of the 25-page AstroAI manual
+  needed 85 to 163 seconds, so `AI_TIMEOUT_SECONDS` had to be raised, and a
+  question needed **Retry** several times. Retry keeps the finished tool
+  results, so each press moves on.
+- **Thinking models on Ollama.** The Ollama adapter does not switch a model's
+  hidden reasoning off. A thinking model spent 8 minutes on the map request.
+  Use a non-thinking ("instruct") model.
+- **Small models.** A local 8B model built a usable map in 21 to 32 seconds
+  but could not follow the assistant's step format, so it could not hold the
+  conversation.
+- A vision model can misread a page too. Its reading is given next to the OCR
+  text, not instead of it.
 
 ## Permissions and retention
 
@@ -557,7 +617,10 @@ manuals, unfinished reading, a missing vision model and household isolation
 `tests/test_real_manual.py` reads a real scanned manual with Poppler and
 Tesseract. It is skipped unless `HOUSETORY_MANUAL_PDF` points to the AstroAI
 file `ASIM6K0R-EN-v2.pdf`; the model in it is scripted, so it calls no AI
-provider. Brave-specific tests
+provider. Its checks compare key words in order and ignore spacing and
+punctuation, because OCR output differs between Tesseract versions; it passes
+in the worker image (Tesseract 5.3, `eng+swe`) and on macOS (Tesseract 5.5,
+`eng`). Brave-specific tests
 use realistic vendor fixtures to verify request construction, the documented
 `X-Subscription-Token` header, query parameters, response normalization,
 manufacturer provenance validation, direct-PDF versus source-page discovery,
