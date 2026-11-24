@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createServer, type Server } from "node:http";
 
 test.skip(!process.env.TOOLS_E2E_ISOLATED, "Requires a disposable API/database and a real worker");
@@ -135,13 +135,28 @@ async function ask(page: Page, text: string, header = false) {
   }
 }
 
+/**
+ * The share of dark pixels on a page canvas. A drawn page of text is mostly
+ * white with some ink; a blank canvas has none and an unpainted one is all dark.
+ */
+function ink(canvas: Locator) {
+  return canvas.evaluate((element: HTMLCanvasElement) => {
+    if (!element.width || !element.height) return 0;
+    const { data } = element.getContext("2d")!.getImageData(0, 0, element.width, element.height);
+    let dark = 0;
+    for (let index = 0; index < data.length; index += 4) if (data[index]! < 200) dark += 1;
+    return dark / (data.length / 4);
+  });
+}
+
 for (const mobile of [false, true]) {
-  test(`${mobile ? "mobile" : "desktop"} attached manual is linked directly and answered with page citations`, async ({ page, request }) => {
+  test(`${mobile ? "mobile" : "desktop"} attached manual is opened as the file itself and answered with page citations`, async ({ page, request }) => {
     await page.setViewportSize(mobile ? { width: 375, height: 812 } : { width: 1440, height: 1000 });
     itemName = `Manual multimeter ${crypto.randomUUID().slice(0, 7)}`;
     const item = (await (await request.post("/api/v1/items", { data: { name: itemName } })).json()).item;
+    const pdf = manualPdf(PAGES);
     const upload = await request.post("/api/v1/documents", { multipart: {
-      file: { name: `${TITLE}.pdf`, mimeType: "application/pdf", buffer: manualPdf(PAGES) },
+      file: { name: `${TITLE}.pdf`, mimeType: "application/pdf", buffer: pdf },
       document_type: "manual",
       item_ids: item.id,
     } });
@@ -156,11 +171,13 @@ for (const mobile of [false, true]) {
     await ask(page, "Show me the multimeter documentation", true);
     const shown = page.getByLabel("Assistant tool task").last();
     await expect(shown.getByTestId("answer-text")).toHaveText(`Your multimeter's manual is ${TITLE}.`);
+    // Open leads to the file viewer. The document page is a separate Details link.
     const open = shown.getByRole("link", { name: `Open ${TITLE}`, exact: true });
-    await expect(open).toHaveAttribute("href", new RegExp(`^/documents/${manual.id}(\\?|$)`));
+    await expect(open).toHaveAttribute("href", new RegExp(`^/documents/${manual.id}/view(\\?|$)`));
+    await expect(shown.getByRole("link", { name: `Details of ${TITLE}`, exact: true }))
+      .toHaveAttribute("href", new RegExp(`^/documents/${manual.id}(\\?|$)`));
     await expect(shown.getByRole("link", { name: `Download ${TITLE}`, exact: true }))
       .toHaveAttribute("href", `/api/v1/documents/${manual.id}/file`);
-    expect((await request.get(`/api/v1/documents/${manual.id}/file`)).ok()).toBeTruthy();
     // Showing a manual opens no capture or extraction review.
     await expect(page.getByLabel("Assistant capture status")).toHaveCount(0);
     await expect(page.getByLabel("Assistant document review")).toHaveCount(0);
@@ -171,7 +188,7 @@ for (const mobile of [false, true]) {
     await expect(answered.getByTestId("answer-text")).toContainText(`(${TITLE}, page 2)`);
     await expect(answered.getByRole("list", { name: "Manual citations" })
       .getByRole("link", { name: `${TITLE}, page 2`, exact: true }))
-      .toHaveAttribute("href", `/api/v1/documents/${manual.id}/file#page=2`);
+      .toHaveAttribute("href", new RegExp(`^/documents/${manual.id}/view\\?page=2(&|$)`));
 
     await ask(page, "And the battery?");
     const battery = page.getByLabel("Assistant tool task").last();
@@ -184,9 +201,115 @@ for (const mobile of [false, true]) {
       path: test.info().outputPath(`manual-answer-${mobile ? "mobile" : "desktop"}.png`),
     });
 
-    // The Open link is the document page itself.
-    await open.click();
-    await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}`));
+    // Open shows the stored file itself.
+    const requests: string[] = [];
+    const documentApi = `/api/v1/documents/${manual.id}`;
+    page.on("request", (sent) => {
+      const { pathname } = new URL(sent.url());
+      if (pathname.startsWith(documentApi)) {
+        requests.push(`${sent.method()} ${pathname.slice(documentApi.length) || "/"}`);
+      }
+    });
+    const [served] = await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === `${documentApi}/file`),
+      open.click(),
+    ]);
+    await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}/view$`));
+    expect(served.status()).toBe(200);
+    expect(served.headers()["content-type"]).toBe("application/pdf");
+    // The file is still only served as an attachment; the page draws it.
+    expect(served.headers()["content-disposition"]).toContain("attachment");
+    expect((await served.body()).equals(pdf)).toBeTruthy();
     await expect(page.getByRole("heading", { name: TITLE, exact: true })).toBeVisible();
+    const viewer = page.getByRole("region", { name: `Pages of ${TITLE}`, exact: true });
+    await expect(viewer.getByText("3 pages", { exact: true })).toBeVisible();
+    const inked: number[] = [];
+    for (const number of [1, 2, 3]) {
+      const drawn = viewer.locator(`[data-page="${number}"]`);
+      await drawn.scrollIntoViewIfNeeded();
+      await expect(drawn).toHaveAttribute("data-state", "drawn");
+      const canvas = viewer.getByRole("img", { name: `Page ${number} of 3`, exact: true });
+      await expect(canvas).toBeVisible();
+      inked.push(await ink(canvas));
+    }
+    // Every page is white paper with some text on it, and the pages are not all alike:
+    // the second page of the file has the most text.
+    for (const share of inked) {
+      expect(share).toBeGreaterThan(0.0002);
+      expect(share).toBeLessThan(0.05);
+    }
+    expect(inked[1]).toBeGreaterThan(inked[0]!);
+    expect(inked[1]).toBeGreaterThan(inked[2]!);
+    // The pages are drawn by the app, not handed to the browser's own PDF viewer.
+    await expect(page.locator("iframe, embed, object")).toHaveCount(0);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(viewer.locator('[data-page="1"]')).toHaveAttribute("data-state", "drawn");
+    await page.screenshot({
+      path: test.info().outputPath(`manual-viewer-${mobile ? "mobile" : "desktop"}.png`),
+    });
+
+    // Opening the file neither starts nor shows an extraction review.
+    await expect(page.locator("#document-extraction-review")).toHaveCount(0);
+    await expect(page.getByText(/extraction review/i)).toHaveCount(0);
+    await expect(page.getByLabel("Document processing")).toHaveCount(0);
+    expect([...new Set(requests)].sort()).toEqual(["GET /", "GET /file"]);
+
+    // Reopening the assistant on the viewer does not pull the manual into a review.
+    await page.locator('button[title="Open assistant"]').first().click();
+    await expect(page.getByLabel("Assistant tool task").last().getByTestId("answer-text"))
+      .toContainText(`(${TITLE}, page 3)`);
+    await expect(page.getByLabel("Assistant document review")).toHaveCount(0);
+    await expect(page.getByLabel("Assistant capture status")).toHaveCount(0);
+
+    // A citation opens the same viewer at the cited page.
+    const citation = page.locator(`a[href^="/documents/${manual.id}/view?page=2"]`);
+    await expect(citation).toHaveText(`${TITLE}, page 2`);
+    await citation.click();
+    await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}/view\\?page=2$`));
+    const cited = viewer.locator('[data-page="2"]');
+    await expect(cited).toHaveAttribute("data-state", "drawn");
+    await expect(cited).toBeInViewport();
+    expect([...new Set(requests)].sort()).toEqual(["GET /", "GET /file"]);
+    // How far down page 2 the bottom edge of the toolbar is, as a share of the page.
+    // Closing the assistant can still be sliding the page a few pixels, so this waits
+    // until two readings agree.
+    const reading = async () => {
+      const read = () => viewer.evaluate((section) => {
+        const line = section.firstElementChild!.getBoundingClientRect().bottom;
+        const box = section.querySelector('[data-page="2"]')!.getBoundingClientRect();
+        return (line - box.top) / box.height;
+      });
+      let now = await read();
+      await expect.poll(async () => {
+        const last = now;
+        now = await read();
+        return now === last;
+      }).toBe(true);
+      return now;
+    };
+    // The assistant closes and, on a wide screen, the pages grow into the room it leaves:
+    // a page is as wide as its frame, up to 900 pixels.
+    await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeHidden();
+    await expect.poll(() => viewer.evaluate((section) =>
+      section.querySelector<HTMLElement>('[data-page="2"]')!.offsetWidth
+        - Math.min(section.lastElementChild!.clientWidth, 900))).toBe(0);
+    // The cited page still starts right under the toolbar, not behind it or far below.
+    const landed = await reading();
+    expect(landed).toBeLessThanOrEqual(0);
+    expect(landed).toBeGreaterThan(-0.1);
+
+    // Zooming keeps the place being read: the same part of the page stays under the toolbar.
+    await page.evaluate(() => window.scrollBy({ top: 200, behavior: "instant" }));
+    const place = await reading();
+    expect(place).toBeGreaterThan(0.1);
+    expect(place).toBeLessThan(0.9);
+    await viewer.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect(cited).toHaveAttribute("data-state", "drawn");
+    expect(await reading()).toBeCloseTo(place, 2);
+
+    // Managing the document, with its extraction review, stays a separate page.
+    await page.getByRole("link", { name: "Details", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}$`));
+    await expect(page.locator("#document-extraction-review")).toBeVisible();
   });
 }
