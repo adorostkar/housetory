@@ -19,7 +19,6 @@ from housetory_api.models import (
     User,
 )
 from housetory_api.schemas.ai import AiStatus
-from housetory_api.services import ai as ai_service
 from housetory_api.services import document_pages, manual_web
 from housetory_api.services.auth import create_session
 from housetory_api.services.document_ocr import run_document_ocr
@@ -237,12 +236,6 @@ def test_manual_identity_gate_and_exact_model_candidates(owner_client, monkeypat
     no_profile = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
     assert no_profile.status_code == 409
     assert no_profile.json()["detail"]["code"] == "manual_identity_required"
-    online = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert online.status_code == 409
-    assert online.json()["detail"]["code"] == "manual_identity_required"
 
     unconfirmed = confirmed_profile(owner_client, item["id"], confirmed=False)
     assert unconfirmed.status_code == 422
@@ -533,105 +526,6 @@ def test_exact_model_filter_honours_confirmed_variant():
     )
     assert [entry.title for entry in accepted] == ["DeWalt DCD791B drill manual"]
     assert any("exact confirmed model" in notice for notice in notices)
-
-
-def test_online_questions_require_full_gate_and_send_only_product_context(
-    owner_client, monkeypatch
-):
-    item = create_item(owner_client, "Heavy drill")
-    disable_search(monkeypatch)
-    no_profile = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert no_profile.status_code == 409
-    assert no_profile.json()["detail"]["code"] == "manual_identity_required"
-
-    assert confirmed_profile(owner_client, item["id"]).status_code == 200
-    unconfigured = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert unconfigured.status_code == 409
-    assert unconfigured.json()["detail"]["code"] == "manual_search_unconfigured"
-
-    configure_search(monkeypatch)
-    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
-    calls = []
-
-    def fake_search(payload, **kwargs):
-        calls.append(payload)
-        return {
-            "results": [
-                {
-                    "title": "DeWalt DCD791B battery specification",
-                    "url": "https://www.dewalt.example/DCD791B",
-                    "publisher": "DeWalt",
-                    "language": "en",
-                    "source_type": "manufacturer",
-                    "model_coverage": ["DCD791"],
-                    "snippet": "The DCD791 uses 18 V LXT batteries.",
-                },
-                {
-                    "title": "DCD790 battery guide",
-                    "url": "https://example.com/DCD790",
-                    "source_type": "other",
-                    "snippet": "A similar drill uses a different battery.",
-                },
-            ]
-        }
-
-    monkeypatch.setattr(manual_web, "_post_search", fake_search)
-    response = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert response.status_code == 200, response.text
-    answer = response.json()
-    assert answer["mode"] == "extractive"
-    assert [citation["url"] for citation in answer["citations"]] == [
-        "https://www.dewalt.example/DCD791B"
-    ]
-    assert "18 V" in answer["citations"][0]["excerpt"]
-    assert set(calls[0]) == {"mode", "manufacturer", "model", "variant", "question"}
-    assert calls[0]["mode"] == "question"
-    assert calls[0]["manufacturer"] == "DeWalt"
-    assert calls[0]["model"] == "DCD791"
-    assert calls[0]["variant"] == "B"
-    assert calls[0]["question"] == "What battery does it use?"
-    serialized = str(calls[0]).lower()
-    assert "borrower" not in serialized
-    assert "household" not in serialized
-    assert "loan" not in serialized
-
-    monkeypatch.setattr(
-        manual_web,
-        "_post_search",
-        lambda payload, **kwargs: {
-            "results": [
-                {
-                    "title": "DCD790 battery guide",
-                    "url": "https://example.com/DCD790",
-                    "source_type": "other",
-                    "snippet": "A similar drill uses a different battery.",
-                }
-            ]
-        },
-    )
-    similar = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    ).json()
-    assert similar["mode"] == "no_evidence"
-    assert similar["citations"] == []
-
-    monkeypatch.setattr(manual_web, "_post_search", lambda payload, **kwargs: {"results": "bad"})
-    malformed = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert malformed.status_code == 502
-    assert malformed.json()["detail"]["code"] == "manual_search_unavailable"
 
 
 def test_public_ip_and_ssrf_download_guards(monkeypatch, pdf_bytes):
@@ -1098,44 +992,6 @@ def test_brave_error_mapping_does_not_leak_key_or_query(owner_client, monkeypatc
     malformed = owner_client.post(f"/api/v1/items/{item['id']}/manual-search")
     assert malformed.status_code == 502
     assert "usable results" in malformed.json()["detail"]["message"]
-
-
-def test_brave_online_question_sends_only_product_identifiers_and_question(
-    owner_client, monkeypatch
-):
-    configure_brave(monkeypatch)
-    monkeypatch.setattr(manual_web.http.client, "HTTPSConnection", _FakeBraveConnection)
-    fixture = brave_fixture()
-    fixture["web"]["results"] = [
-        {
-            "title": "DeWalt DCD791B battery specification",
-            "url": "https://www.dewalt.com/support/DCD791B/battery",
-            "description": "The DCD791B uses 20V MAX battery packs.",
-            "profile": {"name": "DeWalt", "long_name": "DeWalt"},
-            "language": "en",
-        }
-    ]
-    brave_response(body=fixture)
-    item = create_item(owner_client, "DeWalt question drill")
-    assert confirmed_profile(owner_client, item["id"]).status_code == 200
-    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
-
-    response = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions/online",
-        json={"question": "What battery does it use?"},
-    )
-    assert response.status_code == 200, response.text
-    answer = response.json()
-    assert answer["mode"] == "extractive"
-    assert answer["citations"][0]["url"] == ("https://www.dewalt.com/support/DCD791B/battery")
-    assert answer["citations"][0]["source_type"] == "manufacturer"
-    query = parse_qs(urlparse(_FakeBraveConnection.instances[-1].path).query)["q"][0]
-    assert "DeWalt" in query
-    assert "DCD791" in query
-    assert "B" in query
-    assert "What battery does it use?" in query
-    for forbidden in ("borrower", "household", "loan", "Ada", "Ada's Home"):
-        assert forbidden.lower() not in query.lower()
 
 
 def test_brave_provider_configuration_and_unconfigured_reasons(monkeypatch):

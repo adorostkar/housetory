@@ -364,8 +364,10 @@ def _no_manual(target: Target) -> ToolOutput:
         f"No manual or other documentation is attached to {target.item.name}. If the user "
         "expects one, look for it in the library with search_documents (title or file name) "
         "before saying none exists; a manual found there is opened and read by its "
-        "document_id. Otherwise offer the item page actions under Documents & manuals: "
-        "Add manual, Link existing or Find manual.",
+        "document_id. Otherwise call find_manuals_online for this item now, before you "
+        "ask the user anything: its result says what is needed to look online. The item "
+        "page also has Add manual, Link existing and Find manual under Documents & "
+        "manuals.",
         {"condition": "no_manual"},
     )
 

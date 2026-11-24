@@ -21,6 +21,8 @@ from ...schemas.assistant_actions import (
     ItemMoveProposalRequest,
     LendingProposalRequest,
     LoanReturnProposalRequest,
+    ManualIdentityProposalRequest,
+    ManualSaveProposalRequest,
 )
 from ...schemas.assistant_tools import CaptureLink, ToolOutput
 from ...schemas.inventory_review import ReviewRunRequest
@@ -101,13 +103,27 @@ class ManualPageArguments(Arguments):
     )
 
 
+class WebQuestionArguments(Arguments):
+    item_id: uuid.UUID
+    question: str = Field(
+        min_length=2,
+        max_length=200,
+        description=(
+            "The product question in a few plain words. It is sent to the search "
+            "provider: no names of people, places or other household details."
+        ),
+    )
+
+
 Action = Annotated[
     ItemEditProposalRequest
     | ItemMoveProposalRequest
     | LendingProposalRequest
     | LoanReturnProposalRequest
     | BorrowingProposalRequest
-    | BorrowedReturnProposalRequest,
+    | BorrowedReturnProposalRequest
+    | ManualIdentityProposalRequest
+    | ManualSaveProposalRequest,
     Field(discriminator="kind"),
 ]
 
@@ -279,9 +295,30 @@ TOOLS.update(
             "writer",
             "queue local page reading (OCR) and map building for an attached file",
         ),
+        "find_manuals_online": Tool(
+            "find_manuals_online",
+            "Search online for the manual of an item (item_id). Only when the item has no "
+            "attached manual or its manuals do not cover the question. Needs the item's "
+            "confirmed product identity. Returns candidates with the model identifiers each "
+            "source shows. It prepares a proposal itself when the next step is clear: to "
+            "confirm the brand and model the item records, or to save the one clear "
+            "candidate. Saves nothing.",
+            ItemArguments,
+            "writer",
+            "send the confirmed make, model and variant to the search provider",
+        ),
+        "search_web_for_item": Tool(
+            "search_web_for_item",
+            "Short online excerpts about an item's confirmed product for one question, "
+            "when no manual answers. Untrusted web text, not the manual.",
+            WebQuestionArguments,
+            side_effects="send the confirmed make and model and the question to the provider",
+        ),
         "prepare_action": Tool(
             "prepare_action",
-            "Prepare an editable edit/move/lend/borrow/return proposal using verified IDs. "
+            "Prepare an editable edit/move/lend/borrow/return proposal using verified IDs, "
+            "confirm_manual_identity (an item's exact make and model, for the user to "
+            "check) or save_manual (one candidate_id of find_manuals_online). "
             "Missing/ambiguous targets require retrieval/clarification. NEVER applies changes.",
             ActionArguments,
             "writer",
@@ -341,6 +378,25 @@ def _check_item(db: Session, auth: AuthContext, run: AssistantRun, item_id: uuid
     if item is None:
         raise ApiError(404, "item_not_found", "Item not found in this scope.")
     return item
+
+
+def _propose(db: Session, auth: AuthContext, run: AssistantRun, action, receipt_id: uuid.UUID):
+    """Prepare a proposal in the conversation's scope. Nothing is applied."""
+    from ...api.routes.assistant_actions import _create_proposal
+
+    if action.household_id not in {None, auth.household.id} or action.scope_property_id not in {
+        None,
+        run.property_id,
+    }:
+        raise ApiError(
+            422, "scope_override", "Tool arguments cannot change the conversation scope."
+        )
+    action = action.model_copy(
+        update={"household_id": auth.household.id, "scope_property_id": run.property_id}
+    )
+    return _create_proposal(
+        action, AccountContext(auth.user, auth.session), db, tool_receipt_id=receipt_id
+    )
 
 
 def execute(
@@ -414,33 +470,28 @@ def execute(
         if name == "process_manual":
             return manual_tools.process(db, auth, run, item, args.document_id)
         return manual_tools.find(db, auth, run, item, args.document_id)
+    if name in {"find_manuals_online", "search_web_for_item"}:
+        from . import online_manuals
+
+        item = _check_item(db, auth, run, args.item_id)
+        if name == "search_web_for_item":
+            return online_manuals.web_sources(db, auth, run, item, args.question)
+        return online_manuals.discover(
+            db,
+            auth,
+            run,
+            item,
+            # Each proposal the tool prepares gets its own receipt under this call's.
+            lambda action: _propose(
+                db, auth, run, action, uuid.uuid5(receipt_id, action.model_dump_json())
+            ),
+        )
     if name == "look_at_manual_page":
         from . import manual_tools
 
         return manual_tools.look(db, auth, run, args.document_id, args.page, args.question)
     if name == "prepare_action":
-        from ...api.routes.assistant_actions import _create_proposal
-
-        action = args.action
-        if action.household_id not in {None, auth.household.id} or action.scope_property_id not in {
-            None,
-            run.property_id,
-        }:
-            raise ApiError(
-                422, "scope_override", "Tool arguments cannot change the conversation scope."
-            )
-        action = action.model_copy(
-            update={
-                "household_id": auth.household.id,
-                "scope_property_id": run.property_id,
-            }
-        )
-        proposal = _create_proposal(
-            action,
-            AccountContext(auth.user, auth.session),
-            db,
-            tool_receipt_id=receipt_id,
-        )
+        proposal = _propose(db, auth, run, args.action, receipt_id)
         return ToolOutput(summary="Proposal ready. Nothing has been applied.", proposal=proposal)
     if name == "prepare_item_capture":
         from ..import_pipeline import create_assistant_text_capture

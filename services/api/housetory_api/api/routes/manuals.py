@@ -9,8 +9,6 @@ from ...schemas.manuals import (
     ManualCandidateList,
     ManualDownloadIn,
     ManualDownloadOut,
-    ManualOnlineAnswerOut,
-    ManualOnlineAskRequest,
     ManualProfileIn,
     ManualProfileOut,
     ManualsOut,
@@ -89,13 +87,3 @@ def download_reviewed_manual(
         auth.user.id,
         payload.request_id,
     )
-
-
-@router.post("/items/{item_id}/manual-questions/online", response_model=ManualOnlineAnswerOut)
-def ask_online_about_item(
-    item_id: uuid.UUID,
-    payload: ManualOnlineAskRequest,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ManualOnlineAnswerOut:
-    return manual_service.ask_online_question(db, auth.household.id, item_id, payload.question)

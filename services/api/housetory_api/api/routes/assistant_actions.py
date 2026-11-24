@@ -36,6 +36,8 @@ from ...schemas.assistant_actions import (
     LendingProposalRequest,
     LendingReviewRequest,
     LoanReturnProposalRequest,
+    ManualIdentityProposalRequest,
+    ManualSaveProposalRequest,
     ReturnReviewRequest,
 )
 from ...schemas.borrowed import BorrowedCreate, BorrowedReturnCreate
@@ -43,6 +45,7 @@ from ...schemas.bulk import BulkMoveRequest
 from ...schemas.items import ItemUpdate
 from ...schemas.lending import LoanCreate, LoanReturnCreate
 from ...services import borrowed, bulk, history, items, lending
+from ...services import manuals as manual_service
 from ...services.ai_tools.inventory_query import property_item_conditions
 from ...services.containers import household_hierarchy_lock
 from ..deps import AccountContext, AuthContext, require_account
@@ -184,6 +187,8 @@ def create_proposal(
         | LoanReturnProposalRequest
         | BorrowingProposalRequest
         | BorrowedReturnProposalRequest
+        | ManualIdentityProposalRequest
+        | ManualSaveProposalRequest
     ),
     account: AccountContext = Depends(require_account),
     db: Session = Depends(get_db),
@@ -199,6 +204,8 @@ def _create_proposal(
         | LoanReturnProposalRequest
         | BorrowingProposalRequest
         | BorrowedReturnProposalRequest
+        | ManualIdentityProposalRequest
+        | ManualSaveProposalRequest
     ),
     account: AccountContext,
     db: Session,
@@ -457,6 +464,51 @@ def _create_proposal(
                 id=location.id if location else room.id,
                 name=f"{room.name} / {location.name}" if location else room.name,
             ),
+        )
+        return finish(result)
+    if isinstance(payload, ManualIdentityProposalRequest | ManualSaveProposalRequest):
+        item = items.get_item(db, auth.household.id, payload.item_id)
+        _check_items_scope(db, auth, payload.scope_property_id, [item.id])
+        changes, before, snapshots = manual_service.prepare_proposal(
+            db,
+            auth.household.id,
+            item,
+            payload.kind,
+            payload.model_dump(mode="json", exclude={"kind", "household_id", "scope_property_id"}),
+        )
+        if refreshed_from is None:
+            # The same thing waiting for the same user is shown once, not as a second card.
+            waiting = db.scalar(
+                select(AssistantActionProposal).where(
+                    AssistantActionProposal.actor_user_id == auth.user.id,
+                    AssistantActionProposal.household_id == auth.household.id,
+                    AssistantActionProposal.kind == payload.kind,
+                    AssistantActionProposal.item_id == item.id,
+                    AssistantActionProposal.state == "ready",
+                    AssistantActionProposal.changes == changes,
+                )
+            )
+            if waiting is not None and "tool_preview" in waiting.snapshots:
+                return tool_proposal_preview(db, waiting)
+        proposal = AssistantActionProposal(
+            household_id=auth.household.id,
+            actor_user_id=auth.user.id,
+            kind=payload.kind,
+            scope_property_id=payload.scope_property_id,
+            item_id=item.id,
+            changes=changes,
+            snapshots=snapshots,
+        )
+        db.add(proposal)
+        db.flush()
+        result = AssistantActionProposalOut(
+            id=proposal.id,
+            scope_label=_scope_label(db, auth, proposal.scope_property_id),
+            kind=proposal.kind,
+            state=proposal.state,
+            targets=[AssistantActionTarget(id=item.id, name=item.name)],
+            changes=changes,
+            before=before,
         )
         return finish(result)
     item = items.get_item(db, auth.household.id, payload.item_id)
@@ -812,6 +864,26 @@ def apply_proposal(
         raise ApiError(409, "proposal_not_ready", "This proposal is no longer pending.")
     if proposal.scope_property_id is not None:
         household_hierarchy_lock(db, auth.household.id)
+    if proposal.kind in manual_service.PROPOSAL_KINDS:
+        item = items.get_item(db, auth.household.id, proposal.item_id)
+        _check_items_scope(db, auth, proposal.scope_property_id, [item.id])
+        message = manual_service.apply_proposal(
+            db,
+            auth.household.id,
+            auth.user.id,
+            item,
+            proposal.kind,
+            proposal.changes,
+            proposal.snapshots,
+        )
+        result = AssistantActionApplyOut(
+            proposal_id=proposal.id, request_id=payload.request_id, message=message
+        )
+        proposal.state = "applied"
+        proposal.request_id = payload.request_id
+        proposal.result = result.model_dump(mode="json")
+        db.commit()
+        return result
     if proposal.kind == "return_borrowed":
         record = borrowed.get_record(
             db, auth.household.id, uuid.UUID(proposal.changes["record_id"]), for_update=True
@@ -1077,6 +1149,18 @@ def refresh_proposal(
     elif proposal.kind == "return_borrowed":
         payload = BorrowedReturnProposalRequest.model_validate(
             {"kind": proposal.kind, **proposal.changes}
+        )
+    elif proposal.kind == "confirm_manual_identity":
+        payload = ManualIdentityProposalRequest.model_validate(
+            {"kind": proposal.kind, **proposal.changes}
+        )
+    elif proposal.kind == "save_manual":
+        payload = ManualSaveProposalRequest.model_validate(
+            {
+                "kind": proposal.kind,
+                "item_id": proposal.changes["item_id"],
+                "candidate_id": proposal.changes["candidate_id"],
+            }
         )
     else:
         payload = ItemEditProposalRequest.model_validate(

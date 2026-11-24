@@ -136,6 +136,7 @@ def test_a_question_is_answered_from_the_pages_read_and_follow_ups_read_only_wha
     tools = {tool["name"]: tool for tool in client.get("/api/v1/assistant/tools").json()["tools"]}
     assert {name: tools[name]["permission"] for name in tools if "manual" in name} == {
         "find_manuals": "reader",
+        "find_manuals_online": "writer",
         "read_manual": "reader",
         "search_manual": "reader",
         "look_at_manual_page": "reader",

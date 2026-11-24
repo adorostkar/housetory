@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..schemas.ai import AiStatus
 from ..schemas.common import ORMModel, trimmed
 from ..schemas.documents import DocumentOut, DocumentReadingOut
 
@@ -161,26 +160,3 @@ class ManualDownloadOut(BaseModel):
     document: DocumentOut
     candidate: ManualCandidateOut
     duplicate_documents: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class ManualOnlineAskRequest(BaseModel):
-    question: trimmed(2, 1000)
-
-
-class WebCitationOut(BaseModel):
-    title: str
-    url: str
-    publisher: str | None = None
-    language: str | None = None
-    source_type: str = "other"
-    excerpt: str
-
-
-class ManualOnlineAnswerOut(BaseModel):
-    item_id: uuid.UUID
-    answer: str
-    mode: Literal["ai", "extractive", "no_evidence"]
-    citations: list[WebCitationOut] = Field(default_factory=list)
-    notices: list[str] = Field(default_factory=list)
-    ai_status: AiStatus
-    source_kind: Literal["online"] = "online"

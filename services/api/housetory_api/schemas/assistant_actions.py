@@ -101,6 +101,33 @@ class BorrowedReturnProposalRequest(BorrowedReturnCreate):
     request_id: uuid.UUID = Field(default_factory=uuid.uuid4, exclude=True)
 
 
+# The exact product an item is, for the user to check against its label. Applying it
+# stores the confirmed identity that online manual search needs. It never edits the
+# item's own brand or model. (A comment, not a docstring: a docstring would be sent
+# to the model with every request.)
+class ManualIdentityProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["confirm_manual_identity"]
+    household_id: uuid.UUID | None = None
+    scope_property_id: uuid.UUID | None = None
+    item_id: uuid.UUID
+    manufacturer: trimmed(2, 120)
+    model_identifier: trimmed(2, 120) = Field(description="As printed on the product.")
+    variant: trimmed(1, 120) | None = Field(default=None, description="Only when known.")
+
+
+# One reviewed online candidate to download and attach to the item as its manual.
+class ManualSaveProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["save_manual"]
+    household_id: uuid.UUID | None = None
+    scope_property_id: uuid.UUID | None = None
+    item_id: uuid.UUID
+    candidate_id: uuid.UUID
+
+
 class AssistantActionTarget(BaseModel):
     id: uuid.UUID
     name: str

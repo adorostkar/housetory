@@ -35,6 +35,14 @@ class ManualLink(BaseModel):
     pages_failed: int | None = None
 
 
+class WebLink(BaseModel):
+    """An online source a tool returned. The application shows it as an outside link."""
+
+    title: str = Field(max_length=300)
+    url: str = Field(max_length=2000)
+    publisher: str | None = Field(default=None, max_length=200)
+
+
 class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -46,6 +54,9 @@ class RunRequest(BaseModel):
     local_date: date | None = None
     page_context: list[SearchPageReference] = Field(default_factory=list, max_length=12)
     capture_context: list[CaptureLink] = Field(default_factory=list, max_length=6)
+    # A manual proposal the user has just applied. The request then starts with the step
+    # that follows it, so carrying on does not depend on the model.
+    applied_proposal_id: uuid.UUID | None = None
 
 
 class ToolOutput(BaseModel):
@@ -58,6 +69,7 @@ class ToolOutput(BaseModel):
     capture: CaptureLink | None = None
     review: ReviewRunOut | None = None
     manuals: list[ManualLink] = Field(default_factory=list, max_length=8)
+    web_sources: list[WebLink] = Field(default_factory=list, max_length=8)
     # Only in results stored by earlier versions. Citations now belong to the answer.
     citations: list[ManualCitationOut] = Field(default_factory=list, max_length=4)
     error: str | None = None

@@ -140,10 +140,6 @@ def require_writer(auth: AuthContext = Depends(require_auth)) -> AuthContext:
     return auth
 
 
-READ_ONLY_POST_SUFFIXES = (
-    "/manual-questions",
-    "/manual-questions/online",
-)
 READ_ONLY_POST_PATTERNS = (
     re.compile(r"/evidence-exports/preview$"),
     re.compile(r"/insurance-valuations/scope-preview$"),
@@ -153,9 +149,7 @@ READ_ONLY_POST_PATTERNS = (
 
 
 def _read_only_post(path: str) -> bool:
-    return any(path.endswith(suffix) for suffix in READ_ONLY_POST_SUFFIXES) or any(
-        pattern.search(path) for pattern in READ_ONLY_POST_PATTERNS
-    )
+    return any(pattern.search(path) for pattern in READ_ONLY_POST_PATTERNS)
 
 
 def enforce_household_context(
