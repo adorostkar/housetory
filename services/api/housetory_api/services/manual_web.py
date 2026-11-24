@@ -45,7 +45,6 @@ MAX_PAGE_LINKS = 500
 MAX_REDIRECTS = 3
 BRAVE_SEARCH_PATH = "/res/v1/web/search"
 BRAVE_RESULT_LIMIT = 10
-BRAVE_QUESTION_LIMIT = 5
 MANUAL_LINK_TERMS = (
     "manual",
     "instruction",
@@ -478,14 +477,6 @@ def _brave_query(manufacturer: str, model: str, variant: str | None) -> str:
     if variant:
         parts.append(f'"{variant}"')
     parts.extend(["manual", "instruction", "operator guide", "pdf"])
-    return _limit_query(" ".join(parts))
-
-
-def _brave_question_query(manufacturer: str, model: str, variant: str | None, question: str) -> str:
-    parts = [manufacturer, model]
-    if variant:
-        parts.append(variant)
-    parts.append(question.strip()[:300])
     return _limit_query(" ".join(parts))
 
 
@@ -1012,78 +1003,6 @@ def search_manual_candidates(
         notices.append(
             "No source with exact model evidence was found. Try a different variant or "
             "upload the manual."
-        )
-    return SearchOutcome(candidates=accepted, notices=notices)
-
-
-def search_online_sources(
-    *,
-    manufacturer: str,
-    model: str,
-    variant: str | None,
-    question: str,
-    db: Session | None = None,
-    household_id: uuid.UUID | None = None,
-) -> SearchOutcome:
-    provider = resolve_search_provider(db, household_id)
-    if provider.kind == "brave":
-        settings = get_settings()
-        raw_results = _brave_search_results(
-            provider,
-            _brave_question_query(manufacturer, model, variant, question),
-            BRAVE_QUESTION_LIMIT,
-        )
-        candidates: list[SearchCandidateData] = []
-        for entry in raw_results:
-            parsed = _brave_candidate(
-                entry,
-                manufacturer=manufacturer,
-                model=model,
-                variant=variant,
-                default_language=settings.brave_search_lang.strip() or None,
-            )
-            if parsed is not None:
-                candidates.append(parsed[0])
-        accepted, notices = _exact_model_candidates(
-            candidates, manufacturer=manufacturer, model=model, variant=variant
-        )
-        if not accepted:
-            notices.append(
-                "No online source showed the exact confirmed model identifier; no answer "
-                "was synthesized from generic or similar-product results."
-            )
-        return SearchOutcome(candidates=accepted, notices=notices)
-    if provider.kind != "gateway":
-        raise ManualSearchUnavailable(provider.reason or "Manual search is not configured.")
-    raw = _post_search(
-        {
-            "mode": "question",
-            "manufacturer": manufacturer,
-            "model": model,
-            "variant": variant,
-            "question": question,
-        },
-        db=db,
-        household_id=household_id,
-    )
-    results = raw.get("results")
-    if not isinstance(results, list):
-        raise ManualSearchUnavailable("The manual search service returned no results list.")
-    sources: list[SearchCandidateData] = []
-    for entry in results[:30]:
-        if not isinstance(entry, dict):
-            continue
-        try:
-            sources.append(_parse_candidate(entry, file_required=False))
-        except ManualWebError:
-            continue
-    accepted, notices = _exact_model_candidates(
-        sources, manufacturer=manufacturer, model=model, variant=variant
-    )
-    if not accepted:
-        notices.append(
-            "No online source showed the exact confirmed model identifier; no answer "
-            "was synthesized from generic or similar-product results."
         )
     return SearchOutcome(candidates=accepted, notices=notices)
 

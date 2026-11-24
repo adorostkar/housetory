@@ -1,10 +1,10 @@
 """Manual attachment and reviewed online discovery.
 
 Attached manuals are ordinary household ``Document`` rows with
-``document_type="manual"``. Questions about a manual or a product are answered by
-the main assistant, which reads the manual's pages (``assistant_tools.manual_tools``)
-and uses the online steps below as tools (``assistant_tools.online_manuals``);
-nothing here interprets manual or web text. Online search is only possible when a
+``document_type="manual"``. Questions about a manual are answered by the main
+assistant, which reads the manual's pages (``assistant_tools.manual_tools``) and uses
+the online steps below as a tool (``assistant_tools.online_manuals``); nothing here
+interprets manual or web text. Online search is only possible when a
 real search provider is configured and the product identity is confirmed, and
 every download must be explicitly reviewed first.
 """
@@ -551,33 +551,6 @@ def _sha256(content: bytes) -> str:
     import hashlib
 
     return hashlib.sha256(content).hexdigest()
-
-
-def online_sources(
-    db: Session,
-    household_id: uuid.UUID,
-    item_id: uuid.UUID,
-    question: str,
-) -> tuple[ItemManualProfile, manual_web.SearchOutcome]:
-    """Web excerpts that show the confirmed product, for a question about it.
-
-    Nothing here interprets them: the assistant reads the excerpts and answers. The
-    request carries the confirmed manufacturer, model and variant and the question,
-    and no other household record.
-    """
-    profile = _require_search(db, household_id, item_id)
-    try:
-        outcome = manual_web.search_online_sources(
-            manufacturer=profile.manufacturer,
-            model=profile.model_identifier,
-            variant=profile.variant,
-            question=question,
-            db=db,
-            household_id=household_id,
-        )
-    except manual_web.ManualSearchUnavailable as exc:
-        raise ApiError(502, "manual_search_unavailable", str(exc)) from exc
-    return profile, outcome
 
 
 # Assistant proposals. The assistant prepares them; the signed-in user reviews the

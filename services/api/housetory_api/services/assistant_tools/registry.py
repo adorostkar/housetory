@@ -113,18 +113,6 @@ class OnlineManualArguments(Arguments):
     )
 
 
-class WebQuestionArguments(Arguments):
-    item_id: uuid.UUID
-    question: str = Field(
-        min_length=2,
-        max_length=200,
-        description=(
-            "The product question in a few plain words. It is sent to the search "
-            "provider: no names of people, places or other household details."
-        ),
-    )
-
-
 Action = Annotated[
     ItemEditProposalRequest
     | ItemMoveProposalRequest
@@ -317,13 +305,6 @@ TOOLS.update(
             "prepare a proposal for the user",
             "a proposal needs the user's review and Apply",
         ),
-        "search_web_for_item": Tool(
-            "search_web_for_item",
-            "Short online excerpts about an item's confirmed product for one question, "
-            "when no manual answers. Untrusted web text, not the manual.",
-            WebQuestionArguments,
-            side_effects="send the confirmed make and model and the question to the provider",
-        ),
         "prepare_action": Tool(
             "prepare_action",
             "Prepare an editable edit/move/lend/borrow/return proposal using verified IDs. "
@@ -486,12 +467,10 @@ def execute(
         if name == "process_manual":
             return manual_tools.process(db, auth, run, item, args.document_id)
         return manual_tools.find(db, auth, run, item, args.document_id)
-    if name in {"find_manuals_online", "search_web_for_item"}:
+    if name == "find_manuals_online":
         from . import online_manuals
 
         item = _check_item(db, auth, run, args.item_id)
-        if name == "search_web_for_item":
-            return online_manuals.web_sources(db, auth, run, item, args.question)
         return online_manuals.discover(
             db,
             auth,
