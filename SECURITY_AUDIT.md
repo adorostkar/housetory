@@ -450,8 +450,12 @@ warranties, financial reporting and CSV exports. Security implications reviewed:
   resolution no longer attempts mkdir/chmod. The worker has a read-only root,
   tmpfs `/tmp`, no added capabilities, `no-new-privileges`, no network access to
   external OCR services, and only receives a document UUID in the job payload.
-- Tesseract and Poppler process content-validated documents. Scanned PDF pages
-  are bounded by `OCR_MAX_PDF_PAGES` and subprocess timeouts. OCR results are
+- Tesseract and Poppler process content-validated documents. In the first
+  reading, scanned PDF pages are bounded by `OCR_MAX_PDF_PAGES` and subprocess
+  timeouts. Manuals and other documentation are then read to the last page (at
+  most 500 pages) by a background job, one page per subprocess with its own
+  timeout, in small batches. The stored page text is untrusted data: it reaches
+  a model only inside assistant tool results. OCR results are
   proposals; a separate authenticated confirmation endpoint is required before
   any item or purchase changes.
 - Shared purchase and warranty-document references validate household ownership.

@@ -166,11 +166,13 @@ Tailscale is optional.
   pages and deliberate library links. It reuses existing Manual-library documents
   across compatible items and offers Ask about this item, Add manual, Link
   existing and Find manual without a second duplicate document/manual list.
-  Answers use the attached manuals' actual text, cite real pages when page-level
-  OCR exists and explicit sections/excerpts otherwise, and fall back to extractive
-  evidence without AI. The assistant can open an item's manual (the file itself
-  in a built-in viewer, plus download and details links, never a review) and
-  answer questions from its text with page citations that open the cited page. Online search and download require a deliberate,
+  Every page of a manual is read in the background (OCR for scanned pages) and
+  stored with the document. Opening, downloading and reading that text need no
+  AI. Questions are answered by the assistant only: it reads the pages through
+  its tools, uses a cached AI-built map to find them, and cites the pages it
+  really read with links that open the file at that page. Without an AI
+  provider the app says that questions are unavailable; it does not imitate an
+  answer. Online search and download require a deliberate,
   server-enforced manufacturer + complete model confirmation, reviewed candidates
   and a configured search provider. The owner adds one encrypted Brave Search API
   key and enables manual discovery in **Settings → Online search**; an
@@ -414,8 +416,8 @@ stack, not just unit mocks:
   view-scoped assistant access, title-level loan state and usual-home semantics,
   natural loan-wording factual parity, Loans-page new-loan stock checks and
   direct-return validation, manual upload/reuse, exact make/model and variant
-  gates on search/download/online questions, grounded page citations and
-  extractive/AI fallback, the documented Brave Search API request/auth/response
+  gates on search/download/online questions, manual page reading with cited pages,
+  the documented Brave Search API request/auth/response
   adapter with realistic fixtures, conservative manufacturer provenance,
   direct-PDF versus source-page discovery, 401/403/429/timeout/invalid-output
   handling, idempotent duplicate-aware downloads with provenance,
@@ -738,7 +740,7 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `LOGIN_WINDOW_SECONDS` | `900` | Sliding throttle window |
 | `EXTRA_ORIGINS` | empty | Comma-separated extra allowed origins (normally empty) |
 | `OCR_LANGUAGE` | `eng` | Tesseract language code installed in the worker image |
-| `OCR_MAX_PDF_PAGES` | `5` | Maximum scanned PDF pages rendered for OCR |
+| `OCR_MAX_PDF_PAGES` | `5` | Scanned PDF pages rendered for OCR in the first reading. Manuals are then read to the last page in the background |
 | `AI_CREDENTIAL_KEY` | empty | Fernet key encrypting API keys saved in the UI; keep outside PostgreSQL |
 | `AI_CREDENTIAL_KEY_PREVIOUS` | empty | Old key used only during credential rotation |
 | `AI_PROVIDER` | `disabled` | Optional environment bootstrap: `disabled`, `ollama`, or `openai_compatible` |
@@ -781,8 +783,10 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `MANUAL_SEARCH_PROVIDER_LABEL` | `Configured manual search` | Gateway label shown in the manual UI |
 | `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Online search/landing/download timeout |
 
-Manual answers use the existing **assistant** AI task when configured and
-consented; they remain extractive without it. Online discovery uses the official
+Questions about attached manuals are answered by the assistant, with the
+**assistant** AI task; there is no answer without it. Online item questions use
+the same task when configured and consented and stay extractive without it.
+Online discovery uses the official
 **Brave Search API** adapter with an owner-managed encrypted key, or an advanced
 operator gateway, and never pretends a chat model has live browsing. Configure
 one Brave key plus separate manual and reference-image enable controls in
@@ -1232,7 +1236,8 @@ docker compose down                   # stop, keep data
 - Documents support metadata/search/filtering, original downloads, OCR retry,
   explicit review/apply and related-item suggestions. Item manuals add
   `GET/POST /items/{id}/manuals`, confirmed `manual-profile`, attach-existing,
-  grounded `manual-questions`, and reviewed `manual-search` candidate/download
+  `GET /documents/{id}/text` (stored page text), and reviewed `manual-search`
+  candidate/download
   endpoints; optional online questions use the same confirmed identity gate.
 - Evidence exports add `POST /evidence-exports/preview`,
   `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and

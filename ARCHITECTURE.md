@@ -648,10 +648,16 @@ deployment.
   notice; a Search-only model does not enable typed commands. Those actions
   stay available through the normal buttons and forms, and reviews start from
   the Review page.
-- The tool engine also opens and reads item manuals. `find_manuals` returns
-  links to the file viewer, the stored file and the document page, which the
-  conversation shows, and `read_manual` returns a few cited passages of stored
-  manual text for the model to answer from. An item and a document given
+- The tool engine also opens and reads item manuals. Page text is stored per
+  document in `document_page_texts` by the `documents.read_pages` job, and the
+  `documents.map` job caches an AI-built map of sections and topics in
+  `document_readings`. `find_manuals` returns links to the file viewer, the
+  stored file and the document page. `read_manual` returns the map and page
+  text (the whole manual when it is short, chosen pages otherwise),
+  `search_manual` points to pages, `look_at_manual_page` lets a vision model
+  read one page, and `process_manual` queues missing reading. The assistant is
+  the only place where a manual is interpreted; answers cite pages a tool
+  really returned. An item and a document given
   together must belong together in stored records. A Manual document is never
   opened as a capture or extraction review. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).

@@ -1,7 +1,8 @@
 # Item manuals and grounded product help
 
-This milestone adds compact manual attachment, grounded manual answers and an
-explicit reviewed path for finding a manual online. It deliberately reuses the
+This milestone adds compact manual attachment, manual reading by the assistant
+and an explicit reviewed path for finding a manual online. It deliberately
+reuses the
 existing **Manual** document type, document library, upload validation, OCR,
 private storage and authenticated file routes. There is no separate manual
 library.
@@ -33,115 +34,159 @@ multi-household work.
   that is already linked elsewhere. Housetory never infers compatibility from a
   shared brand or a similar name.
 
-## Ask about this item
+## Reading manuals: where AI is needed and where it is not
 
-`Ask about this item` reads the actual text of manuals attached to that item.
-The deterministic retrieval pipeline is always available:
+Housetory keeps a clear line here.
 
-1. Text comes from `extracted_text` and, when the OCR pipeline has stored it,
-   bounded page-level text under `extracted_metadata["ocr_pages"]`.
-2. Page text is split into bounded chunks. The question is tokenised and scored
-   against those chunks; at most four evidence chunks are used, with at most two
-   from one manual.
-3. Citations contain the real document, the real page when page metadata exists,
-   and an explicit section/excerpt label otherwise. Page numbers are never
-   invented. The citation URL opens the stored document (`#page=N` when the
-   page is known).
-4. If no passage matches, the answer says so and no answer is inferred from the
-   title, metadata or general product knowledge.
+- **Without AI** you can open a manual in the file viewer, download it, and read
+  the text of its pages on the document's **Details** page. Attaching, linking
+  and removing manuals also need no AI.
+- **Understanding a manual is the assistant's job.** There is one assistant and
+  it uses the provider set for the **assistant** AI task. Housetory has no second
+  question-answering pipeline and no keyword-based answer generator.
+- When the assistant is not set up, the item page says so: “Questions about
+  manuals need the AI assistant, which is not set up. Every file can still be
+  opened and downloaded.” The **Ask about this item** button is disabled. The
+  app does not pretend to answer.
 
-The existing **assistant** AI task is optional. When it is configured and
-consented, the model receives only the question, item name/brand/model and the
-bounded numbered evidence excerpts. It must return a strict JSON answer and
-citation IDs from that supplied set. Unknown IDs, missing citations, malformed
-JSON, unsupported page claims or provider errors fall back to the extractive
-answer. The model cannot choose arbitrary document IDs or URLs, execute tools,
-or fetch referenced content. No AI configuration is needed to view, download or
-search the attached manual text.
+**Ask about this item** opens the assistant on the item page. The assistant
+already knows which item the page shows.
 
-Manuals are treated as untrusted data. Instructions inside a manual are not
-system or tool instructions. The answer distinguishes quoted source evidence
-from general explanation, reports missing evidence, and warns when evidence comes
-from multiple manuals or when page-level text is unavailable. This milestone
-does not claim semantic conflict detection beyond that warning.
+### Page text is stored with the document
 
-## Manuals in the assistant
+A document's text is stored page by page in the `document_page_texts` table.
+The text belongs to the document, so every item the document is linked to uses
+the same rows. Nothing is read twice.
 
-The assistant can find, open and read manuals. It uses two read-only tools in
-its tool registry (`services/assistant_tools/registry.py`). Both tools use the
-same discovery and retrieval code as the item page (`services/manuals.py`). They
-make no extra model call: the tool returns passages, and the assistant's own
-model writes the answer.
+- The first reading of an upload is short on purpose. It reads the first pages
+  only, which is what a receipt review needs (`OCR_MAX_PDF_PAGES`, default 5,
+  for a scanned PDF).
+- For documentation (types **Manual**, **Specification** and **Other**) a
+  background job, `documents.read_pages`, then reads every remaining page. A
+  page with a text layer uses that text. A scanned page is drawn with Poppler
+  and read with Tesseract, the same tools as the first reading.
+- The job works in small batches (8 scanned pages or 90 seconds) and queues
+  the next batch itself, so one long manual does not block other work. It reads
+  up to 500 pages.
+- One page that cannot be read is stored as unreadable and the job goes on. If
+  the OCR tools are missing, the job stops and keeps the reason.
+- Replacing a document's file starts a new generation. Text from the old file
+  no longer counts.
 
-- `find_manuals` lists the manuals of an item, or one manual by document ID. For
-  each manual the conversation shows three links: **Open** (the file itself, in
-  the file viewer), **Download** (the stored file) and **Details** (the document
-  page, with its settings and extraction review). The tool reads no text. It
-  never opens an extraction review, an import or a capture. If the model calls
-  `get_capture_status` for a Manual document, it gets the same links, not a
-  review.
-- `read_manual` returns the passages that match a question: at most four, at
-  most two per manual, each up to 1,200 characters. Each passage has the
-  document title and the real page when page text exists. The conversation shows
-  them as citations. A citation opens the file viewer at that page.
+The job is queued after the first reading (also when that reading failed), when
+a manual is linked to an item, and when the assistant asks for it. A manual
+stored before this change gets its remaining pages in any of these ways: the
+assistant calls `process_manual`, the manual is linked again, or **Run OCR** is
+used on its **Details** page.
 
-Both tools take an item ID, a document ID, or both. When both are given, the
-document must belong to the item: it is linked to the item now, or a reviewed
-online download saved it for that item. Any other pair is refused with
-`manual_not_for_item`. The message says where the document really is and tells
-the model to call again with one ID only. The tool never guesses a link between
-an item and a document. It says “saved by an online download” only when that
-download record exists.
+`GET /documents/{id}/text` returns the stored pages and the progress. The
+**Details** page shows them under **Extracted text**, one block per page, each
+with a link to that page in the file viewer.
+
+### The map
+
+When all pages are read and the assistant is set up, a second job,
+`documents.map`, asks the assistant's provider to index the document. The
+result is stored in `document_readings.map`:
+
+- **sections**: title and page range;
+- **topics**: a short phrase and the pages that cover it, with other words a
+  person might use (for example “measuring current (amps, amperage)”).
+
+The map is built once and reused. It is rebuilt when more pages are read or
+the file is replaced.
+
+- A PDF's own bookmarks are used as the sections when it has three or more.
+- A manual that fits in one request is sent whole. A longer one is sent as the
+  start of each page, in at most six requests.
+- Every page number is checked. Pages that do not exist or were not read are
+  dropped. A section whose title stands alone on a line of one page is moved to
+  that page. Page numbers printed inside the text are not trusted.
+- The map helps to find pages. It is never shown as a source and never cited.
+
+### The assistant's tools
+
+The tools are in `services/assistant_tools/registry.py` and
+`services/assistant_tools/manual_tools.py`.
+
+| Tool | What it does |
+| --- | --- |
+| `find_manuals` | Lists the manuals of an item, or one manual by document ID, with **Open**, **Download** and **Details** links and how many pages are read. Returns no text. |
+| `read_manual` | Without `pages`: the map and, if the manual is short enough (about 30,000 characters), its complete text. A longer manual returns the map, or its first pages when no map exists. With `pages` (“11”, “9-12”, “3,7-9”): the text of those pages. |
+| `search_manual` | Finds pages that contain given words and shows the matching lines. It points to pages; it returns no page text. |
+| `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The result is stored with the page. |
+| `process_manual` | Queues the reading of missing pages, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
+
+The assistant is told to read further when the pages it has do not answer the
+question, and that a word search that finds nothing proves nothing. Search and
+the map are aids. They do not limit what the assistant may read.
+
+`look_at_manual_page` uses the assistant's own model when it can read pictures.
+Otherwise it uses the model of the **Vision** task. If neither exists, the tool
+says so and the stored text stays readable.
+
+Both `find_manuals` and `read_manual` take an item ID, a document ID, or both.
+When both are given, the document must belong to the item: it is linked to the
+item now, or a reviewed online download saved it for that item. Any other pair
+is refused with `manual_not_for_item`. The tool never guesses a link.
 
 Three kinds of document count as an item's manual:
 
-1. Manual-library documents linked to the item. This is the list the item page
-   shows.
-2. Documents that a reviewed online download saved for the item. They are found
-   through `manual_search_candidates`. This also works when the item link was
-   removed later, or when the file was first stored under another type.
+1. Manual-library documents linked to the item.
+2. Documents that a reviewed online download saved for the item, found through
+   `manual_search_candidates`.
 3. Other documentation attached to the item with the type **Specification** or
-   **Other**. The item page's plain **Upload document** files a manual as
-   **Other**, so such a manual must still be found.
+   **Other**.
 
 Receipts, invoices and warranty certificates are never read as manuals. A
-Manual-library document with no linked item can still be opened and read by its
-document ID, after `search_documents` finds it. `search_documents` and
-`get_item_details` give the model each document's title and type, never its
-text.
+Manual-library document with no linked item can be opened and read by its
+document ID, after `search_documents` finds it.
 
-When there is no answer, the tool says why. The assistant repeats that reason
-and offers the matching existing action:
+The tool result always says what the situation is, and the assistant repeats it:
 
-| Condition | Meaning | Action offered |
-| --- | --- | --- |
-| `no_manual` | Nothing is attached to the item. | **Add manual**, **Link existing** or **Find manual** on the item page. |
-| `ocr_pending` | The text is still being read. | Wait. The **Details** page shows the progress. |
-| `ocr_failed` | Reading failed, or found no readable text. | **Run OCR** on the **Details** page (**Clean up scan** first for unclear pages). |
-| `no_text` | No text is stored for the file. | **Run OCR** on the **Details** page. |
-| `no_relevant_passage` | The stored text has no passage for the question. | Ask with other words, or open the manual. |
+| Situation | What the assistant is told |
+| --- | --- |
+| No manual attached | Offer **Add manual**, **Link existing** or **Find manual** on the item page. |
+| Only some pages read | The result starts with “INCOMPLETE: only N of M pages…”. Call `process_manual` (owner or member), or say that an owner or member has to start it. |
+| Pages are being read | Wait. The request continues when reading is done. |
+| Reading failed | The stored reason is given, for example that the OCR tools are missing. |
+| Manual too long to return whole | Choose pages from the map, or search. |
+| No vision model | The page cannot be looked at. Its stored text can still be read. |
 
-In every case except `no_manual` the manual keeps its links, and the assistant
-is told not to ask for a new upload.
+In every case except the first the manual keeps its links, and the assistant is
+told not to ask for a new upload.
 
-Limits:
+### Citations
 
-- Manual text is untrusted data. It reaches the model only as passage text
-  inside a tool result.
-- Later turns always keep the item and manual IDs. They repeat an earlier tool
-  result only when it is short (up to 1,500 characters), so long passages are
-  not sent again. A follow-up such as “How do I check amperage?” reads the
-  manual again for the new question.
+An answer names the pages it rests on. The model lists them in `sources`
+(document, pages and an optional short quote).
+
+- A page is kept as a citation only if a tool returned its text in this request
+  or in one of the four turns before it.
+- A quote is shown only when its words really stand on that page. The words are
+  taken from the stored page, not from the model.
+- Each citation links to `/documents/{id}/view?page=N`, the file viewer at that
+  page.
+- The wording of the answer comes from the model and is not checked sentence by
+  sentence.
+
+### Keeping the conversation small
+
+- A read returns at most about 30,000 characters of page text. One prompt keeps
+  at most about 56,000 characters of page text from all steps.
+- An earlier step or an earlier turn keeps the map and the numbers of the pages
+  that were read, not their text. A follow-up reads only the pages it needs.
+- The item and document IDs stay in the conversation, so “How do I check
+  amperage?” after “Show me the multimeter documentation” needs no new search.
+
+### Safety
+
+- Page text, the map and what a vision model read are untrusted data. They
+  reach the model only inside tool results. Summaries written by the tools never
+  contain page text.
 - Household and property scope are checked on every call. A manual outside the
-  conversation's property is reported as not found. In a conversation about one
-  property, the tool names only items of that property.
-- The final wording comes from the model. Unlike **Ask about this item**, code
-  does not check page numbers in that wording. The citation list always shows
-  the passages that were really retrieved.
-- Text is stored for the first pages of a file only: up to 40 pages of a PDF with
-  a text layer, and up to `OCR_MAX_PDF_PAGES` pages (default 5) of a scanned PDF.
-  The tool says so when a manual is longer, because later pages cannot be
-  searched.
+  conversation's property is reported as not found.
+- Reading a manual creates no import, no capture and no extraction review.
 
 ### The file viewer
 
@@ -195,7 +240,7 @@ variant `B`).
 The gate is rechecked on every automated search, download and online-question
 request. Missing or invalid profiles return `409 manual_identity_required` /
 `409 incomplete_manual_identity` or `422 incomplete_manual_identity`. Manual
-upload and attached-manual questions do not require the gate.
+upload and the assistant's reading of attached manuals do not require the gate.
 
 ## Reviewed online discovery and download
 
@@ -435,8 +480,9 @@ not a PDF, the request fails clearly and the user can still upload a manual.
 
 ## Optional online item questions
 
-After an attached-manual answer, a writer can explicitly choose to ask the
-configured online provider. This requires:
+**Ask online sources** on the item page lets a user send a question to the
+configured online provider. It is separate from the assistant's reading of
+attached manuals. This requires:
 
 - the same confirmed manufacturer + complete model gate;
 - a configured Brave adapter or advanced gateway;
@@ -453,7 +499,7 @@ cannot add URLs or use unreviewed results. No autonomous tool loop, browsing
 session or instruction-following from retrieved text is implemented.
 
 If no real search capability is configured, the UI states that plainly and
-keeps attached-manual questions and manual uploads available. It does not invent
+keeps manual uploads and the assistant available. It does not invent
 search results or require a paid provider.
 
 ## OCR and citation limitations
@@ -464,28 +510,31 @@ search results or require a paid provider.
   loaded with the page once the text has been read. The full review opens with
   **Review extraction**; lookups of related items, rooms and locations wait
   until then. To read a manual without this section, use
-  [the file viewer](#the-file-viewer). Questions about a manual are asked on the
-  item page or in the assistant, not on the document page.
-- New or newly reprocessed documents store up to 40 pages, 20,000 characters per
-  page and 180,000 characters total under `extracted_metadata["ocr_pages"]`;
-  `extracted_text` remains capped at 200,000 characters.
-- Older manuals without `ocr_pages` still answer from their stored text, but
-  citations use explicit section/excerpt labels instead of claiming a page.
+  [the file viewer](#the-file-viewer). Questions about a manual are asked in
+  the assistant, not on the document page.
+- The first reading still stores up to 40 pages under
+  `extracted_metadata["ocr_pages"]` and `extracted_text` (capped at 200,000
+  characters). The later pages of a manual are stored only in
+  `document_page_texts`. So text search over documents and the extraction
+  review still see the first reading only.
 - Image OCR maps to page 1. Text documents map to page 1. Digital PDFs and
-  scanned PDFs map to their rendered/extracted page numbers.
-- Section labels are detected heuristically from short heading-like lines; the
-  excerpt itself is the authoritative source.
-- The retrieval is lexical and bounded, not a full document QA model. A question
-  that does not share useful terms with the text may return no evidence rather
-  than guess. All stored text of a manual is searched (earlier, only its first
-  40 chunks, about 48,000 characters, were); at most four passages are used.
+  scanned PDFs map to their real page numbers.
+- OCR makes mistakes, most often with symbols. In the AstroAI multimeter manual
+  the dial symbols µA, mA and A are read as “pas”, “mas” and “at”. The words
+  around them are right. `look_at_manual_page` exists for such pages and needs
+  a model that can read pictures.
+- A manual with more than 500 pages is read up to page 500.
+- `search_manual` matches the start of words. It does not know synonyms. That
+  is why it is only an aid and the assistant may always read pages directly.
+- No answer is produced without an AI provider.
 
 ## Permissions and retention
 
-- Viewers can read attached manuals, ask attached-manual questions and download
-  permitted documents, but cannot upload, attach, save identity, search online,
-  download online candidates or otherwise mutate records. Online question
-  requests remain read-only and use the existing assistant consent state.
+- Viewers can open and download attached manuals, read their page text and ask
+  the assistant about them, but cannot upload, attach, save identity, search
+  online, download online candidates, start page reading or otherwise mutate
+  records. Online question requests remain read-only and use the existing
+  assistant consent state.
 - Every manual, profile, candidate, document link, citation and answer lookup is
   household-scoped. Deleted documents remove their item links through the
   existing cascade; downloaded files remain ordinary documents with provenance.
@@ -499,17 +548,25 @@ Automated backend tests cover upload without make/model, multi-item reuse,
 cross-household and viewer boundaries, letter-only and variant model identities,
 both search and online-question gates, exact-model filtering, candidate
 persistence, reviewed download idempotency, duplicate reuse, provenance,
-malformed provider output, optional AI fallback, fabricated-page rejection, OCR
-page storage and SSRF/redirect/size/type/timeout guards. Brave-specific tests
+malformed provider output, OCR
+page storage and SSRF/redirect/size/type/timeout guards. Manual reading has its
+own tests: page reading in batches, the map and its page checks, the five
+assistant tools, citations of pages that were really read, follow-ups, long
+manuals, unfinished reading, a missing vision model and household isolation
+(`tests/test_document_pages.py`, `tests/test_assistant_manuals.py`).
+`tests/test_real_manual.py` reads a real scanned manual with Poppler and
+Tesseract. It is skipped unless `HOUSETORY_MANUAL_PDF` points to the AstroAI
+file `ASIM6K0R-EN-v2.pdf`; the model in it is scripted, so it calls no AI
+provider. Brave-specific tests
 use realistic vendor fixtures to verify request construction, the documented
 `X-Subscription-Token` header, query parameters, response normalization,
 manufacturer provenance validation, direct-PDF versus source-page discovery,
 401/403/429/500 parsing, timeouts, invalid JSON, rate limits, key non-disclosure
 and the complete API search/download path. Frontend tests cover
-attach/ask/citations/no-AI/gated find/review/save, source-page-only candidates and
+attach, opening the assistant, the no-AI notice, gated find/review/save, source-page-only candidates and
 viewer controls. Playwright starts a fixture Brave service, configures the real
 adapter through the disposable API, discovers a candidate, reviews it, saves a
-manual through the UI and asks a cited manual question. The browser workflow
+manual through the UI and checks that its page text is stored. The browser workflow
 fixtures the private PDF fetch response because the disposable mock service is
 not a public SSRF destination; real server-side PDF fetch, validation,
 idempotency and duplicate handling are covered by PostgreSQL backend tests.
