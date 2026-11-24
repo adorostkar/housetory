@@ -105,7 +105,8 @@ class ManualPageArguments(Arguments):
 
 class OnlineManualArguments(Arguments):
     item_id: uuid.UUID
-    variant: str | None = Field(
+    # A name of its own: a real model put a plain "variant" into search_items too.
+    user_named_variant: str | None = Field(
         default=None,
         max_length=120,
         description="Only a variant or revision the user named for this item. Never guess one.",
@@ -500,7 +501,7 @@ def execute(
             lambda action: _propose(
                 db, auth, run, action, uuid.uuid5(receipt_id, action.model_dump_json())
             ),
-            args.variant,
+            args.user_named_variant,
         )
     if name == "look_at_manual_page":
         from . import manual_tools

@@ -88,7 +88,7 @@ def _blocked(
                 "that they should check the card against the product label and apply it. Do "
                 "not ask for the brand and model in words. Only when the user named another "
                 "model, prepare another confirm_manual_identity proposal with prepare_action. "
-                "A variant the user named goes into the variant argument of this tool. Never "
+                "A variant the user named goes into user_named_variant of this tool. Never "
                 "guess a variant."
             )
         elif maker:

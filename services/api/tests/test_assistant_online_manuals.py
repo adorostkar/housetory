@@ -369,7 +369,9 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     # The user named variant B. It goes into the proposal the tool prepares.
     item = meter(client)
     (prepared,) = results(
-        client, monkeypatch, [call("find_manuals_online", item_id=item["id"], variant=" B ")]
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], user_named_variant=" B ")],
     )
     assert prepared["proposal"]["changes"]["variant"] == "B"
     assert "with the variant B the user named" in prepared["summary"]
@@ -401,7 +403,9 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     searched = []
     gateway(monkeypatch, [MANUAL], searched)
     (other,) = results(
-        client, monkeypatch, [call("find_manuals_online", item_id=item["id"], variant="C")]
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], user_named_variant="C")],
     )
     assert other["error"] == "manual_variant_not_confirmed" and searched == []
     assert other["proposal"]["changes"]["variant"] == "C"
