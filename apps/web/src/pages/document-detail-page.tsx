@@ -609,7 +609,9 @@ function DocumentText({ document }: { document: DocumentRecord }) {
         Extracted text
         <span className="ml-2 text-2xs font-normal text-muted-foreground">
           {text && text.page_total > 0
-            ? `${text.pages_read} of ${text.page_total} pages read${text.reading ? ", still reading" : ""}`
+            ? `${text.pages_read} of ${text.page_total} pages read${
+              text.pages_failed?.length ? `, ${text.pages_failed.length} failed` : ""
+            }${text.reading ? ", still reading" : ""}`
             : document.extracted_text
               ? `${document.extracted_text.length.toLocaleString()} characters`
               : ""}
@@ -619,6 +621,14 @@ function DocumentText({ document }: { document: DocumentRecord }) {
         <p className="mt-4 text-2xs text-muted-foreground">Loading text…</p>
       )}
       {text?.error && <p className="mt-4 text-2xs text-brass">{text.error}</p>}
+      {text?.pages_failed?.length ? (
+        <p className="mt-4 text-2xs text-brass">
+          Reading failed on page {text.pages_failed.join(", ")}.{" "}
+          {text.can_retry
+            ? "Run OCR tries these pages once more."
+            : "They were tried several times and are not tried again. Clean up scan may help."}
+        </p>
+      ) : null}
       {text && text.pages.length > 0 ? (
         <div className="mt-4 max-h-[32rem] space-y-3 overflow-auto rounded-xl bg-secondary/40 p-4">
           {text.pages.map((page) => (
@@ -628,7 +638,9 @@ function DocumentText({ document }: { document: DocumentRecord }) {
                 Page {page.page}
               </Link>
               <pre className="mt-1 whitespace-pre-wrap text-2xs leading-relaxed text-muted-foreground">
-                {page.text || "No text was read on this page."}
+                {page.text || (page.source === "unreadable"
+                  ? `Reading this page failed.${page.error ? ` ${page.error}` : ""}`
+                  : "No text was found on this page.")}
               </pre>
             </section>
           ))}

@@ -163,24 +163,30 @@ describe("DocumentDetailPage extraction review", () => {
   it("shows the text of every page read, loaded only when the section is opened", async () => {
     const processing = await vi.mocked(api.get)("/documents/document-1/processing");
     vi.mocked(api.get).mockImplementation(async (path: string) => path.endsWith("/text") ? {
-      page_total: 25, pages_read: 12, reading: true, error: null,
+      page_total: 25, pages_read: 12, pages_failed: [12], can_retry: true, reading: true, error: null,
       pages: [
+        { page: 9, text: "", source: "ocr" },
         { page: 10, text: "Measuring Voltage", source: "ocr" },
         { page: 11, text: "Measuring Current\n1. Turn the rotary switch.", source: "ocr" },
-        { page: 12, text: "", source: "unreadable" },
+        { page: 12, text: "", source: "unreadable", error: "OcrError: Tesseract timed out" },
       ],
     } : processing);
     renderPage("manual");
     expect(api.get).not.toHaveBeenCalledWith("/documents/document-1/text");
 
     await userEvent.click(screen.getByText("Extracted text"));
-    expect(await screen.findByText("12 of 25 pages read, still reading")).toBeVisible();
+    expect(await screen.findByText("12 of 25 pages read, 1 failed, still reading")).toBeVisible();
     expect(screen.getByRole("region", { name: "Text of page 11" }))
       .toHaveTextContent("Measuring Current 1. Turn the rotary switch.");
     // Each page opens the file itself at that page.
     expect(screen.getByRole("link", { name: "Page 11" }))
       .toHaveAttribute("href", "/documents/document-1/view?page=11");
+    // A page whose reading failed is not shown as an empty page.
+    expect(screen.getByRole("region", { name: "Text of page 9" }))
+      .toHaveTextContent("No text was found on this page.");
     expect(screen.getByRole("region", { name: "Text of page 12" }))
-      .toHaveTextContent("No text was read on this page.");
+      .toHaveTextContent("Reading this page failed. OcrError: Tesseract timed out");
+    expect(screen.getByText("Reading failed on page 12. Run OCR tries these pages once more."))
+      .toBeVisible();
   });
 });

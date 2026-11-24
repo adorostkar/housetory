@@ -30,6 +30,8 @@ export interface AssistantManualLink {
   state: "readable" | "ocr_pending" | "ocr_failed" | "no_text";
   pages?: number;
   pages_read?: number;
+  /** How many pages could not be read. They have no text. */
+  pages_failed?: number;
 }
 
 export interface AssistantToolOutput {

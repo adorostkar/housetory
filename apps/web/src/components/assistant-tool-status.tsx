@@ -102,6 +102,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
               ) : manual.pages && (manual.pages_read ?? manual.pages) < manual.pages ? (
                 <span className="text-muted-foreground">
                   {manual.pages_read} of {manual.pages} pages read
+                  {manual.pages_failed ? `, reading failed on ${manual.pages_failed}` : ""}
                 </span>
               ) : null}
             </li>

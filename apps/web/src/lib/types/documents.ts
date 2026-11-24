@@ -139,13 +139,18 @@ export interface ManualSearchStatus {
 
 export interface DocumentReading {
   page_total: number;
+  /** Pages that have text. Pages whose reading failed are not counted. */
   pages_read: number;
+  /** Pages whose reading failed. They have no text. */
+  pages_failed?: number[];
+  /** Run OCR tries the failed pages once more. False after too many tries. */
+  can_retry?: boolean;
   reading: boolean;
   error: string | null;
 }
 
 export interface DocumentText extends DocumentReading {
-  pages: { page: number; text: string; source: string }[];
+  pages: { page: number; text: string; source: string; error?: string | null }[];
 }
 
 export interface ItemManuals {
