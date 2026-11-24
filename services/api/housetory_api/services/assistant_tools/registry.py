@@ -316,10 +316,10 @@ TOOLS.update(
         ),
         "prepare_action": Tool(
             "prepare_action",
-            "Prepare an editable edit/move/lend/borrow/return proposal using verified IDs, "
-            "confirm_manual_identity (an item's exact make and model, for the user to "
-            "check) or save_manual (one candidate_id of find_manuals_online). "
-            "Missing/ambiguous targets require retrieval/clarification. NEVER applies changes.",
+            "Prepare an editable edit/move/lend/borrow/return proposal using verified IDs. "
+            "Missing/ambiguous targets require retrieval/clarification. NEVER applies changes. "
+            "Also for manuals: confirm_manual_identity (an item's make and model for the "
+            "user to check) and save_manual (one candidate_id of find_manuals_online).",
             ActionArguments,
             "writer",
             "persist frozen proposal only",

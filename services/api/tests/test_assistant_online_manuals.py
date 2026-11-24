@@ -223,8 +223,7 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
     earlier = prompts[0]["context_newest_first"][0]
     assert earlier["request"] == QUESTION
     assert earlier["observations"][-1]["result"]["proposal"]["state"] == "applied"
-    assert "carries on with the earlier request" in prompts[0]["system"]
-    assert "Never answer that you will search" in prompts[0]["system"]
+    assert "A request that only says to continue" in prompts[0]["system"]
     (found,) = (step["result"] for step in second["steps"])
     assert searched == [
         {"mode": "manual", "manufacturer": "AstroAI", "model": "M6K0R", "variant": None}
@@ -339,11 +338,15 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     vague = meter(client, name="Old drill", brand=None, model=None)
     gateway(monkeypatch, [MANUAL])
 
-    blocked, generic, missing = results(
+    blocked, missing, generic = results(
         client,
         monkeypatch,
         [
             call("find_manuals_online", item_id=vague["id"]),
+            call(
+                "prepare_action",
+                action={"kind": "confirm_manual_identity", "item_id": vague["id"]},
+            ),
             call(
                 "prepare_action",
                 action={
@@ -353,16 +356,14 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
                     "model_identifier": "cordless drill",
                 },
             ),
-            call(
-                "prepare_action",
-                action={"kind": "confirm_manual_identity", "item_id": vague["id"]},
-            ),
         ],
     )
     assert "brand not set, model not set" in blocked["summary"] and blocked["proposal"] is None
     assert "Ask the user to read the manufacturer and the complete model" in blocked["summary"]
     assert generic["error"] == "incomplete_manual_identity" and generic["proposal"] is None
+    # The model is told which arguments were missing, so it can correct the call.
     assert missing["error"] == "tool_validation"
+    assert "manufacturer: Field required" in missing["summary"]
     assert count(AssistantActionProposal) == 0
 
     # The user confirmed variant B. The only source shows the plain model, so it is hidden.

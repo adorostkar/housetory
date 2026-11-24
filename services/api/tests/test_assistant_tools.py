@@ -1534,3 +1534,67 @@ def test_without_an_assistant_model_typed_commands_are_only_searched(
     with SessionLocal() as db:
         assert db.scalar(text("SELECT count(*) FROM assistant_action_proposals")) == 0
         assert db.scalar(text("SELECT count(*) FROM assistant_runs")) == 0
+
+
+def test_an_answer_that_rests_on_nothing_is_sent_back_once(
+    owner_client, configured_ai, monkeypatch
+):
+    """A real model answered right after a call with invalid arguments ("let me search
+    again"), and answered a request without using any tool. Both ended with nothing done."""
+    seed(owner_client)
+
+    def converse(query, replies):
+        prompts = []
+        pending = iter(replies)
+
+        def complete(system, prompt, **kwargs):
+            prompts.append(json.loads(prompt))
+            return next(pending)
+
+        monkeypatch.setattr(ai, "complete_json", complete)
+        run = start(owner_client, query)
+        work(run)
+        return read(owner_client, run), prompts
+
+    # It answers after a call with invalid arguments, which did nothing.
+    invalid, prompts = converse(
+        "Where is the validation drill?",
+        [
+            call("search_items", q="Validation drill", field="name"),
+            {"kind": "answer", "message": "Let me search again."},
+            call("search_items", q="Validation drill"),
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ],
+    )
+    assert invalid["state"] == "completed" and invalid["answer"] == "It is in Tool Storage."
+    # The result names the wrong argument, so the call can be corrected.
+    assert "field: Input should be" in invalid["steps"][0]["result"]["summary"]
+    assert "invalid arguments" in prompts[2]["correction"]
+
+    # It answers without any tool. The second time the request stops, as before.
+    unfounded, prompts = converse(
+        "Where is the validation drill?",
+        [
+            {"kind": "answer", "message": "I cannot look that up."},
+            call("search_items", q="Validation drill"),
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ],
+    )
+    assert unfounded["state"] == "completed" and "used no tool" in prompts[1]["correction"]
+    stubborn, _ = converse(
+        "Where is the validation drill?",
+        [{"kind": "answer", "message": "No idea."}, {"kind": "answer", "message": "No idea."}],
+    )
+    assert stubborn["state"] == "needs_attention"
+    assert stubborn["message"] == "The model answered without evidence. Retry or use local search."
+
+    # Each reason is given once: the same answer the second time is shown as it is.
+    twice, _ = converse(
+        "Where is the validation drill?",
+        [
+            call("search_items", q="Validation drill", field="name"),
+            {"kind": "answer", "message": "Let me search again."},
+            {"kind": "answer", "message": "I could not search for it."},
+        ],
+    )
+    assert twice["state"] == "completed" and twice["answer"] == "I could not search for it."
