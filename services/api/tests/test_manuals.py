@@ -14,12 +14,13 @@ from housetory_api.models import (
     Document,
     Household,
     HouseholdMember,
+    Job,
     ManualSearchCandidate,
     User,
 )
 from housetory_api.schemas.ai import AiStatus
 from housetory_api.services import ai as ai_service
-from housetory_api.services import manual_web
+from housetory_api.services import document_pages, manual_web
 from housetory_api.services.auth import create_session
 from housetory_api.services.document_ocr import run_document_ocr
 from housetory_api.services.ocr import ExtractedText, OcrPage
@@ -190,12 +191,13 @@ def test_manual_upload_without_model_links_multiple_items_and_viewer_is_read_onl
         f"/api/v1/items/{second['id']}/manuals/{document['id']}", headers=headers
     )
     assert blocked_attach.status_code == 403
-    blocked_question = anon_client.post(
+    # Questions about a manual go to the assistant; the item has no question endpoint.
+    retired_question = anon_client.post(
         f"/api/v1/items/{first['id']}/manual-questions",
         headers=headers,
         json={"question": "How do I change the bit?"},
     )
-    assert blocked_question.status_code == 200, blocked_question.text
+    assert retired_question.status_code == 404
 
     with SessionLocal() as db:
         other_user = User(name="Other Owner", email="other@example.com", password_hash="not-used")
@@ -472,102 +474,7 @@ def test_reviewed_download_is_idempotent_duplicate_aware_and_provenanced(
         assert candidate.document_id is None
 
 
-def test_manual_questions_cite_real_pages_and_never_fabricate(owner_client, monkeypatch):
-    item = create_item(owner_client, "Cordless drill")
-    document = upload_manual(owner_client, item_ids=[item["id"]]).json()
-    populate_manual(
-        document["id"],
-        "Safety: unplug the drill before changing the drill bit.\nSpecifications: 18 V battery.\n",
-        pages=[
-            {
-                "page": 3,
-                "text": "Safety. Unplug the drill before changing the drill bit. "
-                "Keep hands clear of the chuck.",
-            },
-            {"page": 7, "text": "Specifications. Battery voltage 18 V. Chuck 13 mm."},
-        ],
-    )
-    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
-
-    asked = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "How do I change the drill bit?"},
-    )
-    assert asked.status_code == 200, asked.text
-    answer = asked.json()
-    assert answer["mode"] == "extractive"
-    assert answer["citations"]
-    assert answer["citations"][0]["page"] == 3
-    assert "changing the drill bit" in answer["citations"][0]["excerpt"]
-    assert answer["citations"][0]["url"].endswith(f"/documents/{document['id']}/file#page=3")
-    assert answer["manuals"][0]["id"] == document["id"]
-    assert all(citation["page"] in {3, 7} for citation in answer["citations"])
-    assert "not configured" in " ".join(answer["notices"]).lower()
-
-    monkeypatch.setattr(
-        ai_service, "status_for", lambda *args, **kwargs: fake_ai_status(configured=True)
-    )
-    monkeypatch.setattr(
-        ai_service,
-        "complete_json",
-        lambda *args, **kwargs: {
-            "answer": "See page 99 for the bit change procedure.",
-            "citation_ids": [1],
-        },
-    )
-    fabricated = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "How do I change the drill bit?"},
-    ).json()
-    assert fabricated["mode"] == "extractive"
-    assert all(citation["page"] != 99 for citation in fabricated["citations"])
-    assert "page 99" not in fabricated["answer"].lower()
-
-    monkeypatch.setattr(
-        ai_service,
-        "complete_json",
-        lambda *args, **kwargs: {
-            "answer": "Unplug the drill before changing the bit.",
-            "citation_ids": [1],
-        },
-    )
-    synthesized = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "How do I change the drill bit?"},
-    ).json()
-    assert synthesized["mode"] == "ai"
-    assert synthesized["citations"][0]["page"] == 3
-
-    no_match = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "What is the warranty period for the charger?"},
-    ).json()
-    assert no_match["mode"] == "no_evidence"
-    assert no_match["citations"] == []
-    assert "will not infer" in no_match["answer"].lower() or "do not contain" in (
-        no_match["answer"].lower()
-    )
-
-
-def test_manual_without_page_metadata_uses_explicit_excerpt_labels(owner_client, monkeypatch):
-    item = create_item(owner_client, "Legacy manual item")
-    document = upload_manual(owner_client, item_ids=[item["id"]]).json()
-    populate_manual(
-        document["id"],
-        "Lubrication\nClean the chuck weekly and apply light machine oil.\n",
-    )
-    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
-    answer = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "How should I lubricate the chuck?"},
-    ).json()
-    assert answer["mode"] == "extractive"
-    assert answer["citations"][0]["page"] is None
-    assert answer["citations"][0]["section"]
-    assert any("page-level text is not available" in notice.lower() for notice in answer["notices"])
-
-
-def test_ocr_page_metadata_is_stored_for_real_manual_citations(owner_client, monkeypatch):
+def test_first_reading_keeps_page_records_and_queues_the_rest_of_a_manual(owner_client):
     item = create_item(owner_client, "Scanned manual item")
     document = upload_manual(owner_client, item_ids=[item["id"]]).json()
     extracted = ExtractedText(
@@ -589,13 +496,15 @@ def test_ocr_page_metadata_is_stored_for_real_manual_citations(owner_client, mon
     assert refreshed["extracted_metadata"]["ocr_pages"][1]["text"].startswith("Maintenance")
     assert refreshed["extracted_metadata"]["ocr_page_count"] == 2
 
-    monkeypatch.setattr(ai_service, "status_for", lambda *args, **kwargs: fake_ai_status())
-    answer = owner_client.post(
-        f"/api/v1/items/{item['id']}/manual-questions",
-        json={"question": "How often should I oil the spindle?"},
-    ).json()
-    assert answer["citations"][0]["page"] == 2
-    assert "Oil the spindle" in answer["citations"][0]["excerpt"]
+    # The first reading is short. Every page of a manual is read in a background job.
+    with SessionLocal() as db:
+        queued = db.scalars(
+            select(Job).where(
+                Job.task == document_pages.READ_TASK,
+                Job.payload["document_id"].astext == document["id"],
+            )
+        ).all()
+    assert [job.status for job in queued] == ["queued"]
 
 
 def test_exact_model_filter_honours_confirmed_variant():

@@ -239,9 +239,12 @@ def _run_tesseract_tsv(path: Path, psm: str = "6") -> ExtractedText:
 
     lines: dict[tuple[str, str, str, str], list[str]] = {}
     confidence_values: list[float] = []
+    # Tesseract writes words as they are. A word that starts with a double quote is not
+    # the start of a quoted CSV field, so quoting is off.
     reader = csv.DictReader(
         io.StringIO(completed.stdout.decode("utf-8", "replace")),
         delimiter="\t",
+        quoting=csv.QUOTE_NONE,
     )
     for row in reader:
         text = (row.get("text") or "").strip()
@@ -288,6 +291,58 @@ def _pdf_embedded_pages(path: Path) -> list[OcrPage]:
         OcrPage(page_number=index, text=page.extract_text() or "")
         for index, page in enumerate(reader.pages, start=1)
     ]
+
+
+def has_text(text: str) -> bool:
+    """Whether embedded PDF text is real page text, not a stray page number or mark."""
+    return len(re.sub(r"\s+", "", text)) >= 30
+
+
+def render_pdf_page(path: Path, page_number: int, target: Path, *, dpi: int = 200) -> Path:
+    """Draw one page of a PDF as a PNG file and return that file."""
+    _require_binary("pdftoppm")
+    try:
+        completed = subprocess.run(
+            [
+                "pdftoppm",
+                "-r",
+                str(dpi),
+                "-png",
+                "-f",
+                str(page_number),
+                "-l",
+                str(page_number),
+                "-singlefile",
+                str(path),
+                str(target.with_suffix("")),
+            ],
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OcrError(f"Drawing page {page_number} took too long.") from exc
+    image = target.with_suffix(".png")
+    if completed.returncode != 0 or not image.exists():
+        message = completed.stderr.decode("utf-8", "replace").strip()
+        raise OcrError(f"Poppler failed: {message[:300] or 'the page was not drawn'}")
+    return image
+
+
+def read_pdf_page(path: Path, page_number: int, embedded: str = "") -> tuple[str, str]:
+    """Text of one PDF page and where it came from: ``pdf_text`` or ``ocr``.
+
+    A page with its own text needs no OCR. Any other page is drawn and read with
+    Tesseract, the same way the first pages of a scanned PDF are read.
+    """
+    if has_text(embedded):
+        return embedded, "pdf_text"
+    with tempfile.TemporaryDirectory(prefix="housetory-ocr-") as temp_dir:
+        image = render_pdf_page(path, page_number, Path(temp_dir) / "page.png")
+        recognised = _tesseract_tsv(image).text
+    if len(recognised.strip()) >= len(embedded.strip()):
+        return recognised, "ocr"
+    return embedded, "pdf_text"
 
 
 def _ocr_pdf(path: Path) -> ExtractedText:
@@ -338,7 +393,7 @@ def extract_text(path: Path, content_type: str) -> ExtractedText:
     if lowered == "application/pdf":
         embedded_pages = _pdf_embedded_pages(path)
         embedded = "\n".join(page.text for page in embedded_pages).strip()
-        if len(re.sub(r"\s+", "", embedded)) >= 30:
+        if has_text(embedded):
             return ExtractedText(
                 text=embedded,
                 confidence=None,

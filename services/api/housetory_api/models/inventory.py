@@ -817,6 +817,59 @@ class Document(UUIDPrimaryKeyMixin, Base):
     )
 
 
+class DocumentPageText(Base):
+    """The text of one page of a document.
+
+    Rows are added page by page while a file is read, so they are kept apart from the
+    document row: nothing else that updates a document can overwrite them. A row counts
+    only for the document content it was read from (``source_generation``).
+    """
+
+    __tablename__ = "document_page_texts"
+    __table_args__ = (
+        CheckConstraint("page_number >= 1", name="page_number_positive"),
+        CheckConstraint(
+            "source in ('pdf_text', 'ocr', 'text', 'unreadable')",
+            name="valid_source",
+        ),
+    )
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    page_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # What a vision model read from the picture of the page, when it was asked to look.
+    vision_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DocumentReading(Base):
+    """How far a document has been read, and its navigation map.
+
+    The map lists sections and topics with their pages. The assistant's AI provider
+    builds it once from the page text. It helps to find pages; it is not evidence.
+    """
+
+    __tablename__ = "document_readings"
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    source_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    map: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    map_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class DocumentScan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "document_scans"
     __table_args__ = (

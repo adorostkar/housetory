@@ -167,6 +167,25 @@ class DocumentOut(DocumentSummary):
     pages: list[DocumentPageOut] = Field(default_factory=list)
 
 
+class DocumentReadingOut(BaseModel):
+    """How many pages of a document have their text stored."""
+
+    page_total: int
+    pages_read: int
+    reading: bool
+    error: str | None = None
+
+
+class DocumentTextPage(BaseModel):
+    page: int
+    text: str
+    source: str
+
+
+class DocumentTextOut(DocumentReadingOut):
+    pages: list[DocumentTextPage]
+
+
 class DocumentList(BaseModel):
     items: list[DocumentOut]
     total: int

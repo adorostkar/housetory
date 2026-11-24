@@ -28,6 +28,9 @@ class ManualLink(BaseModel):
     download_url: str
     details_url: str | None = None
     state: Literal["readable", "ocr_pending", "ocr_failed", "no_text"]
+    # Pages in the file and pages whose text is read so far.
+    pages: int | None = None
+    pages_read: int | None = None
 
 
 class RunRequest(BaseModel):
@@ -53,6 +56,7 @@ class ToolOutput(BaseModel):
     capture: CaptureLink | None = None
     review: ReviewRunOut | None = None
     manuals: list[ManualLink] = Field(default_factory=list, max_length=8)
+    # Only in results stored by earlier versions. Citations now belong to the answer.
     citations: list[ManualCitationOut] = Field(default_factory=list, max_length=4)
     error: str | None = None
 
@@ -71,10 +75,34 @@ class ToolStep(BaseModel):
     call: ToolCall
 
 
+class ManualSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: uuid.UUID
+    pages: list[int] = Field(min_length=1, max_length=12)
+    quote: str | None = Field(
+        default=None,
+        max_length=300,
+        description=(
+            "A few words copied exactly from one of those pages that support the answer. "
+            "The application shows them only when they really stand on the page."
+        ),
+    )
+
+
 class AnswerStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["answer", "clarify", "unsupported"]
+    sources: list[ManualSource] = Field(
+        default_factory=list,
+        max_length=6,
+        description=(
+            "When the answer uses a manual: the document_id and the page numbers the "
+            "facts come from. Only pages whose text a tool returned in this conversation. "
+            "The application shows them as links to those pages."
+        ),
+    )
     message: str = Field(
         default="",
         max_length=4000,
@@ -107,6 +135,8 @@ class RunOut(BaseModel):
     message: str
     answer: str | None = None
     steps: list[dict[str, Any]]
+    # Manual pages the answer rests on. Each was read by a tool in this conversation.
+    citations: list[ManualCitationOut] = Field(default_factory=list)
     model_calls: int
     max_model_calls: int
     can_retry: bool

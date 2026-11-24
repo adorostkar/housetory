@@ -16,11 +16,13 @@ from ...schemas.documents import (
     DocumentList,
     DocumentOut,
     DocumentSummaryList,
+    DocumentTextOut,
+    DocumentTextPage,
     DocumentUpdate,
     OcrApplyRequest,
     OcrApplyResponse,
 )
-from ...services import storage
+from ...services import document_pages, storage
 from ...services.document_ocr import enqueue_ocr
 from ...services.document_processing import (
     cancel_processing,
@@ -382,6 +384,23 @@ def delete_document_route(
     document = get_document(db, auth.household.id, document_id)
     delete_document(db, document)
     return Response(status_code=204)
+
+
+@router.get("/documents/{document_id}/text", response_model=DocumentTextOut)
+def read_document_text(
+    document_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> DocumentTextOut:
+    """The stored text of every page read so far. Needs no AI."""
+    document = get_document(db, auth.household.id, document_id)
+    return DocumentTextOut(
+        **document_pages.reading_out(db, document).model_dump(),
+        pages=[
+            DocumentTextPage(page=page.number, text=page.text, source=page.source)
+            for page in document_pages.pages(db, document)
+        ],
+    )
 
 
 @router.post("/documents/{document_id}/ocr", response_model=DocumentOut)

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..schemas.ai import AiStatus
 from ..schemas.common import ORMModel, trimmed
-from ..schemas.documents import DocumentOut
+from ..schemas.documents import DocumentOut, DocumentReadingOut
 
 GENERIC_MANUFACTURERS = {
     "unknown",
@@ -106,32 +106,20 @@ class ManualSearchStatusOut(BaseModel):
 class ManualsOut(BaseModel):
     item_id: uuid.UUID
     manuals: list[DocumentOut]
+    # Page-reading progress of each manual, by document id.
+    reading: dict[uuid.UUID, DocumentReadingOut] = Field(default_factory=dict)
     search: ManualSearchStatusOut
 
 
 class ManualCitationOut(BaseModel):
+    """A page of a manual that the assistant read and based an answer on."""
+
     document_id: uuid.UUID
     document_title: str
     page: int | None = None
     section: str | None = None
-    excerpt: str
+    excerpt: str = ""
     url: str
-
-
-class ManualAskRequest(BaseModel):
-    question: trimmed(2, 1000)
-
-
-class ManualAnswerOut(BaseModel):
-    item_id: uuid.UUID
-    item_name: str
-    answer: str
-    mode: Literal["ai", "extractive", "no_evidence"]
-    citations: list[ManualCitationOut] = Field(default_factory=list)
-    manuals: list[dict[str, Any]] = Field(default_factory=list)
-    notices: list[str] = Field(default_factory=list)
-    ai_status: AiStatus
-    source_kind: Literal["attached_manual"] = "attached_manual"
 
 
 class ManualCandidateOut(ORMModel):

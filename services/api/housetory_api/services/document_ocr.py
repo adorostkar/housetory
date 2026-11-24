@@ -17,9 +17,9 @@ from sqlalchemy.orm import Session
 from ..db import SessionLocal
 from ..domain import AiTask, JobStatus, OcrStatus
 from ..jobs import enqueue, is_cancelled
-from ..models import Document, DocumentScan, Job
+from ..models import Document, Job
 from ..schemas.ai import AiDocumentMetadata
-from . import ai, storage
+from . import ai, document_pages, storage
 from .document_extraction import build_extraction
 from .document_processing import (
     LOCAL_QUEUE,
@@ -292,15 +292,7 @@ def run_document_ocr(
         if document.ocr_status == OcrStatus.SUCCEEDED.value and not force:
             return {"document_id": str(document.id), "skipped": True}
 
-        scan = db.scalar(select(DocumentScan.id).where(DocumentScan.document_id == document.id))
-        if scan is not None:
-            key = document.storage_key
-            content_type = document.content_type
-            artifact = "cleaned_pdf"
-        else:
-            key = document.original_storage_key or document.storage_key
-            content_type = document.original_content_type or document.content_type
-            artifact = "original"
+        key, content_type, artifact = document_pages.source_file(db, document)
         now = datetime.now(UTC)
         local_started = time.monotonic()
         document.ocr_status = OcrStatus.PROCESSING.value
@@ -408,6 +400,7 @@ def run_document_ocr(
                 can_retry=False,
                 timings=timings,
             )
+            _read_all_pages(db, document)
             db.commit()
             return {
                 "job_id": job_id,
@@ -447,8 +440,19 @@ def run_document_ocr(
                         can_retry=True,
                         timings=timings,
                     )
+                _read_all_pages(db, document)
                 db.commit()
             raise OcrError(f"{type(exc).__name__}: {exc}") from exc
+
+
+def _read_all_pages(db: Session, document: Document) -> None:
+    """Queue reading of every page of documentation.
+
+    This pass reads only the first pages, which is what a receipt review needs. A manual
+    is read to its last page in the background, also when this pass found no text.
+    """
+    if document.document_type in document_pages.DOCUMENTATION_TYPES:
+        document_pages.request_reading(db, document, commit=False)
 
 
 def run_job(payload: dict[str, Any]) -> dict[str, Any] | None:

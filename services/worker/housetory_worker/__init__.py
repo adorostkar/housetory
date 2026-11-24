@@ -43,6 +43,18 @@ from housetory_api.services.assistant_tools.review_jobs import (
 )
 from housetory_api.services.document_ocr import OCR_TASK
 from housetory_api.services.document_ocr import run_job as run_document_ocr
+from housetory_api.services.document_pages import (
+    MAP_TASK as DOCUMENT_MAP_TASK,
+)
+from housetory_api.services.document_pages import (
+    READ_TASK as DOCUMENT_READ_TASK,
+)
+from housetory_api.services.document_pages import (
+    run_map_job as run_document_map,
+)
+from housetory_api.services.document_pages import (
+    run_read_job as run_document_read,
+)
 from housetory_api.services.enrichment import TASK as ENRICHMENT_TASK
 from housetory_api.services.enrichment import run_enhancement
 from housetory_api.services.evidence_export import (
@@ -350,6 +362,8 @@ HANDLERS = {
     INSURANCE_LIST_TASK: run_insurance_list,
     "maintenance.ping": ping,
     OCR_TASK: run_document_ocr,
+    DOCUMENT_READ_TASK: run_document_read,
+    DOCUMENT_MAP_TASK: run_document_map,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
     VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(

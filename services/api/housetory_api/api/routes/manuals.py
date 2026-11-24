@@ -6,8 +6,6 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...schemas.documents import DocumentOut
 from ...schemas.manuals import (
-    ManualAnswerOut,
-    ManualAskRequest,
     ManualCandidateList,
     ManualDownloadIn,
     ManualDownloadOut,
@@ -52,16 +50,6 @@ def attach_existing_manual(
 ) -> DocumentOut:
     document = manual_service.link_manual(db, auth.household.id, item_id, document_id)
     return document_out(document)
-
-
-@router.post("/items/{item_id}/manual-questions", response_model=ManualAnswerOut)
-def ask_about_item_manual(
-    item_id: uuid.UUID,
-    payload: ManualAskRequest,
-    auth: AuthContext = Depends(require_auth),
-    db: Session = Depends(get_db),
-) -> ManualAnswerOut:
-    return manual_service.ask_manual_question(db, auth.household.id, item_id, payload.question)
 
 
 @router.get("/items/{item_id}/manual-search", response_model=ManualCandidateList)
