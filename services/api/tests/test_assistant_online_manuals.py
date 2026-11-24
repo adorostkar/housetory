@@ -366,25 +366,15 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     assert "manufacturer: Field required" in missing["summary"]
     assert count(AssistantActionProposal) == 0
 
-    # The user confirmed variant B. The only source shows the plain model, so it is hidden.
+    # The user named variant B. It goes into the proposal the tool prepares.
     item = meter(client)
     (prepared,) = results(
-        client,
-        monkeypatch,
-        [
-            call(
-                "prepare_action",
-                action={
-                    "kind": "confirm_manual_identity",
-                    "item_id": item["id"],
-                    "manufacturer": "AstroAI",
-                    "model_identifier": "M6K0R",
-                    "variant": "B",
-                },
-            )
-        ],
+        client, monkeypatch, [call("find_manuals_online", item_id=item["id"], variant=" B ")]
     )
+    assert prepared["proposal"]["changes"]["variant"] == "B"
+    assert "with the variant B the user named" in prepared["summary"]
     assert apply(client, prepared["proposal"]).status_code == 200
+    # The only source shows the plain model, so it is hidden.
     found, repeated = results(
         client,
         monkeypatch,
@@ -406,6 +396,16 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     assert found["facts"]["candidates"] == [] and found["web_sources"] == []
     assert "ask them to check the product label" in found["summary"]
     assert repeated["error"] == "manual_identity_confirmed"
+
+    # Later the user says it is variant C. Nothing is searched until they confirmed that.
+    searched = []
+    gateway(monkeypatch, [MANUAL], searched)
+    (other,) = results(
+        client, monkeypatch, [call("find_manuals_online", item_id=item["id"], variant="C")]
+    )
+    assert other["error"] == "manual_variant_not_confirmed" and searched == []
+    assert other["proposal"]["changes"]["variant"] == "C"
+    assert other["proposal"]["before"]["variant"] == "B"
 
 
 def test_search_that_is_not_set_up_or_fails_is_reported_as_it_is(
@@ -742,6 +742,7 @@ def test_every_published_tool_and_action_kind_has_a_handler(
     item_id, document_id = item["id"], document["id"]
     samples = {
         "ItemArguments": {"item_id": item_id},
+        "OnlineManualArguments": {"item_id": item_id},
         "ManualArguments": {"document_id": document_id},
         "ManualReadArguments": {"document_id": document_id},
         "ManualPageArguments": {"document_id": document_id, "page": 1},

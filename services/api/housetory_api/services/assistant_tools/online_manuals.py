@@ -54,7 +54,9 @@ def _identity(profile) -> dict:
     }
 
 
-def _blocked(item: Item, exc: ApiError, attached: int, propose=None) -> ToolOutput:
+def _blocked(
+    item: Item, exc: ApiError, attached: int, propose=None, variant: str | None = None
+) -> ToolOutput:
     """The condition that stopped an online request, with the action that fits it."""
     facts = {"item": _item_facts(item), "attached_manuals": attached}
     if exc.code in {"manual_identity_required", "incomplete_manual_identity"}:
@@ -74,17 +76,20 @@ def _blocked(item: Item, exc: ApiError, attached: int, propose=None) -> ToolOutp
                     item_id=item.id,
                     manufacturer=maker,
                     model_identifier=model,
+                    variant=variant,
                 )
             )
         if proposal is not None:
+            named = f" with the variant {variant} the user named" if variant else ""
             summary = (
                 f"{start} A proposal to confirm {maker} {model}, the brand and model recorded "
-                "on the item, is prepared and shown to the user. Say in one or two sentences "
-                "that no manual is attached, that you can look for it online, and that they "
-                "should check the card against the product label and apply it. Do not ask "
-                "for the brand and model in words. Only when the user named another model or "
-                "a variant, prepare another confirm_manual_identity proposal with those "
-                "values. Never guess a variant."
+                f"on the item{named}, is prepared and shown to the user. Say in one or two "
+                "sentences that no manual is attached, that you can look for it online, and "
+                "that they should check the card against the product label and apply it. Do "
+                "not ask for the brand and model in words. Only when the user named another "
+                "model, prepare another confirm_manual_identity proposal with prepare_action. "
+                "A variant the user named goes into the variant argument of this tool. Never "
+                "guess a variant."
             )
         elif maker:
             summary = (
@@ -125,6 +130,40 @@ def _blocked(item: Item, exc: ApiError, attached: int, propose=None) -> ToolOutp
     raise exc
 
 
+def _other_variant(item: Item, confirmed, variant: str, attached: int, propose) -> ToolOutput:
+    """The user named a variant that is not the confirmed one. Nothing is searched: the
+    user first checks a proposal with that variant."""
+    label = manuals.profile_out(confirmed).display
+    proposal = None
+    if propose is not None:
+        proposal = propose(
+            ManualIdentityProposalRequest(
+                kind="confirm_manual_identity",
+                item_id=item.id,
+                manufacturer=confirmed.manufacturer,
+                model_identifier=confirmed.model_identifier,
+                variant=variant,
+            )
+        )
+    return ToolOutput(
+        summary=(
+            f"Nothing was searched: the confirmed product of {item.name} is {label}, and the "
+            f"user named the variant {variant}. A proposal to confirm that variant is "
+            "prepared and shown to the user. Tell them to check it against the product "
+            "label and apply it; the search then looks for that variant only."
+        ),
+        facts={
+            "item": _item_facts(item),
+            "confirmed_identity": _identity(confirmed),
+            "attached_manuals": attached,
+            "condition": "variant_not_confirmed",
+        },
+        references=[_item_reference(item)],
+        proposal=proposal,
+        error="manual_variant_not_confirmed",
+    )
+
+
 def _read_attached(db: Session, run: AssistantRun) -> bool:
     """True when this request or an earlier turn of the conversation used the attached
     manuals."""
@@ -157,13 +196,21 @@ def _clear_choice(candidates: list):
 
 
 def discover(
-    db: Session, auth: AuthContext, run: AssistantRun, item: Item, propose=None
+    db: Session,
+    auth: AuthContext,
+    run: AssistantRun,
+    item: Item,
+    propose=None,
+    variant: str | None = None,
 ) -> ToolOutput:
     """Search the configured provider for manuals of the confirmed product.
 
     ``propose`` prepares a proposal in this conversation. It is used when the identity
-    is not confirmed and the item itself records a make and model.
+    is not confirmed and the item itself records a make and model. ``variant`` is a
+    variant the user named: it goes into that proposal, and when it differs from the
+    confirmed identity nothing is searched until the user has confirmed it.
     """
+    variant = " ".join(variant.split()) if variant and variant.strip() else None
     attached = manuals.item_manual_sources(db, auth.household.id, item.id)
     if attached and not _read_attached(db, run):
         return ToolOutput(
@@ -180,10 +227,17 @@ def discover(
             references=[_item_reference(item)],
             error="read_attached_first",
         )
+    confirmed = manuals.get_profile(db, auth.household.id, item.id)
+    if (
+        confirmed is not None
+        and variant
+        and variant.casefold() != (confirmed.variant or "").casefold()
+    ):
+        return _other_variant(item, confirmed, variant, len(attached), propose)
     try:
         found = manuals.search_candidates(db, auth.household.id, item.id, auth.user.id)
     except ApiError as exc:
-        return _blocked(item, exc, len(attached), propose)
+        return _blocked(item, exc, len(attached), propose, variant)
     profile = manuals.get_profile(db, auth.household.id, item.id)
     entries = []
     for candidate in found.candidates[:MAX_CANDIDATES]:

@@ -1541,7 +1541,7 @@ def test_an_answer_that_rests_on_nothing_is_sent_back_once(
 ):
     """A real model answered right after a call with invalid arguments ("let me search
     again"), and answered a request without using any tool. Both ended with nothing done."""
-    seed(owner_client)
+    _, drill = seed(owner_client)
 
     def converse(query, replies):
         prompts = []
@@ -1588,13 +1588,37 @@ def test_an_answer_that_rests_on_nothing_is_sent_back_once(
     assert stubborn["state"] == "needs_attention"
     assert stubborn["message"] == "The model answered without evidence. Retry or use local search."
 
-    # Each reason is given once: the same answer the second time is shown as it is.
+    # A second answer after the invalid call ends the request with the plain truth,
+    # whatever the model says it did.
     twice, _ = converse(
         "Where is the validation drill?",
         [
             call("search_items", q="Validation drill", field="name"),
             {"kind": "answer", "message": "Let me search again."},
-            {"kind": "answer", "message": "I could not search for it."},
+            call("search_items", q="Validation drill", field="name"),
+            {"kind": "answer", "message": "I found it and prepared everything."},
         ],
     )
-    assert twice["state"] == "completed" and twice["answer"] == "I could not search for it."
+    assert twice["state"] == "needs_attention" and twice["answer"] is None
+    assert "did not make a valid tool call, so nothing was done" in twice["message"]
+
+    # An empty request ID from the model means none: the proposal is still prepared.
+    lent, _ = converse(
+        "Lend the validation drill to Sam",
+        [
+            call(
+                "prepare_action",
+                action={
+                    "kind": "lend",
+                    "item_id": drill["id"],
+                    "borrower_name": "Sam",
+                    "quantity": 1,
+                    "lent_on": "2026-01-10",
+                    "request_id": None,
+                },
+            ),
+            {"kind": "answer", "message": ""},
+        ],
+    )
+    assert lent["state"] == "awaiting_approval", lent
+    assert lent["steps"][0]["result"]["proposal"]["kind"] == "lend"

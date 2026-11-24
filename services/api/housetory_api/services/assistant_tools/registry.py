@@ -103,6 +103,15 @@ class ManualPageArguments(Arguments):
     )
 
 
+class OnlineManualArguments(Arguments):
+    item_id: uuid.UUID
+    variant: str | None = Field(
+        default=None,
+        max_length=120,
+        description="Only a variant or revision the user named for this item. Never guess one.",
+    )
+
+
 class WebQuestionArguments(Arguments):
     item_id: uuid.UUID
     question: str = Field(
@@ -300,12 +309,12 @@ TOOLS.update(
             "Search online for the manual of an item (item_id). Only when the item has no "
             "attached manual or its manuals do not cover the question. Needs the item's "
             "confirmed product identity. Returns candidates with the model identifiers each "
-            "source shows. It prepares a proposal itself when the next step is clear: to "
-            "confirm the brand and model the item records, or to save the one clear "
-            "candidate. Saves nothing.",
-            ItemArguments,
+            "source shows, and says what to do next. Saves nothing.",
+            OnlineManualArguments,
             "writer",
-            "send the confirmed make, model and variant to the search provider",
+            "send the confirmed make, model and variant to the search provider; may "
+            "prepare a proposal for the user",
+            "a proposal needs the user's review and Apply",
         ),
         "search_web_for_item": Tool(
             "search_web_for_item",
@@ -407,6 +416,12 @@ def execute(
         raise ApiError(
             422, "unknown_tool", f"Unsupported tool {name!r}. Use only the published registry."
         )
+    if name == "prepare_action" and isinstance(raw.get("action"), dict):
+        # The application makes the request ID. A model that sends an empty one means none.
+        action = dict(raw["action"])
+        if action.get("request_id") is None:
+            action.pop("request_id", None)
+        raw = {**raw, "action": action}
     args = tool.arguments.model_validate(raw)
     if tool.permission == "writer" and auth.role not in {"owner", "member"}:
         raise ApiError(403, "read_only_role", "This household is read-only for your account.")
@@ -485,6 +500,7 @@ def execute(
             lambda action: _propose(
                 db, auth, run, action, uuid.uuid5(receipt_id, action.model_dump_json())
             ),
+            args.variant,
         )
     if name == "look_at_manual_page":
         from . import manual_tools
