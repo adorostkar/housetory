@@ -271,22 +271,11 @@ for (const mobile of [false, true]) {
     await expect(cited).toBeInViewport();
     expect([...new Set(requests)].sort()).toEqual(["GET /", "GET /file"]);
     // How far down page 2 the bottom edge of the toolbar is, as a share of the page.
-    // Closing the assistant can still be sliding the page a few pixels, so this waits
-    // until two readings agree.
-    const reading = async () => {
-      const read = () => viewer.evaluate((section) => {
-        const line = section.firstElementChild!.getBoundingClientRect().bottom;
-        const box = section.querySelector('[data-page="2"]')!.getBoundingClientRect();
-        return (line - box.top) / box.height;
-      });
-      let now = await read();
-      await expect.poll(async () => {
-        const last = now;
-        now = await read();
-        return now === last;
-      }).toBe(true);
-      return now;
-    };
+    const reading = () => viewer.evaluate((section) => {
+      const line = section.firstElementChild!.getBoundingClientRect().bottom;
+      const box = section.querySelector('[data-page="2"]')!.getBoundingClientRect();
+      return (line - box.top) / box.height;
+    });
     // The assistant closes and, on a wide screen, the pages grow into the room it leaves:
     // a page is as wide as its frame, up to 900 pixels.
     await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeHidden();
@@ -296,7 +285,7 @@ for (const mobile of [false, true]) {
     // The cited page still starts right under the toolbar, not behind it or far below.
     const landed = await reading();
     expect(landed).toBeLessThanOrEqual(0);
-    expect(landed).toBeGreaterThan(-0.1);
+    expect(landed).toBeGreaterThan(-0.05);
 
     // Zooming keeps the place being read: the same part of the page stays under the toolbar.
     await page.evaluate(() => window.scrollBy({ top: 200, behavior: "instant" }));

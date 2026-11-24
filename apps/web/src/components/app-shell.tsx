@@ -268,7 +268,10 @@ function AppShellLayout() {
       if (restoreAssistantFocus.current) {
         window.requestAnimationFrame(() => {
           if (window.location.hash !== "#assistant") {
-            assistantTrigger.current?.focus();
+            // No scrolling for this focus. A control in the sticky header is always on
+            // screen, yet it sits inside the page's scroll padding, so the browser
+            // would move the page to make room for it.
+            assistantTrigger.current?.focus({ preventScroll: true });
             restoreAssistantFocus.current = false;
           }
         });
