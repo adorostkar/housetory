@@ -307,6 +307,17 @@ export function AssistantPage({
     }
   };
 
+  // After Apply of a manual proposal the conversation carries on by itself. The card can
+  // be applied while the assistant still writes its answer, so this waits until it is idle.
+  const [appliedManualProposal, setAppliedManualProposal] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!appliedManualProposal || pending) return;
+    setAppliedManualProposal(null);
+    ask(selection, CONTINUE_REQUEST, false, searchSession, false, appliedManualProposal);
+    // Only a new Apply or the end of the running request starts it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedManualProposal, pending]);
+
   const submitValue = (value: string, freshRequest = false) => {
     if (pending || tooManyReferences || capturePending) return;
     requestedCaptureRef.current = null;
@@ -932,7 +943,7 @@ export function AssistantPage({
                                 proposal.id,
                                 // The manual was the way to an answer: carry on once it is applied.
                                 MANUAL_PROPOSAL_KINDS.has(proposal.kind) && message.toolRunId
-                                  ? () => ask(selection, CONTINUE_REQUEST, false, searchSession, false, proposal.id)
+                                  ? () => setAppliedManualProposal(proposal.id)
                                   : undefined,
                               );
                             }}

@@ -359,6 +359,49 @@ describe("AssistantPage", () => {
     expect(await screen.findByText("Connect the meter in series.")).toBeVisible();
   });
 
+  it("waits for the running request to end before it carries on after Apply", async () => {
+    const proposal = {
+      id: "identity-1", kind: "confirm_manual_identity", state: "ready", scope_label: "Home",
+      targets: [{ id: "item-meter", name: "Multimeter" }], destination: null,
+      before: { item_brand: "AstroAI", item_model: "M6K0R" },
+      changes: { item_id: "item-meter", manufacturer: "AstroAI", model_identifier: "M6K0R", variant: null },
+    };
+    // The card is there while the assistant still writes its answer.
+    const running = {
+      id: "run-1", parent_id: null, household_id: "house-1", property_id: null,
+      query: "How do I check the amp?", state: "running", generation: 1,
+      message: "Proposal ready.", answer: null,
+      steps: [{ call: { name: "find_manuals_online", arguments: {} },
+        result: { summary: "Not confirmed.", references: [], proposal } }],
+      model_calls: 3, max_model_calls: 8, can_retry: false, worker_available: true,
+    };
+    let runs: unknown[] = [];
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return runs;
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    vi.mocked(createToolRun).mockResolvedValue(running);
+    vi.mocked(api.post).mockReset().mockResolvedValue({ message: "Confirmed AstroAI M6K0R." });
+    renderPage("/assistant", { id: "manual-running", text: running.query });
+    const card = await screen.findByLabelText("Action review");
+    expect(card).toHaveTextContent("Applying confirms this as the exact product");
+    await userEvent.click(within(card).getByRole("button", { name: "Apply" }));
+    expect(await within(card).findByText("Confirmed AstroAI M6K0R.")).toBeVisible();
+    expect(createToolRun).toHaveBeenCalledTimes(1);
+    // The request ends. Only now the conversation goes on.
+    vi.mocked(createToolRun).mockResolvedValue({
+      ...running, id: "run-2", parent_id: "run-1", query: "Continue.", state: "completed",
+      message: "I found the manual.", answer: "I found the manual.", steps: [],
+    });
+    runs = [{ ...running, state: "awaiting_approval", answer: "Please check the card.", message: "Please check the card." }];
+    await waitFor(() => expect(createToolRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ parent_id: "run-1", query: "Continue.", applied_proposal_id: "identity-1" }),
+      expect.any(AbortSignal),
+    ), { timeout: 5000 });
+  });
+
   it("opens a notification's exact capture inline without submitting another request or showing the capture queue", async () => {
     renderPage("/assistant", {
       id: "notification-older", text: "", capture: { kind: "items", id: "older-import" },
