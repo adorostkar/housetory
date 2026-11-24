@@ -100,8 +100,7 @@ Available actions are context-sensitive:
   receipt, warranty certificate, manual or other document without uploading a
   copy;
 - Ask about this item opens the assistant and remains available to all
-  household roles when the assistant is set up; Ask online sources appears once
-  the product identity is confirmed; writes remain
+  household roles when the assistant is set up; writes remain
   owner/member only.
 
 **Add manual** submits the current item ID with the file, title and notes and does

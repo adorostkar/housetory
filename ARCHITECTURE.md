@@ -665,6 +665,52 @@ deployment.
   together must belong together in stored records. A Manual document is never
   opened as a capture or extraction review. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
+- The tool engine also finds a manual online. `find_manuals_online` calls the
+  reviewed online workflow of the item page (confirmed identity, configured
+  search provider, exact-model evidence). It saves nothing. Confirming an identity and downloading a candidate are the
+  proposals `confirm_manual_identity` and `save_manual`: the user applies them
+  through `/assistant/actions/proposals`, and Apply runs the same functions as
+  the item page. Attached manuals are read before anything is searched online.
+  After Apply of one of the two, the web app continues the conversation with
+  `applied_proposal_id`, and the request starts with the step that follows.
+  The separate online question route and its own AI request were removed, and
+  nothing answers from search snippets.
+- The tool engine checks an answer against what the tools of the request did,
+  and sends it back to the model once for each reason: no tool was used at
+  all; the last tool call had invalid arguments (its result names the wrong
+  argument, and a second such answer ends the request with an error, not with
+  the model's claim); manual pages are named that were not read in this
+  request; cited pages have words OCR was unsure about. A call the model
+  repeats with the same arguments and the same result returns a short note,
+  not the result again. A call that failed is made again, not answered from
+  the stored failure. These checks use recorded facts, not the wording of the
+  answer.
+- **Assistant access is part of accepting a feature.** When a feature is added
+  or changed, decide how the assistant reaches it, and write the decision down
+  in the feature's document:
+  1. *Reads* that help to answer questions get a tool, or more facts in an
+     existing tool. The tool calls the feature's service function. It does not
+     copy its logic.
+  2. *Changes* go through a proposal that the user applies. Apply calls the
+     same service function as the normal button or form, with the same
+     permission, scope and stale checks. The assistant never writes directly.
+  3. The tool result names the real condition (not set up, not allowed,
+     nothing found, failed) and the action that fits it, so the assistant
+     does not have to guess.
+  4. The feature keeps working from its normal page without AI. Nothing may
+     work only through the assistant, and no second place may interpret text.
+  5. A test covers the tool and the proposal with scripted model replies, and
+     the catalogue test still passes
+     (`test_every_published_tool_and_action_kind_has_a_handler`).
+  6. The conversation is tried with a real model, and so are two or three
+     existing requests (a rename, a loan, a plain lookup), compared with the
+     branch before the change. New instructions and new fields in the answer
+     schema can change how a model handles other requests: both happened
+     during the online-manual work. Scripted tests cannot see that. Keep new
+     instructions short and about the feature only, and where a step must not
+     be forgotten, let the tool or the application do it.
+  7. If the assistant should not reach the feature, say so and why. A feature
+     the assistant cannot reach is a decision, not an oversight.
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
 - Sparse overviews collapse empty value/warranty sections while recent items, rooms

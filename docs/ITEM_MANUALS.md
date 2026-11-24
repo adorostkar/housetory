@@ -136,6 +136,8 @@ The tools are in `services/assistant_tools/registry.py` and
 | `search_manual` | Finds pages that contain given words and shows the matching lines. It points to pages; it returns no page text. |
 | `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The result is stored with the page. |
 | `process_manual` | Queues the reading of pages that were not tried yet, one more try of pages whose reading failed, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
+| `find_manuals_online` | Searches the configured provider for the manual of an item and returns the reviewed candidates. Takes the item and, when the user named one, a variant. Saves nothing. Needs the owner or member role. See “The assistant finds a manual online”. |
+| `prepare_action` | Also prepares the two manual proposals: `confirm_manual_identity` and `save_manual`. The user applies them. |
 
 The assistant is told to read further when the pages it has do not answer the
 question, and that a word search that finds nothing proves nothing. Search and
@@ -183,7 +185,7 @@ The tool result always says what the situation is, and the assistant repeats it:
 
 | Situation | What the assistant is told |
 | --- | --- |
-| No manual attached | Offer **Add manual**, **Link existing** or **Find manual** on the item page. |
+| No manual attached | Look for the manual online with `find_manuals_online`, or offer **Add manual**, **Link existing** or **Find manual** on the item page. |
 | Only some pages read | The result starts with “INCOMPLETE: only N of M pages…”. Call `process_manual` (owner or member), or say that an owner or member has to start it. |
 | Pages are being read | Wait. The request continues when reading is done. |
 | Reading failed | The stored reason is given, for example that the OCR tools are missing. |
@@ -193,6 +195,92 @@ The tool result always says what the situation is, and the assistant repeats it:
 
 In every case except the first the manual keeps its links, and the assistant is
 told not to ask for a new upload.
+
+### The assistant finds a manual online
+
+The assistant can do the steps of **Find manual** itself. It adds no search or
+download code: the tool calls the same functions as the item page
+(`services/manuals.py`, `services/manual_web.py`). The code is in
+`services/assistant_tools/online_manuals.py`.
+
+The steps of one conversation:
+
+1. The user asks about an item. The assistant reads what is attached first.
+2. No manual is attached, or the manuals do not cover the question. The
+   assistant calls `find_manuals_online`.
+3. The product identity is not confirmed. Nothing is searched. When the item
+   records a real brand and model, the tool itself prepares a
+   `confirm_manual_identity` proposal with them. When they are missing or
+   generic, the assistant asks the user to read them from the product label
+   and prepares the proposal from the answer.
+4. The user checks the card and presses **Apply**. Only this stores the
+   identity. It does not change the item's brand or model.
+5. The assistant searches. It gets the candidates that show the exact model,
+   with the identifiers each source really shows. Similar models are left out.
+6. A `save_manual` proposal is prepared for one candidate. The tool prepares it
+   itself when one candidate is the clear choice: the only one with a file, or
+   the only one with a file from the manufacturer or another official source.
+   Otherwise the assistant chooses or asks. The card shows the title, the
+   publisher, the identifiers the source shows, the source page and the file
+   address.
+7. The user presses **Apply**. Only now the file is downloaded, with all checks
+   of “Download safety”, stored as a Manual document and attached to the item.
+8. The pages are read by the normal jobs. The assistant reads the manual with
+   `read_manual` and answers with page citations.
+
+After **Apply** of one of these two proposals the web app sends “Continue.” in
+the same conversation, with the ID of the applied proposal
+(`applied_proposal_id`), so the user does not have to type anything. The server
+checks that the proposal belongs to this user and household, that it is
+applied, and that it is a manual proposal. Then the request starts with the
+step that follows: `find_manuals_online` after a confirmed identity,
+`process_manual` and then `read_manual` after a saved manual. The assistant
+goes on from that result with the earlier question. Other proposals do not do
+this, and a proposal that is not applied starts nothing.
+
+Three steps are done by the application and not left to the model, because a
+real model did not do them reliably (see “Verification with a real model”):
+
+- With a brand and model on the item, the model still asked the user for them
+  in words and prepared no proposal. So the tool prepares the proposal.
+- After **Apply**, the model answered “I will now search” and called no tool.
+  So the request starts with the next step.
+- With one clear candidate, the model wrote “please apply the proposal” and
+  had prepared none. So the tool prepares the proposal for that candidate.
+
+All three only do what the user's request or the user's Apply already decided.
+The user still checks and applies every proposal.
+
+Rules the tools enforce, whatever the model decides:
+
+| Rule | How |
+| --- | --- |
+| Attached manuals come first | `find_manuals_online` refuses with `read_attached_first` when the item has documentation and no manual tool was used in this conversation. |
+| No search without a confirmed identity | The identity gate of the item page. The tool returns `manual_identity_required` and the brand and model recorded on the item. |
+| Nobody but the user confirms an identity | A proposal is only a preview. Generic values are refused when it is prepared. |
+| The assistant cannot download or attach | Only **Apply** by a signed-in owner or member does. A viewer gets `read_only_role`. |
+| No second copy | A candidate that is already saved is refused with `manual_already_saved`. A file whose content is already in the library is attached, not stored again. |
+| No second card | A manual proposal that already waits for the same user with the same content is shown again; no new one is made. |
+| No guessed file address | A source page without a PDF link is refused with `manual_source_page_only`. |
+| A changed identity or source | **Apply** returns `proposal_stale`. **Refresh proposal** shows the current values for a new review. |
+| Failed download | **Apply** shows the reason, for example a private address or a web page that is not a PDF. Nothing is stored and the proposal stays pending. |
+
+The tool result says what the situation is:
+
+| Situation | What the assistant is told |
+| --- | --- |
+| Identity not confirmed | A proposal with the item's brand and model is prepared: tell the user to check it. Without a real brand and model: ask the user for them. Never guess. |
+| Search not set up | The stored reason, for example that no key is saved. Offer **Add manual**. |
+| Search failed | The provider's error. The search service or the internet may be down. |
+| No source shows the exact model | Say so. Ask the user to check the model and variant on the label. |
+| The user named another variant | Nothing is searched. A proposal with that variant is prepared (`manual_variant_not_confirmed`). After **Apply** the search looks for that variant only. |
+| Candidates | A proposal for the one clear candidate is prepared: tell the user to check the source. Without a clear one: choose only a candidate that shows the confirmed model and variant, or ask. |
+
+What leaves the server: `find_manuals_online` sends the confirmed manufacturer,
+model and variant, and nothing else. No question text, name or other household
+detail is sent. Titles and snippets that come back are untrusted text. The
+assistant gets them shortened, and the web app shows the sources as outside
+links under **Online sources**.
 
 ### Citations
 
@@ -260,8 +348,8 @@ in Chrome on desktop and phone sizes only.
 
 ## Confirming the product identity
 
-Online search, online download and online item questions use one server-side
-gate stored in `item_manual_profiles`:
+Online search and online download use one server-side gate stored in
+`item_manual_profiles`:
 
 - a manufacturer with at least two characters and at least one letter;
 - a complete model identifier with at least two characters, containing a letter
@@ -276,14 +364,15 @@ accepted. Generic values such as “Unknown”, “Heavy drill”, “cordless d
 “tool” or “manual” are rejected, as are empty/one-character fragments.
 
 The UI pre-fills item brand and model only as suggestions; the user must check
-the physical label and confirm. Saving the profile never edits the item's brand,
+the physical label and confirm. The assistant can prepare the same confirmation
+as a `confirm_manual_identity` proposal; it is stored only when the user applies it. Saving the profile never edits the item's brand,
 model or other fields. Regional, hardware or revision variants can be recorded;
 when a variant is present, candidate evidence must show the variant or the
 concatenated model form (for example DeWalt `DCD791B` for model `DCD791` with
 variant `B`).
 
-The gate is rechecked on every automated search, download and online-question
-request. Missing or invalid profiles return `409 manual_identity_required` /
+The gate is rechecked on every search and download request, from the item page
+and from the assistant. Missing or invalid profiles return `409 manual_identity_required` /
 `409 incomplete_manual_identity` or `422 incomplete_manual_identity`. Manual
 upload and the assistant's reading of attached manuals do not require the gate.
 
@@ -438,18 +527,6 @@ POST <MANUAL_SEARCH_URL>
 }
 ```
 
-For online questions the same endpoint receives:
-
-```json
-{
-  "mode": "question",
-  "manufacturer": "DeWalt",
-  "model": "DCD791",
-  "variant": "B",
-  "question": "What battery does it use?"
-}
-```
-
 Expected response:
 
 ```json
@@ -523,29 +600,25 @@ not a PDF, the request fails clearly and the user can still upload a manual.
   destination; the operator-configured provider or a previously stored reviewed
   candidate is the only source. Downloaded text, queries and keys are not logged.
 
-## Optional online item questions
+## No answers from search snippets
 
-**Ask online sources** on the item page lets a user send a question to the
-configured online provider. It is separate from the assistant's reading of
-attached manuals. This requires:
+There is no **Ask online sources** dialog any more, and the assistant has no
+tool that answers from search snippets.
 
-- the same confirmed manufacturer + complete model gate;
-- a configured Brave adapter or advanced gateway;
-- an explicit user action in the UI.
+- The old dialog had its own AI request and, without AI, built an answer from
+  snippets. Both are gone (`POST /items/{id}/manual-questions/online`,
+  `ask_online_question`, `search_online_sources`). The assistant is the only
+  place that answers.
+- A tool that gave the assistant short online excerpts for a question was built
+  and tried with a real model. For “what wattage does it use?” the only
+  excerpt said “User manual for the Northlake NL-900 space heater.” The model
+  answered “1500 watts, according to an online source”. That value was in no
+  excerpt. A search snippet is too little evidence, and the model fills the
+  gap. The tool was removed.
 
-For Brave, Housetory sends a search query containing only manufacturer, model,
-optional variant and the question (bounded to 300 characters in the provider
-query). Borrower names, loans, household name, item location, inventory counts
-and other household records are not included. The response is shown as web
-evidence with source URLs, publisher/language/source type and excerpts,
-separately labelled from attached-manual evidence. The optional assistant AI
-may synthesise the supplied excerpts with schema-validated citation IDs; it
-cannot add URLs or use unreviewed results. No autonomous tool loop, browsing
-session or instruction-following from retrieved text is implemented.
-
-If no real search capability is configured, the UI states that plainly and
-keeps manual uploads and the assistant available. It does not invent
-search results or require a paid provider.
+For a question about a product without a manual, the assistant finds the
+manual online, the user saves it, and the answer comes from its pages with
+page citations.
 
 ## OCR and citation limitations
 
@@ -593,8 +666,8 @@ search results or require a paid provider.
 - Viewers can open and download attached manuals, read their page text and ask
   the assistant about them, but cannot upload, attach, save identity, search
   online, download online candidates, start page reading or otherwise mutate
-  records. Online question requests remain read-only and use the existing
-  assistant consent state.
+  records. With the assistant a viewer can read manuals, but cannot search for
+  manuals online or prepare a proposal.
 - Every manual, profile, candidate, document link, citation and answer lookup is
   household-scoped. Deleted documents remove their item links through the
   existing cascade; downloaded files remain ordinary documents with provenance.
@@ -606,7 +679,7 @@ search results or require a paid provider.
 
 Automated backend tests cover upload without make/model, multi-item reuse,
 cross-household and viewer boundaries, letter-only and variant model identities,
-both search and online-question gates, exact-model filtering, candidate
+the search gate, exact-model filtering, candidate
 persistence, reviewed download idempotency, duplicate reuse, provenance,
 malformed provider output, OCR
 page storage and SSRF/redirect/size/type/timeout guards. Manual reading has its
@@ -643,6 +716,88 @@ To verify live, register a Brave Search API token, save it under
 one download while watching the API/worker logs. Configure a consented assistant
 provider only if AI synthesis is wanted. No live network, paid AI, email or
 remote deployment is performed by the automated tests.
+
+## Verification with a real model
+
+Scripted tests prove that the tools and proposals work. They cannot show what a
+model does with them. So the conversations were run with a real model, on
+isolated data: a throwaway PostgreSQL database, its own data folder, the API
+and worker on the host. No existing document, setting or key was touched.
+
+- **Model:** `qwen3-vl:32b-instruct` in Ollama 0.40 on an Apple M4 Max with
+  64 GB, about 9 tokens per second. It was the assistant, the vision model and
+  the map builder. No cloud model was used.
+- **Search:** a local stand-in that answers like the Brave Search API, used
+  through the real Brave adapter. No real Brave key exists here. The manual it
+  points to is the real AstroAI file on the public internet, so the download
+  and its checks were real (3,263,458 bytes, 25 scanned pages).
+- **OCR:** Tesseract 5.5 (`eng`) and Poppler on macOS.
+
+The code changed while this ran, because the model showed faults that the
+scripted tests could not show. Each row gives the last run of that
+conversation. “Retries” counts how often **Retry assistant** was needed.
+
+| Conversation | Tool calls the model or the application made | Result | Time, retries |
+| --- | --- | --- | --- |
+| “How do I check the amp with the multimeter?” No manual attached. | `search_items`, `get_item_details`, `find_manuals` (none), `find_manuals_online` (identity not confirmed, proposal prepared) | Says no manual is attached and asks to check the card. | 42 s, 0 |
+| Apply identity, then the app continues | `find_manuals_online` (2 candidates, the similar model hidden, proposal for the manufacturer's PDF) | Says what was found and asks to check the source. | 39 s, 0 |
+| Apply save, then the app continues | Download 0.5 s. `process_manual` (25 pages by OCR in about 30 s, map built by the model), `read_manual`, two `look_at_manual_page` | The six steps of “Measuring Current”, pages 11–12 cited. Checked against page 11: correct. One sentence came from page 10, which was not cited. | 815 s, 8 |
+| The same three steps in the web app (Chrome) | As above. The app continued by itself after both Apply clicks. | Correct steps, pages 11–12 cited, the link opens page 11 in the viewer. | 27 s, 32 s, then 4 minutes with 1 retry |
+| “and how do I measure voltage with it?” | `read_manual` 12, then 10–11, one look | Correct, pages 10–11 cited. | 326 s, 3 |
+| “ok n whats the max amps it can take b4 the fuse blows??” | `read_manual` 18, one look | **Wrong in part:** it said a 200 mA fuse; the manual says 600 mA. It named pages 16–17, which it had not read. This led to the stricter page check. | 236 s, 2 |
+| The same manual, new question: “what fuses are in my Multimeter and how do I change them?” | `find_manuals`, `read_manual` 1–25, two looks | Correct: F600 mA/250 V and F10 A/250 V, pages 16–17 cited. | 501 s, 5 |
+| Persian follow-ups (car battery voltage; “how do I change its battery?”) | `read_manual` 10–11 / 16–17, looks | Answered in Persian, correct, pages 10–11 and 16 cited. | 715 s, 7 and 272 s, 2 |
+| “how do i test continuity w/ my multimeter, the beepy thing” with the manual attached | `find_manuals`, `read_manual`, one look | Correct, page 13 cited. **No search request was sent.** | 407 s, 4 |
+| “Please download the multimeter manual from the internet again and attach it.” | `search_items`, `get_item_details`, `find_manuals` | Says the manual is already attached. Nothing searched or downloaded. | 54 s, 0 |
+| “Can you find the manual for my toaster?” (no brand, no model) | `find_manuals`, `find_manuals_online` (identity not confirmed, no proposal) | Asks for the make and model from the label. | 36 s, 0 |
+| “It's a Bosch TAT3A011, I read it from the bottom.” | `prepare_action` (identity proposal). After Apply: `find_manuals_online` | Says no source shows that exact model and offers **Add manual**. | 33 s and 27 s, 0 |
+| “…It is the Pro variant, it says M6K0R Pro on the back.” | `find_manuals_online` with the variant (proposal with variant Pro). Later search: no source shows it | Says nothing was found for that variant and asks to check the label. | 75 s and 39 s, 0 |
+| Space heater whose only source is a private address | Identity and save proposals as above | **Apply refused:** “The manual source resolves to a private, loopback or internal address.” Nothing stored. | 36 s, 30 s |
+| Search switched off for the household | `find_manuals_online` (not set up) | Reports that online search is off and names Settings and **Add manual**. | 27 s, 0 |
+| Search service stopped | `find_manuals_online` (search failed) | Reports that the search service cannot be reached. | 24 s, 0 |
+| Ollama stopped | none | “The AI provider failed. Retry or use local/manual controls.” | 6 s |
+| Assistant task switched off | none | `409 assistant_tools_unavailable`. Manual list, file download, page text, quick search and inventory export still answer 200. | — |
+| Existing requests: rename an item and set its brand (5 times, then 3 on the last code), lend an item (3 times), “where's my space heater?” | `search_items`/`locate_item`, `prepare_action` | Proposal prepared every time; lookup correct. | 36–60 s, 0 |
+
+Search requests sent in all of this: eight. Seven carried only the confirmed
+manufacturer, model and variant. One carried a question; it came from the
+excerpt tool that was then removed.
+
+Faults the real model showed, and what was done:
+
+| Fault | Change |
+| --- | --- |
+| With a brand and model on the item it asked for them in words and prepared no proposal. | The tool prepares the identity proposal. |
+| After Apply it answered “I will now search” and called no tool. | The request after Apply starts with the next step. |
+| It wrote “please apply the proposal” and had prepared none. | The tool prepares the save proposal for the one clear candidate. |
+| It read the same page five times in one request. | A repeated call with the same result returns a short note. |
+| The first, long instructions made it answer “I will prepare a proposal” for a plain rename, where the branch before prepared the proposal 3 times of 3. A shorter version still failed 1 time of 3. | The instructions are three lines. The tool results say what to do. Rename: 8 of 8 on the last code. |
+| Two new fields in the answer schema (“prepared for the user”, “left to do”) had the same bad effect: 0 of 3 renames prepared. | Removed again. |
+| It sent an empty request ID with a loan proposal, twice, and then said the proposal was ready. | An empty request ID means none. A second answer after an invalid call ends the request with an error. |
+| It answered “which heater?” and “I cannot download” without looking at the inventory. | A first reply without any tool is sent back once. |
+| It named manual pages it had not read. | Every page named in the answer must have been read in the request. |
+| The user said “Pro variant” and the proposal had no variant. | `find_manuals_online` takes a variant the user named. |
+| From one search snippet it invented “1500 watts”. | The excerpt tool was removed. |
+| In the browser, Apply while the answer was still being written did not continue. | The page continues when the running request has ended. |
+
+Limits that remain:
+
+- **Speed.** With this local model one attempt (90 seconds) is often too short
+  once a whole manual is in the prompt. The answer after saving needed 8
+  retries in one run and 1 in another. A faster model needs none; that was not
+  measured.
+- **No real search provider.** The Brave Search API itself was not called.
+- **One model.** No other local model and no cloud model was tried.
+- **Accuracy is the model's.** One fuse value was wrong. Citations can miss a
+  page (page 10 above) or include a page that adds nothing (page 12).
+- **Looking at a page often fails.** `look_at_manual_page` ran out of time in
+  about half of the calls. The answer then rests on the OCR text.
+- **Search across languages.** “مولتی‌متر من کجاست؟” found nothing, because
+  the item is named “Multimeter”. The model searched for the Persian word.
+- **Other households** were covered by the scripted tests only.
+- A saved manual also starts the normal document enrichment job, as every
+  upload does. With a slow model it competes with the assistant.
+- `e2e/manuals.spec.ts` and `e2e/item-editing.spec.ts` were not run.
 
 ## Representative screenshots
 

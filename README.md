@@ -416,7 +416,8 @@ stack, not just unit mocks:
   view-scoped assistant access, title-level loan state and usual-home semantics,
   natural loan-wording factual parity, Loans-page new-loan stock checks and
   direct-return validation, manual upload/reuse, exact make/model and variant
-  gates on search/download/online questions, manual page reading with cited pages,
+  gates on search/download, manual page reading with cited pages,
+  online manual discovery by the assistant with reviewed proposals,
   the documented Brave Search API request/auth/response
   adapter with realistic fixtures, conservative manufacturer provenance,
   direct-PDF versus source-page discovery, 401/403/429/timeout/invalid-output
@@ -784,8 +785,9 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `MANUAL_SEARCH_TIMEOUT_SECONDS` | `20` | Online search/landing/download timeout |
 
 Questions about attached manuals are answered by the assistant, with the
-**assistant** AI task; there is no answer without it. Online item questions use
-the same task when configured and consented and stay extractive without it.
+**assistant** AI task; there is no answer without it. When no manual is
+attached, the assistant can look for one online, and it saves one only after
+you apply its proposal. There is no separate online question dialog.
 Online discovery uses the official
 **Brave Search API** adapter with an owner-managed encrypted key, or an advanced
 operator gateway, and never pretends a chat model has live browsing. Configure
@@ -1238,7 +1240,8 @@ docker compose down                   # stop, keep data
   `GET/POST /items/{id}/manuals`, confirmed `manual-profile`, attach-existing,
   `GET /documents/{id}/text` (stored page text), and reviewed `manual-search`
   candidate/download
-  endpoints; optional online questions use the same confirmed identity gate.
+  endpoints. The assistant uses the same steps as tools and saves a manual
+  only through a proposal that the user applies.
 - Evidence exports add `POST /evidence-exports/preview`,
   `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and
   authenticated PDF/CSV/ZIP downloads. They use the existing durable worker and
