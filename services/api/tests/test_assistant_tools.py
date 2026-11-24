@@ -1588,6 +1588,27 @@ def test_an_answer_that_rests_on_nothing_is_sent_back_once(
     assert stubborn["state"] == "needs_attention"
     assert stubborn["message"] == "The model answered without evidence. Retry or use local search."
 
+    # A question back without looking anything up is sent back once too. The second
+    # time it is shown: the model may really need the user's answer.
+    asked, prompts = converse(
+        "Where is the validation drill?",
+        [
+            {"kind": "clarify", "message": "Which drill do you mean?"},
+            call("search_items", q="Validation drill"),
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ],
+    )
+    assert asked["answer"] == "It is in Tool Storage."
+    assert "Ask the user or decline only when" in prompts[1]["correction"]
+    insists, _ = converse(
+        "Book me a flight",
+        [
+            {"kind": "unsupported", "message": "I cannot book flights."},
+            {"kind": "unsupported", "message": "I cannot book flights."},
+        ],
+    )
+    assert insists["state"] == "completed" and insists["answer"] == "I cannot book flights."
+
     # A second answer after the invalid call ends the request with the plain truth,
     # whatever the model says it did.
     twice, _ = converse(

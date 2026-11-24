@@ -634,9 +634,10 @@ UNREAD_PAGES_NOTE = (
 # "left to do" was tried and made things worse: a real model then answered with a promise
 # where it had called the tool before.)
 NO_EVIDENCE_NOTE = (
-    "Your answer was not accepted: you used no tool in this request, so it rests on "
+    "Your reply was not accepted: you used no tool in this request, so it rests on "
     "nothing. Look up the records the request is about first (for example search_items "
-    "or locate_item), then do what was asked with the tools, then answer."
+    "or locate_item), then do what was asked with the tools. Ask the user or decline "
+    "only when the records do not settle it."
 )
 INVALID_CALL_NOTE = (
     "Your answer was not accepted: your last tool call had invalid arguments, so it did "
@@ -970,13 +971,10 @@ def run_job(payload: dict):
                     continue
                 outputs = [entry["result"] for entry in run.data["steps"]]
                 sent = run.data.get("corrections", [])
-                unfounded = (
-                    step.kind == "answer"
-                    and not outputs
-                    and not run.parent_id
-                    and not run.data.get("captures")
-                )
-                if unfounded and "no_evidence" in sent:
+                # Nothing was looked up in a first request. An answer needs evidence; a
+                # question back or a refusal is also sent back once, to look first.
+                unfounded = not outputs and not run.parent_id and not run.data.get("captures")
+                if unfounded and step.kind == "answer" and "no_evidence" in sent:
                     raise ApiError(
                         422,
                         "assistant_no_evidence",
