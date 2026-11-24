@@ -11,20 +11,21 @@ import {
   Trash2,
 } from "lucide-react";
 import * as React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { DocumentLinkDialog } from "@/components/document-link-dialog";
 import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
-import { ManualAskDialog } from "@/components/manual-ask-dialog";
 import { ManualFindDialog } from "@/components/manual-find-dialog";
+import { ManualOnlineAskDialog } from "@/components/manual-online-ask-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/labels";
 import {
+  useAiStatus,
   useCanWrite,
   useInvalidateInventory,
   useItemManuals,
@@ -36,6 +37,9 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
   const invalidate = useInvalidateInventory();
   const canWrite = useCanWrite();
   const manualsQuery = useItemManuals(item.id);
+  const assistantStatus = useAiStatus("assistant");
+  const navigate = useNavigate();
+  const location = useLocation();
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [manualUploadOpen, setManualUploadOpen] = React.useState(false);
   const [scanOpen, setScanOpen] = React.useState(false);
@@ -80,11 +84,29 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
             </h2>
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            One library for receipts, warranties, manuals and other files. Attached
-            manuals answer questions from their stored text and show citations.
+            One library for receipts, warranties, manuals and other files. The assistant
+            reads attached manuals to answer questions and names the pages it used.
           </p>
+          {assistantStatus.data && !assistantStatus.data.configured && (
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Questions about manuals need the AI assistant, which is not set up. Every file
+              can still be opened and downloaded.{" "}
+              <Link to="/settings/ai" className="underline underline-offset-4 hover:text-foreground">
+                AI settings
+              </Link>
+            </p>
+          )}
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => setAskOpen(true)}>
+        {/* The assistant already knows this page's item, so the question can be short. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={assistantStatus.data ? !assistantStatus.data.configured : false}
+          onClick={() =>
+            navigate({ pathname: location.pathname, search: location.search, hash: "#assistant" })
+          }
+        >
           <MessageCircle />
           Ask about this item
         </Button>
@@ -157,15 +179,21 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                 </button>
               </p>
             )}
+            {profile && (
+              <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={() => setAskOpen(true)}>
+                <Globe2 />
+                Ask online sources
+              </Button>
+            )}
           </div>
         ) : (
           <ul className="divide-y divide-border/60">
             {documents.map((document) => {
               const manual = manualById.get(document.id);
-              const pageCount = manual?.extracted_metadata.ocr_page_count as
-                | number
-                | undefined;
+              const progress = manualsQuery.data?.reading?.[document.id];
+              const pageCount = progress?.page_total;
               const reading =
+                progress?.reading ||
                 document.ocr_status === "queued" ||
                 document.ocr_status === "processing";
               return (
@@ -186,9 +214,11 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                       </Badge>
                       {manual && reading ? (
                         <Badge variant="secondary">Reading…</Badge>
-                      ) : pageCount ? (
+                      ) : manual && progress && pageCount ? (
                         <Badge variant="outline">
-                          {pageCount} {pageCount === 1 ? "page" : "pages"}
+                          {progress.pages_read < pageCount
+                            ? `${progress.pages_read} of ${pageCount} pages read`
+                            : `${pageCount} ${pageCount === 1 ? "page" : "pages"}`}
                         </Badge>
                       ) : null}
                       {document.item_count > 1 && (
@@ -265,8 +295,8 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
               </span>
             )}
           </div>
-          {canWrite && (
-            <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canWrite && (
               <Button
                 type="button"
                 size="sm"
@@ -276,12 +306,20 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                 <Plus />
                 Add manual
               </Button>
+            )}
+            {canWrite && (
               <Button type="button" size="sm" variant="ghost" onClick={openManualLibrary}>
                 <Globe2 />
                 Find manual
               </Button>
-            </div>
-          )}
+            )}
+            {profile && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setAskOpen(true)}>
+                <Globe2 />
+                Ask online sources
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -324,7 +362,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
         onOpenChange={setLinkOpen}
         onUpload={() => setUploadOpen(true)}
       />
-      <ManualAskDialog
+      <ManualOnlineAskDialog
         item={item}
         manuals={manualsQuery.data}
         open={askOpen}

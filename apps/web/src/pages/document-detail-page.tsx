@@ -51,6 +51,7 @@ import {
   useCanWrite,
   useDocument,
   useDocumentRelations,
+  useDocumentText,
   useInvalidateInventory,
 } from "@/lib/queries";
 import type { DocumentCaptureContext, DocumentRecord, DocumentType } from "@/lib/types";
@@ -319,19 +320,7 @@ export function DocumentDetailPage() {
                 onOpenChange={(open) => { if (open) setExtractionOpened(true); }} />
             </section>
 
-          {document.extracted_text && (
-            <details className="surface p-5 sm:p-6">
-              <summary className="cursor-pointer text-xs font-medium">
-                Extracted text
-                <span className="ml-2 text-2xs font-normal text-muted-foreground">
-                  {document.extracted_text.length.toLocaleString()} characters
-                </span>
-              </summary>
-              <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-secondary/40 p-4 text-2xs leading-relaxed text-muted-foreground">
-                {document.extracted_text}
-              </pre>
-            </details>
-          )}
+          <DocumentText document={document} />
         </div>
 
         <aside className="space-y-4">
@@ -597,6 +586,59 @@ function MetadataRow({ label, value }: { label: string; value: string }) {
       <dt className="shrink-0 text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words text-right">{value}</dd>
     </div>
+  );
+}
+
+/**
+ * The text read from the document, page by page. It is loaded when the section is
+ * opened. A manual is read to its last page in the background, so the pages listed
+ * here can be more than the first reading found.
+ */
+function DocumentText({ document }: { document: DocumentRecord }) {
+  const [opened, setOpened] = React.useState(false);
+  const textQuery = useDocumentText(document.id, opened);
+  const text = textQuery.data;
+  if (!document.extracted_text && !["manual", "specification", "other"].includes(document.document_type)) {
+    return null;
+  }
+  return (
+    <details className="surface p-5 sm:p-6" onToggle={(event) => {
+      if (event.currentTarget.open) setOpened(true);
+    }}>
+      <summary className="cursor-pointer text-xs font-medium">
+        Extracted text
+        <span className="ml-2 text-2xs font-normal text-muted-foreground">
+          {text && text.page_total > 0
+            ? `${text.pages_read} of ${text.page_total} pages read${text.reading ? ", still reading" : ""}`
+            : document.extracted_text
+              ? `${document.extracted_text.length.toLocaleString()} characters`
+              : ""}
+        </span>
+      </summary>
+      {textQuery.isPending && opened && (
+        <p className="mt-4 text-2xs text-muted-foreground">Loading text…</p>
+      )}
+      {text?.error && <p className="mt-4 text-2xs text-brass">{text.error}</p>}
+      {text && text.pages.length > 0 ? (
+        <div className="mt-4 max-h-[32rem] space-y-3 overflow-auto rounded-xl bg-secondary/40 p-4">
+          {text.pages.map((page) => (
+            <section key={page.page} aria-label={`Text of page ${page.page}`}>
+              <Link to={`/documents/${document.id}/view?page=${page.page}`}
+                className="text-2xs font-medium underline underline-offset-4">
+                Page {page.page}
+              </Link>
+              <pre className="mt-1 whitespace-pre-wrap text-2xs leading-relaxed text-muted-foreground">
+                {page.text || "No text was read on this page."}
+              </pre>
+            </section>
+          ))}
+        </div>
+      ) : (textQuery.isError || text) && (
+        <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-secondary/40 p-4 text-2xs leading-relaxed text-muted-foreground">
+          {document.extracted_text || "No text has been read from this document yet."}
+        </pre>
+      )}
+    </details>
   );
 }
 

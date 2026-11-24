@@ -1,17 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import type {
+  AiStatus,
   DocumentRecord,
   ItemDetail,
   ItemManuals as ItemManualsData,
-  ManualAnswer,
   ManualCandidateList,
   ManualDownloadResult,
   ManualOnlineAnswer,
@@ -115,6 +115,9 @@ function manualsData(overrides: Partial<ItemManualsData> = {}): ItemManualsData 
   return {
     item_id: item.id,
     manuals: [manualDocument],
+    reading: {
+      [manualDocument.id]: { page_total: 12, pages_read: 12, reading: false, error: null },
+    },
     search: {
       configured: false,
       provider: null,
@@ -152,66 +155,45 @@ function renderDocumentsAndManuals(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ItemDocumentsAndManuals item={detail} />
+        <Hash />
       </MemoryRouter>
     </QueryClientProvider>,
   );
   return client;
 }
 
-function answer(overrides: Partial<ManualAnswer> = {}): ManualAnswer {
-  return {
-    item_id: item.id,
-    item_name: item.name,
-    answer: "Unplug the drill before changing the bit.",
-    mode: "extractive",
-    citations: [
-      {
-        document_id: manualDocument.id,
-        document_title: manualDocument.title,
-        page: 7,
-        section: null,
-        excerpt: "Unplug the drill before changing the drill bit.",
-        url: "/api/v1/documents/document-1/file#page=7",
-      },
-    ],
-    manuals: [
-      {
-        id: manualDocument.id,
-        title: manualDocument.title,
-        url: manualDocument.url,
-        ocr_status: "succeeded",
-      },
-    ],
-    notices: ["Page-level text is available for this manual."],
-    ai_status: {
-      provider: "none",
-      mode: "disabled",
-      model: null,
-      configured: false,
-      available: false,
-      catalog_checked: false,
-      catalog_count: 0,
-      cloud_enabled: false,
-      cloud_consent: false,
-      data_leaves_server: false,
-      error: null,
-      privacy_note: "AI is optional.",
-    },
-    source_kind: "attached_manual",
-    ...overrides,
-  };
+function Hash() {
+  return <output aria-label="Location hash">{useLocation().hash}</output>;
 }
 
+const aiStatus: AiStatus = {
+  provider: "none",
+  mode: "disabled",
+  model: null,
+  configured: false,
+  available: false,
+  catalog_checked: false,
+  catalog_count: 0,
+  cloud_enabled: false,
+  cloud_consent: false,
+  data_leaves_server: false,
+  error: null,
+  privacy_note: "AI is optional.",
+};
+
 let activeManuals = manualsData();
+let assistantConfigured = true;
 
 beforeEach(() => {
   activeManuals = manualsData();
+  assistantConfigured = true;
   vi.mocked(api.get).mockReset();
   vi.mocked(api.get).mockImplementation(async (path: string) => {
     if (path.includes("/manual-search")) {
       return { item_id: item.id, candidates: [], notices: [] };
     }
     if (path.includes("/manuals")) return activeManuals;
+    if (path.startsWith("/ai/status")) return { ...aiStatus, configured: assistantConfigured };
     return { items: [], total: 0, limit: 100, offset: 0 };
   });
   vi.mocked(api.post).mockReset();
@@ -219,48 +201,36 @@ beforeEach(() => {
 });
 
 describe("ItemDocumentsAndManuals", () => {
-  it("shows attached manuals and renders grounded answers with real citations", async () => {
+  it("shows attached manuals and sends questions about them to the assistant", async () => {
     renderDocumentsAndManuals(manualsData());
     expect(screen.getByText("DCD791B instruction manual")).toBeVisible();
     expect(screen.getByText("12 pages")).toBeVisible();
     expect(screen.getByText(/Exact make\/model is not confirmed/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Add manual" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Find manual" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Ask online sources" })).not.toBeInTheDocument();
 
-    vi.mocked(api.post).mockResolvedValue(answer());
-    await userEvent.click(screen.getByRole("button", { name: "Ask about this item" }));
-    await userEvent.type(screen.getByLabelText("Question"), "How do I change the bit?");
-    await userEvent.click(screen.getByRole("button", { name: "Ask attached manuals" }));
-
-    await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith(`/items/${item.id}/manual-questions`, {
-        question: "How do I change the bit?",
-      }),
-    );
-    expect(await screen.findByText("Page 7")).toBeVisible();
-    expect(screen.getByText(/Unplug the drill before changing the drill bit/)).toBeVisible();
-    expect(screen.getByText("Extracted from manual text")).toBeVisible();
-    expect(screen.getByRole("link", { name: /Page 7/ })).toHaveAttribute(
-      "href",
-      "/api/v1/documents/document-1/file#page=7",
-    );
+    // One assistant answers questions: the button opens it on this item's page.
+    const ask = screen.getByRole("button", { name: "Ask about this item" });
+    await waitFor(() => expect(ask).toBeEnabled());
+    await userEvent.click(ask);
+    expect(screen.getByLabelText("Location hash")).toHaveTextContent("#assistant");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("keeps no-AI and unconfigured online states honest", async () => {
-    renderDocumentsAndManuals(manualsData());
-    vi.mocked(api.post).mockResolvedValue(
-      answer({
-        answer: "The attached manuals do not contain a matching passage.",
-        mode: "no_evidence",
-        citations: [],
-      }),
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Ask about this item" }));
-    await userEvent.type(screen.getByLabelText("Question"), "What is the charger warranty?");
-    await userEvent.click(screen.getByRole("button", { name: "Ask attached manuals" }));
-    expect(await screen.findByText("No matching manual evidence")).toBeVisible();
-    expect(screen.getByText("No AI required")).toBeVisible();
-    expect(screen.queryByText("Ask configured online sources")).not.toBeInTheDocument();
+  it("says that questions need the assistant when AI is not set up, and keeps the files usable", async () => {
+    assistantConfigured = false;
+    renderDocumentsAndManuals(manualsData({
+      reading: { [manualDocument.id]: { page_total: 25, pages_read: 5, reading: false, error: null } },
+    }));
+    expect(await screen.findByText(/Questions about manuals need the AI assistant, which is not set up/))
+      .toBeVisible();
+    expect(screen.getByRole("button", { name: "Ask about this item" })).toBeDisabled();
+    expect(screen.getByText("5 of 25 pages read")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Download DCD791B instruction manual" }))
+      .toHaveAttribute("href", "/api/v1/documents/document-1/file");
+    expect(screen.getByRole("link", { name: "Open DCD791B instruction manual" })).toBeVisible();
   });
 
   it("requires deliberate identity confirmation before online search", async () => {
@@ -396,27 +366,23 @@ describe("ItemDocumentsAndManuals", () => {
         },
       ],
       notices: [],
-      ai_status: answer().ai_status,
+      ai_status: aiStatus,
       source_kind: "online",
     };
-    vi.mocked(api.post).mockImplementation(async (path: string) => {
-      if (path.endsWith("/manual-questions/online")) return onlineAnswer;
-      return answer({
-        answer: "The attached manuals do not contain a matching passage.",
-        mode: "no_evidence",
-        citations: [],
-      });
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Ask about this item" }));
-    await userEvent.type(screen.getByLabelText("Question"), "What battery does it use?");
-    await userEvent.click(screen.getByRole("button", { name: "Ask attached manuals" }));
-    expect(await screen.findByText("No matching manual evidence")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Review online request" }));
+    vi.mocked(api.post).mockResolvedValue(onlineAnswer);
+    await userEvent.click(screen.getByRole("button", { name: "Ask online sources" }));
     expect(
       screen.getByText(/Borrower, loan and household data are never included/),
     ).toBeVisible();
+    await userEvent.type(screen.getByLabelText("Question"), "What battery does it use?");
+    // Nothing leaves the server before the request is reviewed and sent.
+    await userEvent.click(screen.getByRole("button", { name: "Review online request" }));
+    expect(api.post).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Send online question" }));
     expect(await screen.findByText("18 V LXT battery.")).toBeVisible();
+    expect(api.post).toHaveBeenCalledWith(`/items/${item.id}/manual-questions/online`, {
+      question: "What battery does it use?",
+    });
     expect(screen.getByText("Online sources")).toBeVisible();
     expect(
       screen.getByRole("link", { name: /DeWalt DCD791B battery specification/ }),

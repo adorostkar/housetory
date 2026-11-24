@@ -32,8 +32,10 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   // Manuals are shown with their own links, not as a review: Open shows the file itself.
   const manuals = [...new Map(run.steps.flatMap(({ result }) =>
     result.manuals ?? []).map((manual) => [manual.document_id, manual])).values()];
-  const citations = [...new Map(run.steps.flatMap(({ result }) => result.citations ?? [])
-    .map((citation) => [
+  // The pages the answer rests on. Earlier versions stored them with each step.
+  const citations = [...new Map([
+    ...(run.citations ?? []), ...run.steps.flatMap(({ result }) => result.citations ?? []),
+  ].map((citation) => [
       `${citation.document_id}:${citation.page ?? citation.section}:${citation.excerpt.slice(0, 60)}`,
       citation,
     ])).values()];
@@ -95,9 +97,13 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
                   className="inline-flex min-h-11 items-center underline"
                   aria-label={`Details of ${manual.title}`}>Details</Link>
               )}
-              {MANUAL_STATES[manual.state] && (
+              {MANUAL_STATES[manual.state] ? (
                 <span className="text-muted-foreground">{MANUAL_STATES[manual.state]}</span>
-              )}
+              ) : manual.pages && (manual.pages_read ?? manual.pages) < manual.pages ? (
+                <span className="text-muted-foreground">
+                  {manual.pages_read} of {manual.pages} pages read
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -110,18 +116,21 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
             const label = `${citation.document_title}, ${place}`;
             // A citation opens the file at its page, in the same viewer as Open.
             const manual = manuals.find((entry) => entry.document_id === citation.document_id);
+            const viewer = citation.url.startsWith("/documents/") ? citation.url
+              : manual ? `${manual.url}${citation.page ? `?page=${citation.page}` : ""}` : null;
             return (
               <li key={index} className="rounded-md border px-3 py-2">
-                {manual ? (
-                  <Link className="text-xs font-medium underline" to={withHousehold(
-                    `${manual.url}${citation.page ? `?page=${citation.page}` : ""}`, run.household_id,
-                  )}>{label}</Link>
+                {viewer ? (
+                  <Link className="text-xs font-medium underline"
+                    to={withHousehold(viewer, run.household_id)}>{label}</Link>
                 ) : (
                   <span className="text-xs font-medium">{label}</span>
                 )}
-                <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-2xs text-muted-foreground">
-                  {citation.excerpt}
-                </p>
+                {citation.excerpt && (
+                  <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-2xs text-muted-foreground">
+                    “{citation.excerpt}”
+                  </p>
+                )}
               </li>
             );
           })}

@@ -303,11 +303,9 @@ test("documents, manuals and image-source details stay coherent and honest", asy
   await expect(page.getByRole("button", { name: "Add manual" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Find manual" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Ask about this item" }).click();
-  await expect(
-    page.getByRole("heading", { name: `Ask about Disclosure toolbox ${fixture.id}` }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
+  // Questions about the item go to the assistant; the section opens no dialog for them.
+  await expect(page.getByRole("button", { name: "Ask about this item" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask attached manuals" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Find manual" }).click();
   await expect(

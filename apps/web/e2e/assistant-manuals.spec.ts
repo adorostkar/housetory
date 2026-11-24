@@ -20,7 +20,8 @@ interface Step {
     references?: { id: string; type: string }[];
     facts?: {
       manuals?: { title: string }[];
-      passages?: { document: string; page: number; text: string }[];
+      pages?: { document_id: string; document: string; page: number; text: string }[];
+      map?: { document_id: string; topics: { topic: string; pages: string }[] }[];
     };
   };
 }
@@ -28,6 +29,7 @@ interface Step {
 let server: Server;
 let providerId = "";
 let itemName = "";
+let mapsBuilt = 0;
 
 /** A small text PDF, so stored page numbers are real. */
 function manualPdf(pages: string[][]) {
@@ -68,9 +70,17 @@ test.beforeAll(async ({ request }) => {
     if (req.url !== "/api/chat") { res.writeHead(404).end("{}"); return; }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const prompt = JSON.parse(Buffer.concat(chunks).toString()).messages.at(-1).content as string;
+    const messages = JSON.parse(Buffer.concat(chunks).toString()).messages as { content: string }[];
+    const prompt = messages.at(-1)!.content;
     let output: unknown = {};
-    if (prompt.includes('"step_schema"')) {
+    if (messages[0]!.content.includes("You index a document")) {
+      // The map: one topic per page, named by the heading the page starts with.
+      const topics = prompt.split("[page ").slice(1).map((block) => ({
+        topic: block.split("\n")[1]!.toLowerCase(), pages: [Number.parseInt(block, 10)],
+      }));
+      output = { sections: [], topics };
+      mapsBuilt += 1;
+    } else if (prompt.includes('"step_schema"')) {
       const input = JSON.parse(prompt) as {
         request: string; observations: Step[]; context_newest_first: { observations: Step[] }[];
       };
@@ -84,19 +94,26 @@ test.beforeAll(async ({ request }) => {
       } else if (observed.length === 0) {
         // Follow-ups can only use what earlier turns left in the conversation context.
         const earlier = input.context_newest_first.flatMap((turn) => turn.observations);
-        output = tool("read_manual", input.request.includes("battery") ? {
-          document_id: earlier.flatMap((step) => step.result.references ?? [])
-            .find((reference) => reference.type === "document")!.id,
-          question: "battery replacement",
-        } : {
-          item_id: earlier.find((step) => step.call.name === "find_manuals")!.call.arguments.item_id,
-          question: "measure current amperage amps",
-        });
+        if (input.request.includes("battery")) {
+          // The last turn left the map and no page text: only the page needed is read.
+          const map = earlier.flatMap((step) => step.result.facts?.map ?? [])[0]!;
+          output = tool("read_manual", {
+            document_id: map.document_id,
+            pages: map.topics.find((entry) => entry.topic.includes("battery"))!.pages,
+          });
+        } else {
+          output = tool("read_manual", {
+            item_id: earlier.find((step) => step.call.name === "find_manuals")!.call.arguments.item_id,
+          });
+        }
       } else {
-        const passage = observed[0]!.result.facts!.passages![0]!;
+        const heading = input.request.includes("battery") ? "BATTERY REPLACEMENT" : "CURRENT MEASUREMENT";
+        const read = observed[0]!.result.facts!.pages!.find((entry) => entry.text.startsWith(heading))!;
+        const lines = read.text.trim().split("\n").slice(1);
         output = {
           kind: "answer",
-          message: `${passage.text.split("\n").slice(1).join(" ")} (${passage.document}, page ${passage.page}).`,
+          message: `${lines.join(" ")} (${read.document}, page ${read.page}).`,
+          sources: [{ document_id: read.document_id, pages: [read.page], quote: lines[0] }],
         };
       }
     }
@@ -155,6 +172,7 @@ for (const mobile of [false, true]) {
     itemName = `Manual multimeter ${crypto.randomUUID().slice(0, 7)}`;
     const item = (await (await request.post("/api/v1/items", { data: { name: itemName } })).json()).item;
     const pdf = manualPdf(PAGES);
+    const mapsBefore = mapsBuilt;
     const upload = await request.post("/api/v1/documents", { multipart: {
       file: { name: `${TITLE}.pdf`, mimeType: "application/pdf", buffer: pdf },
       document_type: "manual",
@@ -166,6 +184,25 @@ for (const mobile of [false, true]) {
     await expect.poll(async () =>
       (await (await request.get(`/api/v1/documents/${manual.id}`)).json()).ocr_status,
     { timeout: 30_000 }).toBe("succeeded");
+    // Every page is read in the background and the assistant's provider builds the map.
+    await expect.poll(async () => {
+      const text = await (await request.get(`/api/v1/documents/${manual.id}/text`)).json();
+      return [text.pages_read, text.page_total, text.reading];
+    }, { timeout: 30_000 }).toEqual([3, 3, false]);
+    await expect.poll(() => mapsBuilt, { timeout: 30_000 }).toBeGreaterThan(mapsBefore);
+
+    // On the item page the manual shows its pages, and a question goes to the assistant:
+    // the item has no question dialog of its own.
+    await page.goto(`/items/${item.id}?tab=documents`);
+    const section = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Documents & manuals" }),
+    });
+    await expect(section.getByText("3 pages", { exact: true })).toBeVisible();
+    await expect(section.getByText(/Questions about manuals need the AI assistant/)).toHaveCount(0);
+    await section.getByRole("button", { name: "Ask about this item" }).click();
+    await expect(page).toHaveURL(/#assistant$/);
+    await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ask attached manuals" })).toHaveCount(0);
 
     await page.goto("/items");
     await ask(page, "Show me the multimeter documentation", true);
@@ -186,9 +223,11 @@ for (const mobile of [false, true]) {
     const answered = page.getByLabel("Assistant tool task").last();
     await expect(answered.getByTestId("answer-text")).toContainText("move the red lead to the 10A jack");
     await expect(answered.getByTestId("answer-text")).toContainText(`(${TITLE}, page 2)`);
-    await expect(answered.getByRole("list", { name: "Manual citations" })
-      .getByRole("link", { name: `${TITLE}, page 2`, exact: true }))
+    const citations = answered.getByRole("list", { name: "Manual citations" });
+    await expect(citations.getByRole("link", { name: `${TITLE}, page 2`, exact: true }))
       .toHaveAttribute("href", new RegExp(`^/documents/${manual.id}/view\\?page=2(&|$)`));
+    // The words quoted next to the link stand on that page of the file.
+    await expect(citations.getByText(`“${PAGES[1]![1]}”`)).toBeVisible();
 
     await ask(page, "And the battery?");
     const battery = page.getByLabel("Assistant tool task").last();
@@ -318,5 +357,12 @@ for (const mobile of [false, true]) {
     await page.getByRole("link", { name: "Details", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}$`));
     await expect(page.locator("#document-extraction-review")).toBeVisible();
+    // The text of every page is there to read, with a link to each page of the file.
+    await page.locator("summary").filter({ hasText: "Extracted text" }).click();
+    await expect(page.getByText("3 of 3 pages read", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Text of page 2", exact: true }))
+      .toContainText("move the red lead to the 10A jack");
+    await expect(page.getByRole("link", { name: "Page 2", exact: true }))
+      .toHaveAttribute("href", `/documents/${manual.id}/view?page=2`);
   });
 }

@@ -137,19 +137,26 @@ export interface ManualSearchStatus {
   can_search: boolean;
 }
 
+export interface DocumentReading {
+  page_total: number;
+  pages_read: number;
+  reading: boolean;
+  error: string | null;
+}
+
+export interface DocumentText extends DocumentReading {
+  pages: { page: number; text: string; source: string }[];
+}
+
 export interface ItemManuals {
   item_id: UUID;
   manuals: DocumentRecord[];
+  /** Page-reading progress of each manual, by document id. */
+  reading?: Record<UUID, DocumentReading>;
   search: ManualSearchStatus;
 }
 
-export interface ManualReference {
-  id: UUID;
-  title: string;
-  url: string;
-  ocr_status: OcrStatus;
-}
-
+/** A page the assistant read and based an answer on. */
 export interface ManualCitation {
   document_id: UUID;
   document_title: string;
@@ -160,18 +167,6 @@ export interface ManualCitation {
 }
 
 export type ManualAnswerMode = "ai" | "extractive" | "no_evidence";
-
-export interface ManualAnswer {
-  item_id: UUID;
-  item_name: string;
-  answer: string;
-  mode: ManualAnswerMode;
-  citations: ManualCitation[];
-  manuals: ManualReference[];
-  notices: string[];
-  ai_status: AiStatus;
-  source_kind: "attached_manual";
-}
 
 export interface WebCitation {
   title: string;

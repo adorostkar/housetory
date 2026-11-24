@@ -72,7 +72,7 @@ async function createItem(request: APIRequestContext, name: string) {
   return (await response.json()) as { item: { id: string; name: string } };
 }
 
-test("uploads a manual without make/model, answers from its text, and attaches it to another item", async ({
+test("uploads a manual without make/model, keeps its page text, and attaches it to another item", async ({
   page,
   request,
 }) => {
@@ -115,16 +115,22 @@ test("uploads a manual without make/model, answers from its text, and attaches i
 
   await page.reload();
   await expect(page.getByText(title).first()).toBeVisible();
-  await page.getByRole("button", { name: "Ask about this item" }).click();
-  const askDialog = page.getByRole("dialog", { name: `Ask about ${first.item.name}` });
-  await askDialog.getByLabel("Question").fill("How do I change the drill bit?");
-  await askDialog.getByRole("button", { name: "Ask attached manuals" }).click();
-  await expect(askDialog.getByText("Extracted from manual text")).toBeVisible();
-  await expect(askDialog.getByText("Page 1").first()).toBeVisible();
-  await expect(
-    askDialog.getByText(/Disconnect the battery before changing the drill bit/).first(),
-  ).toBeVisible();
-  await expect(askDialog.getByText(/Borrower, loan and household data/)).toHaveCount(0);
+  // The text is stored with the document, page by page, and needs no AI to be read.
+  const listed = (await (await request.get(`/api/v1/items/${first.item.id}/manuals`)).json()) as {
+    manuals: Array<{ title: string; id: string }>;
+  };
+  const manualId = listed.manuals.find((manual) => manual.title === title)!.id;
+  await expect
+    .poll(async () => {
+      const text = (await (await request.get(`/api/v1/documents/${manualId}/text`)).json()) as {
+        pages: Array<{ text: string }>;
+      };
+      return text.pages.map((entry) => entry.text).join("\n");
+    }, { timeout: 60_000 })
+    .toContain("Disconnect the battery before changing the drill bit.");
+  // Questions about a manual go to the assistant: the item has no question dialog of its own.
+  await expect(page.getByRole("button", { name: "Ask about this item" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask attached manuals" })).toHaveCount(0);
 
   await page.goto(`/items/${second.item.id}`);
   await page.getByRole("button", { name: "Link existing" }).click();
@@ -136,7 +142,7 @@ test("uploads a manual without make/model, answers from its text, and attaches i
   await expect(page.getByText(title).first()).toBeVisible();
 });
 
-test("discovers through the concrete Brave adapter, reviews the real source and cites the saved manual", async ({
+test("discovers through the concrete Brave adapter, reviews the real source and saves a readable manual", async ({
   page,
   request,
 }) => {
@@ -254,13 +260,24 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
   expect(requestQuery?.toLowerCase()).not.toContain("loan");
 
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Ask about this item" }).click();
-  const askDialog = page.getByRole("dialog", { name: `Ask about ${item.item.name}` });
-  await askDialog.getByLabel("Question").fill("How do I change the drill bit?");
-  await askDialog.getByRole("button", { name: "Ask attached manuals" }).click();
-  await expect(askDialog.getByText("Extracted from manual text")).toBeVisible();
-  await expect(askDialog.getByText("Page 1").first()).toBeVisible();
-  await expect(
-    askDialog.getByText(/Disconnect the battery before changing the drill bit/).first(),
-  ).toBeVisible();
+  // The saved manual is read like an uploaded one. Online questions stay a separate,
+  // reviewed request.
+  const saved = (await (await request.get(`/api/v1/items/${item.item.id}/manuals`)).json()) as {
+    manuals: Array<{ title: string; id: string }>;
+  };
+  const savedId = saved.manuals.find((manual) => manual.title === savedTitle)!.id;
+  await expect
+    .poll(async () => {
+      const text = (await (await request.get(`/api/v1/documents/${savedId}/text`)).json()) as {
+        pages: Array<{ text: string }>;
+      };
+      return text.pages.map((entry) => entry.text).join("\n");
+    }, { timeout: 60_000 })
+    .toContain("Disconnect the battery before changing the drill bit.");
+  await page.getByRole("button", { name: "Ask online sources" }).click();
+  const askDialog = page.getByRole("dialog", {
+    name: `Ask online sources about ${item.item.name}`,
+  });
+  await expect(askDialog.getByText(/Borrower, loan and household data/)).toBeVisible();
+  await expect(askDialog.getByRole("button", { name: "Review online request" })).toBeDisabled();
 });

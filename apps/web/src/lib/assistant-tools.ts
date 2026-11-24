@@ -28,6 +28,8 @@ export interface AssistantManualLink {
   download_url: string;
   details_url?: string | null;
   state: "readable" | "ocr_pending" | "ocr_failed" | "no_text";
+  pages?: number;
+  pages_read?: number;
 }
 
 export interface AssistantToolOutput {
@@ -38,6 +40,7 @@ export interface AssistantToolOutput {
   capture?: { kind: "items" | "document" | "photo"; id: string } | null;
   review?: ReviewRun | null;
   manuals?: AssistantManualLink[];
+  /** Only in results stored by earlier versions. Citations now belong to the answer. */
   citations?: ManualCitation[];
 }
 
@@ -52,6 +55,8 @@ export interface AssistantToolRun {
   message: string;
   answer?: string | null;
   steps: { call: { name: string; arguments: Record<string, unknown> }; result: AssistantToolOutput }[];
+  /** The manual pages the answer rests on. Each was read by the assistant. */
+  citations?: ManualCitation[];
   model_calls: number;
   max_model_calls: number;
   can_retry: boolean;

@@ -24,6 +24,7 @@ import type {
   ContainerList,
   DocumentSummaryList,
   DocumentRecord,
+  DocumentText,
   DocumentRelations,
   EvidenceExportList,
   EvidenceExportRecord,
@@ -507,6 +508,17 @@ export function useDocument(documentId: string | undefined, enabled = true) {
       const status = (query.state.data as DocumentRecord | undefined)?.ocr_status;
       return status === "queued" || status === "processing" ? 2000 : false;
     },
+  });
+}
+
+/** The stored text of every page read so far. Loaded only when asked for. */
+export function useDocumentText(documentId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.document(documentId ?? ""), "text"],
+    queryFn: () => api.get<DocumentText>(`/documents/${documentId}/text`),
+    enabled: Boolean(documentId) && enabled,
+    refetchInterval: (query) =>
+      (query.state.data as DocumentText | undefined)?.reading ? 3000 : false,
   });
 }
 

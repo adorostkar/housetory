@@ -159,4 +159,28 @@ describe("DocumentDetailPage extraction review", () => {
     await waitFor(() => expect(state.relations).toHaveBeenLastCalledWith("document-1"));
     expect(screen.getByText("Extracted text")).toBeVisible();
   });
+
+  it("shows the text of every page read, loaded only when the section is opened", async () => {
+    const processing = await vi.mocked(api.get)("/documents/document-1/processing");
+    vi.mocked(api.get).mockImplementation(async (path: string) => path.endsWith("/text") ? {
+      page_total: 25, pages_read: 12, reading: true, error: null,
+      pages: [
+        { page: 10, text: "Measuring Voltage", source: "ocr" },
+        { page: 11, text: "Measuring Current\n1. Turn the rotary switch.", source: "ocr" },
+        { page: 12, text: "", source: "unreadable" },
+      ],
+    } : processing);
+    renderPage("manual");
+    expect(api.get).not.toHaveBeenCalledWith("/documents/document-1/text");
+
+    await userEvent.click(screen.getByText("Extracted text"));
+    expect(await screen.findByText("12 of 25 pages read, still reading")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Text of page 11" }))
+      .toHaveTextContent("Measuring Current 1. Turn the rotary switch.");
+    // Each page opens the file itself at that page.
+    expect(screen.getByRole("link", { name: "Page 11" }))
+      .toHaveAttribute("href", "/documents/document-1/view?page=11");
+    expect(screen.getByRole("region", { name: "Text of page 12" }))
+      .toHaveTextContent("No text was read on this page.");
+  });
 });
