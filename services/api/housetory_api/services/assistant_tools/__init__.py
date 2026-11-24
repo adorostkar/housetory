@@ -628,11 +628,11 @@ def _citations(run: AssistantRun, answer: str, sources: list) -> list:
 
 MANUAL_TOOLS = {"find_manuals", "read_manual", "search_manual", "look_at_manual_page"}
 UNREAD_PAGES_NOTE = (
-    "Your answer was not accepted. It names pages of a manual, but no text of those pages "
-    "was returned in this request, and page text from earlier turns is not kept. Read the "
-    "pages with read_manual now (the map and the page numbers from earlier turns tell you "
-    "which), then answer only from what you read. If you cannot read them, say so and do "
-    "not give instructions from general knowledge."
+    "Your answer was not accepted. It names pages of a manual whose text was not returned "
+    "in this request, and page text from earlier turns is not kept. Read those pages with "
+    "read_manual now (the map and the page numbers from earlier turns tell you which), "
+    "then answer only from what you read, and name only pages you read in this request. "
+    "If you cannot read them, say so and do not give instructions from general knowledge."
 )
 # An answer is sent back to the model, once for each reason, when the tools of this
 # request did nothing it could rest on. (Asking the model to state in its answer what is
@@ -683,13 +683,15 @@ def _unsure_cited_pages(db: Session, run: AssistantRun, cited: list) -> list[dic
 
 
 def _names_unread_manual_pages(db: Session, run: AssistantRun, answer: str, sources: list) -> bool:
-    """True when an answer points to manual pages although none of them was returned in
-    this request. The conversation must be about a manual: this request or an earlier
-    turn used a manual tool."""
+    """True when an answer points to manual pages that were not returned in this request:
+    none of the pages it gives as sources, or any page its text names. The conversation
+    must be about a manual: this request or an earlier turn used a manual tool."""
     from .manual_tools import page_numbers_in, pages_returned
 
-    named = {number for source in sources for number in source.pages} | page_numbers_in(answer)
-    if not named or named & pages_returned(run.data.get("steps", [])):
+    in_text = page_numbers_in(answer)
+    named = {number for source in sources for number in source.pages} | in_text
+    returned = pages_returned(run.data.get("steps", []))
+    if not named or (named & returned and in_text <= returned):
         return False
     steps = list(run.data.get("steps", []))
     parent_id = run.parent_id
@@ -1016,7 +1018,6 @@ def run_job(payload: dict):
                 cited = _citations(run, answer, step.sources)
                 if (
                     step.kind == "answer"
-                    and not cited
                     and not run.data.get("sent_back")
                     and _names_unread_manual_pages(db, run, answer, step.sources)
                 ):

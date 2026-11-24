@@ -759,7 +759,7 @@ def test_a_follow_up_answered_from_memory_is_sent_back_to_read_the_pages(
     def read_after_the_correction(prompt):
         # The answer was not accepted, and the model is told why and what to do.
         assert prompt["observations"] == []
-        assert "no text of those pages was returned in this request" in prompt["correction"]
+        assert "whose text was not returned in this request" in prompt["correction"]
         return call("read_manual", document_id=document["id"], pages="9")
 
     def answer_from_the_page(prompt):
@@ -1009,3 +1009,35 @@ def test_reading_the_same_pages_again_is_answered_with_a_note_not_the_text_again
     )
     assert run["state"] == "completed"
     assert [entry["page"] for entry in run["citations"]] == [11]
+
+
+def test_an_answer_that_names_a_page_it_did_not_read_is_sent_back(
+    owner_client, configured_ai, monkeypatch
+):
+    """A real model read page 18 and answered "the manual says this on pages 16-17",
+    with a value that is not in the manual. Pages named in the text must have been read."""
+    item, document = multimeter(owner_client, monkeypatch)
+    source = {"document_id": document["id"], "pages": [9]}
+
+    def reads_the_named_page(prompt):
+        assert "name only pages you read in this request" in prompt["correction"]
+        return call("read_manual", item_id=item["id"], pages="12")
+
+    run, _ = converse(
+        owner_client,
+        monkeypatch,
+        "When do I change the battery?",
+        [
+            call("read_manual", item_id=item["id"], pages="9"),
+            # Page 9 was read and is a source, but the text points to page 12.
+            {"kind": "answer", "message": "See page 12 of the manual.", "sources": [source]},
+            reads_the_named_page,
+            {
+                "kind": "answer",
+                "message": f"When the battery symbol shows ({TITLE}, page 12).",
+                "sources": [{"document_id": document["id"], "pages": [12]}],
+            },
+        ],
+    )
+    assert run["state"] == "completed"
+    assert [entry["page"] for entry in run["citations"]] == [12]
