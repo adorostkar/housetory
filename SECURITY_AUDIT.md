@@ -154,6 +154,15 @@ viewer in that origin.
 downloaded and opened in a user's PDF reader. Add a scanning hook before handling
 documents from untrusted sources.
 
+**Later addition: in-app file viewer.** `/documents/{id}/view` shows a document
+inside the app. The fix above is kept: the file is still served only as an
+attachment, and the browser's PDF viewer is still not used. The page fetches the
+bytes and pdf.js draws each PDF page on a canvas. No script in the file is run,
+and its forms and links cannot be used. XFA is off, and pdf.js runs without
+WebAssembly, so the Content Security Policy did not change. Residual: pdf.js
+parses untrusted PDFs in the application origin, so a bug in pdf.js is a risk.
+Keep `pdfjs-dist` updated.
+
 ### SEC-06 — Medium: container privilege posture
 
 **Finding.** nginx ran as root with a writable root filesystem and default

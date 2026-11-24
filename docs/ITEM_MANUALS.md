@@ -74,15 +74,24 @@ make no extra model call: the tool returns passages, and the assistant's own
 model writes the answer.
 
 - `find_manuals` lists the manuals of an item, or one manual by document ID. For
-  each manual the conversation shows an **Open** link (the document page) and a
-  **Download** link (the stored file). The tool reads no text. It never opens an
-  extraction review, an import or a capture. If the model calls
+  each manual the conversation shows three links: **Open** (the file itself, in
+  the file viewer), **Download** (the stored file) and **Details** (the document
+  page, with its settings and extraction review). The tool reads no text. It
+  never opens an extraction review, an import or a capture. If the model calls
   `get_capture_status` for a Manual document, it gets the same links, not a
   review.
 - `read_manual` returns the passages that match a question: at most four, at
   most two per manual, each up to 1,200 characters. Each passage has the
   document title and the real page when page text exists. The conversation shows
-  them as citations with a link to that page.
+  them as citations. A citation opens the file viewer at that page.
+
+Both tools take an item ID, a document ID, or both. When both are given, the
+document must belong to the item: it is linked to the item now, or a reviewed
+online download saved it for that item. Any other pair is refused with
+`manual_not_for_item`. The message says where the document really is and tells
+the model to call again with one ID only. The tool never guesses a link between
+an item and a document. It says “saved by an online download” only when that
+download record exists.
 
 Three kinds of document count as an item's manual:
 
@@ -107,9 +116,9 @@ and offers the matching existing action:
 | Condition | Meaning | Action offered |
 | --- | --- | --- |
 | `no_manual` | Nothing is attached to the item. | **Add manual**, **Link existing** or **Find manual** on the item page. |
-| `ocr_pending` | The text is still being read. | Wait. The document page shows the progress. |
-| `ocr_failed` | Reading failed, or found no readable text. | **Run OCR** on the document page (**Clean up scan** first for unclear pages). |
-| `no_text` | No text is stored for the file. | **Run OCR** on the document page. |
+| `ocr_pending` | The text is still being read. | Wait. The **Details** page shows the progress. |
+| `ocr_failed` | Reading failed, or found no readable text. | **Run OCR** on the **Details** page (**Clean up scan** first for unclear pages). |
+| `no_text` | No text is stored for the file. | **Run OCR** on the **Details** page. |
 | `no_relevant_passage` | The stored text has no passage for the question. | Ask with other words, or open the manual. |
 
 In every case except `no_manual` the manual keeps its links, and the assistant
@@ -124,7 +133,8 @@ Limits:
   not sent again. A follow-up such as “How do I check amperage?” reads the
   manual again for the new question.
 - Household and property scope are checked on every call. A manual outside the
-  conversation's property is reported as not found.
+  conversation's property is reported as not found. In a conversation about one
+  property, the tool names only items of that property.
 - The final wording comes from the model. Unlike **Ask about this item**, code
   does not check page numbers in that wording. The citation list always shows
   the passages that were really retrieved.
@@ -132,6 +142,31 @@ Limits:
   a text layer, and up to `OCR_MAX_PDF_PAGES` pages (default 5) of a scanned PDF.
   The tool says so when a manual is longer, because later pages cannot be
   searched.
+
+### The file viewer
+
+**Open** goes to `/documents/{id}/view`. This page shows the stored file and
+nothing else from the document page: it starts no extraction review and no
+processing. It loads the document's name and the file, with the same API calls
+and the same access checks as a download.
+
+- A PDF is drawn page by page on canvases by pdf.js, inside the app. The
+  browser's own PDF viewer is not used. Nothing inside the file is run or can
+  be clicked: no scripts, no working forms, no links. The file is still only
+  served as a download (`Content-Disposition: attachment`).
+- An image is shown as an image. A text file is shown as plain text.
+- `?page=N` opens a PDF at page N. Citations use it.
+- Zoom buttons stay under the app header. Zooming, turning the phone and
+  resizing the window keep the place being read.
+- Only pages near the screen are drawn, so a long manual does not fill the
+  memory.
+- **Download** and **Details** are on the page. **Details** is the document page.
+- A link from a conversation in another household switches to that household
+  first, if the user is a member. Otherwise the file is not loaded.
+
+Limits of the viewer: text on a page cannot be selected or searched, and links
+inside a PDF cannot be clicked. Use **Download** for that. The viewer was tested
+in Chrome on desktop and phone sizes only.
 
 ## Confirming the product identity
 

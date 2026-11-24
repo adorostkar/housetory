@@ -525,6 +525,12 @@ columns.
 - All document responses are forced to `Content-Disposition: attachment` so
   active PDF content is not rendered in the application origin. Photo and
   document responses are `private, no-store`, `nosniff` and CORP same-origin.
+- The web app has its own file viewer at `/documents/{id}/view`. It fetches the
+  same attachment response and draws a PDF on canvases with pdf.js. The
+  browser's PDF viewer is not used and nothing inside the file is run. pdf.js
+  runs without WebAssembly, so the Content Security Policy is unchanged; its
+  fonts, character maps and JavaScript image decoders are plain files under
+  `/assets/pdfjs-<version>/`.
 - The worker mounts uploads read-only. Storage resolution has a read-only path
   that never attempts to create or chmod directories; only API write paths set
   up `0700` storage.
@@ -643,10 +649,12 @@ deployment.
   stay available through the normal buttons and forms, and reviews start from
   the Review page.
 - The tool engine also opens and reads item manuals. `find_manuals` returns
-  direct document-page and file links, which the conversation shows, and
-  `read_manual` returns a few cited passages of stored manual text for the model
-  to answer from. A Manual document is never opened as a capture or extraction
-  review. See [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
+  links to the file viewer, the stored file and the document page, which the
+  conversation shows, and `read_manual` returns a few cited passages of stored
+  manual text for the model to answer from. An item and a document given
+  together must belong together in stored records. A Manual document is never
+  opened as a capture or extraction review. See
+  [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
 - Sparse overviews collapse empty value/warranty sections while recent items, rooms
@@ -811,8 +819,9 @@ development and nginx proxies in production. No CORS allowlist is needed.
   loan corrections; parent and child loans remain independently correctable.
 - No antivirus/malware scanning of documents; PDFs are parsed and downloaded as
   attachments but may still contain malicious content when opened in a PDF
-  reader. OCR parses untrusted documents locally in the worker; keep the worker
-  image rebuilt and patched.
+  reader. The in-app file viewer parses PDFs with pdf.js in the browser; keep
+  `pdfjs-dist` updated. OCR parses untrusted documents locally in the worker;
+  keep the worker image rebuilt and patched.
 - AI extraction/recognition is heuristic and provider-dependent. Deterministic
   fallback works without a model, but real model quality, latency and hardware
   requirements were not measured because no model is bundled or installed by the
