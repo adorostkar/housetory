@@ -14,6 +14,8 @@ export const queryKeys = {
   item: (itemId: string) => ["item", itemId] as const,
   documents: ["documents"] as const,
   document: (documentId: string) => ["document", documentId] as const,
+  // Kept apart from "document" so record updates do not download the file again.
+  documentFile: (documentId: string) => ["document-file", documentId] as const,
   purchases: ["purchases"] as const,
   warranties: ["warranties"] as const,
   warrantyList: (status: string) => ["warranties", status] as const,

@@ -102,6 +102,11 @@ const DocumentDetailPage = React.lazy(() =>
     default: module.DocumentDetailPage,
   })),
 );
+const DocumentViewPage = React.lazy(() =>
+  import("@/pages/document-view-page").then((module) => ({
+    default: module.DocumentViewPage,
+  })),
+);
 const PurchasesPage = React.lazy(() =>
   import("@/pages/purchases-page").then((module) => ({
     default: module.PurchasesPage,
@@ -339,6 +344,10 @@ export default function App() {
             <Route
               path="documents/:documentId"
               element={<DocumentDetailPage />}
+            />
+            <Route
+              path="documents/:documentId/view"
+              element={<DocumentViewPage />}
             />
             <Route element={<FinancialsLayout />}>
               <Route path="purchases" element={<PurchasesPage />} />

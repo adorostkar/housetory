@@ -180,6 +180,9 @@ export const api = {
   postForm<T>(path: string, formData: FormData, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: "POST", formData });
   },
+  getBlob(path: string, options?: RequestOptions): Promise<Blob> {
+    return requestBlob(path, { ...options, method: "GET" });
+  },
   postBlob(path: string, body?: unknown, options?: RequestOptions): Promise<Blob> {
     return requestBlob(path, { ...options, method: "POST", body });
   },
