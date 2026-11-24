@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
+from typing import NamedTuple
 
 from ..config import get_settings
 
@@ -42,6 +43,14 @@ class ExtractedText:
     confidence: int | None
     source: str
     pages: tuple[OcrPage, ...] = ()
+    # Words that Tesseract itself was unsure about. Symbols, units and the labels of
+    # dials and sockets are the usual cases: they come out as nonsense words.
+    unsure: tuple[str, ...] = ()
+
+
+# A word read with less confidence than this (0-100) is reported as unsure.
+UNSURE_CONFIDENCE = 60
+MAX_UNSURE_WORDS = 40
 
 
 CURRENCY_SYMBOLS = {
@@ -239,6 +248,7 @@ def _run_tesseract_tsv(path: Path, psm: str = "6") -> ExtractedText:
 
     lines: dict[tuple[str, str, str, str], list[str]] = {}
     confidence_values: list[float] = []
+    unsure: list[str] = []
     # Tesseract writes words as they are. A word that starts with a double quote is not
     # the start of a quoted CSV field, so quoting is off.
     reader = csv.DictReader(
@@ -263,6 +273,9 @@ def _run_tesseract_tsv(path: Path, psm: str = "6") -> ExtractedText:
             confidence = -1
         if confidence >= 0:
             confidence_values.append(confidence)
+            # A lone mark or a page number tells nothing: only words are reported.
+            if confidence < UNSURE_CONFIDENCE and re.search(r"[^\W\d_]", text):
+                unsure.append(text[:40])
 
     ordered = [
         " ".join(words)
@@ -280,6 +293,7 @@ def _run_tesseract_tsv(path: Path, psm: str = "6") -> ExtractedText:
         confidence=confidence,
         source="ocr",
         pages=(OcrPage(page_number=1, text=text),),
+        unsure=tuple(dict.fromkeys(unsure))[:MAX_UNSURE_WORDS],
     )
 
 
@@ -298,15 +312,21 @@ def has_text(text: str) -> bool:
     return len(re.sub(r"\s+", "", text)) >= 30
 
 
-def render_pdf_page(path: Path, page_number: int, target: Path, *, dpi: int = 200) -> Path:
-    """Draw one page of a PDF as a PNG file and return that file."""
+def render_pdf_page(
+    path: Path, page_number: int, target: Path, *, dpi: int = 200, long_side: int | None = None
+) -> Path:
+    """Draw one page of a PDF as a PNG file and return that file.
+
+    With ``long_side`` the picture gets that many pixels on its longer side, whatever
+    the size of the page. A small page drawn at a fixed dpi is too small to read.
+    """
     _require_binary("pdftoppm")
+    size = ["-scale-to", str(long_side)] if long_side else ["-r", str(dpi)]
     try:
         completed = subprocess.run(
             [
                 "pdftoppm",
-                "-r",
-                str(dpi),
+                *size,
                 "-png",
                 "-f",
                 str(page_number),
@@ -329,20 +349,29 @@ def render_pdf_page(path: Path, page_number: int, target: Path, *, dpi: int = 20
     return image
 
 
-def read_pdf_page(path: Path, page_number: int, embedded: str = "") -> tuple[str, str]:
+class PageText(NamedTuple):
+    """One page as it was read: its text, where the text came from (``pdf_text`` or
+    ``ocr``), and the words OCR was unsure about."""
+
+    text: str
+    source: str
+    unsure: tuple[str, ...] = ()
+
+
+def read_pdf_page(path: Path, page_number: int, embedded: str = "") -> PageText:
     """Text of one PDF page and where it came from: ``pdf_text`` or ``ocr``.
 
     A page with its own text needs no OCR. Any other page is drawn and read with
     Tesseract, the same way the first pages of a scanned PDF are read.
     """
     if has_text(embedded):
-        return embedded, "pdf_text"
+        return PageText(embedded, "pdf_text")
     with tempfile.TemporaryDirectory(prefix="housetory-ocr-") as temp_dir:
         image = render_pdf_page(path, page_number, Path(temp_dir) / "page.png")
-        recognised = _tesseract_tsv(image).text
-    if len(recognised.strip()) >= len(embedded.strip()):
-        return recognised, "ocr"
-    return embedded, "pdf_text"
+        recognised = _tesseract_tsv(image)
+    if len(recognised.text.strip()) >= len(embedded.strip()):
+        return PageText(recognised.text, "ocr", recognised.unsure)
+    return PageText(embedded, "pdf_text")
 
 
 def _ocr_pdf(path: Path) -> ExtractedText:

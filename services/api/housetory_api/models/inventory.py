@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -840,7 +841,14 @@ class DocumentPageText(Base):
     page_number: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_generation: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # "unreadable" means that reading the page failed. It has no text, and it is not a
+    # page that was read and found empty.
     source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # How often reading was tried, and why the last try failed.
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
+    error: Mapped[str | None] = mapped_column(Text)
+    # Words that OCR itself was unsure about: often symbols and labels, read as nonsense.
+    unsure_words: Mapped[list[str] | None] = mapped_column(JSONB)
     # What a vision model read from the picture of the page, when it was asked to look.
     vision_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(

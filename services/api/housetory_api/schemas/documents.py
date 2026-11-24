@@ -171,7 +171,11 @@ class DocumentReadingOut(BaseModel):
     """How many pages of a document have their text stored."""
 
     page_total: int
+    # Pages that have content. Pages whose reading failed are not counted here.
     pages_read: int
+    pages_failed: list[int] = Field(default_factory=list)
+    # Run OCR tries the failed pages once more. False after too many tries.
+    can_retry: bool = False
     reading: bool
     error: str | None = None
 
@@ -179,7 +183,9 @@ class DocumentReadingOut(BaseModel):
 class DocumentTextPage(BaseModel):
     page: int
     text: str
+    # "unreadable" when reading the page failed; ``error`` then says why.
     source: str
+    error: str | None = None
 
 
 class DocumentTextOut(DocumentReadingOut):

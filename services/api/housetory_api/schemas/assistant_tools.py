@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .ai import AssistantReference, SearchPageReference
 from .assistant_actions import AssistantActionProposalOut
@@ -31,6 +31,8 @@ class ManualLink(BaseModel):
     # Pages in the file and pages whose text is read so far.
     pages: int | None = None
     pages_read: int | None = None
+    # Pages whose reading failed: they have no text.
+    pages_failed: int | None = None
 
 
 class RunRequest(BaseModel):
@@ -75,19 +77,40 @@ class ToolStep(BaseModel):
     call: ToolCall
 
 
+QUOTE_CHARS = 600
+
+
 class ManualSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """A source the model names for its answer. It helps the reader to check the answer,
+    so a badly formed one is repaired or dropped: it never makes the answer invalid."""
+
+    model_config = ConfigDict(extra="ignore")
 
     document_id: uuid.UUID
-    pages: list[int] = Field(min_length=1, max_length=12)
+    pages: list[int] = Field(min_length=1)
     quote: str | None = Field(
         default=None,
-        max_length=300,
         description=(
-            "A few words copied exactly from one of those pages that support the answer. "
-            "The application shows them only when they really stand on the page."
+            "A few words (one sentence at most) copied exactly from one of those pages "
+            "that support the answer. The application shows them only when they really "
+            "stand on the page."
         ),
     )
+
+    @field_validator("pages", mode="before")
+    @classmethod
+    def _page_numbers(cls, value: Any) -> Any:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return [value]
+        if isinstance(value, list):
+            numbers = [n for n in value if isinstance(n, int) and not isinstance(n, bool)]
+            return numbers[:12]
+        return value
+
+    @field_validator("quote", mode="before")
+    @classmethod
+    def _short_quote(cls, value: Any) -> Any:
+        return value[:QUOTE_CHARS] if isinstance(value, str) else None
 
 
 class AnswerStep(BaseModel):
@@ -96,13 +119,24 @@ class AnswerStep(BaseModel):
     kind: Literal["answer", "clarify", "unsupported"]
     sources: list[ManualSource] = Field(
         default_factory=list,
-        max_length=6,
         description=(
             "When the answer uses a manual: the document_id and the page numbers the "
-            "facts come from. Only pages whose text a tool returned in this conversation. "
+            "facts come from. Only pages whose text a tool returned in this request. "
             "The application shows them as links to those pages."
         ),
     )
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _usable_sources(cls, value: Any) -> list[ManualSource]:
+        kept = []
+        for entry in value if isinstance(value, list) else []:
+            try:
+                kept.append(ManualSource.model_validate(entry))
+            except ValidationError:
+                continue
+        return kept[:6]
+
     message: str = Field(
         default="",
         max_length=4000,

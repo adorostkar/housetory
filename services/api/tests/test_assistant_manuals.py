@@ -167,6 +167,7 @@ def test_a_question_is_answered_from_the_pages_read_and_follow_ups_read_only_wha
             "state": "readable",
             "pages": 12,
             "pages_read": 12,
+            "pages_failed": 0,
         }
     ]
     assert "12 pages, all read" in found["summary"] and "pages" not in found["facts"]
@@ -440,7 +441,7 @@ def test_manual_tools_stay_inside_the_household_and_the_property(
     ]
 
     monkeypatch.setattr(
-        ocr, "render_pdf_page", lambda path, page, target, dpi=200: target.write_bytes(b"png")
+        ocr, "render_pdf_page", lambda path, page, target, **size: target.write_bytes(b"png")
     )
     others = {
         MAP_SYSTEM: map_from_headings,
@@ -507,8 +508,8 @@ def test_a_page_is_looked_at_with_a_vision_model_and_failures_are_said_plainly(
     )
     drawn = []
 
-    def render(path, page, target, dpi=200):
-        drawn.append(page)
+    def render(path, page, target, **size):
+        drawn.append((page, size))
         target.write_bytes(b"\x89PNG synthetic page picture")
         return target
 
@@ -554,6 +555,8 @@ def test_a_page_is_looked_at_with_a_vision_model_and_failures_are_said_plainly(
         others=others,
     )
     failed, looked, read = (step["result"] for step in run["steps"])
+    # The page is drawn large enough to read small labels, whatever the page size.
+    assert drawn[0] == (11, {"long_side": manual_tools.LOOK_PICTURE_SIDE})
     # A provider failure is an observation with its reason; the request goes on.
     assert failed["error"] == "vision_failed" and "HTTP 503 from the provider" in failed["summary"]
     assert seen[0] == ("llava:13b", "image/png", seen[0][2]) and "dial symbols" in seen[0][2]
@@ -622,3 +625,355 @@ def test_nothing_readable_is_reported_with_its_reason(owner_client, configured_a
     assert "Reading stopped earlier: Reading stopped: Local OCR is unavailable" in failed["summary"]
     assert failed["manuals"][0]["url"] == f"/documents/{document['id']}/view"
     assert "upload" not in json.dumps([unread, processing, failed]).lower()
+
+
+def test_a_page_whose_reading_failed_is_reported_retried_on_request_and_never_cited(
+    owner_client, anon_client, configured_ai, monkeypatch
+):
+    client = owner_client
+    item = client.post("/api/v1/items", json={"name": "Multimeter"}).json()["item"]
+    # Page 11, where the answer is, is a scan, and OCR fails on it.
+    document = upload(
+        client, pdf_bytes([*PAGES[:10], None, PAGES[11]]), title=TITLE, item_ids=[item["id"]]
+    )
+    read = fake_ocr(monkeypatch, unreadable=(11,))
+    monkeypatch.setattr(ai, "complete_json", map_from_headings)
+    run_document_ocr(uuid.UUID(document["id"]))
+    run_document_jobs()
+    assert read == [11]
+
+    # A read-only member is told what failed and who can try again. Nothing is queued.
+    (viewer,) = results(
+        anon_client,
+        monkeypatch,
+        [call("read_manual", item_id=item["id"])],
+        viewer_headers(client),
+    )
+    assert "an owner or member has to start it" in viewer["summary"]
+
+    def retry_when_a_page_failed(prompt):
+        result = prompt["observations"][0]["result"]
+        # The manual is not passed off as complete: 11 of 12 pages, and page 11 failed.
+        assert "the complete text" not in result["summary"]
+        assert f"READING FAILED on page 11 of “{TITLE}”" in result["summary"]
+        assert "OcrError: Tesseract failed: unreadable page" in result["summary"]
+        assert "Page 11 can be tried again: call process_manual." in result["summary"]
+        assert result["facts"]["manuals"][0]["pages_failed"] == [11]
+        failed_page = result["facts"]["pages"][10]
+        assert failed_page["text"] == "" and "Reading this page FAILED" in failed_page["note"]
+        return call("process_manual", item_id=item["id"])
+
+    def say_what_is_known(prompt):
+        return {
+            "kind": "answer",
+            "message": "Page 11 could not be read, so I cannot give the steps.",
+            # A page that gave no text was not read: it must not become a citation.
+            "sources": [{"document_id": document["id"], "pages": [11]}],
+        }
+
+    # Page 11 still fails when it is tried again.
+    read.clear()
+    still, _ = converse(
+        client,
+        monkeypatch,
+        "How do I check the amp with the multimeter?",
+        [call("read_manual", item_id=item["id"]), retry_when_a_page_failed, say_what_is_known],
+    )
+    listed, processing, again = (step["result"] for step in still["steps"])
+    assert (listed["manuals"][0]["pages_read"], listed["manuals"][0]["pages_failed"]) == (11, 1)
+    assert "Trying page 11" in processing["summary"]
+    assert processing["facts"]["waiting_for"] == [document["id"]]
+    # Only the failed page was tried, once. The other eleven were not read again.
+    assert read == [11]
+    assert "READING FAILED on page 11" in again["summary"] and still["citations"] == []
+
+    # Now the page can be read. The same request recovers it and the answer cites it.
+    read = fake_ocr(monkeypatch)
+    recovered, _ = converse(
+        client,
+        monkeypatch,
+        "Try again: how do I check the amp?",
+        [
+            call("process_manual", item_id=item["id"]),
+            lambda prompt: {
+                "kind": "answer",
+                "message": "It is on page 11.",
+                "sources": [
+                    {
+                        "document_id": page_with(prompt, "SCANNED PAGE 11")["document_id"],
+                        "pages": [11],
+                    }
+                ],
+            },
+        ],
+    )
+    assert read == [11]
+    whole = recovered["steps"][1]["result"]
+    assert "the complete text (12 pages)" in whole["summary"]
+    assert "READING FAILED" not in whole["summary"]
+    assert (whole["manuals"][0]["pages_read"], whole["manuals"][0]["pages_failed"]) == (12, 0)
+    assert [citation["page"] for citation in recovered["citations"]] == [11]
+
+    # A page that failed three times is left alone, and the assistant is told so.
+    with SessionLocal() as db:
+        row = db.get(DocumentPageText, (uuid.UUID(document["id"]), 4))
+        row.source, row.text, row.attempts, row.error = "unreadable", "", 3, "OcrError: timed out"
+        db.commit()
+    read.clear()
+    # The map is built again without page 4. The page itself is not tried.
+    given_up, _ = results(
+        client, monkeypatch, [call("process_manual", item_id=item["id"])], steps=2
+    )
+    assert "its map is being built" in given_up["summary"]
+    assert "Page 4 failed 3 times and is not tried again" in given_up["summary"]
+    assert "look_at_manual_page can read such a page from its picture" in given_up["summary"]
+    assert read == [] and run_document_jobs() == []
+
+
+def test_a_follow_up_answered_from_memory_is_sent_back_to_read_the_pages(
+    owner_client, configured_ai, monkeypatch
+):
+    """What a real model did: it answered a follow-up without any tool, with general
+    advice, and named pages that an earlier turn had read."""
+    client = owner_client
+    item, document = multimeter(client, monkeypatch)
+    first, _ = converse(
+        client,
+        monkeypatch,
+        "How do I check the amp with the multimeter?",
+        [
+            call("read_manual", item_id=item["id"], pages="11"),
+            {"kind": "answer", "message": f"See the steps ({TITLE}, page 11)."},
+        ],
+    )
+    assert [citation["page"] for citation in first["citations"]] == [11]
+
+    from_memory = {
+        "kind": "answer",
+        "message": f"Set the dial to V and use the VΩ jack, as the manual says ({TITLE}, pages "
+        "9-10). Ensure the circuit is powered.",
+        "sources": [{"document_id": document["id"], "pages": [9, 10]}],
+    }
+
+    def read_after_the_correction(prompt):
+        # The answer was not accepted, and the model is told why and what to do.
+        assert prompt["observations"] == []
+        assert "no text of those pages was returned in this request" in prompt["correction"]
+        return call("read_manual", document_id=document["id"], pages="9")
+
+    def answer_from_the_page(prompt):
+        page = page_with(prompt, "MEASURING VOLTAGE")
+        return {
+            "kind": "answer",
+            "message": f"Turn the rotary switch to V ({TITLE}, page 9).",
+            "sources": [
+                {
+                    "document_id": page["document_id"],
+                    "pages": [9],
+                    # Models quote too much. The quote is cut, the answer is kept.
+                    "quote": page["text"] + " and much more text" * 60,
+                },
+                # A source that is not well formed is dropped, not a reason to fail.
+                {"document_id": "the manual", "pages": "nine"},
+            ],
+        }
+
+    followed, prompts = converse(
+        client,
+        monkeypatch,
+        "And how do I measure voltage?",
+        [from_memory, read_after_the_correction, answer_from_the_page],
+        parent_id=first["id"],
+    )
+    assert followed["state"] == "completed" and followed["model_calls"] == 3
+    assert followed["answer"] == f"Turn the rotary switch to V ({TITLE}, page 9)."
+    assert [(c["page"], c["excerpt"]) for c in followed["citations"]] == [(9, "")]
+    assert "never answer a manual question from memory" in " ".join(prompts[0]["system"].split())
+
+    # A model that insists is not asked twice. Its answer is shown without page links:
+    # pages read in an earlier turn are no evidence for a new answer.
+    insisted, _ = converse(
+        client,
+        monkeypatch,
+        "And the battery?",
+        [from_memory, from_memory],
+        parent_id=followed["id"],
+    )
+    assert insisted["state"] == "completed" and insisted["model_calls"] == 2
+    assert insisted["citations"] == []
+
+    # An answer that names no manual page is not touched.
+    plain, _ = converse(
+        client,
+        monkeypatch,
+        "Thanks, which item was that?",
+        [{"kind": "answer", "message": "Your Multimeter."}],
+        parent_id=insisted["id"],
+    )
+    assert plain["state"] == "completed" and plain["model_calls"] == 1
+
+
+def test_words_that_ocr_was_unsure_about_are_passed_on_until_the_page_is_looked_at(
+    owner_client, configured_ai, monkeypatch
+):
+    client = owner_client
+    item = client.post("/api/v1/items", json={"name": "Multimeter"}).json()["item"]
+    document = upload(
+        client, pdf_bytes([*PAGES[:10], None, PAGES[11]]), title=TITLE, item_ids=[item["id"]]
+    )
+
+    def scanned_page(path, number, embedded=""):
+        if ocr.has_text(embedded):
+            return ocr.PageText(embedded, "pdf_text")
+        return ocr.PageText(
+            'MEASURING CURRENT\n1. Turn the rotary switch to the "pas", "mas" or "at" setting.\n'
+            '2. Connect the red test lead to the "vawxoetye" terminal.',
+            "ocr",
+            ('"pas",', '"mas"', '"at"', '"vawxoetye"'),
+        )
+
+    monkeypatch.setattr(ocr, "read_pdf_page", scanned_page)
+    monkeypatch.setattr(ai, "complete_json", map_from_headings)
+    run_document_ocr(uuid.UUID(document["id"]))
+    run_document_jobs()
+
+    monkeypatch.setattr(
+        ai,
+        "config_for",
+        lambda *a, **k: configured_ai.__class__(**{**configured_ai.__dict__, "model": "llava:13b"}),
+    )
+    monkeypatch.setattr(
+        ocr, "render_pdf_page", lambda path, page, target, **size: target.write_bytes(b"png")
+    )
+    others = {
+        MAP_SYSTEM: map_from_headings,
+        manual_tools.LOOK_SYSTEM: lambda *a, **k: {
+            "text": "Turn the rotary switch to the µA, mA or A setting. Red lead: VΩHz terminal."
+        },
+    }
+    read, _, again = results(
+        client,
+        monkeypatch,
+        [
+            call("read_manual", item_id=item["id"], pages="10-12"),
+            call("look_at_manual_page", document_id=document["id"], page=11),
+            call("read_manual", item_id=item["id"], pages="10-12"),
+        ],
+        others=others,
+    )
+    typed, scanned, _ = read["facts"]["pages"]
+    # Only the scanned page carries the list: a text layer is not guessed at.
+    assert "ocr_unsure_words" not in typed
+    assert scanned["ocr_unsure_words"] == ['"pas",', '"mas"', '"at"', '"vawxoetye"']
+    assert "OCR was unsure about some words on page 11" in read["summary"]
+    assert "do not guess what it stands for" in read["summary"]
+    # After a vision model read the page, its reading is given and the warning is gone.
+    looked = again["facts"]["pages"][1]
+    assert "µA, mA or A setting" in looked["seen_by_vision_model"]
+    assert "ocr_unsure_words" not in looked and "OCR was unsure" not in again["summary"]
+
+
+def test_cited_pages_where_ocr_was_unsure_are_looked_at_before_the_answer_is_shown(
+    owner_client, configured_ai, monkeypatch
+):
+    """A real model did not look at the page by itself: it guessed the socket label from
+    the misread words. So the application looks, once, at the pages an answer cites."""
+    client = owner_client
+    item = client.post("/api/v1/items", json={"name": "Multimeter"}).json()["item"]
+    document = upload(
+        client, pdf_bytes([*PAGES[:9], None, None, PAGES[11]]), title=TITLE, item_ids=[item["id"]]
+    )
+
+    def scanned_page(path, number, embedded=""):
+        if ocr.has_text(embedded):
+            return ocr.PageText(embedded, "pdf_text")
+        return ocr.PageText(
+            f'SCANNED PAGE {number}\nTurn the rotary switch to the "mas" setting and connect '
+            'the red test lead to the "vawxoetye" terminal.',
+            "ocr",
+            ('"mas"', '"vawxoetye"'),
+        )
+
+    monkeypatch.setattr(ocr, "read_pdf_page", scanned_page)
+    monkeypatch.setattr(ai, "complete_json", map_from_headings)
+    run_document_ocr(uuid.UUID(document["id"]))
+    run_document_jobs()
+    monkeypatch.setattr(
+        ai,
+        "config_for",
+        lambda *a, **k: configured_ai.__class__(**{**configured_ai.__dict__, "model": "llava:13b"}),
+    )
+    monkeypatch.setattr(
+        ocr, "render_pdf_page", lambda path, page, target, **size: target.write_bytes(b"png")
+    )
+    looked = []
+
+    def vision(system, prompt, **kwargs):
+        looked.append(prompt)
+        return {"text": 'Turn the rotary switch to the "mA" setting. Red lead: "VΩHz" terminal.'}
+
+    others = {MAP_SYSTEM: map_from_headings, manual_tools.LOOK_SYSTEM: vision}
+
+    def guessed(page_number):
+        return {
+            "kind": "answer",
+            "message": f"Use the mA setting and the VΩmA terminal ({TITLE}, page {page_number}).",
+            "sources": [{"document_id": document["id"], "pages": [page_number]}],
+        }
+
+    def corrected(prompt):
+        # The page was looked at although the model did not ask for it.
+        assert [step["call"]["name"] for step in prompt["observations"]] == [
+            "read_manual",
+            "look_at_manual_page",
+        ]
+        assert "looked at those pages with a vision model" in prompt["correction"]
+        seen = prompt["observations"][-1]["result"]["facts"]["pages"][0]["seen_by_vision_model"]
+        assert '"VΩHz" terminal' in seen
+        return {
+            "kind": "answer",
+            "message": f"Use the mA setting and the VΩHz terminal ({TITLE}, page 11).",
+            "sources": [
+                {"document_id": document["id"], "pages": [11], "quote": 'Red lead: "VΩHz" terminal'}
+            ],
+        }
+
+    first, _ = converse(
+        client,
+        monkeypatch,
+        "Which socket for small currents?",
+        [call("read_manual", item_id=item["id"], pages="11"), guessed(11), corrected],
+        others=others,
+    )
+    assert first["answer"] == f"Use the mA setting and the VΩHz terminal ({TITLE}, page 11)."
+    assert (first["model_calls"], len(looked)) == (3, 1)
+    assert [(c["page"], c["excerpt"]) for c in first["citations"]] == [
+        (11, 'Red lead: "VΩHz" terminal')
+    ]
+
+    # The reading is kept with the page: the next question about it costs nothing extra.
+    again, _ = converse(
+        client,
+        monkeypatch,
+        "And which dial position?",
+        [call("read_manual", item_id=item["id"], pages="11"), guessed(11)],
+        others=others,
+        parent_id=first["id"],
+    )
+    assert (again["model_calls"], len(looked)) == (2, 1)
+    assert "seen_by_vision_model" in again["steps"][0]["result"]["facts"]["pages"][0]
+    assert again["answer"] == guessed(11)["message"]
+
+    # Without a model that reads pictures nothing is looked at. The warning about the
+    # unsure words was already given with the page.
+    monkeypatch.setattr(manual_tools, "can_look", lambda db, household_id: False)
+    blind, _ = converse(
+        client,
+        monkeypatch,
+        "And on page 10?",
+        [call("read_manual", item_id=item["id"], pages="10"), guessed(10)],
+        others=others,
+    )
+    assert (blind["model_calls"], len(looked)) == (2, 1)
+    assert "OCR was unsure about some words on page 10" in blind["steps"][0]["result"]["summary"]
+    assert [citation["page"] for citation in blind["citations"]] == [10]

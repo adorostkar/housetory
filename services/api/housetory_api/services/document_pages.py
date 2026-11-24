@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -47,6 +47,9 @@ MAX_PAGE_CHARS = 20_000
 # worker for long and the pages read so far are already usable.
 BATCH_OCR_PAGES = 8
 BATCH_SECONDS = 90
+# A page whose reading failed is tried again only when someone asks for it, and at most
+# this many times in all. Nothing retries by itself.
+MAX_PAGE_ATTEMPTS = 3
 # The map is built from this much text per AI request, in at most this many requests.
 MAP_WINDOW_CHARS = 48_000
 MAP_MAX_REQUESTS = 6
@@ -78,14 +81,39 @@ class Page:
     source: str
     # What a vision model read from the picture of the page, if it was asked to look.
     seen: str | None = None
+    # Why reading the page failed, and how often it was tried.
+    error: str | None = None
+    attempts: int = 1
+    # Words that OCR itself was unsure about on this page.
+    unsure: tuple[str, ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        """Reading was tried and failed. A page read and found empty has not failed."""
+        return self.source == "unreadable" and self.attempts > 0
+
+    @property
+    def usable(self) -> bool:
+        """The page has content to work with: its text, or what a vision model saw."""
+        return self.source != "unreadable" or bool(self.seen)
+
+    @property
+    def can_retry(self) -> bool:
+        return self.failed and self.attempts < MAX_PAGE_ATTEMPTS
 
 
 @dataclass(frozen=True)
 class Progress:
-    """How much of a document's text is available right now."""
+    """How much of a document's text is available right now.
+
+    ``processed`` counts the pages that reading was tried on. ``read`` counts the pages
+    that have content. They differ by the pages whose reading failed.
+    """
 
     total: int
+    processed: int
     read: int
+    failed: tuple[Page, ...]
     reading: bool
     error: str | None
     map: dict[str, Any] | None
@@ -98,7 +126,12 @@ class Progress:
 
     @property
     def complete(self) -> bool:
-        return self.read >= self.limit
+        """Reading was tried on every page. Some of them may have failed."""
+        return self.processed >= self.limit
+
+    @property
+    def retryable(self) -> list[int]:
+        return [page.number for page in self.failed if page.can_retry]
 
 
 def source_file(db: Session, document: Document) -> tuple[str, str, str]:
@@ -128,8 +161,7 @@ def _first_pass_pages(document: Document) -> list[Page]:
     return pages
 
 
-def pages(db: Session, document: Document) -> list[Page]:
-    """Every page whose text is stored for the document's current content, in order."""
+def _stored_pages(db: Session, document: Document) -> list[Page]:
     rows = db.scalars(
         select(DocumentPageText)
         .where(
@@ -138,9 +170,26 @@ def pages(db: Session, document: Document) -> list[Page]:
         )
         .order_by(DocumentPageText.page_number)
     ).all()
-    if rows:
-        return [Page(row.page_number, row.text, row.source, row.vision_text) for row in rows]
-    return _first_pass_pages(document)
+    return [
+        Page(
+            row.page_number,
+            row.text,
+            row.source,
+            row.vision_text,
+            row.error,
+            row.attempts,
+            tuple(row.unsure_words or ()),
+        )
+        for row in rows
+    ]
+
+
+def pages(db: Session, document: Document) -> list[Page]:
+    """Every page stored for the document's current content, in order.
+
+    This includes pages whose reading failed (``failed``): they have no text.
+    """
+    return _stored_pages(db, document) or _first_pass_pages(document)
 
 
 def _reading(db: Session, document: Document) -> DocumentReading | None:
@@ -180,19 +229,17 @@ def _active(db: Session, document: Document, task: str) -> bool:
 
 def progress(db: Session, document: Document) -> Progress:
     reading = _reading(db, document)
-    read = db.scalar(
-        select(func.count())
-        .select_from(DocumentPageText)
-        .where(
-            DocumentPageText.document_id == document.id,
-            DocumentPageText.source_generation == document.source_generation,
-        )
-    ) or len(_first_pass_pages(document))
+    stored = pages(db, document)
+    # A page that only a vision model looked at was not tried by the reading job yet.
+    processed = sum(1 for page in stored if page.attempts > 0)
+    read = sum(1 for page in stored if page.usable)
     active = _active(db, document, READ_TASK)
     map_data = reading.map if reading is not None else None
     return Progress(
         total=reading.page_total if reading is not None else _count_pages(db, document),
+        processed=processed,
         read=read,
+        failed=tuple(page for page in stored if page.failed),
         reading=active,
         error=None if active or reading is None else reading.error,
         # A map built before more pages were read is replaced, not shown.
@@ -207,6 +254,8 @@ def reading_out(db: Session, document: Document) -> DocumentReadingOut:
     return DocumentReadingOut(
         page_total=state.total,
         pages_read=min(state.read, state.total),
+        pages_failed=[page.number for page in state.failed if not page.usable],
+        can_retry=bool(state.retryable),
         reading=state.reading,
         error=state.error,
     )
@@ -220,14 +269,25 @@ def _payload(document: Document) -> dict[str, Any]:
     }
 
 
-def request_reading(db: Session, document: Document, *, commit: bool = True) -> bool:
-    """Queue reading of the pages that have no text yet. True when reading is under way."""
+def request_reading(
+    db: Session, document: Document, *, commit: bool = True, retry_failed: bool = False
+) -> bool:
+    """Queue reading of the pages that were not tried yet. True when reading is under way.
+
+    With ``retry_failed`` the pages whose reading failed are tried once more, unless they
+    already failed ``MAX_PAGE_ATTEMPTS`` times. Only an explicit request sets it: the
+    assistant's process_manual, or Run OCR again. Pages that were read are never read again.
+    """
     state = progress(db, document)
     if state.reading:
         return True
-    if state.complete and _reading(db, document) is not None:
+    retry = state.retryable if retry_failed else []
+    if state.complete and _reading(db, document) is not None and not retry:
         return False
-    enqueue(db, READ_TASK, _payload(document), max_attempts=1, priority=3, commit=commit)
+    payload = _payload(document)
+    if retry:
+        payload["retry_pages"] = retry
+    enqueue(db, READ_TASK, payload, max_attempts=1, priority=3, commit=commit)
     return True
 
 
@@ -254,9 +314,23 @@ def request_map(
 
 
 def _store_page(
-    db: Session, document_id: uuid.UUID, generation: int, number: int, text: str, source: str
+    db: Session,
+    document_id: uuid.UUID,
+    generation: int,
+    number: int,
+    text: str,
+    source: str,
+    *,
+    error: str | None = None,
+    unsure: tuple[str, ...] = (),
+    tried: bool = True,
 ) -> bool:
-    """Keep one page. False when the document was removed or its content replaced."""
+    """Keep the result of reading one page. False when the document was removed or its
+    content replaced.
+
+    ``tried`` is False for a page that only a vision model looked at: the reading job
+    still has to read it.
+    """
     current = db.scalar(select(Document.source_generation).where(Document.id == document_id))
     if current != generation:
         db.rollback()
@@ -267,7 +341,11 @@ def _store_page(
         source_generation=generation,
         text=text.replace("\x00", "")[:MAX_PAGE_CHARS],
         source=source,
+        error=error,
+        unsure_words=list(unsure) or None,
+        attempts=1 if tried else 0,
     )
+    same_content = DocumentPageText.source_generation == statement.excluded.source_generation
     db.execute(
         statement.on_conflict_do_update(
             index_elements=["document_id", "page_number"],
@@ -275,7 +353,14 @@ def _store_page(
                 "source_generation": statement.excluded.source_generation,
                 "text": statement.excluded.text,
                 "source": statement.excluded.source,
-                "vision_text": None,
+                "error": statement.excluded.error,
+                "unsure_words": statement.excluded.unsure_words,
+                # Tries are counted per content. What a vision model saw stays with it.
+                "attempts": case(
+                    (same_content, DocumentPageText.attempts + statement.excluded.attempts),
+                    else_=statement.excluded.attempts,
+                ),
+                "vision_text": case((same_content, DocumentPageText.vision_text), else_=None),
             },
             # Text of the current content is never replaced by a page read from older content.
             where=DocumentPageText.source_generation <= statement.excluded.source_generation,
@@ -288,13 +373,13 @@ def _store_page(
 def store_seen(db: Session, document: Document, number: int, text: str) -> None:
     """Keep what a vision model read from the picture of a page."""
     row = db.get(DocumentPageText, (document.id, number))
-    if row is not None and row.source_generation == document.source_generation:
-        row.vision_text = text[:MAX_PAGE_CHARS]
-    else:
-        _store_page(db, document.id, document.source_generation, number, "", "unreadable")
+    if row is None or row.source_generation != document.source_generation:
+        _store_page(
+            db, document.id, document.source_generation, number, "", "unreadable", tried=False
+        )
         row = db.get(DocumentPageText, (document.id, number))
-        if row is not None:
-            row.vision_text = text[:MAX_PAGE_CHARS]
+    if row is not None:
+        row.vision_text = text[:MAX_PAGE_CHARS]
     db.commit()
 
 
@@ -317,7 +402,11 @@ def _set_reading(db: Session, document: Document, **values: Any) -> None:
 
 
 def run_read_job(payload: dict[str, Any]) -> dict[str, Any]:
-    """Read some of the pages that have no text yet, then queue the rest."""
+    """Read some of the pages that were not tried yet, then queue the rest.
+
+    ``retry_pages`` in the payload names failed pages to try once more. Each page is
+    tried once per request: a page that fails again is not carried to the next batch.
+    """
     document_id = uuid.UUID(str(payload["document_id"]))
     generation = int(payload["source_generation"])
     with SessionLocal() as db:
@@ -340,41 +429,52 @@ def run_read_job(payload: dict[str, Any]) -> dict[str, Any]:
             raise
         _set_reading(db, document, page_total=max(1, total), error=None)
         db.commit()
-        stored = set(
-            db.scalars(
-                select(DocumentPageText.page_number).where(
-                    DocumentPageText.document_id == document_id,
-                    DocumentPageText.source_generation == generation,
-                )
-            )
-        )
+        stored = {page.number: page for page in _stored_pages(db, document)}
         if not stored:
             # The first OCR pass already read the first pages: they are not read twice.
             for page in _first_pass_pages(document):
                 _store_page(db, document_id, generation, page.number, page.text, page.source)
-                stored.add(page.number)
-    missing = [number for number in range(1, min(total, MAX_PAGES) + 1) if number not in stored]
-    started, slow_pages, done = time.monotonic(), 0, 0
+                stored[page.number] = page
+    limit = min(total, MAX_PAGES)
+    missing = [
+        number
+        for number in range(1, limit + 1)
+        if number not in stored or stored[number].attempts == 0
+    ]
+    again = [
+        number
+        for number in sorted({int(number) for number in payload.get("retry_pages") or []})
+        if number in stored and stored[number].can_retry
+    ]
+    targets = missing + again
+    started, slow_pages, done, failed = time.monotonic(), 0, 0, []
     try:
-        for number in missing:
+        for number in targets:
             if slow_pages >= BATCH_OCR_PAGES or time.monotonic() - started > BATCH_SECONDS:
                 break
+            error = None
+            unsure: tuple[str, ...] = ()
             try:
                 if reader is not None:
                     embedded = reader.pages[number - 1].extract_text() or ""
-                    text, source = ocr.read_pdf_page(path, number, embedded)
+                    text, source, *more = ocr.read_pdf_page(path, number, embedded)
+                    unsure = tuple(more[0]) if more else ()
                 else:
                     extracted = ocr.extract_text(path, content_type)
-                    text, source = extracted.text, extracted.source
+                    text, source, unsure = extracted.text, extracted.source, extracted.unsure
             except ocr.OcrUnavailableError:
                 raise
             except Exception as exc:  # noqa: BLE001 - one bad page does not stop the others
                 logger.warning("Page %s of document %s was not read: %s", number, document_id, exc)
                 text, source = "", "unreadable"
+                error = " ".join(f"{type(exc).__name__}: {exc}".split())[:300]
+                failed.append(number)
             if source != "pdf_text":
                 slow_pages += 1
             with SessionLocal() as db:
-                if not _store_page(db, document_id, generation, number, text, source):
+                if not _store_page(
+                    db, document_id, generation, number, text, source, error=error, unsure=unsure
+                ):
                     return {"document_id": str(document_id), "skipped": True, "reason": "stale"}
             done += 1
     except Exception as exc:
@@ -388,13 +488,27 @@ def run_read_job(payload: dict[str, Any]) -> dict[str, Any]:
         document = db.get(Document, document_id)
         if document is None or document.source_generation != generation:
             return {"document_id": str(document_id), "skipped": True, "reason": "stale_source"}
-        left = len(missing) - done
+        left = targets[done:]
         if left:
-            enqueue(db, READ_TASK, _payload(document), max_attempts=1, priority=3, commit=False)
+            # Pages tried in this batch are not in ``left``, also when they failed again.
+            retry_left = [number for number in left if number in again]
+            enqueue(
+                db,
+                READ_TASK,
+                {**_payload(document), **({"retry_pages": retry_left} if retry_left else {})},
+                max_attempts=1,
+                priority=3,
+                commit=False,
+            )
         else:
             request_map(db, document, commit=False, after_reading=True)
         db.commit()
-    return {"document_id": str(document_id), "pages_read": done, "pages_left": left}
+    return {
+        "document_id": str(document_id),
+        "pages_read": done - len(failed),
+        "pages_failed": failed,
+        "pages_left": len(left),
+    }
 
 
 def bookmarks(path: Path) -> list[tuple[str, int]]:
@@ -447,35 +561,49 @@ def _map_requests(document_pages: list[Page]) -> tuple[list[str], bool]:
 
 
 def _headed_by(title: str, document_pages: list[Page]) -> list[int]:
-    """Pages where the title stands on a line of its own, as a heading does.
-
-    A contents page also prints the title, but with dots and a page number after it.
-    """
-    wanted = title.lower().strip(" .:")
+    """Pages where the title stands on a line of its own, as a heading does."""
+    wanted = title.lower().strip(_HEADING_MARKS)
     return [
         page.number
         for page in document_pages
         if any(
-            " ".join(line.split()).lower().strip(" .:") == wanted
+            " ".join(line.split()).lower().strip(_HEADING_MARKS) == wanted
             for line in (page.seen or page.text).splitlines()
         )
     ]
+
+
+# Marks that OCR leaves around a heading line, and the dots of a contents page.
+_HEADING_MARKS = " .:-–—_*"
+# A page that lists this many section titles as lines is a contents page.
+_CONTENTS_PAGE_TITLES = 3
 
 
 def checked_map(raw: Any, document_pages: list[Page]) -> dict[str, list[dict[str, Any]]]:
     """Keep only map entries whose pages exist and were read.
 
     A section is moved to the one page where its title is a heading, when that is not
-    the page the model gave: models sometimes copy the number printed on a contents page.
+    the page the model gave: models are often one page off, or copy the number printed
+    on a contents page. The contents page itself prints every title, so it is not
+    counted as the place of a heading.
     """
     texts = {page.number: (page.seen or page.text).lower() for page in document_pages}
     sections: list[dict[str, Any]] = []
     topics: list[dict[str, Any]] = []
     if not isinstance(raw, dict):
         return {"sections": sections, "topics": topics}
-    for entry in raw.get("sections") or []:
-        if not isinstance(entry, dict):
-            continue
+    entries = [entry for entry in raw.get("sections") or [] if isinstance(entry, dict)]
+    headed_pages = {
+        title: _headed_by(title, document_pages)
+        for title in {" ".join(str(entry.get("title") or "").split())[:120] for entry in entries}
+        if title
+    }
+    listed: dict[int, int] = {}
+    for numbers in headed_pages.values():
+        for number in numbers:
+            listed[number] = listed.get(number, 0) + 1
+    contents = {number for number, count in listed.items() if count >= _CONTENTS_PAGE_TITLES}
+    for entry in entries:
         title = " ".join(str(entry.get("title") or "").split())[:120]
         first, last = entry.get("first_page"), entry.get("last_page")
         last = last if isinstance(last, int) and not isinstance(last, bool) else first
@@ -483,7 +611,7 @@ def checked_map(raw: Any, document_pages: list[Page]) -> dict[str, list[dict[str
             continue
         if first not in texts or last not in texts or last < first:
             continue
-        headed = _headed_by(title, document_pages)
+        headed = [number for number in headed_pages[title] if number not in contents]
         if len(headed) == 1 and headed[0] != first:
             first = headed[0]
             last = max(first, last)
@@ -567,7 +695,8 @@ def run_map_job(payload: dict[str, Any]) -> dict[str, Any]:
         document = db.get(Document, document_id)
         if document is None or document.source_generation != generation:
             return {"document_id": str(document_id), "skipped": True, "reason": "stale_source"}
-        document_pages = pages(db, document)
+        # The map is built from pages that have content. A page whose reading failed has none.
+        document_pages = [page for page in pages(db, document) if page.usable]
         if not document_pages or not assistant_configured(db, document.household_id):
             return {"document_id": str(document_id), "skipped": True, "reason": "not_available"}
         config = ai.config_for(db, document.household_id, AiTask.ASSISTANT.value)

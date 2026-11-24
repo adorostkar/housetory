@@ -82,12 +82,18 @@ questions about an item, read its manual with read_manual and answer from the pa
 were given. The map and search_manual only help to find pages: never quote or cite them. If
 the pages you read do not answer the question, read other pages before you say the manual does
 not cover it; a word search that found nothing proves nothing, because manuals use their own
-words. When a manual is incomplete or not read, call process_manual. When a page's text is
-garbled or the answer depends on a drawing, symbol or table, use look_at_manual_page. Name the
-document and page each fact comes from and list those pages in sources, with a short quote
-copied from the page; cite only pages whose text a tool returned. A follow-up about the same
-item reuses the item or manual already
-identified in this conversation: read only the pages the new question needs. When nothing can
+words. When a manual is incomplete or not read, call process_manual. Scanned pages are read by
+OCR, which misreads symbols, units and the labels of dials, buttons and sockets as nonsense
+words; a page lists the words OCR was unsure about as ocr_unsure_words. When the answer names
+a dial position, symbol, unit or socket and the text there is unsure or makes no sense, call
+look_at_manual_page for that page first; never guess what a misread word stands for. Also use
+look_at_manual_page when the answer depends on a drawing or table. Name the
+document and page each fact comes from and list those pages in sources, with one short quote
+copied from the page; cite only pages whose text a tool returned in this request. A follow-up
+about the same item reuses the item or manual already identified in this conversation, but
+earlier turns keep only the map and the page numbers, never the page text: for every new
+question read the pages it needs with read_manual before you answer, and never answer a manual
+question from memory or general knowledge. When nothing can
 be read, report the reason the tool gives (no manual attached, pages still being read, reading
 failed, vision model unavailable) and the action it names. Never replace a model-specific
 procedure with general instructions, and never ask the user to upload a manual that is already
@@ -530,6 +536,7 @@ def _prompt(db: Session, run: AssistantRun) -> str:
                 "context_newest_first": parents,
                 "request": run.query,
                 "observations": _observations(steps, budget, room),
+                **({"correction": run.data["correction"]} if run.data.get("correction") else {}),
                 "remaining_calls": MAX_MODEL_CALLS - run.data.get("attempt_calls", 0),
             },
             ensure_ascii=False,
@@ -553,10 +560,65 @@ def _prompt(db: Session, run: AssistantRun) -> str:
     return prompt
 
 
-def _citations(db: Session, run: AssistantRun, answer: str, sources: list) -> list:
-    """Manual pages the answer rests on: those read in this request or earlier turns."""
+def _citations(run: AssistantRun, answer: str, sources: list) -> list:
+    """Manual pages the answer rests on: only pages whose text a tool returned in this
+    request.
+
+    Pages read in an earlier turn do not count. Their text is not kept in the
+    conversation, so an answer that names them was not written from them.
+    """
     from .manual_tools import citations
 
+    return citations(
+        run.data.get("steps", []), answer, [source.model_dump(mode="json") for source in sources]
+    )
+
+
+MANUAL_TOOLS = {"find_manuals", "read_manual", "search_manual", "look_at_manual_page"}
+UNREAD_PAGES_NOTE = (
+    "Your answer was not accepted. It names pages of a manual, but no text of those pages "
+    "was returned in this request, and page text from earlier turns is not kept. Read the "
+    "pages with read_manual now (the map and the page numbers from earlier turns tell you "
+    "which), then answer only from what you read. If you cannot read them, say so and do "
+    "not give instructions from general knowledge."
+)
+# Pages the application looks at by itself before an answer is shown.
+MAX_LOOKS = 2
+LOOKED_NOTE = (
+    "Your answer is not shown yet. OCR was unsure about words on the pages you cited, so "
+    "the application looked at those pages with a vision model: see the "
+    "look_at_manual_page results (seen_by_vision_model). Compare your answer with them. "
+    "For dial positions, symbols, units, buttons and socket labels use what the vision "
+    "model read, and remove any label that neither reading shows. Then give the final "
+    "answer with its sources. Do not mention this check."
+)
+
+
+def _unsure_cited_pages(db: Session, run: AssistantRun, cited: list) -> list[dict]:
+    """look_at_manual_page calls for cited pages where OCR was unsure and no vision model
+    has read the page yet. Empty when no model can read pictures."""
+    from .manual_tools import can_look, unsure_pages
+
+    wanted = unsure_pages(
+        run.data.get("steps", []), [(str(entry.document_id), entry.page) for entry in cited]
+    )[:MAX_LOOKS]
+    if not wanted or not can_look(db, run.household_id):
+        return []
+    return [
+        {"name": "look_at_manual_page", "arguments": {"document_id": document_id, "page": page}}
+        for document_id, page in wanted
+    ]
+
+
+def _names_unread_manual_pages(db: Session, run: AssistantRun, answer: str, sources: list) -> bool:
+    """True when an answer points to manual pages although none of them was returned in
+    this request. The conversation must be about a manual: this request or an earlier
+    turn used a manual tool."""
+    from .manual_tools import page_numbers_in, pages_returned
+
+    named = {number for source in sources for number in source.pages} | page_numbers_in(answer)
+    if not named or named & pages_returned(run.data.get("steps", [])):
+        return False
     steps = list(run.data.get("steps", []))
     parent_id = run.parent_id
     for _ in range(4):
@@ -569,7 +631,7 @@ def _citations(db: Session, run: AssistantRun, answer: str, sources: list) -> li
             break
         steps += parent.data.get("steps", [])
         parent_id = parent.parent_id
-    return citations(steps, answer, [source.model_dump(mode="json") for source in sources])
+    return any(step["call"]["name"] in MANUAL_TOOLS for step in steps)
 
 
 def _current(db: Session, run_id: uuid.UUID, generation: int) -> AssistantRun | None:
@@ -761,6 +823,12 @@ def run_job(payload: dict):
                         }
                         _enqueue(db, run, delay=MANUAL_WAIT_SECONDS, continuing=True)
                         return {"run_id": str(run_id), "state": "waiting"}
+                    more = data.get("pending_looks") or []
+                    if more:
+                        # The next cited page that the application looks at by itself.
+                        run.data = {**data, "pending_call": more[0], "pending_looks": more[1:]}
+                        db.commit()
+                        continue
                     db.commit()
                 if data.get("attempt_calls", 0) >= MAX_MODEL_CALLS:
                     raise ApiError(
@@ -825,14 +893,45 @@ def run_job(payload: dict):
                         "assistant_empty_answer",
                         "The model returned no answer. Retry or use local search.",
                     )
+                cited = _citations(run, answer, step.sources)
+                if (
+                    step.kind == "answer"
+                    and not cited
+                    and not run.data.get("sent_back")
+                    and _names_unread_manual_pages(db, run, answer, step.sources)
+                ):
+                    # Sent back once. The model has to read the pages it points to.
+                    run.data = {
+                        **run.data,
+                        "sent_back": True,
+                        "correction": UNREAD_PAGES_NOTE,
+                        "message": "Reading the manual pages before answering.",
+                    }
+                    db.commit()
+                    continue
+                looks = (
+                    _unsure_cited_pages(db, run, cited)
+                    if step.kind == "answer" and not run.data.get("looked")
+                    else []
+                )
+                if looks:
+                    # OCR was unsure on the cited pages. They are looked at once before the
+                    # answer is shown, whether or not the model thought of it.
+                    run.data = {
+                        **run.data,
+                        "looked": True,
+                        "pending_call": looks[0],
+                        "pending_looks": looks[1:],
+                        "correction": LOOKED_NOTE,
+                        "message": "Looking at the cited manual pages before answering.",
+                    }
+                    db.commit()
+                    continue
                 run.state = "awaiting_approval" if awaiting else "completed"
                 run.data = {
                     **run.data,
                     "answer": answer,
-                    "citations": [
-                        citation.model_dump(mode="json")
-                        for citation in _citations(db, run, answer, step.sources)
-                    ],
+                    "citations": [citation.model_dump(mode="json") for citation in cited],
                     "message": " ".join(
                         part for part in (answer, (step.prepared_note or "").strip()) if part
                     )

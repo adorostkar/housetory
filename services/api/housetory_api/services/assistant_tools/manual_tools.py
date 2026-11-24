@@ -37,6 +37,9 @@ MAP_CHARS = 10_000
 SEARCH_MATCHES = 12
 SNIPPET_CHARS = 220
 SEEN_CHARS = 8_000
+# Pixels on the longer side of the page picture a vision model gets. A manual with small
+# pages drawn at a fixed dpi gave a picture too small to read symbols and labels from.
+LOOK_PICTURE_SIDE = 1600
 EXCERPT_CHARS = 280
 MAX_CITATIONS = 6
 TYPE_LABELS = {"manual": "manual", "specification": "specification", "other": "other document"}
@@ -215,33 +218,73 @@ def _wanted(spec: str) -> list[int]:
     return sorted(set(numbers))[: document_pages.MAX_PAGES]
 
 
+def _lost(state: Progress) -> list[Page]:
+    """Pages whose reading failed and that nothing else gave content to."""
+    return [page for page in state.failed if not page.usable]
+
+
+def _failure_note(state: Progress, title: str, can_process: bool, *, retrying: bool = False) -> str:
+    """Which pages could not be read, why, and what can still be done about them."""
+    lost = _lost(state)
+    if not lost:
+        return ""
+    reasons = list(dict.fromkeys(page.error for page in lost if page.error))
+    note = (
+        f"READING FAILED on page {_ranges([page.number for page in lost])} of “{title}”: "
+        "no text could be read there"
+        + (f" (reason recorded: {reasons[0][:160]})" if reasons else "")
+        + "."
+    )
+    again = [page.number for page in lost if page.can_retry]
+    given_up = [page.number for page in lost if not page.can_retry]
+    if again and not retrying:
+        note += f" Page {_ranges(again)} can be tried again: " + (
+            "call process_manual."
+            if can_process
+            else "an owner or member has to start it; this account is read-only."
+        )
+    if given_up:
+        note += (
+            f" Page {_ranges(given_up)} failed {document_pages.MAX_PAGE_ATTEMPTS} times and "
+            "is not tried again; Clean up scan on the document's Details page may help."
+        )
+    return note + (
+        " look_at_manual_page can read such a page from its picture. Tell the user which "
+        "pages could not be read, and never conclude that the manual does not cover "
+        "something that may be on them."
+    )
+
+
 def _reading_note(target: Target, document: Document, can_process: bool) -> str | None:
     """What is not read yet in a document, and what can be done about it."""
     state = target.progress[document.id]
     title = _short(document.title)
-    if state.complete and state.read:
+    notes = []
+    if state.complete and state.processed:
         if state.total > document_pages.MAX_PAGES:
-            return (
+            notes.append(
                 f"“{title}” has {state.total} pages; only the first "
                 f"{document_pages.MAX_PAGES} are read."
             )
-        return None
-    so_far = (
-        f"only {state.read} of {state.limit} pages of “{title}” are read so far"
-        if state.read
-        else f"no page of “{title}” is read yet"
-    )
-    if state.reading or target.state(document) == "ocr_pending":
-        action = "the rest is being read now; call process_manual to wait for it"
-    elif can_process:
-        action = "call process_manual to read the rest now"
     else:
-        action = "an owner or member has to start the reading; this account is read-only"
-    reason = f" Reading stopped earlier: {state.error}" if state.error else ""
-    return (
-        f"INCOMPLETE: {so_far}; {action}. Never conclude from the pages read so far that "
-        f"the manual does not cover something.{reason}"
-    )
+        so_far = (
+            f"only {state.read} of {state.limit} pages of “{title}” are read so far"
+            if state.read
+            else f"no page of “{title}” is read yet"
+        )
+        if state.reading or target.state(document) == "ocr_pending":
+            action = "the rest is being read now; call process_manual to wait for it"
+        elif can_process:
+            action = "call process_manual to read the rest now"
+        else:
+            action = "an owner or member has to start the reading; this account is read-only"
+        reason = f" Reading stopped earlier: {state.error}" if state.error else ""
+        notes.append(
+            f"INCOMPLETE: {so_far}; {action}. Never conclude from the pages read so far that "
+            f"the manual does not cover something.{reason}"
+        )
+    notes.append(_failure_note(state, title, can_process, retrying=state.reading))
+    return " ".join(note for note in notes if note) or None
 
 
 def _manual_facts(target: Target) -> list[dict]:
@@ -255,6 +298,7 @@ def _manual_facts(target: Target) -> list[dict]:
                 "type": document.document_type,
                 "pages": state.total,
                 "pages_read": min(state.read, state.total),
+                "pages_failed": [page.number for page in _lost(state)],
                 "reading_now": state.reading,
                 "map": ("ready" if state.map else "being built" if state.mapping else "not built"),
                 "attached_to": target.owners[document.id][:5],
@@ -307,6 +351,7 @@ def _output(target: Target, summary: str, facts: dict) -> ToolOutput:
                 pages_read=min(
                     target.progress[document.id].read, target.progress[document.id].total
                 ),
+                pages_failed=len(_lost(target.progress[document.id])),
             )
             for document in target.documents[:8]
         ],
@@ -342,6 +387,8 @@ def find(db: Session, auth: AuthContext, run: AssistantRun, item, document_id) -
             parts.append(f"{state.total} pages, all read" if state.total > 1 else "read")
         else:
             parts.append(f"{state.read} of {state.total} pages read")
+        if _lost(state):
+            parts.append(f"reading failed on page {_ranges([p.number for p in _lost(state)])}")
         if item is None:
             parts.append(target.where(document))
         elif target.relations.get(document.id) == "online_download":
@@ -453,6 +500,7 @@ def read(
                 )
                 numbers = []
         sent: list[int] = []
+        unsure_pages: list[int] = []
         for number in numbers:
             page = stored[number]
             text, seen = page.text.strip(), (page.seen or "").strip()
@@ -468,20 +516,36 @@ def read(
             }
             if seen:
                 entry["seen_by_vision_model"] = seen[: max(0, budget - len(entry["text"]))]
-            if not text and not seen:
+            elif page.unsure:
+                # Once a vision model has read the page, its reading is the better source.
+                entry["ocr_unsure_words"] = list(page.unsure)
+                unsure_pages.append(number)
+            if page.failed and not seen:
                 entry["note"] = (
-                    "No text was read on this page. It may hold only a picture, or reading "
-                    "failed. look_at_manual_page can read it from its picture."
+                    "Reading this page FAILED: it has no text, and what it says is unknown. "
+                    "look_at_manual_page can read it from its picture."
+                )
+            elif not text and not seen:
+                entry["note"] = (
+                    "This page was read and no text was found on it. It may hold only a "
+                    "picture. look_at_manual_page can read it from its picture."
                 )
             budget -= min(cost, budget)
             returned.append(entry)
             sent.append(number)
         held_back = [number for number in numbers if number not in sent]
         if sent:
-            all_of_it = not pages and not held_back and state.complete
+            all_of_it = not pages and not held_back and state.complete and not _lost(state)
             lines.append(
                 f"Returned pages {_ranges(sent)} of “{title}”"
                 + (f": the complete text ({state.total} pages)." if all_of_it else ".")
+            )
+        if unsure_pages:
+            lines.append(
+                f"OCR was unsure about some words on page {_ranges(unsure_pages)}; each page "
+                "lists them as ocr_unsure_words. They are often symbols, units or labels of "
+                "dials and sockets, read as nonsense. If your answer depends on one of them, "
+                "call look_at_manual_page for that page; do not guess what it stands for."
             )
         if held_back:
             lines.append(
@@ -590,21 +654,35 @@ def process(db: Session, auth: AuthContext, run: AssistantRun, item, document_id
     for document in target.documents:
         title = _short(document.title)
         state = target.progress[document.id]
-        if document_pages.request_reading(db, document, commit=False):
+        lost = _lost(state)
+        count = (
+            f"{state.read} of {state.limit} pages of “{title}” are read"
+            if lost or not state.complete
+            else f"All {state.read} pages of “{title}” are read"
+        )
+        # Asking is what makes a failed page worth one more try. Nothing retries by itself.
+        retried = state.retryable if state.complete and not state.reading else []
+        queued = document_pages.request_reading(db, document, commit=False, retry_failed=True)
+        if queued:
             waiting.append(str(document.id))
             lines.append(
-                f"Reading the pages of “{title}” ({state.read} of {state.limit} read so far)."
+                f"Trying page {_ranges(retried)} of “{title}” again: reading failed there before."
+                if retried
+                else f"Reading the pages of “{title}” ({state.read} of {state.limit} read so far)."
             )
         elif document_pages.request_map(db, document, commit=False):
             waiting.append(str(document.id))
-            lines.append(f"All {state.read} pages of “{title}” are read; its map is being built.")
+            lines.append(f"{count}; its map is being built.")
         elif state.map is None and state.map_error:
             lines.append(
-                f"All {state.read} pages of “{title}” are read. Its map could not be built "
+                f"{count}. Its map could not be built "
                 f"({state.map_error}); the pages can still be read and searched."
             )
         else:
-            lines.append(f"All {state.read} pages of “{title}” are read; nothing is left to do.")
+            lines.append(f"{count}; nothing is left to do.")
+        # Pages that are being tried again now are reported when the manual is read again.
+        if any(not page.can_retry for page in lost) or (lost and not queued):
+            lines.append(_failure_note(state, title, True, retrying=queued))
     db.commit()
     if waiting:
         lines.append(
@@ -685,7 +763,9 @@ def look(
     try:
         with tempfile.TemporaryDirectory(prefix="housetory-page-") as temp_dir:
             if content_type.lower() == "application/pdf":
-                image = ocr.render_pdf_page(path, page, Path(temp_dir) / "page.png", dpi=150)
+                image = ocr.render_pdf_page(
+                    path, page, Path(temp_dir) / "page.png", long_side=LOOK_PICTURE_SIDE
+                )
                 mime = "image/png"
             elif content_type.lower().startswith("image/"):
                 image, mime = path, content_type
@@ -778,6 +858,53 @@ def _quoted(page: dict, quote: str | None) -> str:
     return ""
 
 
+def page_numbers_in(answer: str) -> set[int]:
+    """Page numbers an answer names in its text: "page 11", "pages 11 and 12",
+    "pages 9-11". Every number after the word counts."""
+    return {
+        int(value)
+        for listed in re.findall(
+            r"\bpages?\s+(\d{1,4}(?:\s*(?:,|and|&|to|-|–)\s*\d{1,4})*)", answer, re.I
+        )
+        for value in re.findall(r"\d+", listed)
+    }
+
+
+def pages_returned(steps: list[dict]) -> set[int]:
+    """Numbers of the pages that tools returned in these steps, with or without text."""
+    return {
+        int(page["page"])
+        for step in steps
+        for page in (step.get("result", {}).get("facts") or {}).get("pages") or []
+        if isinstance(page, dict) and page.get("page")
+    }
+
+
+def unsure_pages(steps: list[dict], keys: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    """Of the given (document, page) pairs, those whose latest reading in these steps
+    lists words OCR was unsure about and has no vision reading."""
+    latest: dict[tuple[str, int], dict] = {}
+    for step in steps:
+        for page in (step.get("result", {}).get("facts") or {}).get("pages") or []:
+            if isinstance(page, dict) and page.get("document_id") and page.get("page"):
+                latest[(str(page["document_id"]), int(page["page"]))] = page
+    return [
+        key
+        for key in dict.fromkeys(keys)
+        if latest.get(key, {}).get("ocr_unsure_words")
+        and not latest[key].get("seen_by_vision_model")
+    ]
+
+
+def can_look(db: Session, household_id: uuid.UUID) -> bool:
+    """Whether a model that reads pictures is set up for this household."""
+    try:
+        _vision_config(db, household_id)
+    except ApiError:
+        return False
+    return True
+
+
 def citations(steps: list[dict], answer: str, sources: list[dict]) -> list[ManualCitationOut]:
     """The pages an answer rests on, kept only when the assistant really read them.
 
@@ -788,7 +915,13 @@ def citations(steps: list[dict], answer: str, sources: list[dict]) -> list[Manua
     read_pages: dict[tuple[str, int], dict] = {}
     for step in steps:
         for page in (step.get("result", {}).get("facts") or {}).get("pages") or []:
-            if isinstance(page, dict) and page.get("document_id") and page.get("page"):
+            # A page that gave no content was not read, so it cannot be cited.
+            if (
+                isinstance(page, dict)
+                and page.get("document_id")
+                and page.get("page")
+                and (page.get("text") or page.get("seen_by_vision_model"))
+            ):
                 key = (str(page["document_id"]), int(page["page"]))
                 read_pages[key] = {**page, **read_pages.get(key, {})}
     named: dict[tuple[str, int], str | None] = {}
@@ -796,14 +929,7 @@ def citations(steps: list[dict], answer: str, sources: list[dict]) -> list[Manua
         for number in source.get("pages") or []:
             named.setdefault((str(source.get("document_id")), number), source.get("quote"))
     if not named:
-        # "page 11", "pages 11 and 12", "pages 9-11": every number after the word counts.
-        numbers = {
-            int(value)
-            for listed in re.findall(
-                r"\bpages?\s+(\d{1,4}(?:\s*(?:,|and|&|to|-|–)\s*\d{1,4})*)", answer, re.I
-            )
-            for value in re.findall(r"\d+", listed)
-        }
+        numbers = page_numbers_in(answer)
         named = {key: None for key in read_pages if key[1] in numbers}
     result = []
     for key, quote in named.items():

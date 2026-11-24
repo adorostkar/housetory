@@ -118,19 +118,27 @@ def test_tesseract_words_that_start_with_a_quote_do_not_swallow_the_following_ro
         "\tleft\ttop\twidth\theight\tconf\ttext"
     )
     rows = [
-        (1, 1, 1, "black"),
-        (1, 1, 2, "lead"),
-        (1, 1, 3, "to"),
-        (1, 1, 4, "the"),
-        (1, 1, 5, '"COM'),
-        (1, 2, 1, "terminal."),
-        (1, 2, 2, "the"),
-        (1, 2, 3, '10A"'),
-        (1, 2, 4, "jack"),
+        (1, 1, 1, "black", 96.5),
+        (1, 1, 2, "lead", 96.5),
+        (1, 1, 3, "to", 96.5),
+        (1, 1, 4, "the", 96.5),
+        (1, 1, 5, '"COM', 96.5),
+        (1, 2, 1, "terminal.", 96.5),
+        (1, 2, 2, "the", 96.5),
+        (1, 2, 3, '10A"', 96.5),
+        (1, 2, 4, "jack", 96.5),
+        # A dial symbol read as a nonsense word, twice, and a page number.
+        (1, 3, 1, '"pas"', 12.0),
+        (1, 3, 2, "or", 96.5),
+        (1, 3, 3, '"pas"', 30.0),
+        (1, 3, 4, "-11-", 8.0),
     ]
     tsv = "\n".join(
         [header]
-        + [f"5\t1\t{b}\t1\t{line}\t{w}\t0\t0\t10\t10\t96.5\t{text}" for b, line, w, text in rows]
+        + [
+            f"5\t1\t{b}\t1\t{line}\t{w}\t0\t0\t10\t10\t{conf}\t{text}"
+            for b, line, w, text, conf in rows
+        ]
     )
 
     class Completed:
@@ -142,8 +150,10 @@ def test_tesseract_words_that_start_with_a_quote_do_not_swallow_the_following_ro
     monkeypatch.setattr(ocr.subprocess, "run", lambda *args, **kwargs: Completed())
     result = ocr._run_tesseract_tsv("page.png")
     # Before the fix the quote opened a CSV field and the next rows became part of the word.
-    assert result.text == 'black lead to the "COM\nterminal. the 10A" jack'
-    assert result.confidence == 96
+    assert result.text == 'black lead to the "COM\nterminal. the 10A" jack\n"pas" or "pas" -11-'
+    assert result.confidence == 78
+    # Words read with little confidence are reported once. A bare number is not a word.
+    assert result.unsure == ('"pas"',)
 
 
 def test_every_page_of_a_manual_is_read_in_batches_and_kept_with_the_document(
@@ -176,19 +186,102 @@ def test_every_page_of_a_manual_is_read_in_batches_and_kept_with_the_document(
     assert sorted(pages_now) == list(range(1, 13))
     assert pages_now[1] == ("pdf_text", "COVER PAGE\nDigital multimeter user manual\n")
     assert pages_now[11] == ("ocr", "SCANNED PAGE 11\nText that only OCR can see on page 11.")
-    # One page that cannot be read does not stop the others, and is not read again.
+    # One page that cannot be read does not stop the others. It is kept as failed, not as read.
     assert pages_now[7] == ("unreadable", "")
     with SessionLocal() as db:
         row = db.get(Document, uuid.UUID(document["id"]))
         state = document_pages.progress(db, row)
-        assert (state.total, state.read, state.reading, state.complete) == (12, 12, False, True)
+        assert (state.total, state.processed, state.read) == (12, 12, 11)
+        assert (state.reading, state.complete) == (False, True)
+        assert [(page.number, page.attempts) for page in state.failed] == [(7, 1)]
         # The text belongs to the document: both items it is attached to use the same rows.
         assert {entry.id for entry in row.items} == {
             uuid.UUID(item_a["id"]),
             uuid.UUID(item_b["id"]),
         }
+        # Nothing tries the failed page again by itself.
         assert document_pages.request_reading(db, row) is False
     assert run_document_jobs() == []
+
+
+def test_a_failed_page_is_reported_and_tried_again_only_when_asked_and_not_forever(
+    owner_client, monkeypatch
+):
+    client = owner_client
+    document = upload(client, pdf_bytes(["FIRST PAGE\nThis page has a text layer.", *[None] * 5]))
+    document_id = uuid.UUID(document["id"])
+    text_url = f"/api/v1/documents/{document['id']}/text"
+
+    def rows():
+        with SessionLocal() as db:
+            found = db.scalars(
+                select(DocumentPageText).where(DocumentPageText.document_id == document_id)
+            ).all()
+            return {row.page_number: (row.source, row.attempts, row.error) for row in found}
+
+    def ask_again():
+        with SessionLocal() as db:
+            return document_pages.request_reading(
+                db, db.get(Document, document_id), retry_failed=True
+            )
+
+    fake_ocr(monkeypatch, unreadable=(3, 5))
+    run_document_ocr(document_id)
+    assert run_document_jobs() == [f"{READ_TASK} succeeded"]
+    failure = "OcrError: Tesseract failed: unreadable page"
+    assert rows() == {
+        1: ("pdf_text", 1, None),
+        2: ("ocr", 1, None),
+        3: ("unreadable", 1, failure),
+        4: ("ocr", 1, None),
+        5: ("unreadable", 1, failure),
+        6: ("ocr", 1, None),
+    }
+    # Every page was tried, but only four were read. The two are reported, not counted.
+    progress = client.get(text_url).json()
+    assert (progress["page_total"], progress["pages_read"]) == (6, 4)
+    assert (progress["pages_failed"], progress["can_retry"]) == ([3, 5], True)
+    assert progress["pages"][2] == {"page": 3, "text": "", "source": "unreadable", "error": failure}
+    assert run_document_jobs() == []
+
+    # Run OCR is an explicit request. It tries the failed pages once more, one per batch
+    # here, and a page that fails again is not carried along to the next batch.
+    read = fake_ocr(monkeypatch, unreadable=(3, 5))
+    monkeypatch.setattr(document_pages, "BATCH_OCR_PAGES", 1)
+    assert client.post(f"/api/v1/documents/{document['id']}/ocr").status_code == 200
+    assert run_document_jobs() == [f"{READ_TASK} succeeded"] * 2
+    assert read == [3, 5]
+    assert {number: row[:2] for number, row in rows().items() if number in (3, 5)} == {
+        3: ("unreadable", 2),
+        5: ("unreadable", 2),
+    }
+    assert run_document_jobs() == []
+
+    # Page 3 can be read now. Pages that were read before are not read again.
+    read = fake_ocr(monkeypatch, unreadable=(5,))
+    monkeypatch.setattr(document_pages, "BATCH_OCR_PAGES", 8)
+    assert ask_again() is True
+    assert run_document_jobs() == [f"{READ_TASK} succeeded"]
+    assert read == [3, 5]
+    assert rows()[3] == ("ocr", 3, None)
+    assert rows()[5] == ("unreadable", 3, failure)
+    assert {number: row[1] for number, row in rows().items() if number not in (3, 5)} == {
+        1: 1,
+        2: 1,
+        4: 1,
+        6: 1,
+    }
+
+    # Page 5 failed three times. It is not tried again, however often it is asked for.
+    assert ask_again() is False
+    assert client.post(f"/api/v1/documents/{document['id']}/ocr").status_code == 409
+    assert run_document_jobs() == [] and read == [3, 5]
+    progress = client.get(text_url).json()
+    assert (progress["pages_read"], progress["pages_failed"]) == (5, [5])
+    assert progress["can_retry"] is False
+    with SessionLocal() as db:
+        state = document_pages.progress(db, db.get(Document, document_id))
+        assert (state.processed, state.read, state.complete, state.retryable) == (6, 5, True, [])
 
 
 def test_page_text_is_dropped_when_the_file_is_replaced_and_survives_other_updates(
@@ -292,6 +385,40 @@ def test_the_map_is_built_once_by_the_assistant_provider_and_its_pages_are_check
     assert run_document_jobs() == [] and len(prompts) == 1
 
 
+def test_sections_are_placed_by_their_heading_also_when_a_contents_page_lists_the_titles():
+    # As OCR reads the AstroAI manual: the contents page holds the bare titles, without
+    # page numbers, and a real model gave pages that were one off.
+    pages = [
+        Page(1, "ASTROAI", "ocr"),
+        Page(
+            2,
+            "NTRODUCTION\nWARNING --\nELECTRICAL SYMBOLS\nDIAGRAM --\nFUNCTION BUTTONS\n"
+            "SETTING FUNCTIONS\nOTHER FUNCTIONS",
+            "ocr",
+        ),
+        Page(3, "ELECTRICAL SYMBOLS\nCategory III test equipment.", "ocr"),
+        Page(4, "DIAGRAM\nDisplay, buttons, rotary switch.", "ocr"),
+        Page(5, "FUNCTION BUTTONS\nUse the rotary switch to select a function.", "ocr"),
+        Page(6, "SETTING FUNCTIONS\nUse the FUNC button.\nOTHER FUNCTIONS\nAuto Shutoff", "ocr"),
+        Page(7, "High Voltage/High Current Indication", "ocr"),
+    ]
+    raw = {
+        "sections": [
+            {"title": "ELECTRICAL SYMBOLS", "first_page": 2, "last_page": 3},
+            {"title": "DIAGRAM", "first_page": 4, "last_page": 5},
+            {"title": "OTHER FUNCTIONS", "first_page": 7, "last_page": 7},
+            # Not a heading anywhere: the model's pages are kept.
+            {"title": "Indications", "first_page": 7, "last_page": 7},
+        ]
+    }
+    assert document_pages.checked_map(raw, pages)["sections"] == [
+        {"title": "ELECTRICAL SYMBOLS", "pages": [3, 3]},
+        {"title": "DIAGRAM", "pages": [4, 5]},
+        {"title": "OTHER FUNCTIONS", "pages": [6, 7]},
+        {"title": "Indications", "pages": [7, 7]},
+    ]
+
+
 def test_a_long_document_is_mapped_from_the_start_of_each_page_in_a_few_requests(monkeypatch):
     pages = [
         Page(number, f"HEADING {number}\n" + "word " * 1200, "pdf_text") for number in range(1, 201)
@@ -347,7 +474,14 @@ def test_without_ai_pages_are_still_read_and_no_map_is_asked_for(
         ai, "complete_json", lambda *args, **kwargs: pytest.fail("no AI request is expected")
     )
     run_document_ocr(uuid.UUID(document["id"]))
-    progress = {"page_total": 2, "pages_read": 1, "reading": True, "error": None}
+    progress = {
+        "page_total": 2,
+        "pages_read": 1,
+        "pages_failed": [],
+        "can_retry": False,
+        "reading": True,
+        "error": None,
+    }
     manuals = owner_client.get(f"/api/v1/items/{item['id']}/manuals").json()
     assert manuals["reading"] == {document["id"]: progress}
     assert run_document_jobs() == [f"{READ_TASK} succeeded"]
@@ -358,20 +492,21 @@ def test_without_ai_pages_are_still_read_and_no_map_is_asked_for(
     assert owner_client.get(f"/api/v1/documents/{document['id']}/file").status_code == 200
     text = owner_client.get(f"/api/v1/documents/{document['id']}/text").json()
     assert text == {
-        "page_total": 2,
+        **progress,
         "pages_read": 2,
         "reading": False,
-        "error": None,
         "pages": [
             {
                 "page": 1,
                 "text": "PAGE ONE\nSome text for the first page here.\n",
                 "source": "pdf_text",
+                "error": None,
             },
             {
                 "page": 2,
                 "text": "SCANNED PAGE 2\nText that only OCR can see on page 2.",
                 "source": "ocr",
+                "error": None,
             },
         ],
     }

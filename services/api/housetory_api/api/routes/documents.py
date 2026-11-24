@@ -397,7 +397,7 @@ def read_document_text(
     return DocumentTextOut(
         **document_pages.reading_out(db, document).model_dump(),
         pages=[
-            DocumentTextPage(page=page.number, text=page.text, source=page.source)
+            DocumentTextPage(page=page.number, text=page.text, source=page.source, error=page.error)
             for page in document_pages.pages(db, document)
         ],
     )
@@ -425,6 +425,9 @@ def retry_document_ocr(
             actor_user_id=auth.user.id,
             force=document.ocr_status == OcrStatus.SUCCEEDED.value,
         )
+    if document.document_type in document_pages.DOCUMENTATION_TYPES:
+        # Run OCR is an explicit request, so pages whose reading failed are tried once more.
+        document_pages.request_reading(db, document, retry_failed=True)
     document = get_document(db, auth.household.id, document.id)
     return document_out(document)
 
