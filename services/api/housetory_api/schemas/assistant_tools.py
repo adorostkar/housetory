@@ -16,12 +16,17 @@ class CaptureLink(BaseModel):
 
 
 class ManualLink(BaseModel):
-    """A manual the application links to directly: its viewer page and its file."""
+    """A manual the application links to directly.
+
+    ``url`` is the page that shows the file itself. ``details_url`` is the document
+    page, where its record is managed. ``download_url`` is the stored file.
+    """
 
     document_id: uuid.UUID
     title: str
     url: str
     download_url: str
+    details_url: str | None = None
     state: Literal["readable", "ocr_pending", "ocr_failed", "no_text"]
 
 

@@ -29,16 +29,17 @@ STATE_LABELS = {
     "no_text": "no text read yet",
 }
 # What the user can do in the application while a manual's text cannot be searched.
+# Open shows the file itself; Run OCR is on the document's Details page.
 BLOCKED_ACTIONS = {
     "ocr_pending": (
         "its text is still being read; ask again when reading finishes "
-        "(the document page shows the progress)"
+        "(its Details page shows the progress)"
     ),
     "ocr_failed": (
-        "reading its text failed or found no readable text; open the document and use "
-        "Run OCR to try again (Clean up scan first if the pages are unclear)"
+        "reading its text failed or found no readable text; use Run OCR on its Details "
+        "page to try again (Clean up scan first if the pages are unclear)"
     ),
-    "no_text": "no readable text is stored for it; open the document and use Run OCR",
+    "no_text": "no readable text is stored for it; use Run OCR on its Details page",
 }
 
 
@@ -210,8 +211,8 @@ def manual_output(
         summary = (
             lead
             + listed
-            + ". The application shows a direct open and download link for each; no review "
-            "is opened."
+            + ". For each, the application shows Open (the file itself), Download and "
+            "Details (the document page); no review is opened."
             + (" Use read_manual to answer questions from the text." if readable else "")
         )
     elif citations:
@@ -319,8 +320,9 @@ def manual_output(
             ManualLink(
                 document_id=document.id,
                 title=document.title,
-                url=f"/documents/{document.id}",
+                url=f"/documents/{document.id}/view",
                 download_url=document_url(document.id),
+                details_url=f"/documents/{document.id}",
                 state=states[document.id],
             )
             for document in documents

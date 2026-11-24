@@ -29,7 +29,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const active = ["queued", "running"].includes(run.state);
   const references = [...new Map(run.steps.flatMap(({ result }) =>
     result.references ?? []).map((reference) => [reference.id, reference])).values()];
-  // Manuals are shown with their own open and download links, not as a review.
+  // Manuals are shown with their own links, not as a review: Open shows the file itself.
   const manuals = [...new Map(run.steps.flatMap(({ result }) =>
     result.manuals ?? []).map((manual) => [manual.document_id, manual])).values()];
   const citations = [...new Map(run.steps.flatMap(({ result }) => result.citations ?? [])
@@ -37,7 +37,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
       `${citation.document_id}:${citation.page ?? citation.section}:${citation.excerpt.slice(0, 60)}`,
       citation,
     ])).values()];
-  // File links are served for the active household only.
+  // The stored file is served for the active household only. The pages switch household.
   const sameHousehold = session.data?.household?.id === run.household_id;
   const sourceReferences = references.filter((reference) =>
     !manuals.some((manual) => manual.document_id === reference.id));
@@ -90,6 +90,11 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
                 <a href={manual.download_url} className="inline-flex min-h-11 items-center underline"
                   aria-label={`Download ${manual.title}`}>Download</a>
               )}
+              {manual.details_url && (
+                <Link to={withHousehold(manual.details_url, run.household_id)}
+                  className="inline-flex min-h-11 items-center underline"
+                  aria-label={`Details of ${manual.title}`}>Details</Link>
+              )}
               {MANUAL_STATES[manual.state] && (
                 <span className="text-muted-foreground">{MANUAL_STATES[manual.state]}</span>
               )}
@@ -103,14 +108,16 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
             const place = citation.page ? `page ${citation.page}`
               : citation.section ?? `excerpt ${index + 1}`;
             const label = `${citation.document_title}, ${place}`;
+            // A citation opens the file at its page, in the same viewer as Open.
+            const manual = manuals.find((entry) => entry.document_id === citation.document_id);
             return (
               <li key={index} className="rounded-md border px-3 py-2">
-                {sameHousehold ? (
-                  <a href={citation.url} target="_blank" rel="noreferrer"
-                    className="text-xs font-medium underline">{label}</a>
+                {manual ? (
+                  <Link className="text-xs font-medium underline" to={withHousehold(
+                    `${manual.url}${citation.page ? `?page=${citation.page}` : ""}`, run.household_id,
+                  )}>{label}</Link>
                 ) : (
-                  <Link to={withHousehold(`/documents/${citation.document_id}`, run.household_id)}
-                    className="text-xs font-medium underline">{label}</Link>
+                  <span className="text-xs font-medium">{label}</span>
                 )}
                 <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-2xs text-muted-foreground">
                   {citation.excerpt}

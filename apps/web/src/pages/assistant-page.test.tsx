@@ -349,14 +349,19 @@ describe("AssistantPage", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("shows a found manual with direct links and page citations, never as a capture review", async () => {
+  it.each([
+    ["the current household", "house-1"],
+    ["another household of the account", "house-2"],
+  ])("opens a found manual as the file itself, with page citations, for %s", async (_label, household) => {
     const manual = {
-      document_id: "doc-manual", title: "ASIM6K0R-EN-v2", url: "/documents/doc-manual",
-      download_url: "/api/v1/documents/doc-manual/file", state: "readable" as const,
+      document_id: "doc-manual", title: "ASIM6K0R-EN-v2", url: "/documents/doc-manual/view",
+      download_url: "/api/v1/documents/doc-manual/file", details_url: "/documents/doc-manual",
+      state: "readable" as const,
     };
     const scan = {
-      document_id: "doc-scan", title: "Quick start scan", url: "/documents/doc-scan",
-      download_url: "/api/v1/documents/doc-scan/file", state: "ocr_failed" as const,
+      document_id: "doc-scan", title: "Quick start scan", url: "/documents/doc-scan/view",
+      download_url: "/api/v1/documents/doc-scan/file", details_url: "/documents/doc-scan",
+      state: "ocr_failed" as const,
     };
     const references = [
       { id: "item-meter", title: "Multimeter", url: "/items/item-meter" },
@@ -365,7 +370,7 @@ describe("AssistantPage", () => {
     ];
     const answer = "Turn the dial to 10A and use the 10A jack (ASIM6K0R-EN-v2, page 12).";
     vi.mocked(createToolRun).mockResolvedValue({
-      id: "run-manual", parent_id: null, household_id: "house-1", property_id: null,
+      id: "run-manual", parent_id: null, household_id: household, property_id: null,
       query: "How do I check amperage?", state: "completed", generation: 1,
       message: answer, answer,
       steps: [{
@@ -377,6 +382,10 @@ describe("AssistantPage", () => {
             document_id: "doc-manual", document_title: "ASIM6K0R-EN-v2", page: 12,
             section: "CURRENT MEASUREMENT", excerpt: "To measure current, turn the rotary dial to 10A.",
             url: "/api/v1/documents/doc-manual/file#page=12",
+          }, {
+            document_id: "doc-manual", document_title: "ASIM6K0R-EN-v2", page: null,
+            section: "Excerpt 2", excerpt: "Connect the leads in series with the load.",
+            url: "/api/v1/documents/doc-manual/file",
           }],
         },
       }],
@@ -385,18 +394,28 @@ describe("AssistantPage", () => {
     renderPage("/assistant", { id: "manual-question", text: "How do I check amperage?" });
     expect(await screen.findByText(answer)).toBeVisible();
 
+    // Open is the page that shows the file. The document page is a separate link.
     const manuals = screen.getByRole("list", { name: "Manuals" });
     expect(within(manuals).getByRole("link", { name: "Open ASIM6K0R-EN-v2" }))
-      .toHaveAttribute("href", "/documents/doc-manual?household_id=house-1");
-    expect(await within(manuals).findByRole("link", { name: "Download ASIM6K0R-EN-v2" }))
-      .toHaveAttribute("href", "/api/v1/documents/doc-manual/file");
+      .toHaveAttribute("href", `/documents/doc-manual/view?household_id=${household}`);
+    expect(within(manuals).getByRole("link", { name: "Details of ASIM6K0R-EN-v2" }))
+      .toHaveAttribute("href", `/documents/doc-manual?household_id=${household}`);
     // A manual whose text could not be read is still one click away.
     expect(within(manuals).getByText("Text could not be read")).toBeVisible();
-    expect(within(manuals).getByRole("link", { name: "Open Quick start scan" })).toBeVisible();
+    expect(within(manuals).getByRole("link", { name: "Open Quick start scan" }))
+      .toHaveAttribute("href", `/documents/doc-scan/view?household_id=${household}`);
+    // The stored file is only served for the household that is open now.
+    await waitFor(() => expect(
+      within(manuals).queryAllByRole("link", { name: /^Download / }).map((link) => link.getAttribute("href")),
+    ).toEqual(household === "house-1"
+      ? ["/api/v1/documents/doc-manual/file", "/api/v1/documents/doc-scan/file"] : []));
 
+    // A citation opens the same viewer at its page.
     const citations = screen.getByRole("list", { name: "Manual citations" });
     expect(within(citations).getByRole("link", { name: "ASIM6K0R-EN-v2, page 12" }))
-      .toHaveAttribute("href", "/api/v1/documents/doc-manual/file#page=12");
+      .toHaveAttribute("href", `/documents/doc-manual/view?page=12&household_id=${household}`);
+    expect(within(citations).getByRole("link", { name: "ASIM6K0R-EN-v2, Excerpt 2" }))
+      .toHaveAttribute("href", `/documents/doc-manual/view?household_id=${household}`);
     expect(within(citations).getByText(/turn the rotary dial to 10A/)).toBeVisible();
 
     // Manuals are not repeated as generic record chips, and no review is opened.

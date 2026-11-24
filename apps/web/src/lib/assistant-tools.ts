@@ -17,12 +17,16 @@ export function createToolRun(request: AssistantToolRequest, signal: AbortSignal
   return api.post<AssistantToolRun>("/assistant/runs", request, { signal });
 }
 
-/** A manual the assistant found: its document page and its file, never a review. */
+/**
+ * A manual the assistant found. `url` is the page that shows the file itself,
+ * `details_url` is the document page. Neither is a capture or extraction review.
+ */
 export interface AssistantManualLink {
   document_id: string;
   title: string;
   url: string;
   download_url: string;
+  details_url?: string | null;
   state: "readable" | "ocr_pending" | "ocr_failed" | "no_text";
 }
 

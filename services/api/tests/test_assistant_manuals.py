@@ -102,8 +102,10 @@ def test_assistant_finds_opens_and_answers_from_an_attached_manual_across_follow
     link = {
         "document_id": document["id"],
         "title": TITLE,
-        "url": f"/documents/{document['id']}",
+        # Open shows the file itself; the document page with its reviews is a separate link.
+        "url": f"/documents/{document['id']}/view",
         "download_url": f"/api/v1/documents/{document['id']}/file",
+        "details_url": f"/documents/{document['id']}",
         "state": "readable",
     }
     tools = {tool["name"]: tool for tool in client.get("/api/v1/assistant/tools").json()["tools"]}
@@ -224,7 +226,7 @@ def test_a_manual_is_linked_instead_of_opened_as_a_capture_review(
     result = opened["steps"][0]["result"]
     assert opened["state"] == "completed"
     assert result["capture"] is None
-    assert result["manuals"][0]["url"] == f"/documents/{document['id']}"
+    assert result["manuals"][0]["url"] == f"/documents/{document['id']}/view"
 
     # A manual carried as capture context is still described as a manual, not a review.
     _, prompts = converse(
@@ -275,7 +277,7 @@ def test_manual_tools_say_why_a_manual_cannot_answer_and_what_to_do(
 
     for status, condition, expected in (
         ("queued", "ocr_pending", "still being read"),
-        ("failed", "ocr_failed", "use Run OCR to try again"),
+        ("failed", "ocr_failed", "use Run OCR on its Details page to try again"),
         ("not_requested", "no_text", "no readable text is stored"),
     ):
         populate_manual(document["id"], "", pages=[], status=status)
