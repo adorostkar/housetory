@@ -458,12 +458,14 @@ search results or require a paid provider.
 
 ## OCR and citation limitations
 
-- A manual's document detail page keeps OCR status, extracted text, downloads and
-  grounded Ask/citation behavior. Purchase-style field and product-line review is
-  behind the collapsed **Advanced · Extraction review** disclosure instead of
-  dominating the page. Its extraction and related-item lookups are deferred until
-  that disclosure is opened; receipts, invoices and other document types retain
-  the existing open review. No extraction endpoint or stored result is removed.
+- A manual's document page keeps OCR status, extracted text and downloads. Like
+  every other document type, it also has an open **Extraction review** section
+  for purchase-style fields and product lines. The stored extraction result is
+  loaded with the page once the text has been read. The full review opens with
+  **Review extraction**; lookups of related items, rooms and locations wait
+  until then. To read a manual without this section, use
+  [the file viewer](#the-file-viewer). Questions about a manual are asked on the
+  item page or in the assistant, not on the document page.
 - New or newly reprocessed documents store up to 40 pages, 20,000 characters per
   page and 180,000 characters total under `extracted_metadata["ocr_pages"]`;
   `extracted_text` remains capped at 200,000 characters.
