@@ -645,6 +645,12 @@ UNREAD_PAGES_NOTE = (
     "which), then answer only from what you read. If you cannot read them, say so and do "
     "not give instructions from general knowledge."
 )
+REPEATED_CALL_NOTE = (
+    "You made this exact call before in this request and nothing has changed: the result "
+    "is the same and is already in your observations. Do not repeat it. Answer from what "
+    "you have, or make a different call: other arguments, other pages, or "
+    "look_at_manual_page for a page whose text is unclear."
+)
 # Pages the application looks at by itself before an answer is shown.
 MAX_LOOKS = 2
 LOOKED_NOTE = (
@@ -839,9 +845,22 @@ def run_job(payload: dict):
                     run = _current(db, run_id, generation)
                     if run is None:
                         return {"state": "stopped"}
+                    if (
+                        run.data.get("pending_from_model")
+                        and not reused
+                        and any(
+                            step["call"] == pending
+                            and step["result"] == output.model_dump(mode="json")
+                            for step in run.data["steps"]
+                        )
+                    ):
+                        # The model made the same call and got the same result again. It
+                        # is not stored a second time: the model is told to use what it has.
+                        output = ToolOutput(summary=REPEATED_CALL_NOTE, error="repeated_call")
                     data = {
                         **run.data,
                         "pending_call": None,
+                        "pending_from_model": False,
                         "steps": [
                             *run.data["steps"],
                             {"call": pending, "result": output.model_dump(mode="json")},
@@ -923,6 +942,7 @@ def run_job(payload: dict):
                     run.data = {
                         **run.data,
                         "pending_call": step.call.model_dump(mode="json"),
+                        "pending_from_model": True,
                         "message": f"Using {step.call.name}.",
                     }
                     db.commit()

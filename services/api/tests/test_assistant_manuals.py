@@ -978,3 +978,34 @@ def test_cited_pages_where_ocr_was_unsure_are_looked_at_before_the_answer_is_sho
     assert (blind["model_calls"], len(looked)) == (2, 1)
     assert "OCR was unsure about some words on page 10" in blind["steps"][0]["result"]["summary"]
     assert [citation["page"] for citation in blind["citations"]] == [10]
+
+
+def test_reading_the_same_pages_again_is_answered_with_a_note_not_the_text_again(
+    owner_client, configured_ai, monkeypatch
+):
+    """A real model read one page five times in one request. The repeat costs a slow
+    model call and fills the prompt with the same text, so it is cut short."""
+    item, document = multimeter(owner_client, monkeypatch)
+    read = call("read_manual", item_id=item["id"], pages="11")
+
+    def answer(prompt):
+        first, second, other = (step["result"] for step in prompt["observations"])
+        assert first["facts"]["pages"][0]["page"] == 11
+        assert second["error"] == "repeated_call" and "facts" not in second
+        assert "Do not repeat it" in second["summary"]
+        # Other pages are a different call and are read normally.
+        assert other["facts"]["pages"][0]["page"] == 9
+        return {
+            "kind": "answer",
+            "message": f"Connect the meter in series ({TITLE}, page 11).",
+            "sources": [{"document_id": document["id"], "pages": [11]}],
+        }
+
+    run, _ = converse(
+        owner_client,
+        monkeypatch,
+        "How do I measure current?",
+        [read, read, call("read_manual", item_id=item["id"], pages="9"), answer],
+    )
+    assert run["state"] == "completed"
+    assert [entry["page"] for entry in run["citations"]] == [11]
