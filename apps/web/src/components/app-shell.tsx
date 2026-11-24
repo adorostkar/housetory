@@ -380,7 +380,7 @@ function AppShellLayout() {
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
-      <aside className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
+      <aside data-always-on-screen className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
         <div className="flex items-center justify-between px-2">
           <Link to="/" aria-label="Housetory home">
             <BrandMark />
@@ -428,7 +428,7 @@ function AppShellLayout() {
       </aside>
 
       <div className={cn("min-w-0", assistantOpen && "lg:pr-[min(34rem,40vw)]")}>
-        <header className="glass safe-top sticky top-0 z-30 border-b border-border/60">
+        <header data-always-on-screen className="glass safe-top sticky top-0 z-30 border-b border-border/60">
           <div className="flex h-14 items-center justify-between px-5 lg:hidden">
             <Link
               to="/"

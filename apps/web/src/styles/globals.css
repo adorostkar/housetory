@@ -72,6 +72,16 @@
     scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom));
   }
 
+  /*
+   * The header and the sidebar are always on screen, but their controls sit inside
+   * the padding above. With the padding, the browser moves the page when one of them
+   * gets focus. While focus is there, nothing needs that room.
+   */
+  html:has([data-always-on-screen]:focus-within) {
+    scroll-padding-top: 0;
+    scroll-padding-bottom: 0;
+  }
+
   body {
     @apply min-h-[100dvh] bg-background font-sans text-foreground antialiased;
     background-image:
