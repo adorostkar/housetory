@@ -260,8 +260,8 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
   expect(requestQuery?.toLowerCase()).not.toContain("loan");
 
   await page.keyboard.press("Escape");
-  // The saved manual is read like an uploaded one. Online questions stay a separate,
-  // reviewed request.
+  // The saved manual is read like an uploaded one. Questions go to the assistant: there
+  // is no separate online question dialog.
   const saved = (await (await request.get(`/api/v1/items/${item.item.id}/manuals`)).json()) as {
     manuals: Array<{ title: string; id: string }>;
   };
@@ -274,10 +274,5 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
       return text.pages.map((entry) => entry.text).join("\n");
     }, { timeout: 60_000 })
     .toContain("Disconnect the battery before changing the drill bit.");
-  await page.getByRole("button", { name: "Ask online sources" }).click();
-  const askDialog = page.getByRole("dialog", {
-    name: `Ask online sources about ${item.item.name}`,
-  });
-  await expect(askDialog.getByText(/Borrower, loan and household data/)).toBeVisible();
-  await expect(askDialog.getByRole("button", { name: "Review online request" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Ask online sources" })).toHaveCount(0);
 });

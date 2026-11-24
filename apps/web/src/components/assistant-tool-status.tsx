@@ -39,6 +39,9 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
       `${citation.document_id}:${citation.page ?? citation.section}:${citation.excerpt.slice(0, 60)}`,
       citation,
     ])).values()];
+  // Sources of an online search. They are outside pages, not household records.
+  const webSources = [...new Map(run.steps.flatMap(({ result }) =>
+    result.web_sources ?? []).map((source) => [source.url, source])).values()];
   // The stored file is served for the active household only. The pages switch household.
   const sameHousehold = session.data?.household?.id === run.household_id;
   const sourceReferences = references.filter((reference) =>
@@ -135,6 +138,20 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
               </li>
             );
           })}
+        </ul>
+      )}
+      {webSources.length > 0 && (
+        <ul className="space-y-1" aria-label="Online sources">
+          {webSources.map((source) => (
+            <li key={source.url} className="text-xs">
+              <a href={source.url} target="_blank" rel="noreferrer"
+                className="inline-flex min-h-11 items-center break-all underline">
+                {source.title}
+              </a>
+              {source.publisher && <span className="text-muted-foreground"> · {source.publisher}</span>}
+              <span className="text-muted-foreground"> · online source</span>
+            </li>
+          ))}
         </ul>
       )}
       {sourceReferences.length > 0 && (

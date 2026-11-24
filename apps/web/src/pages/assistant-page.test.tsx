@@ -306,6 +306,57 @@ describe("AssistantPage", () => {
       { request_id: "old-proposal" }, expect.anything(),
     ));
     expect(await within(card).findByText("Item updated.")).toBeVisible();
+    expect(createToolRun).not.toHaveBeenCalled();
+  });
+
+  it("shows the source of a manual to save and carries on by itself once it is applied", async () => {
+    const proposal = {
+      id: "save-1", kind: "save_manual", state: "ready", scope_label: "Home",
+      targets: [{ id: "item-meter", name: "Multimeter" }], destination: null,
+      before: { manufacturer: "AstroAI", model_identifier: "M6K0R", variant: null },
+      changes: {
+        item_id: "item-meter", candidate_id: "candidate-1", title: "AstroAI M6K0R user manual",
+        publisher: "AstroAI", model_coverage: ["M6K0R"],
+        source_url: "https://www.astroai.example/support/M6K0R",
+        file_url: "https://www.astroai.example/files/M6K0R-EN.pdf",
+      },
+    };
+    const source = { title: "AstroAI M6K0R user manual", url: proposal.changes.source_url, publisher: "AstroAI" };
+    const run = {
+      id: "run-1", parent_id: null, household_id: "house-1", property_id: null,
+      query: "How do I check the amp?", state: "awaiting_approval", generation: 1,
+      message: "I found the manual online.", answer: "I found the manual online.",
+      steps: [
+        { call: { name: "find_manuals_online", arguments: {} },
+          result: { summary: "1 online candidate.", references: [], web_sources: [source] } },
+        { call: { name: "prepare_action", arguments: {} },
+          result: { summary: "Proposal ready.", references: [], proposal } },
+      ],
+      model_calls: 3, max_model_calls: 8, can_retry: false, worker_available: null,
+    };
+    vi.mocked(createToolRun).mockResolvedValue(run);
+    vi.mocked(api.post).mockReset().mockResolvedValue({ message: "Saved the manual." });
+    renderPage("/assistant", { id: "manual-online", text: run.query });
+    const card = await screen.findByLabelText("Action review");
+    expect(card).toHaveTextContent("Check that this manual is for your exact model");
+    expect(card).toHaveTextContent("AstroAI M6K0R");
+    expect(within(card).getByRole("link", { name: proposal.changes.file_url }))
+      .toHaveAttribute("href", proposal.changes.file_url);
+    // A manual proposal has nothing to edit: it is applied or cancelled.
+    expect(within(card).queryByRole("button", { name: /Edit/ })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Online sources")).getByRole("link", { name: source.title }))
+      .toHaveAttribute("href", source.url);
+    vi.mocked(createToolRun).mockResolvedValue({
+      ...run, id: "run-2", parent_id: "run-1", query: "Continue.", state: "completed",
+      message: "Connect the meter in series.", answer: "Connect the meter in series.", steps: [],
+    });
+    await userEvent.click(within(card).getByRole("button", { name: "Apply" }));
+    expect(await within(card).findByText("Saved the manual.")).toBeVisible();
+    await waitFor(() => expect(createToolRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ parent_id: "run-1", query: "Continue.", applied_proposal_id: "save-1" }),
+      expect.any(AbortSignal),
+    ));
+    expect(await screen.findByText("Connect the meter in series.")).toBeVisible();
   });
 
   it("opens a notification's exact capture inline without submitting another request or showing the capture queue", async () => {

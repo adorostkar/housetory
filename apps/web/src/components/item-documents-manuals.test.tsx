@@ -14,7 +14,6 @@ import type {
   ItemManuals as ItemManualsData,
   ManualCandidateList,
   ManualDownloadResult,
-  ManualOnlineAnswer,
   ManualProfile,
   SessionState,
 } from "@/lib/types";
@@ -336,57 +335,6 @@ describe("ItemDocumentsAndManuals", () => {
         }),
       ),
     );
-  });
-
-  it("offers an explicit online question only when a profile and search are configured", async () => {
-    renderDocumentsAndManuals(
-      manualsData({
-        search: {
-          configured: true,
-          provider: "gateway",
-          provider_label: "Test search",
-          reason: null,
-          profile,
-          can_search: true,
-        },
-      }),
-    );
-    const onlineAnswer: ManualOnlineAnswer = {
-      item_id: item.id,
-      answer: "The manufacturer lists an 18 V battery.",
-      mode: "extractive",
-      citations: [
-        {
-          title: "DeWalt DCD791B battery specification",
-          url: "https://www.dewalt.example/DCD791B",
-          publisher: "DeWalt",
-          language: "en",
-          source_type: "manufacturer",
-          excerpt: "18 V LXT battery.",
-        },
-      ],
-      notices: [],
-      ai_status: aiStatus,
-      source_kind: "online",
-    };
-    vi.mocked(api.post).mockResolvedValue(onlineAnswer);
-    await userEvent.click(screen.getByRole("button", { name: "Ask online sources" }));
-    expect(
-      screen.getByText(/Borrower, loan and household data are never included/),
-    ).toBeVisible();
-    await userEvent.type(screen.getByLabelText("Question"), "What battery does it use?");
-    // Nothing leaves the server before the request is reviewed and sent.
-    await userEvent.click(screen.getByRole("button", { name: "Review online request" }));
-    expect(api.post).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Send online question" }));
-    expect(await screen.findByText("18 V LXT battery.")).toBeVisible();
-    expect(api.post).toHaveBeenCalledWith(`/items/${item.id}/manual-questions/online`, {
-      question: "What battery does it use?",
-    });
-    expect(screen.getByText("Online sources")).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: /DeWalt DCD791B battery specification/ }),
-    ).toHaveAttribute("href", "https://www.dewalt.example/DCD791B");
   });
 
   it("shows source-page-only candidates without guessing a PDF and offers upload", async () => {

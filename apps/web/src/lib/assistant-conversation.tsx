@@ -157,8 +157,9 @@ interface AssistantConversationContextValue {
     session: SessionSnapshot,
     references: AssistantPageReference[],
     freshTopic?: boolean,
+    appliedProposalId?: string,
   ) => void;
-  applyAction: (scope: string, proposalId: string) => void;
+  applyAction: (scope: string, proposalId: string, onApplied?: () => void) => void;
   cancelAction: (scope: string, proposalId: string) => void;
   refreshAction: (scope: string, proposalId: string) => void;
   editMove: (scope: string, proposalId: string) => void;
@@ -399,6 +400,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     session: SessionSnapshot,
     references: AssistantPageReference[],
     freshTopic = false,
+    appliedProposalId?: string,
   ) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
     if (current.pending) return;
@@ -459,6 +461,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       ...(selection.propertyId ? { property_id: selection.propertyId } : {}),
       ...(!freshTopic && current.toolParentId ? { parent_id: current.toolParentId } : {}),
       local_date: localDateISO(),
+      ...(appliedProposalId ? { applied_proposal_id: appliedProposalId } : {}),
       page_context: pageReferences.map(({ kind, id }) => ({ kind, id })),
       ...(!freshTopic ? {
         capture_context: [...current.messages].reverse()
@@ -516,7 +519,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     }).finally(() => controllers.current.delete(controller));
   }, [update, queryClient]);
 
-  const applyAction = React.useCallback((scope: string, proposalId: string) => {
+  const applyAction = React.useCallback((scope: string, proposalId: string, onApplied?: () => void) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
     const action = current.messages.find((message) => message.action?.proposal.id === proposalId)?.action;
     if (!action || action.pending || action.result || action.conflict) return;
@@ -544,6 +547,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       invalidateInventory();
       invalidateLoans();
       invalidateBorrowed();
+      onApplied?.();
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (error instanceof ApiError && error.code === "proposal_stale") {
@@ -946,7 +950,7 @@ export function useAssistantConversation(scope: string) {
     updateCapture,
     reset: () => store.reset(scope),
     startFreshTopic: () => store.startFreshTopic(scope),
-    applyAction: (proposalId: string) => store.applyAction(scope, proposalId),
+    applyAction: (proposalId: string, onApplied?: () => void) => store.applyAction(scope, proposalId, onApplied),
     cancelAction: (proposalId: string) => store.cancelAction(scope, proposalId),
     refreshAction: (proposalId: string) => store.refreshAction(scope, proposalId),
     editMove: (proposalId: string) => store.editMove(scope, proposalId),
@@ -967,8 +971,12 @@ export function useAssistantConversation(scope: string) {
       regenerate: boolean,
       session: SessionSnapshot,
       freshTopic = false,
+      appliedProposalId?: string,
     ) => {
-      store.ask(scope, selection, value, regenerate, session, freshTopic ? [] : references, freshTopic);
+      store.ask(
+        scope, selection, value, regenerate, session, freshTopic ? [] : references, freshTopic,
+        appliedProposalId,
+      );
     },
   };
 }

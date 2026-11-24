@@ -11,6 +11,8 @@ export interface AssistantToolRequest {
   local_date: string;
   page_context: { kind: string; id: string }[];
   capture_context?: { kind: "items" | "document" | "photo"; id: string }[];
+  /** A manual proposal the user just applied: the request starts with the step after it. */
+  applied_proposal_id?: string;
 }
 
 export function createToolRun(request: AssistantToolRequest, signal: AbortSignal) {
@@ -34,6 +36,17 @@ export interface AssistantManualLink {
   pages_failed?: number;
 }
 
+/** An online source a tool returned. It is shown as a link that leaves the application. */
+export interface AssistantWebSource {
+  title: string;
+  url: string;
+  publisher?: string | null;
+}
+
+/** Proposals about an item's manual. After Apply the conversation carries on by itself. */
+export const MANUAL_PROPOSAL_KINDS = new Set(["confirm_manual_identity", "save_manual"]);
+export const CONTINUE_REQUEST = "Continue.";
+
 export interface AssistantToolOutput {
   summary: string;
   error?: string | null;
@@ -42,6 +55,7 @@ export interface AssistantToolOutput {
   capture?: { kind: "items" | "document" | "photo"; id: string } | null;
   review?: ReviewRun | null;
   manuals?: AssistantManualLink[];
+  web_sources?: AssistantWebSource[];
   /** Only in results stored by earlier versions. Citations now belong to the answer. */
   citations?: ManualCitation[];
 }
@@ -92,6 +106,8 @@ function proposalExplanation(kind: string) {
   if (kind === "return_loan" || kind === "return_borrowed") return "Review this return, then Apply to record it.";
   if (kind === "lend" || kind === "borrow") return "Review the lending details, then Apply to record them.";
   if (kind === "move_items") return "Review the destination, then Apply to move these items.";
+  if (kind === "confirm_manual_identity") return "Check these product details against the label, then Apply to confirm them.";
+  if (kind === "save_manual") return "Check that this manual is for your exact model, then Apply to download and attach it.";
   return "Review the change below, then Apply to save it.";
 }
 

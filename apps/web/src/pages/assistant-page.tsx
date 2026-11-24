@@ -34,6 +34,7 @@ import { useAiStatus, useCanWrite, useRecognition, useSelectHousehold, useSessio
 import { followUpSuggestions } from "@/lib/assistant-followups";
 import { useSearchSession } from "@/lib/search-session";
 import { ITEM_EDIT_FIELDS, useAssistantConversation, useAssistantScope, type AssistantActionProposal, type AssistantCaptureState } from "@/lib/assistant-conversation";
+import { CONTINUE_REQUEST, MANUAL_PROPOSAL_KINDS } from "@/lib/assistant-tools";
 import { useAssistantPageContext } from "@/lib/assistant-page-context";
 import { AssistantDocumentSlot, AssistantImportSlot, AssistantPhotoSlot, useAssistantDocuments } from "@/lib/assistant-documents";
 import { useSpeechDictation } from "@/lib/use-speech-dictation";
@@ -711,6 +712,57 @@ export function AssistantPage({
                             )}
                           </>
                         )}
+                        {message.action.proposal.kind === "confirm_manual_identity" && (
+                          <>
+                            <dl className="grid grid-cols-2 gap-2 text-sm">
+                              <dt>Manufacturer</dt><dd className="break-words">{String(message.action.proposal.changes.manufacturer ?? "")}</dd>
+                              <dt>Model</dt><dd className="break-words">{String(message.action.proposal.changes.model_identifier ?? "")}</dd>
+                              <dt>Variant</dt><dd className="break-words">{String(message.action.proposal.changes.variant ?? "None")}</dd>
+                              <dt>On the item now</dt>
+                              <dd className="break-words">
+                                Brand {String(message.action.proposal.before.item_brand ?? "not set")}, model {String(message.action.proposal.before.item_model ?? "not set")}
+                              </dd>
+                            </dl>
+                            <p className="text-xs text-muted-foreground">
+                              Applying confirms this as the exact product, so its manual can be searched online.
+                              It does not change the item.
+                            </p>
+                          </>
+                        )}
+                        {message.action.proposal.kind === "save_manual" && (
+                          <>
+                            <dl className="grid grid-cols-2 gap-2 text-sm">
+                              <dt>Manual</dt><dd className="break-words">{String(message.action.proposal.changes.title ?? "")}</dd>
+                              <dt>Publisher</dt><dd className="break-words">{String(message.action.proposal.changes.publisher ?? "Not given")}</dd>
+                              <dt>Source shows</dt>
+                              <dd className="break-words">
+                                {(message.action.proposal.changes.model_coverage as string[] | undefined)?.join(", ") || "No model identifier"}
+                              </dd>
+                              <dt>Your product</dt>
+                              <dd className="break-words">
+                                {[message.action.proposal.before.manufacturer, message.action.proposal.before.model_identifier, message.action.proposal.before.variant]
+                                  .filter(Boolean).join(" ")}
+                              </dd>
+                              <dt>Source page</dt>
+                              <dd className="break-all">
+                                <a className="underline" target="_blank" rel="noreferrer"
+                                  href={String(message.action.proposal.changes.source_url ?? "")}>
+                                  {String(message.action.proposal.changes.source_url ?? "")}
+                                </a>
+                              </dd>
+                              <dt>File</dt>
+                              <dd className="break-all">
+                                <a className="underline" target="_blank" rel="noreferrer"
+                                  href={String(message.action.proposal.changes.file_url ?? "")}>
+                                  {String(message.action.proposal.changes.file_url ?? "")}
+                                </a>
+                              </dd>
+                            </dl>
+                            <p className="text-xs text-muted-foreground">
+                              Applying downloads this PDF, saves it in the Manual library and attaches it to the item.
+                            </p>
+                          </>
+                        )}
                         {message.action.proposal.kind === "lend" && (
                           <dl className="grid grid-cols-2 gap-2 text-sm">
                             <dt>Borrower</dt><dd className="break-words">{String(message.action.proposal.changes.borrower_name ?? "")}</dd>
@@ -830,7 +882,8 @@ export function AssistantPage({
                                 Edit change
                               </Button>
                             )
-                          ) : message.action.editing ? (
+                          ) : MANUAL_PROPOSAL_KINDS.has(message.action.proposal.kind) ? null
+                          : message.action.editing ? (
                             <>
                               <label className="w-full text-sm">
                                 Destination
@@ -872,7 +925,17 @@ export function AssistantPage({
                           <Button
                             type="button"
                             disabled={message.action.pending || message.action.editing || Boolean(message.action.conflict)}
-                            onClick={() => message.action && applyAction(message.action.proposal.id)}
+                            onClick={() => {
+                              const proposal = message.action?.proposal;
+                              if (!proposal) return;
+                              applyAction(
+                                proposal.id,
+                                // The manual was the way to an answer: carry on once it is applied.
+                                MANUAL_PROPOSAL_KINDS.has(proposal.kind) && message.toolRunId
+                                  ? () => ask(selection, CONTINUE_REQUEST, false, searchSession, false, proposal.id)
+                                  : undefined,
+                              );
+                            }}
                           >
                             Apply
                           </Button>

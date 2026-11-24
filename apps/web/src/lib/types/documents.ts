@@ -171,27 +171,6 @@ export interface ManualCitation {
   url: string;
 }
 
-export type ManualAnswerMode = "ai" | "extractive" | "no_evidence";
-
-export interface WebCitation {
-  title: string;
-  url: string;
-  publisher: string | null;
-  language: string | null;
-  source_type: string;
-  excerpt: string;
-}
-
-export interface ManualOnlineAnswer {
-  item_id: UUID;
-  answer: string;
-  mode: ManualAnswerMode;
-  citations: WebCitation[];
-  notices: string[];
-  ai_status: AiStatus;
-  source_kind: "online";
-}
-
 export interface ManualSearchCandidate {
   id: UUID;
   item_id: UUID;

@@ -19,7 +19,6 @@ import { DocumentLinkDialog } from "@/components/document-link-dialog";
 import { DocumentScanDialog } from "@/components/document-scan-dialog";
 import { DocumentUploadDialog } from "@/components/document-upload-dialog";
 import { ManualFindDialog } from "@/components/manual-find-dialog";
-import { ManualOnlineAskDialog } from "@/components/manual-online-ask-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, getApiErrorMessage } from "@/lib/api";
@@ -44,7 +43,6 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
   const [manualUploadOpen, setManualUploadOpen] = React.useState(false);
   const [scanOpen, setScanOpen] = React.useState(false);
   const [linkOpen, setLinkOpen] = React.useState(false);
-  const [askOpen, setAskOpen] = React.useState(false);
   const [findOpen, setFindOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] =
     React.useState<DocumentRecord | null>(null);
@@ -85,7 +83,8 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             One library for receipts, warranties, manuals and other files. The assistant
-            reads attached manuals to answer questions and names the pages it used.
+            reads attached manuals to answer questions and names the pages it used. When no
+            manual is attached, it can look for one online and asks you before it saves it.
           </p>
           {assistantStatus.data && !assistantStatus.data.configured && (
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -178,12 +177,6 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                   Retry
                 </button>
               </p>
-            )}
-            {profile && (
-              <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={() => setAskOpen(true)}>
-                <Globe2 />
-                Ask online sources
-              </Button>
             )}
           </div>
         ) : (
@@ -313,12 +306,6 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
                 Find manual
               </Button>
             )}
-            {profile && (
-              <Button type="button" size="sm" variant="ghost" onClick={() => setAskOpen(true)}>
-                <Globe2 />
-                Ask online sources
-              </Button>
-            )}
           </div>
         </div>
       )}
@@ -361,12 +348,6 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
         open={linkOpen}
         onOpenChange={setLinkOpen}
         onUpload={() => setUploadOpen(true)}
-      />
-      <ManualOnlineAskDialog
-        item={item}
-        manuals={manualsQuery.data}
-        open={askOpen}
-        onOpenChange={setAskOpen}
       />
       <ManualFindDialog
         item={item}
