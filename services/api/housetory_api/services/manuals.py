@@ -234,6 +234,15 @@ def manual_documents(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -
     )
 
 
+def _downloads_for_item(household_id: uuid.UUID, item_id: uuid.UUID):
+    """Documents that a reviewed online download saved for this item."""
+    return select(ManualSearchCandidate.document_id).where(
+        ManualSearchCandidate.household_id == household_id,
+        ManualSearchCandidate.item_id == item_id,
+        ManualSearchCandidate.document_id.is_not(None),
+    )
+
+
 def item_manual_sources(db: Session, household_id: uuid.UUID, item_id: uuid.UUID) -> list[Document]:
     """Every document that can serve as this item's manual, Manual-library ones first.
 
@@ -243,18 +252,16 @@ def item_manual_sources(db: Session, household_id: uuid.UUID, item_id: uuid.UUID
     been stored under another type, and its item link can be removed later. The
     item page's plain upload attaches documentation as "other" or "specification".
     """
-    downloaded = select(ManualSearchCandidate.document_id).where(
-        ManualSearchCandidate.household_id == household_id,
-        ManualSearchCandidate.item_id == item_id,
-        ManualSearchCandidate.document_id.is_not(None),
-    )
     return list(
         db.scalars(
             select(Document)
             .where(
                 Document.household_id == household_id,
                 Document.document_type.in_(MANUAL_SOURCE_TYPES),
-                or_(Document.items.any(Item.id == item_id), Document.id.in_(downloaded)),
+                or_(
+                    Document.items.any(Item.id == item_id),
+                    Document.id.in_(_downloads_for_item(household_id, item_id)),
+                ),
             )
             .order_by(
                 case((Document.document_type == DocumentType.MANUAL.value, 0), else_=1),
@@ -264,6 +271,31 @@ def item_manual_sources(db: Session, household_id: uuid.UUID, item_id: uuid.UUID
             .limit(MAX_MANUAL_SOURCES)
         ).all()
     )
+
+
+def manual_relations(
+    db: Session, household_id: uuid.UUID, item_id: uuid.UUID, documents: list[Document]
+) -> dict[uuid.UUID, str]:
+    """How each document is tied to the item, read from stored records only.
+
+    ``attached`` is a link in ``item_documents``. ``online_download`` is a reviewed
+    download recorded for this very item. These are the two ties that
+    ``item_manual_sources`` follows; a document with neither is left out.
+    """
+    downloaded = set(
+        db.scalars(
+            _downloads_for_item(household_id, item_id).where(
+                ManualSearchCandidate.document_id.in_([document.id for document in documents])
+            )
+        )
+    )
+    relations = {}
+    for document in documents:
+        if any(entry.id == item_id for entry in document.items):
+            relations[document.id] = "attached"
+        elif document.id in downloaded:
+            relations[document.id] = "online_download"
+    return relations
 
 
 def reading_state(document: Document) -> str:

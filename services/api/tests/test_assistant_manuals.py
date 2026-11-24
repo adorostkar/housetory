@@ -76,6 +76,24 @@ def multimeter(client, **room_fields):
     return item, document
 
 
+def save_download(client, item, document):
+    """Record that a reviewed online download saved this document for the item."""
+    household_id = client.get("/api/v1/auth/session").json()["household"]["id"]
+    with SessionLocal() as db:
+        db.add(
+            ManualSearchCandidate(
+                household_id=uuid.UUID(household_id),
+                item_id=uuid.UUID(item["id"]),
+                document_id=uuid.UUID(document["id"]),
+                title=document["title"],
+                source_url=f"https://maker.example/{document['id']}",
+                file_url=f"https://maker.example/{document['id']}.pdf",
+                retrieved_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+
+
 def test_assistant_finds_opens_and_answers_from_an_attached_manual_across_follow_ups(
     owner_client, configured_ai, monkeypatch
 ):
@@ -297,7 +315,6 @@ def test_manual_discovery_covers_every_way_a_manual_reaches_an_item(
     owner_client, configured_ai, monkeypatch
 ):
     client = owner_client
-    household_id = client.get("/api/v1/auth/session").json()["household"]["id"]
     item = client.post("/api/v1/items", json={"name": "Bench drill"}).json()["item"]
     pdf = {"file": ("file.pdf", manual_pdf_bytes(), "application/pdf")}
 
@@ -310,19 +327,7 @@ def test_manual_discovery_covers_every_way_a_manual_reaches_an_item(
     # Saved for the item by a reviewed online download; the item link was removed later.
     downloaded = upload_manual(client, item_ids=[item["id"]], title="DRL-900 manual").json()
     populate_manual(downloaded["id"], "Depth stop\nSet the depth stop before drilling.")
-    with SessionLocal() as db:
-        db.add(
-            ManualSearchCandidate(
-                household_id=uuid.UUID(household_id),
-                item_id=uuid.UUID(item["id"]),
-                document_id=uuid.UUID(downloaded["id"]),
-                title="DRL-900 manual",
-                source_url="https://maker.example/drl-900",
-                file_url="https://maker.example/drl-900.pdf",
-                retrieved_at=datetime.now(UTC),
-            )
-        )
-        db.commit()
+    save_download(client, item, downloaded)
     unlinked = client.patch(f"/api/v1/documents/{downloaded['id']}", json={"item_ids": []})
     assert unlinked.status_code == 200, unlinked.text
     # In the Manual library without any item.
@@ -364,6 +369,227 @@ def test_manual_discovery_covers_every_way_a_manual_reaches_an_item(
 
     assert refused["error"] == "not_a_manual"
     assert refused["manuals"] == [] and refused["citations"] == []
+
+
+def test_an_item_and_a_document_given_together_must_belong_together(
+    owner_client, configured_ai, monkeypatch
+):
+    client = owner_client
+    meter, manual = multimeter(client)
+    drill = client.post("/api/v1/items", json={"name": "Bench drill"}).json()["item"]
+    library = upload_manual(client, title="Lathe handbook").json()
+    populate_manual(library["id"], "Spindle speed\nUse the low spindle speed for steel.")
+    # Saved for the drill by a reviewed online download; the item link was removed later.
+    downloaded = upload_manual(client, item_ids=[drill["id"]], title="DRL-900 manual").json()
+    populate_manual(downloaded["id"], "Depth stop\nSet the depth stop before drilling.")
+    save_download(client, drill, downloaded)
+    unlinked = client.patch(f"/api/v1/documents/{downloaded['id']}", json={"item_ids": []})
+    assert unlinked.status_code == 200, unlinked.text
+    # Still attached to the drill, and a download is recorded for it as well.
+    attached = upload_manual(client, item_ids=[drill["id"]], title="DRL-900 quick start").json()
+    populate_manual(attached["id"], "Chuck key\nUse the chuck key to tighten the bit.")
+    save_download(client, drill, attached)
+
+    unrelated = results(
+        client,
+        monkeypatch,
+        [
+            call("find_manuals", item_id=drill["id"], document_id=manual["id"]),
+            call(
+                "read_manual",
+                item_id=drill["id"],
+                document_id=manual["id"],
+                question="measure current amperage",
+            ),
+            call("find_manuals", item_id=drill["id"], document_id=library["id"]),
+            # A download recorded for another item does not tie the document to this one.
+            call(
+                "read_manual",
+                item_id=meter["id"],
+                document_id=downloaded["id"],
+                question="depth stop",
+            ),
+        ],
+    )
+    for result in unrelated:
+        assert result["error"] == "manual_not_for_item"
+        # Nothing is shown, read or labelled as that item's documentation.
+        assert result["manuals"] == [] and result["citations"] == []
+        assert result["facts"] == {} and result["references"] == []
+        assert "Documentation of" not in result["summary"]
+        assert "online download" not in result["summary"]
+        assert "with only its document_id" in result["summary"]
+    assert unrelated[0]["summary"].startswith(
+        f"“{TITLE}” is not documentation of Bench drill. It is attached to Multimeter."
+    )
+    assert "in the library, not attached to any item" in unrelated[2]["summary"]
+    assert "“DRL-900 manual” is not documentation of Multimeter." in unrelated[3]["summary"]
+    assert "10A jack" not in json.dumps(unrelated) and "depth stop" not in json.dumps(unrelated)
+
+    both, read, saved, listed, by_document, from_library = results(
+        client,
+        monkeypatch,
+        [
+            call("find_manuals", item_id=meter["id"], document_id=manual["id"]),
+            call(
+                "read_manual",
+                item_id=meter["id"],
+                document_id=manual["id"],
+                question="measure current amperage",
+            ),
+            call("find_manuals", item_id=drill["id"], document_id=downloaded["id"]),
+            call("find_manuals", item_id=drill["id"]),
+            call("find_manuals", document_id=manual["id"]),
+            call("read_manual", document_id=library["id"], question="spindle speed steel"),
+        ],
+    )
+    # A document that is attached to the item is shown as that item's documentation.
+    assert both["error"] is None
+    assert both["summary"].startswith(
+        f"Found among the documentation of Multimeter: {TITLE} (manual, text readable)."
+    )
+    assert "online download" not in both["summary"]
+    assert both["facts"]["item"]["id"] == meter["id"]
+    assert both["facts"]["manuals"][0]["for_item"] == "attached"
+    assert [entry["document_id"] for entry in both["manuals"]] == [manual["id"]]
+    assert read["citations"][0]["page"] == 12
+    assert read["facts"]["manuals"][0]["for_item"] == "attached"
+
+    # A download is named only where a download for this item is recorded.
+    assert saved["error"] is None
+    assert saved["facts"]["manuals"][0]["for_item"] == "online_download"
+    assert (
+        "DRL-900 manual (manual, text readable, saved for this item by an online "
+        "download, not attached to it now)" in saved["summary"]
+    )
+    assert [(entry["title"], entry["for_item"]) for entry in listed["facts"]["manuals"]] == [
+        ("DRL-900 quick start", "attached"),
+        ("DRL-900 manual", "online_download"),
+    ]
+    assert listed["summary"].count("online download") == 1
+
+    # A document on its own is still opened and read, without naming an item as its owner.
+    assert by_document["summary"].startswith(
+        f"Found: {TITLE} (manual, text readable, attached to Multimeter)."
+    )
+    assert "item" not in by_document["facts"]
+    assert "for_item" not in by_document["facts"]["manuals"][0]
+    assert from_library["citations"][0]["document_title"] == "Lathe handbook"
+    assert from_library["facts"]["manuals"][0]["attached_to"] == []
+
+
+def test_an_item_and_a_document_given_together_stay_inside_the_household_and_property(
+    owner_client, anon_client, configured_ai, monkeypatch
+):
+    client = owner_client
+    town = client.post("/api/v1/properties", json={"name": "Town house"}).json()
+    cabin = client.post("/api/v1/properties", json={"name": "Lake cabin"}).json()
+    meter, manual = multimeter(client, property_id=town["id"])
+    shed = client.post(
+        "/api/v1/rooms", json={"name": "Cabin shed", "property_id": cabin["id"]}
+    ).json()
+    generator = client.post(
+        "/api/v1/items", json={"name": "Cabin generator", "room_id": shed["id"]}
+    ).json()["item"]
+    cabin_manual = upload_manual(client, item_ids=[generator["id"]], title="GEN-2000 manual").json()
+    populate_manual(cabin_manual["id"], "Starting\nPull the starter cord to start the generator.")
+    shared = upload_manual(
+        client, item_ids=[meter["id"], generator["id"]], title="Shared safety sheet"
+    ).json()
+    populate_manual(shared["id"], "Safety\nWear eye protection.")
+
+    other = _other_household_headers()["headers"]
+    kettle = anon_client.post("/api/v1/items", headers=other, json={"name": "Other kettle"}).json()[
+        "item"
+    ]
+    kettle_manual = anon_client.post(
+        "/api/v1/documents",
+        headers=other,
+        files={"file": ("kettle.pdf", manual_pdf_bytes(), "application/pdf")},
+        data={"title": "KT-1 manual", "document_type": "manual", "item_ids": [kettle["id"]]},
+    ).json()
+    populate_manual(kettle_manual["id"], "Descaling\nBoil water with citric acid.")
+
+    # Inside one property, the other property's items and manuals do not exist.
+    in_town = results(
+        client,
+        monkeypatch,
+        [
+            call("find_manuals", item_id=meter["id"], document_id=manual["id"]),
+            call(
+                "read_manual",
+                item_id=meter["id"],
+                document_id=cabin_manual["id"],
+                question="start the generator",
+            ),
+            call("find_manuals", item_id=generator["id"], document_id=manual["id"]),
+            call("find_manuals", item_id=generator["id"], document_id=cabin_manual["id"]),
+            call("find_manuals", item_id=meter["id"], document_id=shared["id"]),
+            call("find_manuals", document_id=shared["id"]),
+            call("find_manuals", document_id=cabin_manual["id"]),
+        ],
+        property_id=town["id"],
+    )
+    assert [result["error"] for result in in_town] == [
+        None,
+        "document_not_found",
+        "item_not_found",
+        "item_not_found",
+        None,
+        None,
+        "document_not_found",
+    ]
+    # A manual shared with an item in another property names only the item in this one.
+    assert in_town[4]["facts"]["manuals"][0]["attached_to"] == ["Multimeter"]
+    assert "(manual, text readable, attached to Multimeter)" in in_town[5]["summary"]
+    for hidden in ("Cabin generator", "GEN-2000", "starter cord"):
+        assert hidden not in json.dumps(in_town)
+
+    # In the whole household both exist, and the pair is checked.
+    whole = results(
+        client,
+        monkeypatch,
+        [
+            call("find_manuals", item_id=meter["id"], document_id=cabin_manual["id"]),
+            call("find_manuals", item_id=generator["id"], document_id=shared["id"]),
+            call("find_manuals", item_id=meter["id"], document_id=kettle_manual["id"]),
+        ],
+    )
+    assert [result["error"] for result in whole] == [
+        "manual_not_for_item",
+        None,
+        "document_not_found",
+    ]
+    assert "It is attached to Cabin generator." in whole[0]["summary"]
+    assert whole[1]["facts"]["manuals"][0]["attached_to"] == ["Cabin generator", "Multimeter"]
+    assert "KT-1" not in json.dumps(whole) and "citric" not in json.dumps(whole)
+
+    # Another household reaches neither the item nor the manual, in any pairing.
+    foreign = results(
+        anon_client,
+        monkeypatch,
+        [
+            call("find_manuals", item_id=kettle["id"], document_id=manual["id"]),
+            call(
+                "read_manual",
+                item_id=meter["id"],
+                document_id=kettle_manual["id"],
+                question="descaling",
+            ),
+            call("find_manuals", item_id=meter["id"], document_id=manual["id"]),
+            call("find_manuals", item_id=kettle["id"], document_id=kettle_manual["id"]),
+        ],
+        other,
+    )
+    assert [result["error"] for result in foreign] == [
+        "document_not_found",
+        "item_not_found",
+        "item_not_found",
+        None,
+    ]
+    assert foreign[3]["facts"]["manuals"][0]["for_item"] == "attached"
+    for hidden in (TITLE, "Multimeter", "10A jack"):
+        assert hidden not in json.dumps(foreign)
 
 
 def test_manual_tools_stay_inside_the_household_and_property(

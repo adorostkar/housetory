@@ -82,6 +82,25 @@ def _titles(documents: list[Document]) -> str:
     return ", ".join(names)
 
 
+def _owners(
+    db: Session, run: AssistantRun, documents: list[Document]
+) -> dict[uuid.UUID, list[str]]:
+    """Names of the items each document is attached to, inside the conversation's scope."""
+    attached = {entry.id for document in documents for entry in document.items}
+    if run.property_id and attached:
+        attached = set(
+            db.scalars(
+                select(Item.id).where(
+                    Item.id.in_(attached), *property_item_conditions(run.property_id)
+                )
+            )
+        )
+    return {
+        document.id: sorted(entry.name for entry in document.items if entry.id in attached)
+        for document in documents
+    }
+
+
 def _pages(document: Document) -> tuple[int, int]:
     """Pages whose text is stored and pages in the file.
 
@@ -109,7 +128,10 @@ def manual_output(
     document_id: uuid.UUID | None,
     question: str | None,
 ) -> ToolOutput:
-    """List manuals with direct links and, for a question, the passages that match it."""
+    """List manuals with direct links and, for a question, the passages that match it.
+
+    An item and a document may be given together only when stored records tie them.
+    """
     if document_id is not None:
         documents = [_document(db, auth, run, document_id)]
     elif item is not None:
@@ -121,9 +143,30 @@ def manual_output(
             "Give the item_id of the item (find it with search_items) or the document_id "
             "of a manual found earlier.",
         )
+    owners = _owners(db, run, documents)
+
+    def where(document: Document) -> str:
+        names = owners[document.id]
+        if names:
+            return "attached to " + ", ".join(names[:3])
+        if run.property_id:
+            return "not attached to an item in this property"
+        return "in the library, not attached to any item"
+
+    relations: dict[uuid.UUID, str] = {}
+    if item is not None:
+        relations = manuals.manual_relations(db, auth.household.id, item.id, documents)
+        if document_id is not None and not relations:
+            raise ApiError(
+                422,
+                "manual_not_for_item",
+                f"“{_short(documents[0].title)}” is not documentation of {item.name}. "
+                f"It is {where(documents[0])}. To open or read it anyway, call the tool "
+                f"again with only its document_id. For the documentation of {item.name}, "
+                "call it again with only its item_id.",
+            )
     states = {document.id: manuals.reading_state(document) for document in documents}
     pages = {document.id: _pages(document) for document in documents}
-    owners = {document.id: sorted(entry.name for entry in document.items) for document in documents}
     readable = [document for document in documents if states[document.id] == "readable"]
     blocked = [document for document in documents if states[document.id] != "readable"]
     evidence, notices = [], []
@@ -139,13 +182,8 @@ def manual_output(
         elif total > 1:
             parts.append(f"{total} pages")
         if item is None:
-            names = owners[document.id]
-            parts.append(
-                "attached to " + ", ".join(names[:3])
-                if names
-                else "in the library, not attached to any item"
-            )
-        elif all(entry.id != item.id for entry in document.items):
+            parts.append(where(document))
+        elif relations.get(document.id) == "online_download":
             parts.append("saved for this item by an online download, not attached to it now")
         return f"{_short(document.title)} ({', '.join(parts)})"
 
@@ -163,8 +201,14 @@ def manual_output(
         listed = "; ".join(describe(document) for document in documents[:SUMMARY_DOCUMENTS])
         if len(documents) > SUMMARY_DOCUMENTS:
             listed += f"; and {len(documents) - SUMMARY_DOCUMENTS} more"
+        if item is None:
+            lead = "Found: "
+        elif document_id is None:
+            lead = f"Documentation of {item.name}: "
+        else:
+            lead = f"Found among the documentation of {item.name}: "
         summary = (
-            (f"Documentation of {item.name}: " if item is not None else "Found: ")
+            lead
             + listed
             + ". The application shows a direct open and download link for each; no review "
             "is opened."
@@ -235,6 +279,7 @@ def manual_output(
             "type": document.document_type,
             "text": states[document.id],
             "attached_to": owners[document.id][:5],
+            **({"for_item": relations[document.id]} if document.id in relations else {}),
             **(
                 {"pages_with_text": "{} of {}".format(*pages[document.id])}
                 if document in partial
