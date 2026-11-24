@@ -296,6 +296,24 @@ for (const mobile of [false, true]) {
     await expect(cited).toHaveAttribute("data-state", "drawn");
     expect(await reading()).toBeCloseTo(place, 2);
 
+    // The jump to a cited page does not depend on where focus is. Here the search
+    // shortcut moves focus to the header while the file is still loading.
+    await page.route(`**${documentApi}/file`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await route.continue();
+    });
+    await page.goto(`/documents/${manual.id}/view?page=2`);
+    const search = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+    await expect(search).toBeVisible();
+    await page.keyboard.press("Control+k");
+    await expect(search).toBeFocused();
+    await expect(cited).toHaveAttribute("data-state", "drawn");
+    await expect(search).toBeFocused();
+    const withFocusInHeader = await reading();
+    expect(withFocusInHeader).toBeLessThanOrEqual(0);
+    expect(withFocusInHeader).toBeGreaterThan(-0.05);
+    await page.unroute(`**${documentApi}/file`);
+
     // Managing the document, with its extraction review, stays a separate page.
     await page.getByRole("link", { name: "Details", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}$`));

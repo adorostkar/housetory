@@ -20,7 +20,6 @@ vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
 vi.mock("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url", () => ({ default: "/pdf.worker.mjs" }));
 
 const file = new Blob(["%PDF-1.4 synthetic"], { type: "application/pdf" });
-const scrolled: string[] = [];
 let watched: { element: Element; show: (visible: boolean) => void }[] = [];
 
 function pdfDocument(pages: number) {
@@ -41,18 +40,20 @@ function slot(page: number) {
 }
 
 beforeEach(() => {
-  scrolled.length = 0;
   watched = [];
   for (const mock of Object.values(pdfjs)) mock.mockReset();
   pdfjs.getDocument.mockImplementation(() => ({
     promise: Promise.resolve(pdfDocument(3)),
     destroy: pdfjs.destroy,
   }));
-  // jsdom has no layout: give the frame a width and record scrolling.
+  // jsdom has no layout: the frame gets a width, and page N starts N × 1000 pixels down.
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
-  Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
-    scrolled.push(this.getAttribute("data-page") ?? "");
-  };
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function rect(this: HTMLElement) {
+      return new DOMRect(0, Number(this.dataset.page ?? 0) * 1000, 800, 800);
+    },
+  );
+  vi.spyOn(window, "scrollBy").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -82,7 +83,8 @@ describe("PdfPages", () => {
       .toEqual([[1, 800], [2, 800], [3, 800]]);
     expect(Object.keys(pdfjs.render.mock.calls[0]![1]).sort()).toEqual(["canvas", "viewport"]);
     expect(screen.getByText("3 pages")).toBeVisible();
-    expect(scrolled).toEqual(["2"]);
+    // One jump to just above the cited page, worked out without the app's scroll padding.
+    expect(vi.mocked(window.scrollBy).mock.calls).toEqual([[{ top: 1992, behavior: "instant" }]]);
 
     await userEvent.click(screen.getByRole("button", { name: "Zoom in" }));
     await waitFor(() => expect(slot(1).style.width).toBe("1200px"));

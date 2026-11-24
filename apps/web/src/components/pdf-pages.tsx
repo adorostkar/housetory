@@ -24,6 +24,8 @@ const ZOOM_STEPS = [1, 1.5, 2, 3];
 const FIT_WIDTH = 900;
 // Stays below the canvas size that phones accept.
 const MAX_PAGE_PIXELS = 12_000_000;
+// Pixels between the toolbar and the page that the viewer opens at.
+const PAGE_GAP = 8;
 
 /**
  * Draws the pages of a PDF onto canvases with pdf.js.
@@ -150,11 +152,17 @@ export function PdfPages({
   const startPage = Math.min(Math.max(1, Math.floor(initialPage) || 1), pageCount);
   const ready = pageCount > 0 && width > 0;
   React.useEffect(() => {
-    if (!ready || startPage <= 1) return;
+    const page = frame.current?.querySelector(`[data-page="${startPage}"]`);
+    const bar = toolbar.current;
+    if (!ready || startPage <= 1 || !page || !bar) return;
+    // The page goes right under the place where the toolbar sticks. This is worked out
+    // here, not left to the app's scroll padding, which is off while focus is in the header.
+    const line = (parseFloat(getComputedStyle(bar).top) || 0) + bar.offsetHeight;
     // A jump, not a slide: sliding past every page before this one would start drawing them.
-    frame.current
-      ?.querySelector(`[data-page="${startPage}"]`)
-      ?.scrollIntoView?.({ block: "start", behavior: "instant" });
+    window.scrollBy({
+      top: page.getBoundingClientRect().top - line - PAGE_GAP,
+      behavior: "instant",
+    });
     note();
   }, [ready, startPage, note]);
 
@@ -302,14 +310,12 @@ function PdfPage({
     };
   }, [near, pdf, number, width, onShape]);
 
-  // A page that is scrolled to stops just under the app header and the toolbar.
-  // The margins are that height less the 5rem every page of the app already keeps free.
   return (
     <li
       ref={slot}
       data-page={number}
       data-state={state}
-      className="relative scroll-mt-[calc(6rem+env(safe-area-inset-top))] overflow-hidden bg-white shadow-sm lg:scroll-mt-[calc(2.5rem+env(safe-area-inset-top))]"
+      className="relative overflow-hidden bg-white shadow-sm"
       style={{ width, height: Math.round(width * shape) }}
     >
       {/* A canvas is black until its page is painted, so it stays unseen until then. */}
