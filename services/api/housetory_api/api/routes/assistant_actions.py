@@ -38,6 +38,7 @@ from ...schemas.assistant_actions import (
     LoanReturnProposalRequest,
     ManualIdentityProposalRequest,
     ManualSaveProposalRequest,
+    ProposalRequest,
     ReturnReviewRequest,
 )
 from ...schemas.borrowed import BorrowedCreate, BorrowedReturnCreate
@@ -180,16 +181,7 @@ def _borrowed_place_versions(
 
 @router.post("/proposals", response_model=AssistantActionProposalOut, status_code=201)
 def create_proposal(
-    payload: (
-        ItemEditProposalRequest
-        | ItemMoveProposalRequest
-        | LendingProposalRequest
-        | LoanReturnProposalRequest
-        | BorrowingProposalRequest
-        | BorrowedReturnProposalRequest
-        | ManualIdentityProposalRequest
-        | ManualSaveProposalRequest
-    ),
+    payload: ProposalRequest,
     account: AccountContext = Depends(require_account),
     db: Session = Depends(get_db),
 ) -> AssistantActionProposalOut:
@@ -197,16 +189,7 @@ def create_proposal(
 
 
 def _create_proposal(
-    payload: (
-        ItemEditProposalRequest
-        | ItemMoveProposalRequest
-        | LendingProposalRequest
-        | LoanReturnProposalRequest
-        | BorrowingProposalRequest
-        | BorrowedReturnProposalRequest
-        | ManualIdentityProposalRequest
-        | ManualSaveProposalRequest
-    ),
+    payload: ProposalRequest,
     account: AccountContext,
     db: Session,
     refreshed_from: AssistantActionProposal | None = None,

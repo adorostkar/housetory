@@ -1,6 +1,5 @@
 """The assistant finds a manual online, has the user approve it, then reads it."""
 
-import re
 import uuid
 from datetime import UTC, datetime
 from typing import get_args, get_type_hints
@@ -218,7 +217,7 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
     earlier = prompts[0]["context_newest_first"][0]
     assert earlier["request"] == QUESTION
     assert earlier["observations"][-1]["result"]["proposal"]["state"] == "applied"
-    assert "A request that only says to continue" in prompts[0]["system"]
+    assert "A request that only says to continue" in " ".join(prompts[0]["system"].split())
     (found,) = (step["result"] for step in second["steps"])
     assert searched == [
         {"mode": "manual", "manufacturer": "AstroAI", "model": "M6K0R", "variant": None}
@@ -419,10 +418,10 @@ def test_search_that_is_not_set_up_or_fails_is_reported_as_it_is(
         == 200
     )
 
+    # Not set up: the tool is refused before it runs, with the reason and what still works.
     disable_search(monkeypatch)
     (off,) = results(client, monkeypatch, [call("find_manuals_online", item_id=item["id"])])
-    assert off["error"] == "manual_search_unconfigured"
-    assert off["facts"]["condition"] == "search_not_configured"
+    assert off["error"] == "manual_search_unconfigured" and off["proposal"] is None
     assert "Online manual search is not configured." in off["summary"]
     assert "Add manual" in off["summary"]
 
@@ -651,10 +650,11 @@ def test_viewers_and_other_households_cannot_discover_or_save(
     assert searched == [] and fetched == [] and count(Document) == 0
 
 
-def test_every_published_tool_and_action_kind_has_a_handler(
+def test_every_published_tool_runs_its_handler_and_every_proposal_kind_is_offered(
     owner_client, configured_ai, monkeypatch
 ):
-    """The catalogue the model is given and the code that carries it out must agree."""
+    """Each registered tool is called through the assistant with real records. The
+    registry itself is checked in test_assistant_registry.py."""
     published = owner_client.get("/api/v1/assistant/tools").json()["tools"]
     assert {tool["name"] for tool in published} == set(registry.TOOLS)
     # Real records, so that every call passes the scope checks and reaches its handler.
@@ -701,7 +701,7 @@ def test_every_published_tool_and_action_kind_has_a_handler(
     outputs = []
     for start in range(0, len(calls), size):
         outputs += results(owner_client, monkeypatch, calls[start : start + size], others=others)
-    # A tool without a handler ends as unknown_tool.
+    # Every call reached its tool.
     assert len(outputs) == len(calls)
     assert [output["error"] for output in outputs].count("unknown_tool") == 0
 
@@ -712,16 +712,6 @@ def test_every_published_tool_and_action_kind_has_a_handler(
     accepted = kinds(get_args(get_type_hints(create_proposal)["payload"]))
     assert kinds(get_args(get_args(registry.Action)[0])) == accepted
     assert accepted > manuals.PROPOSAL_KINDS
-
-    # Every tool the instructions and descriptions name is a registered tool.
-    text = assistant_tools.SYSTEM + " ".join(tool.description for tool in registry.TOOLS.values())
-    named = set(
-        re.findall(
-            r"\b(?:find|read|search|look|process|prepare|start|get|list|locate|count)_[a-z_]+\b",
-            text,
-        )
-    )
-    assert named and named <= set(registry.TOOLS), named - set(registry.TOOLS)
 
 
 def test_without_ai_the_reviewed_steps_stay_usable_on_the_item_page(owner_client, monkeypatch):

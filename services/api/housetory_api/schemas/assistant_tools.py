@@ -75,6 +75,18 @@ class ToolOutput(BaseModel):
     error: str | None = None
 
 
+class ToolUnavailable(BaseModel):
+    """Why a tool cannot be used now, in words the assistant can pass on to the user.
+
+    The catalogue of a request carries it and a call to the tool is refused with it. It
+    explains; it gives no authority. The same checks run again on every call.
+    """
+
+    code: str
+    reason: str
+    alternative: str
+
+
 class ToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

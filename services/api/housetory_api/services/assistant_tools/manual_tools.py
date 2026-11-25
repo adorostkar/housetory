@@ -22,7 +22,7 @@ from ...domain import AiTask, JobStatus, OcrStatus
 from ...jobs import enqueue
 from ...models import AssistantRun, Document, Item, Job, ManualSearchCandidate
 from ...schemas.ai import AssistantReference
-from ...schemas.assistant_tools import ManualLink, ToolOutput
+from ...schemas.assistant_tools import ManualLink, ToolOutput, ToolUnavailable
 from ...schemas.manuals import ManualCitationOut
 from .. import ai, document_pages, manuals, ocr, storage
 from ..ai_tools.inventory_query import property_item_conditions
@@ -732,21 +732,37 @@ def waiting_message(db: Session, household_id: uuid.UUID, document_ids: list[str
     return None
 
 
-def _vision_config(db: Session, household_id: uuid.UUID):
-    """The model that looks at a page: the assistant's own when it can read pictures."""
+def _vision_model(db: Session, household_id: uuid.UUID):
+    """The model that looks at a page, the assistant's own when it can read pictures, or
+    why there is none."""
     assistant = ai.config_for(db, household_id, AiTask.ASSISTANT.value)
     if "vision" in assistant.capabilities:
-        return assistant
+        return assistant, None
     if ai.status_for(db, household_id, AiTask.VISION.value, probe=False).configured:
-        return ai.config_for(db, household_id, AiTask.VISION.value)
-    raise ApiError(
-        409,
-        "vision_unavailable",
-        f"The assistant's model ({assistant.model}) cannot read pictures and no vision "
-        "model is set up under Settings → AI, so the page cannot be looked at. Its stored "
-        "text can still be read with read_manual, and the user can open the page from the "
-        "manual's link.",
+        return ai.config_for(db, household_id, AiTask.VISION.value), None
+    return None, ToolUnavailable(
+        code="vision_unavailable",
+        reason=(
+            f"The assistant's model ({assistant.model}) cannot read pictures and no vision "
+            "model is set up under Settings → AI, so the page cannot be looked at."
+        ),
+        alternative=(
+            "Its stored text can still be read with read_manual, and the user can open the "
+            "page from the manual's link."
+        ),
     )
+
+
+def vision_unavailable(db: Session, household_id: uuid.UUID) -> ToolUnavailable | None:
+    """Why no page can be looked at for this household, or None when one can."""
+    return _vision_model(db, household_id)[1]
+
+
+def _vision_config(db: Session, household_id: uuid.UUID):
+    config, missing = _vision_model(db, household_id)
+    if missing is not None:
+        raise ApiError(409, missing.code, f"{missing.reason} {missing.alternative}")
+    return config
 
 
 def _picture_kind(content_type: str) -> str | None:
@@ -998,11 +1014,7 @@ def unsure_pages(steps: list[dict], keys: list[tuple[str, int]]) -> list[tuple[s
 
 def can_look(db: Session, household_id: uuid.UUID) -> bool:
     """Whether a model that reads pictures is set up for this household."""
-    try:
-        _vision_config(db, household_id)
-    except ApiError:
-        return False
-    return True
+    return vision_unavailable(db, household_id) is None
 
 
 def citations(steps: list[dict], answer: str, sources: list[dict]) -> list[ManualCitationOut]:

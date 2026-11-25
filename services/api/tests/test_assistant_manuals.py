@@ -224,7 +224,12 @@ def test_a_question_is_answered_from_the_pages_read_and_follow_ups_read_only_wha
             "url": f"/documents/{document['id']}/view?page=11",
         }
     ]
-    assert "a word search that found nothing proves nothing" in prompts[0]["system"]
+    # How to use a tool is said where the tool is registered, and reaches the model there.
+    described = {tool["name"]: tool["description"] for tool in prompts[0]["tools"]}
+    assert "a search that found nothing proves nothing" in described["search_manual"]
+    assert (
+        "read other pages before you say the manual does not cover it" in (described["read_manual"])
+    )
 
     def read_voltage_pages(prompt):
         (earlier,) = prompt["context_newest_first"][0]["observations"]
@@ -796,7 +801,9 @@ def test_a_follow_up_answered_from_memory_is_sent_back_to_read_the_pages(
     assert followed["state"] == "completed" and followed["model_calls"] == 3
     assert followed["answer"] == f"Turn the rotary switch to V ({TITLE}, page 9)."
     assert [(c["page"], c["excerpt"]) for c in followed["citations"]] == [(9, "")]
-    assert "never answer a manual question from memory" in " ".join(prompts[0]["system"].split())
+    assert "from memory or general knowledge" in " ".join(prompts[0]["system"].split())
+    described = {tool["name"]: tool["description"] for tool in prompts[0]["tools"]}
+    assert "for every new question read the pages it needs again" in described["read_manual"]
 
     # A model that insists is not asked twice. Its answer is shown without page links:
     # pages read in an earlier turn are no evidence for a new answer.

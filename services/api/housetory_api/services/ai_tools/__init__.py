@@ -40,6 +40,27 @@ from .whereabouts_tools import (
     tool_locate_item,
 )
 
+# The read-only lookups by name, for the search planner, which names one in its plan.
+# The assistant binds the same functions in its own tool registry.
+READ_TOOLS = {
+    "search_items": tool_search_items,
+    "get_item_details": tool_get_item_details,
+    "search_locations": tool_search_locations,
+    "list_room_contents": tool_list_room_contents,
+    "get_container_contents": tool_get_container_contents,
+    "search_documents": tool_search_documents,
+    "get_purchase_history": tool_get_purchase_history,
+    "get_warranty_status": tool_get_warranty_status,
+    "get_inventory_summary": tool_get_inventory_summary,
+    "find_missing_information": tool_find_missing_information,
+    "list_outstanding_loans": tool_list_outstanding_loans,
+    "list_borrowed_items": tool_list_borrowed_items,
+    "find_borrowed_owner": tool_find_borrowed_owner,
+    "locate_item": tool_locate_item,
+    "count_items": tool_count_items,
+    "get_loan_history": tool_get_loan_history,
+}
+
 
 def execute_tool(
     db: Session,
@@ -49,60 +70,10 @@ def execute_tool(
     *,
     household_reminder_days: int,
 ) -> ToolResult:
-    handlers = {
-        "search_items": lambda: tool_search_items(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_item_details": lambda: tool_get_item_details(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "search_locations": lambda: tool_search_locations(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "list_room_contents": lambda: tool_list_room_contents(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_container_contents": lambda: tool_get_container_contents(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "search_documents": lambda: tool_search_documents(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_purchase_history": lambda: tool_get_purchase_history(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_warranty_status": lambda: tool_get_warranty_status(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_inventory_summary": lambda: tool_get_inventory_summary(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "find_missing_information": lambda: tool_find_missing_information(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "list_outstanding_loans": lambda: tool_list_outstanding_loans(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "list_borrowed_items": lambda: tool_list_borrowed_items(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "find_borrowed_owner": lambda: tool_find_borrowed_owner(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "locate_item": lambda: tool_locate_item(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "count_items": lambda: tool_count_items(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-        "get_loan_history": lambda: tool_get_loan_history(
-            db, household_id, arguments, household_reminder_days=household_reminder_days
-        ),
-    }
-    handler = handlers.get(tool)
+    handler = READ_TOOLS.get(tool)
     if handler is None:
         raise ValueError("Unknown tool")
-    return handler()
+    return handler(db, household_id, arguments, household_reminder_days=household_reminder_days)
 
 
 def document_relations(

@@ -8,17 +8,23 @@ from ...db import get_db
 from ...models import AssistantRun
 from ...schemas.assistant_tools import RunOut, RunRequest
 from ...services import assistant_tools
-from ...services.assistant_tools.registry import TOOLS
+from ...services.assistant_tools.registry import catalogue
 from ..abuse import enforce_search_limit
-from ..deps import AccountContext, require_account
+from ..deps import AccountContext, AuthContext, get_optional_auth, require_account
 
 router = APIRouter(prefix="/assistant", tags=["assistant-tools"])
 
 
 @router.get("/tools")
-def registry(account: AccountContext = Depends(require_account)):
+def registry(
+    account: AccountContext = Depends(require_account),
+    auth: AuthContext | None = Depends(get_optional_auth),
+    db: Session = Depends(get_db),
+):
+    """The assistant's tools, made from their registrations. With an active household
+    the tools this user cannot use now are marked, with the reason."""
     return {
-        "tools": [tool.schema() for tool in TOOLS.values()],
+        **catalogue(db, auth),
         "limits": {
             "model_calls": assistant_tools.MAX_MODEL_CALLS,
             "deadline_seconds": assistant_tools.MAX_SECONDS,

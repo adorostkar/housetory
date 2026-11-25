@@ -17,9 +17,9 @@ from ...schemas.assistant_actions import (
     ManualIdentityProposalRequest,
     ManualSaveProposalRequest,
 )
-from ...schemas.assistant_tools import ToolOutput, WebLink
+from ...schemas.assistant_tools import ToolOutput, ToolUnavailable, WebLink
 from ...schemas.manuals import validate_manual_identifiers
-from .. import manuals
+from .. import manual_web, manuals
 from ..ai_tools.references import _item_reference
 
 MAX_CANDIDATES = 8
@@ -103,17 +103,7 @@ def _blocked(
             proposal=proposal,
             error=exc.code,
         )
-    if exc.code == "manual_search_unconfigured":
-        return ToolOutput(
-            summary=(
-                f"Nothing was searched: online search is not set up. {exc.message} Tell the "
-                "user this reason. A manual can still be added by hand with Add manual on "
-                "the item page. Do not answer from general knowledge instead."
-            ),
-            facts={**facts, "condition": "search_not_configured"},
-            references=[_item_reference(item)],
-            error=exc.code,
-        )
+    # A search that is not set up is refused before this tool runs: see search_unavailable.
     if exc.code == "manual_search_unavailable":
         return ToolOutput(
             summary=(
@@ -126,6 +116,24 @@ def _blocked(
             error=exc.code,
         )
     raise exc
+
+
+def search_unavailable(db: Session, household_id) -> ToolUnavailable | None:
+    """Why nothing can be searched online for this household, or None when it can."""
+    provider = manual_web.resolve_search_provider(db, household_id)
+    if provider.configured:
+        return None
+    return ToolUnavailable(
+        code="manual_search_unconfigured",
+        reason=(
+            "Online manual search is not set up for this household. "
+            + (provider.reason or "Manual search is not configured.")
+        ),
+        alternative=(
+            "Attached manuals can still be read, and a manual can be added by hand with "
+            "Add manual on the item page."
+        ),
+    )
 
 
 def _other_variant(item: Item, confirmed, variant: str, attached: int, propose) -> ToolOutput:

@@ -106,7 +106,8 @@ def test_registry_schemas_and_unknown_tool_recovery_do_not_write_inventory(
     definitions = {tool["name"]: tool for tool in registry["tools"]}
     assert definitions["prepare_action"]["permission"] == "writer"
     assert "Apply" in definitions["prepare_action"]["confirmation"]
-    assert definitions["get_item_details"]["input_schema"]["required"] == ["item_id"]
+    arguments = registry["argument_schemas"][definitions["get_item_details"]["arguments"]]
+    assert arguments["required"] == ["item_id"]
     responses = iter(
         [
             call("http", url="/items/delete-all"),
@@ -1123,7 +1124,9 @@ def test_category_requests_get_a_category_or_a_recorded_reason_and_stay_compact(
             parent=parent,
         )
         parent = current["id"]
-    assert max(len(prompt) for prompt in plans) < 40_000
+    # The instructions and the prompt together. What a tool is for is said in the
+    # catalogue of the prompt, not in the instructions, so the two are counted as one.
+    assert len(assistant_tools.SYSTEM) + max(len(prompt) for prompt in plans) < 45_500
     last = json.loads(plans[-1])
     assert len(last["context_newest_first"]) == 4
     assert "scope_item_ids" not in plans[-1]

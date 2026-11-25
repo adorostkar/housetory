@@ -128,6 +128,20 @@ class ManualSaveProposalRequest(BaseModel):
     candidate_id: uuid.UUID
 
 
+# Every change the assistant can prepare for the user to review. This is the one list:
+# the proposal route accepts it and the assistant's prepare_action tool offers it.
+ProposalRequest = (
+    ItemEditProposalRequest
+    | ItemMoveProposalRequest
+    | LendingProposalRequest
+    | LoanReturnProposalRequest
+    | BorrowingProposalRequest
+    | BorrowedReturnProposalRequest
+    | ManualIdentityProposalRequest
+    | ManualSaveProposalRequest
+)
+
+
 class AssistantActionTarget(BaseModel):
     id: uuid.UUID
     name: str
