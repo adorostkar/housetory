@@ -200,6 +200,8 @@ test("contextual Add items keeps place and returns a useful origin", async ({
   await page.getByRole("button", { name: "Add to your home" }).click();
   await expect(page.getByRole("heading", { name: `Context item ${id}` })).toBeVisible();
   await expect(page.getByRole("link", { name: /Back to .*Context room/ })).toBeVisible();
+  // Documents and manuals have their own tab on the item page.
+  await page.getByRole("tab", { name: "Documents" }).click();
   await expect(page.getByRole("heading", { name: "Documents & manuals" })).toBeVisible();
   await expect(page.getByText("No documents or manuals attached")).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload document" })).toBeVisible();
@@ -293,7 +295,7 @@ test("documents, manuals and image-source details stay coherent and honest", asy
     window.localStorage.setItem("housetory-theme", "light");
   });
   const fixture = await createDisclosureFixture(request);
-  await page.goto(`/items/${fixture.itemId}`);
+  await page.goto(`/items/${fixture.itemId}?tab=documents`);
   await expect(page.getByRole("heading", { name: "Documents & manuals" })).toBeVisible();
   const documentsSection = page.locator("section").filter({
     has: page.getByRole("heading", { name: "Documents & manuals" }),
@@ -319,11 +321,12 @@ test("documents, manuals and image-source details stay coherent and honest", asy
     page.getByRole("heading", { name: "Link an existing document" }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
-
-  await expect(page.getByText("Image source")).toBeVisible();
-  await expect(page.getByText("Category icon").first()).toBeVisible();
   await page.getByRole("heading", { name: "Documents & manuals" }).scrollIntoViewIfNeeded();
   await shot(page, "04-documents-manuals");
+
+  await page.getByRole("tab", { name: "Details" }).click();
+  await expect(page.getByText("Image source")).toBeVisible();
+  await expect(page.getByText("Category icon").first()).toBeVisible();
 });
 
 test("pack purchase can be entered per unit and shows the package total on detail", async ({
@@ -426,7 +429,7 @@ test("item form and detail stay usable at phone, tablet and desktop widths", asy
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`/items/${fixture.itemId}`);
+  await page.goto(`/items/${fixture.itemId}?tab=documents`);
   await expect(page.getByRole("heading", { name: "Documents & manuals" })).toBeVisible();
   expect(
     await page.evaluate(

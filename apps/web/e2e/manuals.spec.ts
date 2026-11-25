@@ -82,7 +82,8 @@ test("uploads a manual without make/model, keeps its page text, and attaches it 
   const second = await createItem(request, `Drill two ${id}`);
 
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto(`/items/${first.item.id}`);
+  // Documents and manuals have their own tab on the item page.
+  await page.goto(`/items/${first.item.id}?tab=documents`);
   await page.getByRole("button", { name: "Add manual" }).first().click();
   const uploadDialog = page.getByRole("dialog", { name: "Add a manual" });
   await expect(uploadDialog).toBeVisible();
@@ -132,7 +133,7 @@ test("uploads a manual without make/model, keeps its page text, and attaches it 
   await expect(page.getByRole("button", { name: "Ask about this item" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ask attached manuals" })).toHaveCount(0);
 
-  await page.goto(`/items/${second.item.id}`);
+  await page.goto(`/items/${second.item.id}?tab=documents`);
   await page.getByRole("button", { name: "Link existing" }).click();
   const attachDialog = page.getByRole("dialog", { name: "Link an existing document" });
   const row = attachDialog.locator("li").filter({ hasText: title });
@@ -230,7 +231,7 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
     },
   );
 
-  await page.goto(`/items/${item.item.id}`);
+  await page.goto(`/items/${item.item.id}?tab=documents`);
   await page.getByRole("button", { name: "Find manual" }).click();
   const dialog = page.getByRole("dialog", { name: `Find a manual for ${item.item.name}` });
   await expect(dialog.getByText("Brave Search API")).toBeVisible();
@@ -275,4 +276,177 @@ test("discovers through the concrete Brave adapter, reviews the real source and 
     }, { timeout: 60_000 })
     .toContain("Disconnect the battery before changing the drill bit.");
   await expect(page.getByRole("button", { name: "Ask online sources" })).toHaveCount(0);
+});
+
+interface AssistantStep {
+  call: { name: string; arguments: Record<string, string> };
+  result: {
+    references?: { id: string }[];
+    facts?: { pages?: { document_id: string; document: string; page: number; text: string }[] };
+  };
+}
+
+test("the assistant finds a manual online, shows each proposal only when it has finished, and answers from the saved file", async ({
+  page,
+  request,
+}) => {
+  test.skip(!process.env.TOOLS_E2E_ISOLATED, "Requires a disposable API/database and a real worker");
+  const id = suffix();
+  const name = `Assistant drill ${id}`;
+  const created = await request.post("/api/v1/items", {
+    data: { name, brand: "DeWalt", model: "DCD791B" },
+  });
+  expect(created.ok()).toBeTruthy();
+  const itemId = ((await created.json()) as { item: { id: string } }).item.id;
+  const configure = await request.put("/api/v1/settings/online-search", {
+    data: { manual_enabled: true, api_key: BRAVE_FIXTURE_KEY },
+  });
+  expect(configure.ok()).toBeTruthy();
+
+  // A scripted model: it chooses the tools a real one would, and is slow with its last
+  // word after a proposal was prepared, so the time in between can be seen.
+  const tool = (call: string, args: object) => ({ kind: "tool", call: { name: call, arguments: args } });
+  const model = http.createServer(async (incoming, response) => {
+    response.setHeader("Content-Type", "application/json");
+    if (incoming.url === "/api/tags") {
+      response.end(JSON.stringify({ models: [{ name: "online-manual-test" }] }));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+    const messages = JSON.parse(Buffer.concat(chunks).toString()).messages as { content: string }[];
+    const prompt = messages.at(-1)!.content;
+    let output: unknown = { sections: [], topics: [] };
+    if (prompt.includes('"step_schema"')) {
+      const input = JSON.parse(prompt) as { request: string; observations: AssistantStep[] };
+      const observed = input.observations;
+      const last = observed.at(-1);
+      if (input.request !== "Continue." && observed.length === 0) {
+        output = tool("search_items", { q: name });
+      } else if (input.request !== "Continue." && observed.length === 1) {
+        output = tool("find_manuals_online", { item_id: last!.result.references![0]!.id });
+      } else if (last?.call.name === "find_manuals_online") {
+        await new Promise((resolve) => setTimeout(resolve, 4_000));
+        output = { kind: "answer", message: "Please check the card." };
+      } else if (!last) {
+        output = tool("read_manual", { item_id: itemId });
+      } else {
+        const read = last.result.facts!.pages![0]!;
+        const quote = read.text.trim().split("\n")[1]!;
+        output = {
+          kind: "answer",
+          message: `${quote} (${read.document}, page ${read.page}).`,
+          sources: [{ document_id: read.document_id, pages: [read.page], quote }],
+        };
+      }
+    }
+    response.end(JSON.stringify({ message: { role: "assistant", content: JSON.stringify(output) } }));
+  });
+  await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
+  const provider = await request.post("/api/v1/ai/providers", {
+    data: {
+      provider: "ollama",
+      display_name: `Scripted online manual model ${id}`,
+      base_url: `http://127.0.0.1:${(model.address() as { port: number }).port}`,
+      default_model: "online-manual-test",
+      enabled: true,
+    },
+  });
+  expect(provider.ok(), await provider.text()).toBeTruthy();
+  const providerId = ((await provider.json()) as { id: string }).id;
+  try {
+    const task = await request.put("/api/v1/ai/tasks/assistant", {
+      data: { provider_id: providerId, model: "online-manual-test", enabled: true },
+    });
+    expect(task.ok(), await task.text()).toBeTruthy();
+
+    // The file the save leads to. The server cannot fetch from a test fixture, so the
+    // download itself is stood in for below, as in the test above.
+    const savedTitle = `Assistant manual ${id}`;
+    const upload = await request.post("/api/v1/documents", {
+      multipart: {
+        file: {
+          name: "assistant-manual.txt",
+          mimeType: "text/plain",
+          buffer: Buffer.from("Changing the bit\nDisconnect the battery before changing the drill bit."),
+        },
+        title: savedTitle,
+        document_type: "manual",
+      },
+    });
+    expect(upload.ok()).toBeTruthy();
+    const savedId = ((await upload.json()) as { id: string }).id;
+    await expect
+      .poll(async () => {
+        const text = (await (await request.get(`/api/v1/documents/${savedId}/text`)).json()) as {
+          pages_read: number;
+          reading: boolean;
+        };
+        return text.pages_read > 0 && !text.reading;
+      }, { timeout: 60_000 })
+      .toBe(true);
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/items");
+    const search = page.getByRole("combobox", { name: "Search or ask about your inventory" });
+    await search.fill(`How do I change the bit on ${name}?`);
+    await search.press("Enter");
+
+    // The make and model must be confirmed first. The proposal is prepared while the
+    // assistant still works: the page says so, and shows the card when it has finished.
+    // Earlier conversations of this household stay on the page: only this item's cards count.
+    const cards = page.getByLabel("Action review").filter({ hasText: name });
+    const working = page.getByRole("status").filter({ hasText: "Working on your request…" });
+    await expect(working).toContainText(
+      "A proposal is prepared. It appears for your review when the assistant has finished.",
+    );
+    await expect(cards).toHaveCount(0);
+    await expect(cards).toHaveCount(1);
+    await expect(working).toHaveCount(0);
+    await expect(cards.first()).toContainText("Applying confirms this as the exact product");
+    const searchesBefore = braveRequests.length;
+    await cards.first().getByRole("button", { name: "Apply" }).click();
+
+    // Apply was the decision: the search starts by itself and leads to one manual to save.
+    await expect(working).toContainText("A proposal is prepared.");
+    await expect(cards).toHaveCount(1);
+    await expect(cards).toHaveCount(2);
+    expect(braveRequests.length).toBeGreaterThan(searchesBefore);
+    const save = cards.last();
+    await expect(save).toContainText("Check that this manual is for your exact model");
+    await expect(
+      save.getByRole("link", { name: "https://www.dewalt.com/-/media/manuals/DCD791B.pdf" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("Online sources").last().getByRole("link", {
+        name: "DeWalt DCD791B 20V MAX Drill Instruction Manual",
+      }),
+    ).toBeVisible();
+
+    await page.route("**/api/v1/assistant/actions/proposals/*/apply", async (route) => {
+      const attach = await request.post(`/api/v1/items/${itemId}/manuals/${savedId}`);
+      expect(attach.ok()).toBeTruthy();
+      await route.fulfill({ json: { message: "Saved the manual." } });
+    });
+    await save.getByRole("button", { name: "Apply" }).click();
+    await expect(save.getByText("Saved the manual.")).toBeVisible();
+
+    // The conversation goes on by itself and answers from the saved file, with its page.
+    const answered = page.getByLabel("Assistant tool task").last();
+    await expect(answered.getByTestId("answer-text")).toContainText(
+      `Disconnect the battery before changing the drill bit. (${savedTitle}, page 1)`,
+      { timeout: 60_000 },
+    );
+    await expect(
+      answered
+        .getByRole("list", { name: "Manual citations" })
+        .getByRole("link", { name: `${savedTitle}, page 1`, exact: true }),
+    ).toHaveAttribute("href", new RegExp(`^/documents/${savedId}/view\\?page=1(&|$)`));
+    // Reading a manual opened no capture or extraction review.
+    await expect(page.getByLabel("Assistant capture status")).toHaveCount(0);
+    await expect(page.getByLabel("Assistant document review")).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/v1/ai/providers/${providerId}`);
+    await new Promise<void>((resolve) => model.close(() => resolve()));
+  }
 });
