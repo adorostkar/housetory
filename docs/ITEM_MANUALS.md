@@ -124,6 +124,24 @@ the file is replaced.
   place of a heading. Page numbers printed inside the text are not trusted.
 - The map helps to find pages. It is never shown as a source and never cited.
 
+### A manual goes to the assistant first
+
+Every uploaded document can get AI suggestions (the ordinary enhancement job,
+`ai.enrich`). For a **manual** the order is now fixed, so that two model
+requests do not run about the same file at the same time:
+
+1. When an assistant is set up, the manual is read and mapped with the
+   assistant's model first. No enhancement job is started. The document shows
+   “Read by the assistant · no separate AI suggestions”.
+2. When that fails (the pages could not be read, the map request failed, or
+   the assistant is no longer set up when the map is due), the ordinary
+   enhancement runs instead, as a new processing attempt with its own time
+   limit.
+3. Without an assistant, the ordinary enhancement runs at once, as before.
+
+Receipts, invoices and all other document types are not changed. **Retry AI
+only** on the document page still starts the ordinary enhancement by hand.
+
 ### The assistant's tools
 
 The tools are in `services/assistant_tools/registry.py` and
@@ -132,9 +150,9 @@ The tools are in `services/assistant_tools/registry.py` and
 | Tool | What it does |
 | --- | --- |
 | `find_manuals` | Lists the manuals of an item, or one manual by document ID, with **Open**, **Download** and **Details** links and how many pages are read. Returns no text. |
-| `read_manual` | Without `pages`: the map and, if the manual is short enough (about 30,000 characters), its complete text. A longer manual returns the map, or its first pages when no map exists. With `pages` (“11”, “9-12”, “3,7-9”): the text of those pages. |
+| `read_manual` | Without `pages`: the map. A short manual (up to about 8,000 characters) also returns its complete text. A longer manual with a map returns the map only, and the assistant asks for the pages it needs. Without a map, the complete text is returned up to about 30,000 characters, and the first pages of a longer manual. With `pages` (“11”, “9-12”, “3,7-9”): the text of those pages. |
 | `search_manual` | Finds pages that contain given words and shows the matching lines. It points to pages; it returns no page text. |
-| `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The result is stored with the page. |
+| `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The look runs as its own job and the request waits for it. The result is stored with the page. |
 | `process_manual` | Queues the reading of pages that were not tried yet, one more try of pages whose reading failed, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
 | `find_manuals_online` | Searches the configured provider for the manual of an item and returns the reviewed candidates. Takes the item and, when the user named one, a variant. Saves nothing. Needs the owner or member role. See “The assistant finds a manual online”. |
 | `prepare_action` | Also prepares the two manual proposals: `confirm_manual_identity` and `save_manual`. The user applies them. |
@@ -146,6 +164,23 @@ the map are aids. They do not limit what the assistant may read.
 `look_at_manual_page` uses the assistant's own model when it can read pictures.
 Otherwise it uses the model of the **Vision** task. If neither exists, the tool
 says so and the stored text stays readable.
+
+**A look is its own job.** Reading a page from its picture is slow on a local
+model. Inside the assistant's attempt it ran out of time in about half of the
+calls. So the tool queues a `documents.look_page` job and the request waits for
+it, like it waits for page reading. The job has the full time of one AI request
+(`AI_TIMEOUT_SECONDS`) and does not use up the assistant's attempt. When the
+job is done, the tool returns the reading. When it fails, the tool says why
+(no vision model, the model did not answer, the page cannot be drawn) and the
+OCR text stays. The same job serves the looks the application makes before an
+answer is shown.
+
+**A long manual opens with its map.** The first real-model run put a whole
+25-page manual in the prompt and then needed many attempts to answer. Now a
+manual that has a map and more than about 8,000 characters of text opens with
+the map only. The assistant picks the pages for the question from the topics
+and sections and reads those. It may still read any page, and a manual without
+a map opens as before.
 
 **Words OCR was unsure about.** Tesseract gives every word a confidence. Words
 below 60 (of 100) are stored with the page and given to the assistant as
@@ -238,6 +273,14 @@ step that follows: `find_manuals_online` after a confirmed identity,
 goes on from that result with the earlier question. Other proposals do not do
 this, and a proposal that is not applied starts nothing.
 
+**A card appears when the request has ended.** A proposal is often prepared in
+the middle of a request, and the assistant still has to write its answer. A
+card that could be applied at that moment looked like the end of the request.
+So while the assistant works, the page shows a spinner with “Working on your
+request…” and “A proposal is prepared. It appears for your review when the
+assistant has finished.” The card is shown when the request has ended. This
+holds for every kind of proposal, not only for manuals.
+
 Three steps are done by the application and not left to the model, because a
 real model did not do them reliably (see “Verification with a real model”):
 
@@ -302,6 +345,17 @@ An answer names the pages it rests on. The model lists them in `sources`
   page.
 - The wording of the answer comes from the model and is not checked sentence by
   sentence.
+
+### When the model needs more time
+
+One attempt of a request has 90 seconds. When an attempt runs out of time, or
+one AI request times out, the request does not stop for the user to press
+**Retry assistant**. It goes on by itself, up to three more times. The steps
+already done are kept, so the next attempt starts where the last one stopped.
+While this happens the page says “This takes longer than usual. The assistant
+is still working and goes on by itself.” After the last try the request ends
+with the normal error and **Retry assistant**. Other failures (a provider that
+is not reachable, a refused request) are not tried again automatically.
 
 ### Keeping the conversation small
 
@@ -651,7 +705,8 @@ page citations.
   model (about 10 words per second) the map of the 25-page AstroAI manual
   needed 85 to 163 seconds, so `AI_TIMEOUT_SECONDS` had to be raised, and a
   question needed **Retry** several times. Retry keeps the finished tool
-  results, so each press moves on.
+  results, so each press moves on. A request that runs out of time now goes
+  on by itself up to three times (see “When the model needs more time”).
 - **Thinking models on Ollama.** The Ollama adapter does not switch a model's
   hidden reasoning off. A thinking model spent 8 minutes on the map request.
   Use a non-thinking ("instruct") model.
@@ -778,26 +833,35 @@ Faults the real model showed, and what was done:
 | It named manual pages it had not read. | Every page named in the answer must have been read in the request. |
 | The user said “Pro variant” and the proposal had no variant. | `find_manuals_online` takes a variant the user named. |
 | From one search snippet it invented “1500 watts”. | The excerpt tool was removed. |
-| In the browser, Apply while the answer was still being written did not continue. | The page continues when the running request has ended. |
+| In the browser, Apply while the answer was still being written did not continue. | The page continues when the running request has ended. A card is now shown only when its request has ended. |
 
 Limits that remain:
 
-- **Speed.** With this local model one attempt (90 seconds) is often too short
-  once a whole manual is in the prompt. The answer after saving needed 8
-  retries in one run and 1 in another. A faster model needs none; that was not
-  measured.
+- **Speed.** With this local model one attempt (90 seconds) was often too short
+  once a whole manual was in the prompt. The answer after saving needed 8
+  retries in one run and 1 in another. Since then a long manual opens with its
+  map only, and a request that runs out of time goes on by itself up to three
+  times. These two changes were made after the run and were **not** tried with
+  a real model. The model's context size (`num_ctx`) is still not sent to
+  Ollama.
 - **No real search provider.** The Brave Search API itself was not called.
 - **One model.** No other local model and no cloud model was tried.
 - **Accuracy is the model's.** One fuse value was wrong. Citations can miss a
   page (page 10 above) or include a page that adds nothing (page 12).
-- **Looking at a page often fails.** `look_at_manual_page` ran out of time in
-  about half of the calls. The answer then rests on the OCR text.
+- **Looking at a page often failed.** `look_at_manual_page` ran out of time in
+  about half of the calls. The answer then rested on the OCR text. A look is
+  now its own job with its own time. This was not tried with a real model.
 - **Search across languages.** “مولتی‌متر من کجاست؟” found nothing, because
   the item is named “Multimeter”. The model searched for the Persian word.
 - **Other households** were covered by the scripted tests only.
-- A saved manual also starts the normal document enrichment job, as every
-  upload does. With a slow model it competes with the assistant.
-- `e2e/manuals.spec.ts` and `e2e/item-editing.spec.ts` were not run.
+- A saved manual used to start the normal document enrichment job at once and
+  it competed with the assistant. A manual now goes to the assistant first
+  (see “A manual goes to the assistant first”).
+- `e2e/manuals.spec.ts` and `e2e/item-editing.spec.ts` were stale: they did not
+  open the **Documents** tab of the item page. They do now, and
+  `manuals.spec.ts` has a browser test of the whole online flow with a scripted
+  model. One test in `item-editing.spec.ts` (“pack purchase…”) still fails; it
+  is about the purchase form, not about manuals.
 
 ## Representative screenshots
 

@@ -659,8 +659,12 @@ deployment.
   reading failed is kept as failed, not as read; it is tried again only on
   request, at most three times in all. Words OCR was unsure about are kept with
   the page, and pages an answer cites that have such words are looked at by a
-  vision model before the answer is shown. The assistant is
-  the only place where a manual is interpreted; answers cite only pages a tool
+  vision model before the answer is shown. A look runs as its own job
+  (`documents.look_page`) and the request waits for it. A manual with a map
+  and more than about 8,000 characters opens with the map only. A manual is
+  read and mapped by the assistant first; its ordinary enhancement
+  (`ai.enrich`) runs only when that fails or no assistant is set up. The
+  assistant is the only place where a manual is interpreted; answers cite only pages a tool
   returned in the same request. An item and a document given
   together must belong together in stored records. A Manual document is never
   opened as a capture or extraction review. See
@@ -685,6 +689,10 @@ deployment.
   not the result again. A call that failed is made again, not answered from
   the stored failure. These checks use recorded facts, not the wording of the
   answer.
+- A request whose attempt runs out of time goes on by itself, up to three
+  times, with the steps it already has. A proposal prepared during a request
+  is shown as a card when the request has ended; until then the page shows
+  that work goes on and that a proposal is prepared.
 - **Assistant access is part of accepting a feature.** When a feature is added
   or changed, decide how the assistant reaches it, and write the decision down
   in the feature's document:
