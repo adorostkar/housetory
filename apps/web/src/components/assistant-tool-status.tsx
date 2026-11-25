@@ -4,11 +4,12 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { AnswerText } from "@/components/answer-text";
 import { InventoryReview } from "@/components/inventory-review";
 import { api, getApiErrorMessage } from "@/lib/api";
 import {
-  assistantAnswerText, startedReview, type AssistantManualLink, type AssistantToolRun,
+  assistantAnswerText, startedReview, toolRunActive, type AssistantManualLink, type AssistantToolRun,
 } from "@/lib/assistant-tools";
 import { withHousehold } from "@/lib/household-links";
 import { useSelectHousehold, useSession } from "@/lib/queries";
@@ -26,7 +27,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   const session = useSession();
   const selectHousehold = useSelectHousehold();
   const [busy, setBusy] = React.useState(false);
-  const active = ["queued", "running"].includes(run.state);
+  const active = toolRunActive(run);
   const references = [...new Map(run.steps.flatMap(({ result }) =>
     result.references ?? []).map((reference) => [reference.id, reference])).values()];
   // Manuals are shown with their own links, not as a review: Open shows the file itself.
@@ -52,6 +53,7 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
   }).map((review) => [review.id, review])).values()];
   const hasPreparedWork = run.steps.some((step) =>
     step.result.proposal || startedReview(step) || step.result.capture);
+  const hasProposal = run.steps.some((step) => step.result.proposal);
   const change = async (action: "cancel" | "retry") => {
     setBusy(true);
     try {
@@ -67,8 +69,21 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
     <div className={`${hasPreparedWork && !reviews.length && !active && !run.can_retry
       ? "px-1" : "surface p-4"} min-w-0 space-y-3`}
       aria-label="Assistant tool task" data-state={run.state}>
-      {active ? <p role="status" className="text-sm">Working on your request…</p>
-        : (!hasPreparedWork || run.can_retry) &&
+      {active ? (
+        <div role="status" className="space-y-1 text-sm">
+          <p className="flex items-center gap-2"><Spinner className="shrink-0" />Working on your request…</p>
+          {hasProposal && (
+            <p className="text-xs text-muted-foreground">
+              A proposal is prepared. It appears for your review when the assistant has finished.
+            </p>
+          )}
+          {(run.continued ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground">
+              This takes longer than usual. The assistant is still working and goes on by itself.
+            </p>
+          )}
+        </div>
+      ) : (!hasPreparedWork || run.can_retry) &&
           <AnswerText text={assistantAnswerText(run.message, references)} className="break-words" />}
       {active && run.worker_available === false && (
         <p className="text-xs text-brass">

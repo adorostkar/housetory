@@ -75,8 +75,15 @@ export interface AssistantToolRun {
   citations?: ManualCitation[];
   model_calls: number;
   max_model_calls: number;
+  /** How often the request went on by itself after it ran out of time. */
+  continued?: number;
   can_retry: boolean;
   worker_available: boolean | null;
+}
+
+/** The request is still being worked on. */
+export function toolRunActive(run: AssistantToolRun) {
+  return ["queued", "running"].includes(run.state);
 }
 
 /** The review a step started. Status reads refer to a review already shown above. */
@@ -136,8 +143,12 @@ export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
     ? assistantAnswerText(run.answer ?? "", run.steps.flatMap(({ result }) => result.references ?? []))
     : "";
   if (answer) messages.push({ role: "assistant", text: answer, toolRunId: run.id, toolAnswer: true });
+  // A proposal is shown when the request has ended. While the assistant still works,
+  // the status line says that one is prepared: a card that can be applied in the middle
+  // of a request looked like the end of it.
+  const active = toolRunActive(run);
   for (const { result } of run.steps) {
-    if (result.proposal && !seen.has(result.proposal.id)) {
+    if (result.proposal && !active && !seen.has(result.proposal.id)) {
       const proposal = result.proposal;
       seen.add(proposal.id);
       messages.push({ ...actionMessage(proposal, run.query), toolRunId: run.id });

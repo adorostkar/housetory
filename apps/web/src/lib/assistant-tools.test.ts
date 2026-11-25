@@ -64,6 +64,8 @@ describe("durable assistant observations", () => {
     // While the task is still being retried or has no extra answer, nothing is duplicated.
     expect(toolRunMessages({ ...run, answer: "" }).some((message) => message.toolAnswer)).toBe(false);
     expect(toolRunMessages({ ...run, state: "running" }).some((message) => message.toolAnswer)).toBe(false);
+    // A card is not shown in the middle of a request: it appears when the request has ended.
+    expect(toolRunMessages({ ...run, state: "running" }).some((message) => message.action)).toBe(false);
   });
 
   it("does not regress a completed poll when an older create response arrives late", () => {

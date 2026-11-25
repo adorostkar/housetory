@@ -307,8 +307,8 @@ export function AssistantPage({
     }
   };
 
-  // After Apply of a manual proposal the conversation carries on by itself. The card can
-  // be applied while the assistant still writes its answer, so this waits until it is idle.
+  // After Apply of a manual proposal the conversation carries on by itself. An earlier
+  // card can be applied while a newer request still runs, so this waits until it is idle.
   const [appliedManualProposal, setAppliedManualProposal] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!appliedManualProposal || pending) return;
