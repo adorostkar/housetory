@@ -689,6 +689,44 @@ deployment.
   not the result again. A call that failed is made again, not answered from
   the stored failure. These checks use recorded facts, not the wording of the
   answer.
+- **A tool is registered once.** `services/assistant_tools/registry.py` holds
+  one `Tool(...)` entry per capability: its name, the description the model
+  reads, a typed argument model, the handler that carries it out, the role it
+  needs (`permission`), other needs (`requires`, for example a configured
+  search service) and two engine flags (`reuse_result`, `once_per_request`).
+  Nothing else lists the tools:
+  - `execute` validates the arguments, checks role and needs, checks the items
+    the call names against the frozen scope, and runs the tool's handler. It
+    has no branch per tool. A handler calls the service the normal page uses,
+    so that service's own permission, validation and approval checks stay.
+  - `catalogue()` turns the registrations into data. The engine puts it in the
+    prompt of every model request, `GET /api/v1/assistant/tools` returns it,
+    and `python -m housetory_api.services.assistant_tools.export [path]`
+    writes it as JSON. The API image build runs that command and keeps the
+    file at `/app/assistant-tools.json`. The file is never edited by hand.
+  - With a signed-in user the catalogue marks each tool that cannot be used
+    now with `unavailable`: a code, the reason and what still works. A viewer
+    sees every writing tool marked; a household without online search sees
+    `find_manuals_online` marked; without a model that reads pictures,
+    `look_at_manual_page`. This only explains. `execute` runs the same check
+    on every call and refuses with the same words, whatever the model was
+    told. Per-record conditions (an item's identity is not confirmed, a manual
+    is not read yet) stay in the tool results.
+  - The general instructions (`SYSTEM`) hold general rules only: use the
+    tools, prefer stored evidence, go on when a result is not enough, use an
+    online service only through a tool, say where each fact comes from. They
+    name no tool. What a tool is for and how to use it is said in its
+    registration.
+  - The proposals `prepare_action` offers are the union `ProposalRequest` in
+    `schemas/assistant_actions.py`, the same one the proposal route accepts.
+  - `tests/test_assistant_registry.py` checks all of this: unique names, valid
+    argument schemas, a bound handler for every tool, one catalogue for
+    export, API and prompt, instructions that name no tool, and that an
+    unavailable tool is explained and refused.
+  The catalogue lists the assistant's tools only. HTTP endpoints are not
+  exposed through it. The search planner behind `POST /search/query` is a
+  separate, older part: it keeps its own short list of the 16 read-only
+  lookups (`ai_tools.READ_TOOLS`) and its own prompt.
 - A request whose attempt runs out of time goes on by itself, up to three
   times, with the steps it already has. A proposal prepared during a request
   is shown as a card when the request has ended; until then the page shows
@@ -698,25 +736,28 @@ deployment.
   in the feature's document:
   1. *Reads* that help to answer questions get a tool, or more facts in an
      existing tool. The tool calls the feature's service function. It does not
-     copy its logic.
+     copy its logic. A new tool is one `Tool(...)` registration with its
+     handler; no dispatch code, prompt text or JSON file is edited.
   2. *Changes* go through a proposal that the user applies. Apply calls the
      same service function as the normal button or form, with the same
      permission, scope and stale checks. The assistant never writes directly.
   3. The tool result names the real condition (not set up, not allowed,
      nothing found, failed) and the action that fits it, so the assistant
-     does not have to guess.
+     does not have to guess. A need that holds for the whole household (a
+     configured service, a kind of model) is a `Requirement` on the tool, so
+     the catalogue can say it before the tool is tried.
   4. The feature keeps working from its normal page without AI. Nothing may
      work only through the assistant, and no second place may interpret text.
   5. A test covers the tool and the proposal with scripted model replies, and
-     the catalogue test still passes
-     (`test_every_published_tool_and_action_kind_has_a_handler`).
+     the registry tests still pass (`tests/test_assistant_registry.py`).
   6. The conversation is tried with a real model, and so are two or three
      existing requests (a rename, a loan, a plain lookup), compared with the
      branch before the change. New instructions and new fields in the answer
      schema can change how a model handles other requests: both happened
-     during the online-manual work. Scripted tests cannot see that. Keep new
-     instructions short and about the feature only, and where a step must not
-     be forgotten, let the tool or the application do it.
+     during the online-manual work. Scripted tests cannot see that. Put what
+     the model must know about a feature in the tool's description, keep it
+     short, and add nothing to the general instructions. Where a step must
+     not be forgotten, let the tool or the application do it.
   7. If the assistant should not reach the feature, say so and why. A feature
      the assistant cannot reach is a decision, not an oversight.
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and

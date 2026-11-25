@@ -144,8 +144,10 @@ only** on the document page still starts the ordinary enhancement by hand.
 
 ### The assistant's tools
 
-The tools are in `services/assistant_tools/registry.py` and
-`services/assistant_tools/manual_tools.py`.
+Each tool is registered once in `services/assistant_tools/registry.py`, with
+its description, its arguments and its handler. The handlers call
+`services/assistant_tools/manual_tools.py` and `online_manuals.py`. See “A tool
+is registered once” in `ARCHITECTURE.md`.
 
 | Tool | What it does |
 | --- | --- |
@@ -313,7 +315,7 @@ The tool result says what the situation is:
 | Situation | What the assistant is told |
 | --- | --- |
 | Identity not confirmed | A proposal with the item's brand and model is prepared: tell the user to check it. Without a real brand and model: ask the user for them. Never guess. |
-| Search not set up | The stored reason, for example that no key is saved. Offer **Add manual**. |
+| Search not set up | Known before the tool is tried: the tool is marked unavailable in the catalogue of the request, with the stored reason (for example that no key is saved) and what still works (**Add manual**, reading attached manuals). A call is refused with the same words (`manual_search_unconfigured`), before any identity is asked for. |
 | Search failed | The provider's error. The search service or the internet may be down. |
 | No source shows the exact model | Say so. Ask the user to check the model and variant on the label. |
 | The user named another variant | Nothing is searched. A proposal with that variant is prepared (`manual_variant_not_confirmed`). After **Apply** the search looks for that variant only. |
