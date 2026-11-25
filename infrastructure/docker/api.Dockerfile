@@ -13,6 +13,9 @@ COPY services/api/alembic.ini ./
 COPY services/api/alembic ./alembic
 COPY services/api/housetory_api ./housetory_api
 RUN uv sync --frozen --no-dev
+# The assistant's tool catalogue, made from the tool registrations, to inspect in the
+# image: docker compose run --rm api cat /app/assistant-tools.json
+RUN .venv/bin/python -m housetory_api.services.assistant_tools.export assistant-tools.json
 
 FROM python:3.12-slim-bookworm AS runtime
 
