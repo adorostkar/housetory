@@ -17,6 +17,8 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import delete, func, select
+
 from housetory_api import __version__
 from housetory_api.config import get_settings
 from housetory_api.db import SessionLocal
@@ -35,6 +37,12 @@ from housetory_api.jobs import (
 from housetory_api.models import AuthSession, Job, WorkerHeartbeat
 from housetory_api.services.assistant_tools import TASK as ASSISTANT_TASK
 from housetory_api.services.assistant_tools import run_job as run_assistant
+from housetory_api.services.assistant_tools.manual_tools import (
+    LOOK_TASK as DOCUMENT_LOOK_TASK,
+)
+from housetory_api.services.assistant_tools.manual_tools import (
+    run_look_job as run_document_look,
+)
 from housetory_api.services.assistant_tools.review_jobs import (
     TASK as ASSISTANT_REVIEW_TASK,
 )
@@ -108,7 +116,6 @@ from housetory_api.services.voice import (
 from housetory_api.services.voice import (
     process_transcription as run_voice_transcription,
 )
-from sqlalchemy import delete, func, select
 
 logging.basicConfig(
     level=logging.INFO,
@@ -364,6 +371,7 @@ HANDLERS = {
     OCR_TASK: run_document_ocr,
     DOCUMENT_READ_TASK: run_document_read,
     DOCUMENT_MAP_TASK: run_document_map,
+    DOCUMENT_LOOK_TASK: run_document_look,
     IMPORT_TASK: run_import_job,
     RECOGNITION_TASK: run_recognition_job,
     VOICE_TRANSCRIBE_TASK: lambda payload: run_voice_transcription(

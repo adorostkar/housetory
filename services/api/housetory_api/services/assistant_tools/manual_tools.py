@@ -10,7 +10,6 @@ import re
 import tempfile
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import or_, select
@@ -18,8 +17,10 @@ from sqlalchemy.orm import Session
 
 from ...api.deps import AuthContext
 from ...api.errors import ApiError
-from ...domain import AiTask, OcrStatus
-from ...models import AssistantRun, Document, Item, ManualSearchCandidate
+from ...db import SessionLocal
+from ...domain import AiTask, JobStatus, OcrStatus
+from ...jobs import enqueue
+from ...models import AssistantRun, Document, Item, Job, ManualSearchCandidate
 from ...schemas.ai import AssistantReference
 from ...schemas.assistant_tools import ManualLink, ToolOutput
 from ...schemas.manuals import ManualCitationOut
@@ -32,6 +33,9 @@ from ..serializers import document_url
 SUMMARY_DOCUMENTS = 4
 # Page text returned by one call. A manual shorter than this is returned whole.
 READ_CHARS = 30_000
+# A manual with a map is opened whole only when it is this short. A longer one opens
+# with its map, and the assistant reads the pages its question needs.
+WHOLE_CHARS = 8_000
 # The map as given to the assistant. A longer map loses topics first, then late sections.
 MAP_CHARS = 10_000
 SEARCH_MATCHES = 12
@@ -40,6 +44,7 @@ SEEN_CHARS = 8_000
 # Pixels on the longer side of the page picture a vision model gets. A manual with small
 # pages drawn at a fixed dpi gave a picture too small to read symbols and labels from.
 LOOK_PICTURE_SIDE = 1600
+LOOK_TASK = "documents.look_page"
 EXCERPT_CHARS = 280
 MAX_CITATIONS = 6
 TYPE_LABELS = {"manual": "manual", "specification": "specification", "other": "other document"}
@@ -458,8 +463,10 @@ def read(
 ) -> ToolOutput:
     """Return the map of the manuals and the text of their pages.
 
-    Without ``pages`` a manual that fits is returned whole. A longer one returns its map,
-    and the first pages when no map exists yet, so reading can always go on.
+    Without ``pages`` a very short manual is returned whole. A longer one that has a map
+    returns the map only: the assistant reads the pages its question needs. Without a
+    map a manual that fits is returned whole, and the first pages of a longer one, so
+    reading can always go on.
     """
     target = _target(db, auth, run, item, document_id)
     if not target.documents:
@@ -495,10 +502,11 @@ def read(
                 len(page.text) + len(page.seen or "") + len(document.title) + 120
                 for page in stored.values()
             )
-            if whole > budget and state.map:
+            if state.map and whole > min(budget, WHOLE_CHARS):
                 lines.append(
-                    f"“{title}” is too long to return whole ({len(stored)} pages read). Its "
-                    "map is in this result: choose pages from it and read them with pages."
+                    f"“{title}” is opened with its map, not its text ({len(stored)} pages "
+                    "read). Choose the pages your question needs from the map and read them "
+                    "with pages. Read more pages when those do not answer it."
                 )
                 numbers = []
         sent: list[int] = []
@@ -701,8 +709,8 @@ def process(db: Session, auth: AuthContext, run: AssistantRun, item, document_id
 def waiting_message(db: Session, household_id: uuid.UUID, document_ids: list[str]) -> str | None:
     """What the assistant is still waiting for, or None when the work is done.
 
-    The map is waited for only when a manual is too long to return whole: a short one
-    can be read without it.
+    The map is waited for only when a manual is opened with its map: a very short one
+    is read whole without it.
     """
     for value in document_ids:
         document = db.scalar(
@@ -719,7 +727,7 @@ def waiting_message(db: Session, household_id: uuid.UUID, document_ids: list[str
             )
         if state.mapping and state.map is None:
             size = sum(len(page.text) for page in document_pages.pages(db, document))
-            if size > READ_CHARS:
+            if size > WHOLE_CHARS:
                 return f"Building the map of “{_short(document.title)}”."
     return None
 
@@ -741,6 +749,13 @@ def _vision_config(db: Session, household_id: uuid.UUID):
     )
 
 
+def _picture_kind(content_type: str) -> str | None:
+    kind = content_type.lower()
+    if kind == "application/pdf":
+        return "pdf"
+    return "image" if kind.startswith("image/") else None
+
+
 def look(
     db: Session,
     auth: AuthContext,
@@ -749,58 +764,72 @@ def look(
     page: int,
     question: str | None,
 ) -> ToolOutput:
-    """Let a vision model read one original page, and keep what it read with the page."""
+    """Let a vision model read one original page, and keep what it read with the page.
+
+    The look runs as its own job, with the provider's full time, so it does not depend
+    on how much time the assistant's attempt has left. The first call queues the job and
+    the assistant waits for it. The call made after the wait returns what was read.
+    """
     target = _target(db, auth, run, None, document_id)
     document = target.documents[0]
     state = target.progress[document.id]
     if page > state.total:
         raise ApiError(422, "invalid_pages", f"“{_short(document.title)}” has {state.total} pages.")
     config = _vision_config(db, auth.household.id)
-    key, content_type, _ = document_pages.source_file(db, document)
-    path = storage.resolve_key(key)
-    seconds = datetime.fromisoformat(run.data["deadline_at"]) - datetime.now().astimezone()
-    prompt = "Read this page." + (
-        f" Take special care with what this question needs: {question[:400]}" if question else ""
+    _, content_type, _ = document_pages.source_file(db, document)
+    if _picture_kind(content_type) is None:
+        raise ApiError(422, "page_not_a_picture", "This file has no page picture to look at.")
+    waited = run.data.get("look_job") or {}
+    if waited.get("document_id") != str(document.id) or waited.get("page") != page:
+        job = enqueue(
+            db,
+            LOOK_TASK,
+            {
+                "document_id": str(document.id),
+                "source_generation": document.source_generation,
+                "page": page,
+                "question": (question or "")[:400],
+            },
+            max_attempts=1,
+            queue="ai",
+            priority=9,
+        )
+        return ToolOutput(
+            summary=f"Looking at page {page} of “{_short(document.title)}”.",
+            facts={
+                "look_job": {"job_id": str(job.id), "document_id": str(document.id), "page": page}
+            },
+        )
+    job = db.get(Job, uuid.UUID(waited["job_id"]))
+    outcome = (job.result or {}) if job is not None else {}
+    if job is not None and job.status in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}:
+        raise ApiError(
+            504,
+            "vision_still_running",
+            f"The vision model ({config.model}) has not finished page {page} yet. What it "
+            "reads is kept with the page and shows up in read_manual later. Answer from "
+            "the page's stored text now, and say that the picture could not be checked.",
+        )
+    if job is None or job.status != JobStatus.SUCCEEDED.value or outcome.get("error"):
+        reason = outcome.get("message") or (job.last_error if job is not None else None)
+        raise ApiError(
+            502 if outcome.get("error") != "page_picture_unavailable" else 409,
+            outcome.get("error") or "vision_failed",
+            (reason or f"The vision model ({config.model}) could not read page {page}.")
+            + " The page's stored text can still be read with read_manual.",
+        )
+    # The job stored what it read. Read the page again to return it.
+    db.expire_all()
+    stored = next(
+        (entry for entry in document_pages.pages(db, document) if entry.number == page), None
     )
-    try:
-        with tempfile.TemporaryDirectory(prefix="housetory-page-") as temp_dir:
-            if content_type.lower() == "application/pdf":
-                image = ocr.render_pdf_page(
-                    path, page, Path(temp_dir) / "page.png", long_side=LOOK_PICTURE_SIDE
-                )
-                mime = "image/png"
-            elif content_type.lower().startswith("image/"):
-                image, mime = path, content_type
-            else:
-                raise ApiError(
-                    422, "page_not_a_picture", "This file has no page picture to look at."
-                )
-            with ai.bounded_request_deadline(seconds.total_seconds()):
-                raw = ai.complete_json(
-                    LOOK_SYSTEM, prompt, image_path=image, image_mime=mime, config=config
-                )
-    except ocr.OcrError as exc:
-        raise ApiError(
-            409,
-            "page_picture_unavailable",
-            f"The picture of page {page} could not be made: {exc}",
-        ) from exc
-    except ai.AiError as exc:
-        raise ApiError(
-            502,
-            "vision_failed",
-            f"The vision model ({config.model}) could not read page {page}: {exc}. The "
-            "page's stored text can still be read with read_manual.",
-        ) from exc
-    seen = str(raw.get("text") or "").strip() if isinstance(raw, dict) else ""
+    seen = (stored.seen or "").strip() if stored else ""
     if not seen:
         raise ApiError(
             502,
             "vision_failed",
             f"The vision model ({config.model}) returned nothing readable for page {page}.",
         )
-    document_pages.store_seen(db, document, page, seen[:SEEN_CHARS])
-    stored = next((entry for entry in target.pages[document.id] if entry.number == page), None)
     return _output(
         target,
         f"Page {page} of “{_short(document.title)}” as the vision model ({config.model}) read "
@@ -819,6 +848,75 @@ def look(
             ],
         },
     )
+
+
+def look_waiting(db: Session, waited: dict) -> str | None:
+    """What a queued page look is still doing, or None when its job has ended."""
+    job = db.get(Job, uuid.UUID(waited["job_id"]))
+    if job is None or job.status not in {JobStatus.QUEUED.value, JobStatus.RUNNING.value}:
+        return None
+    return f"Looking at page {waited['page']} of the manual."
+
+
+def run_look_job(payload: dict) -> dict:
+    """Draw one page and let the vision model read it. What it reads is kept with the page.
+
+    A failure the user can understand is returned as the job's result, with its code,
+    so that the assistant can report it. No database session is held during the request.
+    """
+    document_id = uuid.UUID(str(payload["document_id"]))
+    page = int(payload["page"])
+    question = str(payload.get("question") or "")
+    with SessionLocal() as db:
+        document = db.get(Document, document_id)
+        if document is None or document.source_generation != int(payload["source_generation"]):
+            return {"error": "vision_failed", "message": "The file changed before it was read."}
+        try:
+            config = _vision_config(db, document.household_id)
+        except ApiError as exc:
+            return {"error": exc.code, "message": exc.message}
+        key, content_type, _ = document_pages.source_file(db, document)
+        path = storage.resolve_key(key)
+        kind = _picture_kind(content_type)
+    prompt = "Read this page." + (
+        f" Take special care with what this question needs: {question[:400]}" if question else ""
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="housetory-page-") as temp_dir:
+            if kind == "pdf":
+                image = ocr.render_pdf_page(
+                    path, page, Path(temp_dir) / "page.png", long_side=LOOK_PICTURE_SIDE
+                )
+                mime = "image/png"
+            else:
+                image, mime = path, content_type
+            raw = ai.complete_json(
+                LOOK_SYSTEM, prompt, image_path=image, image_mime=mime, config=config
+            )
+    except ocr.OcrError as exc:
+        return {
+            "error": "page_picture_unavailable",
+            "message": f"The picture of page {page} could not be made: {exc}",
+        }
+    except ai.AiError as exc:
+        return {
+            "error": "vision_failed",
+            "message": f"The vision model ({config.model}) could not read page {page}: {exc}.",
+        }
+    seen = str(raw.get("text") or "").strip() if isinstance(raw, dict) else ""
+    if not seen:
+        return {
+            "error": "vision_failed",
+            "message": (
+                f"The vision model ({config.model}) returned nothing readable for page {page}."
+            ),
+        }
+    with SessionLocal() as db:
+        document = db.get(Document, document_id)
+        if document is None or document.source_generation != int(payload["source_generation"]):
+            return {"error": "vision_failed", "message": "The file changed while it was read."}
+        document_pages.store_seen(db, document, page, seen[:SEEN_CHARS])
+    return {"document_id": str(document_id), "page": page, "characters": len(seen)}
 
 
 def compact_facts(facts: dict, budget: int) -> dict | None:

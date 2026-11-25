@@ -367,9 +367,9 @@ def test_a_long_manual_is_read_part_by_part_with_the_map_and_the_search_as_guide
             call("read_manual", document_id=document["id"], pages="41-42"),
         ],
     )
-    # Too long to return whole: the map comes back, and reading goes on by pages.
+    # It has a map, so it opens with the map, and reading goes on by pages.
     assert opened["facts"]["condition"] == "map_only" and opened["facts"]["pages"] == []
-    assert "too long to return whole (60 pages read)" in opened["summary"]
+    assert "opened with its map, not its text (60 pages read)" in opened["summary"]
     assert {"title": "Spindle Torque", "pages": "41"} in opened["facts"]["map"][0]["sections"]
     # The search points to a page and shows the line; it does not hand out the page.
     assert searched["facts"]["matches"][0]["page"] == 41
@@ -527,6 +527,8 @@ def test_a_page_is_looked_at_with_a_vision_model_and_failures_are_said_plainly(
     seen = []
 
     def vision(system, prompt, **kwargs):
+        # The look has the provider's own time: it is not cut to what the attempt has left.
+        assert ai._request_deadline.get() is None
         seen.append((kwargs["config"].model, kwargs["image_mime"], prompt))
         if len(seen) == 1:
             raise ai.AiUnavailable("HTTP 503 from the provider")
@@ -556,6 +558,11 @@ def test_a_page_is_looked_at_with_a_vision_model_and_failures_are_said_plainly(
         others=others,
     )
     failed, looked, read = (step["result"] for step in run["steps"])
+    # Each look ran as its own job and is one step: waiting for it is not a step.
+    with SessionLocal() as db:
+        jobs = db.scalars(select(Job).where(Job.task == manual_tools.LOOK_TASK)).all()
+    assert [(job.queue, job.status) for job in jobs] == [("ai", "succeeded")] * 2
+    assert sorted(job.result.get("error", "") for job in jobs) == ["", "vision_failed"]
     # The page is drawn large enough to read small labels, whatever the page size.
     assert drawn[0] == (11, {"long_side": manual_tools.LOOK_PICTURE_SIDE})
     # A provider failure is an observation with its reason; the request goes on.
@@ -1041,3 +1048,55 @@ def test_an_answer_that_names_a_page_it_did_not_read_is_sent_back(
     )
     assert run["state"] == "completed"
     assert [entry["page"] for entry in run["citations"]] == [12]
+
+
+def test_a_manual_with_a_map_opens_with_the_map_and_only_the_needed_pages_are_read(
+    owner_client, configured_ai, monkeypatch
+):
+    """A real model got all 25 pages of a short manual with every question, which made
+    each model request slow. With a map only the pages the question needs are sent."""
+    filler = "\n".join(["Ordinary reference text about the product."] * 22)
+    pages = [f"{text.splitlines()[0]}\n{filler}\n{text}" for text in PAGES]
+    item, document = multimeter(owner_client, monkeypatch, pages)
+    whole = sum(len(page) for page in pages)
+    assert manual_tools.WHOLE_CHARS < whole < manual_tools.READ_CHARS
+
+    def read_what_the_map_points_to(prompt):
+        opened = prompt["observations"][0]["result"]
+        assert opened["facts"]["condition"] == "map_only" and opened["facts"]["pages"] == []
+        assert "Choose the pages your question needs from the map" in opened["summary"]
+        topic = next(
+            entry for entry in opened["facts"]["map"][0]["topics"] if "amperage" in entry["topic"]
+        )
+        return call("read_manual", item_id=item["id"], pages=topic["pages"])
+
+    def answer(prompt):
+        page = page_with(prompt, CURRENT_STEP)
+        return {
+            "kind": "answer",
+            "message": f"Connect the meter in series ({TITLE}, page 11).",
+            "sources": [{"document_id": page["document_id"], "pages": [page["page"]]}],
+        }
+
+    run, prompts = converse(
+        owner_client,
+        monkeypatch,
+        "How do I check the amp with the multimeter?",
+        [call("read_manual", item_id=item["id"]), read_what_the_map_points_to, answer],
+    )
+    assert [entry["page"] for entry in run["citations"]] == [11]
+    # The answering request carried one page, not the manual.
+    assert prompts[-1]["chars"] < prompts[0]["chars"] + 2 * len(pages[10]) + 6_000
+
+    # Every page can still be asked for: the map guides, it does not limit.
+    (everything,) = results(
+        owner_client, monkeypatch, [call("read_manual", item_id=item["id"], pages="1-12")]
+    )
+    assert [page["page"] for page in everything["facts"]["pages"]] == list(range(1, 13))
+
+    # Without a map the same manual is returned whole, as before.
+    with SessionLocal() as db:
+        db.get(document_pages.DocumentReading, uuid.UUID(document["id"])).map = None
+        db.commit()
+    (unmapped,) = results(owner_client, monkeypatch, [call("read_manual", item_id=item["id"])])
+    assert "the complete text (12 pages)" in unmapped["summary"]

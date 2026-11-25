@@ -44,6 +44,16 @@ REVIEW_WAIT_TRIES = 90
 # Page reading and map building asked for by process_manual are waited for this long.
 MANUAL_WAIT_SECONDS = 2
 MANUAL_WAIT_TRIES = 75
+# A page look runs as its own job with the provider's full time. It is waited for a
+# little longer than that.
+LOOK_WAIT_SECONDS = 2
+LOOK_WAIT_MARGIN_SECONDS = 60
+# When an attempt runs out of time the next one starts by itself, this many times. The
+# finished tool results are kept, so each attempt goes on where the last one stopped.
+MAX_AUTO_CONTINUES = 3
+# The attempt's own job reports a timeout at its deadline. A status read waits this long
+# after the deadline before it calls the attempt lost.
+DEADLINE_GRACE_SECONDS = 20
 # Results of these tools are never reused inside a request: what they read can change
 # while the request runs, for example after process_manual.
 FRESH_TOOLS = {
@@ -363,7 +373,9 @@ def snapshot(db: Session, run: AssistantRun) -> RunOut:
     data = dict(run.data)
     if run.state in ACTIVE:
         job = db.get(Job, run.job_id)
-        expired = _now() > datetime.fromisoformat(data["deadline_at"])
+        expired = _now() > datetime.fromisoformat(data["deadline_at"]) + timedelta(
+            seconds=DEADLINE_GRACE_SECONDS
+        )
         if job is None or job.status in {"failed", "cancelled", "succeeded"} or expired:
             run.state = "needs_attention"
             run.generation += 1
@@ -408,6 +420,7 @@ def snapshot(db: Session, run: AssistantRun) -> RunOut:
         ),
         model_calls=data.get("model_calls", 0),
         max_model_calls=MAX_MODEL_CALLS,
+        continued=data.get("continued", 0) if run.state in ACTIVE else 0,
         can_retry=run.state in {"needs_attention", "failed", "cancelled"},
         worker_available=_worker_available(db, "ai") if run.state in ACTIVE else None,
     )
@@ -447,6 +460,7 @@ def retry(db: Session, account: AccountContext, run: AssistantRun):
         "route": route,
         "session_id": str(account.session.id),
         "answer": None,
+        "continued": 0,
         "message": "Retrying with completed tool results retained.",
     }
     _enqueue(db, run)
@@ -702,6 +716,13 @@ def _names_unread_manual_pages(db: Session, run: AssistantRun, answer: str, sour
     return any(step["call"]["name"] in MANUAL_TOOLS for step in steps)
 
 
+def _out_of_time(exc: Exception) -> bool:
+    """True when an attempt ended only because its time ran out."""
+    if isinstance(exc, ApiError):
+        return exc.code == "assistant_deadline"
+    return isinstance(exc, ai.AiError) and exc.code == "read_timeout"
+
+
 def _invalid_arguments(exc: ValidationError) -> str:
     """What was wrong with a tool call's arguments, so the model can correct them."""
     faults = []
@@ -770,6 +791,29 @@ def run_job(payload: dict):
                         _enqueue(db, run, delay=REVIEW_WAIT_SECONDS, continuing=True)
                         return {"run_id": str(run_id), "state": "waiting"}
                     run.data = {**run.data, "await_review": None}
+                    db.commit()
+                    run = _current(db, run_id, generation)
+                    if run is None:
+                        return {"state": "stopped"}
+                waiting = run.data.get("look_job")
+                if waiting and not waiting.get("done"):
+                    # A page look runs as its own job. This attempt steps aside until it
+                    # has ended, then asks for the page again and gets what was read.
+                    from .manual_tools import look_waiting
+
+                    limit = (
+                        ai._settings().ai_timeout_seconds + LOOK_WAIT_MARGIN_SECONDS
+                    ) // LOOK_WAIT_SECONDS
+                    message = look_waiting(db, waiting)
+                    if message and waiting["tries"] < limit:
+                        run.data = {
+                            **run.data,
+                            "message": message,
+                            "look_job": {**waiting, "tries": waiting["tries"] + 1},
+                        }
+                        _enqueue(db, run, delay=LOOK_WAIT_SECONDS, continuing=True)
+                        return {"run_id": str(run_id), "state": "waiting"}
+                    run.data = {**run.data, "look_job": {**waiting, "done": True}}
                     db.commit()
                     run = _current(db, run_id, generation)
                     if run is None:
@@ -864,6 +908,17 @@ def run_job(payload: dict):
                     run = _current(db, run_id, generation)
                     if run is None:
                         return {"state": "stopped"}
+                    queued_look = output.facts.get("look_job")
+                    if queued_look:
+                        # The look is queued, not done: nothing is recorded yet. The same
+                        # call is made again when the job has ended.
+                        run.data = {
+                            **run.data,
+                            "look_job": {**queued_look, "tries": 0},
+                            "message": output.summary,
+                        }
+                        _enqueue(db, run, delay=LOOK_WAIT_SECONDS, continuing=True)
+                        return {"run_id": str(run_id), "state": "waiting"}
                     if (
                         run.data.get("pending_from_model")
                         and not reused
@@ -880,6 +935,7 @@ def run_job(payload: dict):
                         **run.data,
                         "pending_call": None,
                         "pending_from_model": False,
+                        "look_job": None,
                         "last_call_malformed": malformed,
                         "steps": [
                             *run.data["steps"],
@@ -1066,6 +1122,20 @@ def run_job(payload: dict):
         with SessionLocal() as db:
             run = db.scalar(select(AssistantRun).where(AssistantRun.id == run_id).with_for_update())
             if run and run.generation == generation and run.state in ACTIVE:
+                again = run.data.get("continued", 0) + 1
+                if _out_of_time(exc) and again <= MAX_AUTO_CONTINUES:
+                    # The attempt ran out of time, which a slow model does often. The next
+                    # attempt starts by itself and keeps every finished tool result.
+                    run.data = {
+                        **run.data,
+                        "continued": again,
+                        "message": (
+                            "The model needs more time. Still working "
+                            f"(attempt {again + 1} of {MAX_AUTO_CONTINUES + 1})."
+                        ),
+                    }
+                    _enqueue(db, run)
+                    return {"run_id": str(run_id), "state": "continuing"}
                 message = (
                     exc.message
                     if isinstance(exc, ApiError)

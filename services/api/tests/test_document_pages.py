@@ -9,6 +9,7 @@ from sqlalchemy import select
 from housetory_api.db import SessionLocal
 from housetory_api.models import Document, DocumentPageText, DocumentReading, Job
 from housetory_api.services import ai, document_pages, ocr
+from housetory_api.services.assistant_tools.manual_tools import LOOK_TASK, run_look_job
 from housetory_api.services.document_ocr import run_document_ocr
 from housetory_api.services.document_pages import MAP_TASK, READ_TASK, Page
 
@@ -66,7 +67,7 @@ def run_document_jobs() -> list[str]:
         with SessionLocal() as db:
             job = db.scalars(
                 select(Job)
-                .where(Job.task.in_([READ_TASK, MAP_TASK]), Job.status == "queued")
+                .where(Job.task.in_([READ_TASK, MAP_TASK, LOOK_TASK]), Job.status == "queued")
                 .order_by(Job.created_at)
             ).first()
             if job is None:
@@ -74,16 +75,24 @@ def run_document_jobs() -> list[str]:
             job.status = "running"
             job_id, task, payload = job.id, job.task, dict(job.payload)
             db.commit()
+        handler = {
+            READ_TASK: document_pages.run_read_job,
+            MAP_TASK: document_pages.run_map_job,
+            LOOK_TASK: run_look_job,
+        }[task]
+        result = None
         try:
-            handler = (
-                document_pages.run_read_job if task == READ_TASK else document_pages.run_map_job
-            )
-            handler(payload)
+            result = handler(payload)
             status = "succeeded"
         except Exception as exc:  # noqa: BLE001 - recorded like the worker records it
             status = f"failed: {exc}"
         with SessionLocal() as db:
-            db.get(Job, job_id).status = status.split(":")[0]
+            job = db.get(Job, job_id)
+            job.status = status.split(":")[0]
+            if result is not None:
+                job.result = result
+            if status != "succeeded":
+                job.last_error = status.removeprefix("failed: ")
             db.commit()
         ran.append(f"{task} {status}")
 

@@ -134,6 +134,17 @@ def test_the_scanned_multimeter_manual_answers_current_and_voltage_questions(
         assert all("Measuring Current" not in page["text"] for page in result["facts"]["pages"])
         return call("process_manual", item_id=item["id"])
 
+    def read_current_from_the_map(prompt):
+        # After processing the manual opens with its map: only the needed page is read.
+        opened = prompt["observations"][-1]["result"]
+        assert opened["facts"]["condition"] == "map_only" and opened["facts"]["pages"] == []
+        section = next(
+            entry
+            for entry in opened["facts"]["map"][0]["sections"]
+            if entry["title"] == "Measuring Current"
+        )
+        return call("read_manual", item_id=item["id"], pages=section["pages"])
+
     def answer_about_current(prompt):
         page = page_under(prompt, "Measuring Current")
         # Real OCR is unsure about words on this page: the dial symbols and the socket
@@ -165,15 +176,17 @@ def test_the_scanned_multimeter_manual_answers_current_and_voltage_questions(
                 "read_manual", item_id=prompt["observations"][0]["result"]["references"][0]["id"]
             ),
             process_when_incomplete,
+            read_current_from_the_map,
             answer_about_current,
         ],
         others=others,
     )
     reading = time.monotonic() - started
     assert current["state"] == "completed", current
-    reread = current["steps"][-1]["result"]
+    reread = current["steps"][-2]["result"]
     assert reread["manuals"][0]["pages_read"] == 25 and "INCOMPLETE" not in reread["summary"]
-    assert "the complete text (25 pages)" in reread["summary"]
+    assert "opened with its map, not its text (25 pages read)" in reread["summary"]
+    assert [page["page"] for page in current["steps"][-1]["result"]["facts"]["pages"]] == [11]
     answer = current["answer"]
     for words in (
         ("turn the rotary switch",),
@@ -219,7 +232,7 @@ def test_the_scanned_multimeter_manual_answers_current_and_voltage_questions(
 
     def read_from_the_map(prompt):
         facts = prompt["context_newest_first"][0]["observations"][-1]["result"]["facts"]
-        assert "pages" not in facts and facts["pages_read_in_this_step"] == {TITLE: "1-25"}
+        assert "pages" not in facts and facts["pages_read_in_this_step"] == {TITLE: "11"}
         topic = next(t for t in facts["map"][0]["topics"] if "(volts)" in t["topic"])
         return call("read_manual", document_id=facts["map"][0]["document_id"], pages=topic["pages"])
 

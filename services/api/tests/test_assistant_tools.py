@@ -1643,3 +1643,60 @@ def test_an_answer_that_rests_on_nothing_is_sent_back_once(
     )
     assert lent["state"] == "awaiting_approval", lent
     assert lent["steps"][0]["result"]["proposal"]["kind"] == "lend"
+
+
+def test_an_attempt_that_runs_out_of_time_goes_on_by_itself_a_few_times(
+    owner_client, configured_ai, monkeypatch
+):
+    """With a slow model the user had to press Retry up to eight times for one answer."""
+    seed(owner_client)
+    slow = ai.AiUnavailable("The model did not respond in time.", code="read_timeout")
+    replies = iter(
+        [
+            call("search_items", q="Validation drill"),
+            slow,
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ]
+    )
+
+    def complete(system, prompt, **kwargs):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = start(owner_client, "Where is the validation drill?")
+    work(run)
+    waiting = read(owner_client, run)
+    # Not handed back to the user: the next attempt is queued, with the finished step kept.
+    assert waiting["state"] == "queued" and waiting["can_retry"] is False
+    assert waiting["continued"] == 1 and waiting["generation"] == 1
+    assert waiting["message"] == "The model needs more time. Still working (attempt 2 of 4)."
+    assert [step["call"]["name"] for step in waiting["steps"]] == ["search_items"]
+    work(run)
+    done = read(owner_client, run)
+    assert done["state"] == "completed" and done["answer"] == "It is in Tool Storage."
+    assert done["model_calls"] == 3 and done["continued"] == 0
+
+    # It stops after three more attempts, and Retry gives it three again.
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: (_ for _ in ()).throw(slow))
+    run = start(owner_client, "Where is the validation drill, again?")
+    for attempt in range(1, assistant_tools.MAX_AUTO_CONTINUES + 1):
+        work(run)
+        assert read(owner_client, run)["continued"] == attempt
+    work(run)
+    stopped = read(owner_client, run)
+    assert stopped["state"] == "needs_attention" and stopped["can_retry"] is True
+    assert stopped["message"] == "The AI provider failed. Retry or use local/manual controls."
+    retried = owner_client.post(f"/api/v1/assistant/runs/{run['id']}/retry")
+    assert retried.status_code == 200, retried.text
+    work(run)
+    assert read(owner_client, run)["continued"] == 1
+
+    # A provider that is down is not a matter of time: the user is told at once.
+    down = ai.AiUnavailable("Inference provider is unreachable.", code="unreachable")
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: (_ for _ in ()).throw(down))
+    run = start(owner_client, "Where is the validation drill now?")
+    work(run)
+    assert read(owner_client, run)["state"] == "needs_attention"

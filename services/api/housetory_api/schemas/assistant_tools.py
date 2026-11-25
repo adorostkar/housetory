@@ -185,5 +185,7 @@ class RunOut(BaseModel):
     citations: list[ManualCitationOut] = Field(default_factory=list)
     model_calls: int
     max_model_calls: int
+    # How often the request went on by itself after an attempt ran out of time.
+    continued: int = 0
     can_retry: bool
     worker_available: bool | None = None
