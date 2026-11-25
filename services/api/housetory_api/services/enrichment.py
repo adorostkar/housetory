@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..api.errors import ApiError
 from ..db import SessionLocal
-from ..domain import AiTask, ImportStatus
+from ..domain import AiTask, DocumentType, ImportStatus
 from ..jobs import enqueue
 from ..models import Document, ImportBatch, ImportEntry, ImportSourceFile, Job
 from ..schemas.extraction import LineMatch
@@ -24,6 +24,8 @@ from .ai_runtime import AiRuntimeConfig
 
 TASK = "ai.enrich"
 DOCUMENT_AI_QUEUE = "ai-documents"
+# A manual is the assistant's to interpret. Its ordinary enhancement waits for that.
+ASSISTANT_FIRST = "assistant_first"
 logger = logging.getLogger("housetory.enrichment")
 
 
@@ -385,6 +387,64 @@ def schedule_enhancement(
                 )
             state.update(status="queued", reason=None, version=version, job_id=str(job.id))
     _write(source, state)
+
+
+def schedule_after_reading(
+    db: Session, document: Document, *, actor_user_id: uuid.UUID | None = None
+) -> None:
+    """Enhancement of a document whose text was just read.
+
+    A manual goes to the assistant first, when one is set up: its pages are read and
+    mapped with the assistant's model, and nothing else asks a model about it meanwhile.
+    The ordinary enhancement runs for a manual only when that fails
+    (``enhance_after_assistant``). Without an assistant, and for every other document,
+    the ordinary enhancement is scheduled at once, as before.
+    """
+    if document.document_type == DocumentType.MANUAL.value:
+        from .document_pages import assistant_configured
+
+        if assistant_configured(db, document.household_id):
+            _write(
+                document,
+                {
+                    "status": "skipped",
+                    "reason": ASSISTANT_FIRST,
+                    "ai_attempted": False,
+                    "ai_succeeded": False,
+                },
+            )
+            return
+    schedule_enhancement(db, document, kind="document", actor_user_id=actor_user_id)
+
+
+def enhance_after_assistant(db: Session, document: Document) -> bool:
+    """Run the ordinary enhancement of a manual that the assistant could not read or map.
+
+    True when it was queued. It starts a fresh processing attempt, like a retry does,
+    because the time limit of the first attempt has passed by now. Nothing is committed.
+    """
+    state = _metadata(document).get("enhancement") or {}
+    if state.get("status") != "skipped" or state.get("reason") != ASSISTANT_FIRST:
+        return False
+    from .document_processing import initialize_processing, update_processing
+
+    previous = _metadata(document).get("processing") or {}
+    if previous:
+        current = initialize_processing(document, page_count=previous.get("page_count"))
+        timings = dict(current["timings"])
+        for key in ("upload_ms", "local_preprocess_ms", "local_queue_ms", "local_processing_ms"):
+            timings[key] = (previous.get("timings") or {}).get(key)
+        update_processing(document, timings=timings)
+    schedule_enhancement(db, document, kind="document")
+    queued = (_metadata(document).get("enhancement") or {}).get("status") == "queued"
+    if previous and queued:
+        update_processing(document, stage="interpreting", reason=None, can_retry=False)
+    elif previous:
+        # Nothing runs after all: the outcome of the first attempt stands.
+        metadata = _metadata(document)
+        metadata["processing"] = previous
+        document.extracted_metadata = metadata
+    return queued
 
 
 def retry_enhancement(

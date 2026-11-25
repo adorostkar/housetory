@@ -313,6 +313,14 @@ def request_map(
     return True
 
 
+def _assistant_could_not(db: Session, document: Document) -> None:
+    """The assistant's reading or map of a manual did not work out. The ordinary
+    enhancement, which waited for it, runs now. Nothing is committed."""
+    from .enrichment import enhance_after_assistant
+
+    enhance_after_assistant(db, document)
+
+
 def _store_page(
     db: Session,
     document_id: uuid.UUID,
@@ -482,6 +490,7 @@ def run_read_job(payload: dict[str, Any]) -> dict[str, Any]:
             document = db.get(Document, document_id)
             if document is not None and document.source_generation == generation:
                 _set_reading(db, document, error=f"Reading stopped: {exc}"[:500])
+                _assistant_could_not(db, document)
                 db.commit()
         raise
     with SessionLocal() as db:
@@ -500,8 +509,11 @@ def run_read_job(payload: dict[str, Any]) -> dict[str, Any]:
                 priority=3,
                 commit=False,
             )
-        else:
-            request_map(db, document, commit=False, after_reading=True)
+        elif not request_map(db, document, commit=False, after_reading=True):
+            reading = _reading(db, document)
+            if reading is None or reading.map is None:
+                # Nothing could be read, or no assistant is set up any more.
+                _assistant_could_not(db, document)
         db.commit()
     return {
         "document_id": str(document_id),
@@ -698,6 +710,8 @@ def run_map_job(payload: dict[str, Any]) -> dict[str, Any]:
         # The map is built from pages that have content. A page whose reading failed has none.
         document_pages = [page for page in pages(db, document) if page.usable]
         if not document_pages or not assistant_configured(db, document.household_id):
+            _assistant_could_not(db, document)
+            db.commit()
             return {"document_id": str(document_id), "skipped": True, "reason": "not_available"}
         config = ai.config_for(db, document.household_id, AiTask.ASSISTANT.value)
         key, content_type, _ = source_file(db, document)
@@ -718,6 +732,7 @@ def run_map_job(payload: dict[str, Any]) -> dict[str, Any]:
             return {"document_id": str(document_id), "skipped": True, "reason": "stale_source"}
         if error:
             _set_reading(db, document, map_error=error)
+            _assistant_could_not(db, document)
         else:
             _set_reading(db, document, map=data, map_error=None)
         db.commit()

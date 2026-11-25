@@ -526,3 +526,65 @@ def test_without_ai_pages_are_still_read_and_no_map_is_asked_for(
         anon_client.get(f"/api/v1/documents/{document['id']}/text", headers=other).status_code
         == 404
     )
+
+
+def enhancement(document_id: str) -> dict:
+    with SessionLocal() as db:
+        metadata = db.get(Document, uuid.UUID(document_id)).extracted_metadata or {}
+        return {**metadata.get("enhancement", {}), "stage": metadata["processing"]["stage"]}
+
+
+def enhancement_jobs() -> int:
+    with SessionLocal() as db:
+        return len(db.scalars(select(Job).where(Job.task == "ai.enrich")).all())
+
+
+def test_a_manual_goes_to_the_assistant_first_and_is_enhanced_only_when_that_fails(
+    owner_client, configured_ai, monkeypatch
+):
+    """A saved manual started the ordinary enhancement and the assistant's map at the
+    same time, and the two model requests slowed each other down."""
+    pages = ["MEASURING CURRENT\nConnect the meter in series.", "BATTERY\nUse a 9 V battery."]
+    answers = {"fail": False}
+
+    def complete(system, prompt, **kwargs):
+        if answers["fail"]:
+            raise ai.AiUnavailable("HTTP 503 from the provider")
+        return {"sections": [{"title": "Battery", "first_page": 2, "last_page": 2}], "topics": []}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+
+    # A receipt is enhanced at once, as before.
+    receipt = upload(
+        owner_client,
+        pdf_bytes(["RECEIPT\nTotal 10.00 EUR paid by card today"] * 2),
+        document_type="receipt",
+    )
+    run_document_ocr(uuid.UUID(receipt["id"]))
+    assert enhancement(receipt["id"])["status"] == "queued" and enhancement_jobs() == 1
+
+    # A manual waits for the assistant: its pages are read and mapped, nothing else runs.
+    manual = upload(owner_client, pdf_bytes(pages), title="Meter manual")
+    run_document_ocr(uuid.UUID(manual["id"]))
+    waiting = enhancement(manual["id"])
+    assert (waiting["status"], waiting["reason"]) == ("skipped", "assistant_first")
+    assert waiting["stage"] != "interpreting" and enhancement_jobs() == 1
+    assert run_document_jobs() == [f"{READ_TASK} succeeded", f"{MAP_TASK} succeeded"]
+    assert enhancement(manual["id"])["reason"] == "assistant_first" and enhancement_jobs() == 1
+
+    # The assistant's map fails: now the ordinary enhancement runs, as a new attempt.
+    answers["fail"] = True
+    second = upload(owner_client, pdf_bytes([*pages, "WARRANTY\nTwo years."]), title="Second")
+    run_document_ocr(uuid.UUID(second["id"]))
+    assert enhancement(second["id"])["reason"] == "assistant_first" and enhancement_jobs() == 1
+    ran = run_document_jobs()
+    assert ran[0] == f"{READ_TASK} succeeded" and ran[1].startswith(f"{MAP_TASK} failed")
+    fallen_back = enhancement(second["id"])
+    assert (fallen_back["status"], fallen_back["stage"]) == ("queued", "interpreting")
+    assert enhancement_jobs() == 2
+
+    # Without an assistant a manual is enhanced at once, as before.
+    monkeypatch.setattr(document_pages, "assistant_configured", lambda db, household_id: False)
+    third = upload(owner_client, pdf_bytes([*pages, "SAFETY\nKeep dry."]), title="Third")
+    run_document_ocr(uuid.UUID(third["id"]))
+    assert enhancement(third["id"])["status"] == "queued" and enhancement_jobs() == 3

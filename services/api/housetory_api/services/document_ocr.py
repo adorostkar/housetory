@@ -368,12 +368,11 @@ def run_document_ocr(
                 metadata=metadata,
                 confidence=extracted.confidence,
             )
-            from .enrichment import schedule_enhancement
+            from .enrichment import schedule_after_reading
 
-            schedule_enhancement(
+            schedule_after_reading(
                 db,
                 document,
-                kind="document",
                 actor_user_id=(uuid.UUID(actor_user_id) if actor_user_id else None),
             )
             processing = dict((document.extracted_metadata or {}).get("processing") or {})

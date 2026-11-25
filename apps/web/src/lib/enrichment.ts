@@ -19,6 +19,7 @@ export function enhancementLabel(state: EnhancementState): string {
           : state.reason === "busy" ? "AI busy · local results kept" : "AI suggestions unavailable";
     case "skipped":
       return state.reason === "cancelled" ? "AI suggestions cancelled"
+        : state.reason === "assistant_first" ? "Read by the assistant · no separate AI suggestions"
         : "AI suggestions skipped: source or settings changed";
     case "accepted":
       return "AI suggestions loaded into review";
