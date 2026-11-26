@@ -76,7 +76,7 @@ describe("RoomRail", () => {
     await userEvent.click(within(rail).getByRole("button", { name: "More" }));
     const choices = within(rail).getByTestId("rail-more");
     expect(within(choices).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
-      "/rooms", "/documents", "/purchases", "/insurance", "/review", "/settings",
+      "/rooms", "/documents", "/purchases", "/insurance", "/stocktake", "/review", "/settings",
     ]);
     // The rooms under the choices cannot be reached.
     expect(within(rail).getByRole("link", { name: "Attic", hidden: true }).closest("[inert]")).not.toBeNull();

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,6 +134,14 @@ describe("InsurancePage", () => {
     const amount = await screen.findByDisplayValue("45.00");
     await userEvent.clear(amount);
     await userEvent.type(amount, "50");
+    // The per-unit value and the total for the owned quantity stay apart.
+    expect(screen.getByText("€100")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Continue to export" }));
+    const exportStep = screen.getByRole("region", { name: "Export" });
+    expect(within(exportStep).getByText("1 (2 owned units)")).toBeVisible();
+    expect(within(exportStep).getByText("Value per unit × owned quantity")).toBeVisible();
+    expect(within(exportStep).getByText("€100")).toBeVisible();
+    expect(within(exportStep).getByText("Every included item has a value.", { exact: false })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Generate insurance list" }));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/insurance-lists", expect.anything()));
@@ -160,8 +168,44 @@ describe("InsurancePage", () => {
     const amount = await screen.findByLabelText("Replacement value for Camera");
     expect(amount).toHaveValue(null);
     await userEvent.type(amount, "0");
+    await userEvent.click(screen.getByRole("button", { name: "Continue to export" }));
     await userEvent.click(screen.getByRole("button", { name: "Generate insurance list" }));
     const payload = vi.mocked(api.post).mock.calls.find(([path]) => path === "/insurance-lists")![1] as any;
     expect(payload.values[0]).toMatchObject({ amount_cents: 0, estimate_id: null });
+  });
+
+  it("walks Scope, Review and Export in order and says what is unknown before exporting", async () => {
+    renderPage();
+    // A deep link loads its items, so the page opens on Review with the scope on one line.
+    const review = await screen.findByRole("button", { name: /Review$/ });
+    expect(review).toHaveAttribute("aria-current", "step");
+    expect(screen.queryByLabelText("Insurance scope")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Scope" })).toHaveTextContent("1 selected item · 1 item · EUR");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 1 item included · 0 valued · 1 unknown");
+
+    await userEvent.click(screen.getByRole("button", { name: "Continue to export" }));
+    const exportStep = screen.getByRole("region", { name: "Export" });
+    expect(screen.getByRole("button", { name: /Export$/ })).toHaveAttribute("aria-current", "step");
+    expect(exportStep).toHaveTextContent("Value unknown1");
+    expect(exportStep).toHaveTextContent("Total in EUR");
+    expect(exportStep).toHaveTextContent(
+      "1 item with no value is listed as unknown and is not in the total.",
+    );
+    expect(api.post).not.toHaveBeenCalledWith("/insurance-lists", expect.anything());
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to review" }));
+    expect(screen.getByLabelText("Replacement value for Camera")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Change scope" }));
+    expect(screen.getByLabelText("Insurance scope")).toHaveValue("items");
+    // The loaded review is kept until the scope itself is changed.
+    await userEvent.selectOptions(screen.getByLabelText("Insurance scope"), "household");
+    expect(screen.getByRole("button", { name: /Review$/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Export$/ })).toBeDisabled();
+  });
+
+  it("offers the household evidence export here", async () => {
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Export evidence" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "evidence export" })).not.toBeInTheDocument();
   });
 });

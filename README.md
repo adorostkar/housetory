@@ -180,7 +180,7 @@ Tailscale is optional.
   answer. Online search and download require a deliberate,
   server-enforced manufacturer + complete model confirmation, reviewed candidates
   and a configured search provider. The owner adds one encrypted Brave Search API
-  key and enables manual discovery in **Settings → Online search**; an
+  key and enables manual discovery in **Settings → AI and online services**; an
   operator-only environment fallback and the advanced manual gateway remain
   available. Similar products are never auto-accepted. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md) and
@@ -353,7 +353,7 @@ Tailscale is optional.
   pages and empty templates are skipped, and the tree is reviewed before apply.
 - Provider management for OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
   OpenRouter and Ollama (loopback, LAN, Tailscale or external endpoints) through
-  **Settings → AI providers**. API keys are encrypted at rest with a key held
+  **Settings → AI and online services → AI providers**. API keys are encrypted at rest with a key held
   outside PostgreSQL.
 - One saved default text model for Assistant, document interpretation, smart
   imports and natural-language search, with preserved advanced overrides. Text
@@ -758,11 +758,11 @@ Copy `.env.example` to `.env`. Compose reads this file for variable substitution
 | `AI_CLOUD_CONSENT` | `false` | Environment bootstrap consent; database providers use per-provider consent |
 | `AI_CLOUD_BASE_URL` | empty | Bootstrap OpenAI-compatible base URL, including `/v1` |
 | `AI_CLOUD_MODEL` | empty | Bootstrap cloud model name |
-| `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI providers |
+| `AI_CLOUD_API_KEY` | empty | Bootstrap cloud bearer token; prefer Settings → AI and online services |
 | `AI_MAX_CONTEXT_CHARS` | `12000` | Per-chunk import context cap |
 | `AI_IMPORT_MAX_CHUNKS` | `8` | Maximum AI chunks per import |
 | `MANUAL_SEARCH_PROVIDER` | `auto` | Operator fallback when no household online-search row exists: `auto`, `brave`, `gateway` or `none` |
-| `BRAVE_SEARCH_API_KEY` | empty | Operator-only installation fallback; configure the Brave key in Settings → Online search instead |
+| `BRAVE_SEARCH_API_KEY` | empty | Operator-only installation fallback; configure the Brave key in Settings → AI and online services instead |
 | `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official Brave endpoint or compatible operator test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language |
@@ -797,7 +797,7 @@ Online discovery uses the official
 **Brave Search API** adapter with an owner-managed encrypted key, or an advanced
 operator gateway, and never pretends a chat model has live browsing. Configure
 one Brave key plus separate manual and reference-image enable controls in
-**Settings → Online search**; changes apply on the next API or worker request
+**Settings → AI and online services**; changes apply on the next API or worker request
 without a restart. The environment variables below are an installation fallback
 only when a household has no saved online-search row. An explicit disable or key
 removal in Settings remains authoritative and does not reactivate the fallback.
@@ -839,7 +839,7 @@ Inside the containers the API uses `DATABASE_URL`, `DATA_DIR=/data`,
 ### AI providers
 
 Ordinary provider setup happens in the application, not `.env`. Sign in as the
-household owner and open **Settings → AI providers**.
+household owner and open **Settings → AI and online services → AI providers**.
 
 1. Add a provider: OpenAI, Anthropic Claude, Google Gemini, xAI Grok,
    OpenRouter or Ollama (local, private-network or external).
@@ -960,11 +960,12 @@ dashboard at the time of writing, but DNS/domain verification was still pending
 and has not been verified by Housetory. Do not claim delivery succeeds until the
 provider shows the domain verified and a test message is delivered.
 
-Account settings are under **Settings → Account settings**. Household settings
-and member administration remain separate under Settings and **Members &
-invitations**. Main Settings shows only a compact owner health summary; detailed
-release identity, readiness, worker jobs and AI task diagnostics live on the
-dedicated **Settings → System status** page. Optional services that are not
+Settings is a short index. **Account** and **Appearance** (colour theme, light
+or dark) are yours. **Household**, **Members and invitations**, **AI and online
+services** and **System status** belong to the household; the owner-only ones are
+hidden from other members. **Advanced** holds storage, installing on an iPhone
+and label calibration. Detailed release identity, readiness, worker jobs and AI
+task diagnostics live on the **System status** screen. Optional services that are not
 configured are reported separately and do not count as core outages.
 
 ## Camera, AI Scan Items and hierarchical imports

@@ -67,7 +67,7 @@ export function AppearanceSettings({ className }: { className?: string }) {
         <div
           role="radiogroup"
           aria-label="Light or dark"
-          className="mt-3 inline-flex rounded-xl border border-border bg-card p-1"
+          className="mt-3 flex w-full max-w-sm rounded-xl border border-border bg-card p-1"
         >
           {MODES.map((mode) => {
             const selected = mode.id === theme;
@@ -79,7 +79,7 @@ export function AppearanceSettings({ className }: { className?: string }) {
                 aria-checked={selected}
                 onClick={() => setTheme(mode.id)}
                 className={cn(
-                  "flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
+                  "flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
                   selected
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground",

@@ -147,6 +147,11 @@ const StocktakePage = React.lazy(() =>
     default: module.StocktakePage,
   })),
 );
+const StocktakeIndexPage = React.lazy(() =>
+  import("@/pages/stocktake-index-page").then((module) => ({
+    default: module.StocktakeIndexPage,
+  })),
+);
 const LabelsPage = React.lazy(() =>
   import("@/pages/labels-page").then((module) => ({
     default: module.LabelsPage,
@@ -155,6 +160,26 @@ const LabelsPage = React.lazy(() =>
 const SettingsPage = React.lazy(() =>
   import("@/pages/settings-page").then((module) => ({
     default: module.SettingsPage,
+  })),
+);
+const SettingsHouseholdPage = React.lazy(() =>
+  import("@/pages/settings-household-page").then((module) => ({
+    default: module.SettingsHouseholdPage,
+  })),
+);
+const SettingsAppearancePage = React.lazy(() =>
+  import("@/pages/settings-appearance-page").then((module) => ({
+    default: module.SettingsAppearancePage,
+  })),
+);
+const SettingsServicesPage = React.lazy(() =>
+  import("@/pages/settings-services-page").then((module) => ({
+    default: module.SettingsServicesPage,
+  })),
+);
+const SettingsAdvancedPage = React.lazy(() =>
+  import("@/pages/settings-advanced-page").then((module) => ({
+    default: module.SettingsAdvancedPage,
   })),
 );
 const AiSettingsPage = React.lazy(() =>
@@ -369,6 +394,7 @@ export default function App() {
               path="containers/:containerId"
               element={<ContainerDetailPage />}
             />
+            <Route path="stocktake" element={<StocktakeIndexPage />} />
             <Route path="stocktake/:sessionId" element={<StocktakePage />} />
             <Route element={<RequireWriter />}>
               <Route path="labels" element={<LabelsPage />} />
@@ -376,6 +402,10 @@ export default function App() {
             <Route path="search" element={<LegacySearchRedirect />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="settings/account" element={<AccountSettingsPage />} />
+            <Route path="settings/household" element={<SettingsHouseholdPage />} />
+            <Route path="settings/appearance" element={<SettingsAppearancePage />} />
+            <Route path="settings/services" element={<SettingsServicesPage />} />
+            <Route path="settings/advanced" element={<SettingsAdvancedPage />} />
             <Route path="settings/members" element={<MembersSettingsPage />} />
             <Route path="settings/ai" element={<AiSettingsPage />} />
             <Route

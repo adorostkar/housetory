@@ -15,7 +15,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | 2 | Capture, documents and reviews | Not started |
 | 3 | Natural assistant behaviour | Not started |
 | 4 | Inventory-first navigation and everyday flows | Not started |
-| 5 | Secondary flows and account design | Not started |
+| 5 | Secondary flows and account design | Done (see "Phase 5 record") |
 | 6 | Verification and final handoff | Not started |
 
 The decision is made (see "Decision" below). Phases 1 to 6 now run without
@@ -185,8 +185,8 @@ What was built:
   desktop the rooms are a sidebar with names and counts, and the bar sits at the
   bottom of the main column.
 - **Start page.** `/` now goes to the item list (`/items`).
-- **More.** Its choices (Places, Documents, Purchases, Insurance, Review,
-  Settings) roll up over the rooms and roll down again. They stay up while one
+- **More.** Its choices (Places, Documents, Purchases, Insurance, Stocktake,
+  Review, Settings) roll up over the rooms and roll down again. They stay up while one
   of their pages is open.
 - **Rail.** It can be hidden. The choice is remembered on the device. The button
   keeps its place in the bar. With the rail hidden, the page title opens it.
@@ -235,6 +235,46 @@ Checks:
 
 Not checked yet: a real iPhone, and the other end-to-end files. Many of them
 still name the old navigation. They are updated in Phase 6.
+
+## Phase 5 record
+
+Phase 5 was finished before Phases 2 to 4. The phases were built side by side.
+
+What was built:
+
+- **Settings is an index.** Rows lead to focused screens: Account, Appearance,
+  Household, Members and invitations, AI and online services, System status,
+  and Advanced (storage, install on iPhone, label calibration). Sign out is at
+  the foot. Owner-only rows are hidden from other members, with one line that
+  says so. Every old section moved without changing what it does. Old links
+  (`/settings#online-search`, `#item-images`, `#system-status`) go to the new
+  screen and scroll to the right place.
+- **Appearance screen.** The four colour themes and light, dark or system.
+- **Insurance** is three clear steps: Scope, Review, Export. The scope folds to
+  one line once the review starts. Before the export there is a summary: items,
+  how many have a value, how many are unknown, and the total. Per-unit and total
+  values stay apart. "Export evidence" for the whole home now starts here.
+- **Stocktake.** "Present" is one tap. The other results are one tap further,
+  under "Other". The list starts on Unchecked. A short progress line stays in
+  view. Controls are 44 px. A new Stocktake page (More → Stocktake) shows
+  stocktakes in progress, starts one for a room or container, and lists recent
+  ones. Review and Finish are as explicit as before.
+- **Labels.** Calibration is under a closed "Advanced · Calibration" part.
+- **First run.** Setup and "create a household" now land in the item list. The
+  wording follows account, then home, then first item. Sign-in, password
+  recovery and invitations are unchanged.
+- **Design only:** `docs/AI_SUPPLIED_AND_BYOK.md` describes how AI supplied by
+  the app could live next to bring-your-own-key, and how a hosted sign-up would
+  own accounts and households. Nothing of this is built. There is no billing,
+  no public sign-up and no hosted AI service.
+
+Decision: a fourth screen, "AI and online services", was added. The AI provider
+page is for owners only, but members could read the AI summary before. The new
+screen keeps that.
+
+Checks: type check clean; the unit tests of all changed pages pass, with new
+tests for the Settings index, setup, labels, insurance steps and one-tap
+Present. No backend change.
 
 ## Checks done in Phase 0
 

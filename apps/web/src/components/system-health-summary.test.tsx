@@ -87,6 +87,16 @@ describe("SystemHealthSummary", () => {
     expect(screen.queryByText(/need attention/)).not.toBeInTheDocument();
   });
 
+  it("leaves out the link on the System status screen itself", () => {
+    render(
+      <MemoryRouter>
+        <SystemHealthSummary isOwner detailsLink={false} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Healthy")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Open System status" })).not.toBeInTheDocument();
+  });
+
   it("separates core and configured-feature attention counts", () => {
     summary = attention;
     renderSummary();

@@ -34,11 +34,12 @@ export function SetupPage() {
       }),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKeys.session, data);
-      navigate("/", { replace: true });
+      // Straight into the inventory, where the first item is added.
+      navigate("/items", { replace: true });
     },
   });
 
-  if (session?.authenticated) return <Navigate to="/" replace />;
+  if (session?.authenticated) return <Navigate to="/items" replace />;
   if (session && !session.setup_required) return <Navigate to="/login" replace />;
 
   const fieldErrors = setup.error instanceof ApiError ? setup.error.fields : undefined;
@@ -53,10 +54,12 @@ export function SetupPage() {
   return (
     <AuthLayout
       title="Make this home yours."
-      subtitle="Create the household owner account. You can invite other people after setup."
+      subtitle="Two short steps: your account and your home. Then you add your first item."
     >
       <form onSubmit={onSubmit} className="space-y-5" noValidate>
         {generalError && <FormError message={generalError} />}
+
+        <h2 className="eyebrow">1 · Your account</h2>
 
         <Field label="Your name" htmlFor="name" error={fieldErrors?.name}>
           <Input
@@ -106,7 +109,14 @@ export function SetupPage() {
           />
         </Field>
 
-        <Field label="Household name" htmlFor="household_name" error={fieldErrors?.household_name}>
+        <h2 className="eyebrow pt-2">2 · Your home</h2>
+
+        <Field
+          label="Household name"
+          htmlFor="household_name"
+          hint="The home you keep track of. You can rename it later."
+          error={fieldErrors?.household_name}
+        >
           <Input
             id="household_name"
             name="household_name"
@@ -120,13 +130,13 @@ export function SetupPage() {
 
         <Button type="submit" size="lg" className="mt-2 w-full" disabled={setup.isPending}>
           {setup.isPending ? <Spinner /> : null}
-          {setup.isPending ? "Preparing your home…" : "Create Housetory"}
+          {setup.isPending ? "Preparing your home…" : "Create account and home"}
           {!setup.isPending && <ArrowRight className="ml-auto" />}
         </Button>
 
         <p className="text-pretty text-center text-2xs leading-relaxed text-muted-foreground">
-          This creates the first owner. Setup can only be completed once; additional
-          people join through household invitations.
+          You become the owner of this home. This setup runs once. Other people
+          join later by invitation.
         </p>
       </form>
     </AuthLayout>

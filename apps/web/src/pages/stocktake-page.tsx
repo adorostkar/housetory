@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   Hash,
   HelpCircle,
@@ -13,7 +14,8 @@ import {
   XCircle,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
@@ -36,6 +38,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import { useCanWrite, useStocktakeSession } from "@/lib/queries";
 import type {
   StocktakeItem,
@@ -76,17 +80,27 @@ const FILTERS: Array<{ value: string; label: string }> = [
   { value: "unknown", label: "Couldn't check" },
 ];
 
-const ACTIONS: Array<{
+// Present is one tap on the row. These open a dialog, because each needs a
+// count, a place, a note or a second look before it is saved.
+const OTHER_ACTIONS: Array<{
   status: ItemObservationStatus;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { status: "present", label: "Present", icon: CheckCircle2 },
+  { status: "quantity_discrepancy", label: "Count differs", icon: Hash },
   { status: "missing", label: "Missing", icon: XCircle },
   { status: "moved", label: "Moved", icon: MoveRight },
-  { status: "quantity_discrepancy", label: "Count differs", icon: Hash },
   { status: "unknown", label: "Couldn't check", icon: HelpCircle },
+  { status: "present", label: "Present, with a note", icon: CheckCircle2 },
 ];
+
+const STALE_CODES = ["item_changed", "loans_changed", "item_deleted"];
+
+function newRequestId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function sessionBack(session: StocktakeSession) {
   const roomId = session.scope.room_ids?.[0];
@@ -110,7 +124,7 @@ export function StocktakePage() {
   const canWrite = useCanWrite();
   const queryClient = useQueryClient();
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
-  const [filter, setFilter] = React.useState(searchParams.get("status") ?? "all");
+  const [savingPresent, setSavingPresent] = React.useState<Set<string>>(new Set());
   const [observationTarget, setObservationTarget] = React.useState<{
     row: StocktakeItem;
     status: ItemObservationStatus;
@@ -119,7 +133,16 @@ export function StocktakePage() {
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [finishMode, setFinishMode] = React.useState<"complete" | "abandon" | null>(null);
   const session = query.data;
-  const back = session ? sessionBack(session) : { to: "/items", label: "Back to items" };
+  const location = useLocation();
+  // Opened from the stocktake list, Back returns there and not to the room.
+  const fromIndex = Boolean(
+    (location.state as { fromStocktakeIndex?: boolean } | null)?.fromStocktakeIndex,
+  );
+  const back = fromIndex
+    ? { to: "/stocktake", label: "Back to stocktakes" }
+    : session
+      ? sessionBack(session)
+      : { to: "/items", label: "Back to items" };
   const refresh = React.useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.stocktake });
     void queryClient.invalidateQueries({ queryKey: queryKeys.items });
@@ -142,6 +165,9 @@ export function StocktakePage() {
   if (!session) return null;
 
   const inProgress = session.status === "in_progress";
+  // While counting, the list starts with what is still to do.
+  const defaultFilter = inProgress && canWrite ? "unchecked" : "all";
+  const filter = searchParams.get("status") ?? defaultFilter;
   const expected = session.expected_item_count;
   const checked = session.checked_item_count;
   const percent = expected ? Math.min(100, Math.round((checked / expected) * 100)) : 0;
@@ -168,10 +194,43 @@ export function StocktakePage() {
     const params = new URLSearchParams(searchParams);
     if (nextSearch.trim()) params.set("q", nextSearch);
     else params.delete("q");
-    if (nextFilter !== "all") params.set("status", nextFilter);
+    if (nextFilter !== defaultFilter) params.set("status", nextFilter);
     else params.delete("status");
-    setSearchParams(params, { replace: true });
+    setSearchParams(params, { replace: true, state: location.state });
   };
+
+  // One tap records that every expected at-home unit was counted. It sends the
+  // same observation as the dialog, with the current item version and loans.
+  const markPresent = async (row: StocktakeItem) => {
+    if (savingPresent.has(row.snapshot_item_id)) return;
+    setSavingPresent((current) => new Set(current).add(row.snapshot_item_id));
+    try {
+      await api.post(`/stocktake/sessions/${session.id}/observations`, {
+        request_id: newRequestId(),
+        status: "present",
+        snapshot_item_id: row.snapshot_item_id,
+        counted_quantity: row.current.at_home_quantity,
+        room_id: null,
+        container_id: null,
+        notes: null,
+        expected_item_updated_at: row.current.updated_at,
+        expected_on_loan_quantity: row.current.on_loan_quantity,
+      });
+      toast.success(`${row.item_name}: present saved`);
+      refresh();
+    } catch (caught) {
+      toast.error(getApiErrorMessage(caught));
+      if (caught instanceof ApiError && STALE_CODES.includes(caught.code)) refresh();
+    } finally {
+      setSavingPresent((current) => {
+        const next = new Set(current);
+        next.delete(row.snapshot_item_id);
+        return next;
+      });
+    }
+  };
+  const allChecked =
+    inProgress && filter === "unchecked" && !search.trim() && (statusCounts.unchecked ?? 0) === 0;
   const defaultRoomId = session.scope.room_ids?.[0];
   const defaultContainerId = session.scope.container_ids?.[0];
   const coverage = session.coverage as Record<string, unknown>;
@@ -198,23 +257,23 @@ export function StocktakePage() {
         actions={
           inProgress && canWrite ? (
             <>
-              <Button variant="outline" onClick={() => setReviewOpen(true)}>
+              <Button variant="outline" className="h-11" onClick={() => setReviewOpen(true)}>
                 <ClipboardCheck />
                 Review changes
               </Button>
-              <Button onClick={() => setFinishMode("complete")}>
+              <Button className="h-11" onClick={() => setFinishMode("complete")}>
                 <Check />
                 Finish
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Stocktake options">
+                  <Button variant="ghost" size="icon" className="size-11" aria-label="Stocktake options">
                     <AlertTriangle />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>{session.scope_label}</DropdownMenuLabel>
-                  <DropdownMenuItem destructive onSelect={() => setFinishMode("abandon")}>
+                  <DropdownMenuItem destructive className="min-h-11" onSelect={() => setFinishMode("abandon")}>
                     <XCircle />
                     Abandon stocktake
                   </DropdownMenuItem>
@@ -233,56 +292,89 @@ export function StocktakePage() {
         }
       />
 
-      <section className="surface mb-5 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-2xs">
-            <Badge variant={inProgress ? "brass" : session.status === "completed" ? "sage" : "secondary"}>
-              {inProgress ? "In progress" : session.status === "completed" ? "Completed" : "Abandoned"}
-            </Badge>
-            {session.partial && session.status === "completed" && <Badge variant="outline">Partial coverage</Badge>}
-            {session.expected_on_loan_unit_count > 0 && (
-              <Badge variant="outline">
-                {session.expected_on_loan_unit_count} on loan excluded from at-home counts
-              </Badge>
-            )}
-          </div>
-          <p className="text-2xs text-muted-foreground">
-            {session.checked_item_count} of {pluralize(expected, "item")} checked ·{" "}
-            {session.checked_unit_count} at-home units counted
-          </p>
-        </div>
+      {inProgress ? (
         <div
-          className="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={expected}
-          aria-valuenow={Math.min(checked, expected)}
-          aria-label="Stocktake items checked"
+          data-testid="stocktake-progress"
+          className="sticky top-[env(safe-area-inset-top,0px)] z-20 -mx-1 mb-3 rounded-b-xl bg-background/95 px-1 pb-2 pt-2 backdrop-blur"
         >
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-300"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-2xs sm:grid-cols-4">
-          <CoverageMetric label="Present" value={statusCounts.present ?? 0} />
-          <CoverageMetric label="Missing" value={statusCounts.missing ?? 0} tone="destructive" />
-          <CoverageMetric label="Quantity differs" value={statusCounts.quantity_discrepancy ?? 0} tone="brass" />
-          <CoverageMetric label="Unexpected" value={session.unexpected_count} />
-        </div>
-        {session.status === "completed" && (
-          <div className="mt-3 grid gap-2 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2.5 text-2xs text-muted-foreground sm:grid-cols-2">
-            <p>
-              Verified items: {session.verified_item_count} · Missing: {session.missing_item_count} ·
-              Couldn't check: {session.unknown_item_count}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs">
+            <p role="status">
+              <span className="font-medium text-foreground">
+                {checked} of {pluralize(expected, "item")} checked
+              </span>
+              <span className="text-muted-foreground"> · {unchecked} left</span>
             </p>
-            <p>
-              Applied corrections: {String(coverage.applied_corrections ?? 0)} · Missing units:{" "}
-              {String(coverage.missing_units ?? 0)} · Unchecked items: {unchecked}
+            <p className="text-2xs text-muted-foreground">
+              {session.checked_unit_count} at-home units counted
+              {session.unexpected_count > 0 ? ` · ${session.unexpected_count} unexpected` : ""}
             </p>
           </div>
-        )}
-      </section>
+          <div
+            className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-secondary"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={expected}
+            aria-valuenow={Math.min(checked, expected)}
+            aria-label="Stocktake items checked"
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      ) : (
+        <section className="surface mb-5 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-2xs">
+              <Badge variant={inProgress ? "brass" : session.status === "completed" ? "sage" : "secondary"}>
+                {inProgress ? "In progress" : session.status === "completed" ? "Completed" : "Abandoned"}
+              </Badge>
+              {session.partial && session.status === "completed" && <Badge variant="outline">Partial coverage</Badge>}
+              {session.expected_on_loan_unit_count > 0 && (
+                <Badge variant="outline">
+                  {session.expected_on_loan_unit_count} on loan excluded from at-home counts
+                </Badge>
+              )}
+            </div>
+            <p className="text-2xs text-muted-foreground">
+              {session.checked_item_count} of {pluralize(expected, "item")} checked ·{" "}
+              {session.checked_unit_count} at-home units counted
+            </p>
+          </div>
+          <div
+            className="mt-3 h-1.5 overflow-hidden rounded-full bg-secondary"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={expected}
+            aria-valuenow={Math.min(checked, expected)}
+            aria-label="Stocktake items checked"
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-2xs sm:grid-cols-4">
+            <CoverageMetric label="Present" value={statusCounts.present ?? 0} />
+            <CoverageMetric label="Missing" value={statusCounts.missing ?? 0} tone="destructive" />
+            <CoverageMetric label="Quantity differs" value={statusCounts.quantity_discrepancy ?? 0} tone="brass" />
+            <CoverageMetric label="Unexpected" value={session.unexpected_count} />
+          </div>
+          {session.status === "completed" && (
+            <div className="mt-3 grid gap-2 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2.5 text-2xs text-muted-foreground sm:grid-cols-2">
+              <p>
+                Verified items: {session.verified_item_count} · Missing: {session.missing_item_count} ·
+                Couldn't check: {session.unknown_item_count}
+              </p>
+              <p>
+                Applied corrections: {String(coverage.applied_corrections ?? 0)} · Missing units:{" "}
+                {String(coverage.missing_units ?? 0)} · Unchecked items: {unchecked}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-sm flex-1">
@@ -306,12 +398,9 @@ export function StocktakePage() {
                 key={entry.value}
                 type="button"
                 aria-pressed={filter === entry.value}
-                onClick={() => {
-                  setFilter(entry.value);
-                  updateQuery(search, entry.value);
-                }}
+                onClick={() => updateQuery(search, entry.value)}
                 className={cn(
-                  "shrink-0 rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
+                  "min-h-11 shrink-0 rounded-full border px-3.5 py-1.5 text-2xs font-medium transition-colors",
                   filter === entry.value
                     ? "border-primary/25 bg-primary text-primary-foreground"
                     : "border-border/70 bg-card/60 text-muted-foreground hover:bg-secondary/40 hover:text-foreground",
@@ -326,11 +415,19 @@ export function StocktakePage() {
 
       {visibleItems.length === 0 ? (
         <EmptyState
-          title={session.items.length === 0 ? "No expected items" : "Nothing matches this view"}
+          title={
+            session.items.length === 0
+              ? "No expected items"
+              : allChecked
+                ? "Everything is checked"
+                : "Nothing matches this view"
+          }
           description={
             session.items.length === 0
               ? "This stocktake has no active expected items."
-              : "Clear the search or choose another status filter."
+              : allChecked
+                ? "Review changes if something moved or a count differs. Then finish the stocktake. Nothing in your inventory changes until you do."
+                : "Clear the search or choose another status filter."
           }
         />
       ) : (
@@ -340,6 +437,8 @@ export function StocktakePage() {
               key={row.snapshot_item_id}
               row={row}
               canWrite={canWrite && inProgress}
+              saving={savingPresent.has(row.snapshot_item_id)}
+              onPresent={() => void markPresent(row)}
               onAction={(status) => setObservationTarget({ row, status })}
             />
           ))}
@@ -357,7 +456,7 @@ export function StocktakePage() {
             </p>
           </div>
           {inProgress && canWrite && (
-            <Button size="sm" variant="outline" onClick={() => setUnexpectedOpen(true)}>
+            <Button size="sm" variant="outline" className="h-11" onClick={() => setUnexpectedOpen(true)}>
               <Plus />
               Add finding
             </Button>
@@ -394,9 +493,11 @@ export function StocktakePage() {
         )}
       </section>
 
-      <section className="mt-5 rounded-2xl border border-border/60 bg-card/40 px-4 py-3 text-2xs leading-relaxed text-muted-foreground">
-        <p className="font-medium text-foreground/80">How this stocktake behaves</p>
-        <p className="mt-1">
+      <details className="mt-5 rounded-2xl border border-border/60 bg-card/40 px-4 text-2xs leading-relaxed text-muted-foreground">
+        <summary className="flex min-h-11 cursor-pointer items-center font-medium text-foreground/80">
+          How this stocktake behaves
+        </summary>
+        <p>
           Unchecked items are never marked present by opening this page. Present, missing and
           couldn't-check observations are evidence only. Moves and quantity corrections require
           the separate review step. Loaned units remain owned and are excluded from expected
@@ -407,7 +508,8 @@ export function StocktakePage() {
           state; later item or loan changes mark that state as changed rather than silently
           remaining “verified here”.
         </p>
-      </section>
+        <div className="h-3" />
+      </details>
 
       {observationTarget && (
         <StocktakeObservationDialog
@@ -479,15 +581,25 @@ function CoverageMetric({
 function StocktakeItemCard({
   row,
   canWrite,
+  saving,
+  onPresent,
   onAction,
 }: {
   row: StocktakeItem;
   canWrite: boolean;
+  saving: boolean;
+  onPresent: () => void;
   onAction: (status: ItemObservationStatus) => void;
 }) {
   const observation = row.latest_observation;
   const status = observation?.status;
-  const actionsDisabled = !canWrite || row.deleted || row.current.is_archived || !row.current.updated_at;
+  const actionsDisabled =
+    !canWrite || saving || row.deleted || row.current.is_archived || !row.current.updated_at;
+  const atHome = row.current.at_home_quantity;
+  // A changed item, or one with nothing at home, needs a look at the numbers
+  // first, so Present opens the dialog instead of saving at once.
+  const needsLook =
+    atHome < 1 || (row.changed_since_snapshot && !row.deleted && !row.correction_applied);
   return (
     <article className="surface px-3.5 py-3.5 sm:px-4">
       <div className="flex gap-3">
@@ -566,25 +678,47 @@ function StocktakeItemCard({
             </p>
           )}
           {canWrite && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {ACTIONS.map((action) => {
-                const active = status === action.status;
-                return (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {status !== "present" && (
+                <Button
+                  type="button"
+                  variant={status ? "outline" : "default"}
+                  className="h-11 min-w-28 flex-1 px-4 sm:flex-none"
+                  disabled={actionsDisabled}
+                  aria-label={`Mark ${row.item_name} present`}
+                  onClick={() => (needsLook ? onAction("present") : onPresent())}
+                >
+                  {saving ? <Spinner /> : <CheckCircle2 />}
+                  {atHome > 1 ? `All ${atHome} present` : "Present"}
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
-                    key={action.status}
                     type="button"
-                    size="sm"
-                    variant={active ? "default" : "outline"}
-                    className="h-7 px-2.5 text-2xs"
+                    variant="outline"
+                    className="h-11 px-4"
                     disabled={actionsDisabled}
-                    aria-label={`Mark ${row.item_name} ${action.label.toLowerCase()}`}
-                    onClick={() => onAction(action.status)}
+                    aria-label={`${status ? "Change the result" : "Other results"} for ${row.item_name}`}
                   >
-                    <action.icon className="size-3.5" />
-                    {action.label}
+                    {status ? "Change" : "Other"}
+                    <ChevronDown />
                   </Button>
-                );
-              })}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuLabel>{row.item_name}</DropdownMenuLabel>
+                  {OTHER_ACTIONS.map((action) => (
+                    <DropdownMenuItem
+                      key={action.status}
+                      className="min-h-11"
+                      onSelect={() => onAction(action.status)}
+                    >
+                      <action.icon className="size-4" />
+                      {action.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
           {row.deleted && (

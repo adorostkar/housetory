@@ -50,8 +50,8 @@ editing.
 - `POST /households/{id}/select` validates membership before changing the session
   selection. A household id from another account returns the same not-found
   response as an id that does not exist.
-- The compact desktop selector and the mobile account menu list current
-  households and roles. Settings also exposes the selector and create action.
+- The desktop sidebar selector lists current households and roles. On a phone,
+  **Settings → Household** has the selector and the create action.
 - Account settings remain separate from household settings, members and
   properties.
 

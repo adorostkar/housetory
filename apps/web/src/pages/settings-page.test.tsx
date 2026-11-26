@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/components/theme-provider";
@@ -14,7 +14,10 @@ import type {
   Overview,
   SessionState,
 } from "@/lib/types";
+import { SettingsAdvancedPage } from "@/pages/settings-advanced-page";
+import { SettingsHouseholdPage } from "@/pages/settings-household-page";
 import { SettingsPage } from "@/pages/settings-page";
+import { SettingsServicesPage } from "@/pages/settings-services-page";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -82,15 +85,28 @@ const baseStatus: AiStatus = {
   privacy_note: "Remote inference sends household prompts to openrouter.ai.",
 };
 
-function renderPage() {
+function Where() {
+  const location = useLocation();
+  return <p data-testid="where">{location.pathname + location.hash}</p>;
+}
+
+/** Renders the Settings index and its screens at the given address. */
+function renderPage(path = "/settings") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
       <ThemeProvider>
-        <MemoryRouter>
-          <SettingsPage />
+        <MemoryRouter initialEntries={[path]}>
+          <Where />
+          <Routes>
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/household" element={<SettingsHouseholdPage />} />
+            <Route path="/settings/services" element={<SettingsServicesPage />} />
+            <Route path="/settings/advanced" element={<SettingsAdvancedPage />} />
+            <Route path="*" element={null} />
+          </Routes>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -123,7 +139,90 @@ function mockApi(status: () => AiStatus, getSession: () => SessionState = () => 
   return calls;
 }
 
-describe("SettingsPage household defaults", () => {
+describe("Settings index", () => {
+  it("lists every screen as a link row and keeps Sign out at the foot", async () => {
+    mockApi(() => baseStatus);
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "Settings", level: 1 }),
+    ).toBeVisible();
+    const rows: Array<[RegExp, string]> = [
+      [/^Account/, "/settings/account"],
+      [/^Appearance/, "/settings/appearance"],
+      [/^Household/, "/settings/household"],
+      [/^Members and invitations/, "/settings/members"],
+      [/^AI and online services/, "/settings/services"],
+      [/^System status/, "/settings/system-status"],
+      [/^Storage, install and labels/, "/settings/advanced"],
+    ];
+    for (const [name, href] of rows) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+    expect(
+      screen.getAllByRole("heading", { level: 2 }).map((node) => node.textContent),
+    ).toEqual(["Yours", "Household", "Advanced", "Sign out"]);
+    expect(screen.getByRole("link", { name: /^Account/ })).toHaveTextContent(
+      "Ashkan · owner@example.test",
+    );
+    expect(screen.getByRole("link", { name: /^Appearance/ })).toHaveTextContent(
+      "Current Housetory · System",
+    );
+    expect(screen.getByRole("link", { name: /^Household/ })).toHaveTextContent(
+      "Home · USD · you are owner",
+    );
+    expect(
+      await within(screen.getByRole("link", { name: /^System status/ })).findByText("Healthy"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeVisible();
+    // The index holds no forms and never checks the AI provider.
+    expect(screen.queryByLabelText("Household name")).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalledWith(expect.stringMatching(/^\/ai\/status/));
+  });
+
+  it("hides owner-only rows from members and viewers and says why", async () => {
+    mockApi(() => baseStatus, () => ({ ...session, role: "viewer" }));
+    renderPage();
+
+    expect(await screen.findByRole("link", { name: /^Household/ })).toHaveTextContent(
+      "you are viewer",
+    );
+    expect(screen.getByRole("link", { name: /^AI and online services/ })).toBeVisible();
+    expect(screen.queryByRole("link", { name: /^Members and invitations/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^System status/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Only the household owner can change household settings/)).toBeVisible();
+    expect(api.get).not.toHaveBeenCalledWith("/system/status/summary");
+  });
+
+  it.each([
+    ["#online-search", "/settings/services#online-search"],
+    ["#online-manual-search", "/settings/services#online-manual-search"],
+    ["#item-images", "/settings/household#item-images"],
+    ["#system-status", "/settings/system-status#system-status"],
+  ])("sends the old anchor %s to the screen that now holds it", async (hash, target) => {
+    mockApi(() => baseStatus);
+    renderPage(`/settings${hash}`);
+
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(target));
+  });
+});
+
+describe("Settings › Advanced", () => {
+  it("keeps storage, install help and the label calibration link", async () => {
+    mockApi(() => baseStatus);
+    renderPage("/settings/advanced");
+
+    expect(await screen.findByRole("heading", { name: "Storage", level: 2 })).toBeVisible();
+    expect(screen.getByText("scripts/backup.sh")).toBeVisible();
+    expect(screen.getByText("Install on your iPhone")).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "Open label calibration" }),
+    ).toHaveAttribute("href", "/labels#calibration");
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+  });
+});
+
+describe("Settings › Household defaults", () => {
   it("saves the default currency, updates cached memberships and follows household switches", async () => {
     let currentSession = session;
     mockApi(() => baseStatus, () => currentSession);
@@ -143,7 +242,7 @@ describe("SettingsPage household defaults", () => {
       };
       return Promise.resolve(updatedHousehold);
     }) as typeof api.patch);
-    const client = renderPage();
+    const client = renderPage("/settings/household");
 
     const currency = await screen.findByLabelText("Default currency");
     expect(currency).toHaveValue("USD");
@@ -179,9 +278,21 @@ describe("SettingsPage household defaults", () => {
     client.setQueryData(queryKeys.session, switched);
     await waitFor(() => expect(currency).toHaveValue("GBP"));
   });
+
+  it("shows the same fields read-only to a viewer, with no members link", async () => {
+    mockApi(() => baseStatus, () => ({ ...session, role: "viewer" }));
+    renderPage("/settings/household");
+
+    expect(await screen.findByLabelText("Household name")).toBeDisabled();
+    expect(screen.getByLabelText("Default currency")).toBeDisabled();
+    expect(screen.getByLabelText(/Automatically find a reference image/)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /Members & invitations/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Only the household owner can change these settings/)).toBeVisible();
+  });
 });
 
-describe("SettingsPage Intelligence summary", () => {
+describe("Settings › AI and online services: Intelligence summary", () => {
   it("shows a compact catalog count and never renders hundreds of model IDs", async () => {
     const catalog = Array.from(
       { length: 500 },
@@ -195,7 +306,7 @@ describe("SettingsPage Intelligence summary", () => {
           models: catalog,
         }) as AiStatus,
     );
-    renderPage();
+    renderPage("/settings/services");
 
     expect(
       await screen.findByText("Model listed by provider"),
@@ -209,10 +320,6 @@ describe("SettingsPage Intelligence summary", () => {
       "href",
       "/settings/ai",
     );
-    expect(await screen.findByText("Healthy")).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: "Open System status" }),
-    ).toHaveAttribute("href", "/settings/system-status");
     expect(screen.queryByText("Available models")).not.toBeInTheDocument();
     expect(screen.queryByText(catalog[499]!)).not.toBeInTheDocument();
     expect(screen.queryByText(catalog[0]!)).not.toBeInTheDocument();
@@ -227,7 +334,7 @@ describe("SettingsPage Intelligence summary", () => {
       error:
         "Model 'GPT-6 Luna' was not listed in the provider catalog. Choose a discovered model or enter the exact API model name.",
     }));
-    renderPage();
+    renderPage("/settings/services");
 
     expect(await screen.findByText("Model not listed")).toBeVisible();
     expect(screen.getByText("GPT-6 Luna")).toBeVisible();
@@ -249,7 +356,7 @@ describe("SettingsPage Intelligence summary", () => {
       error: "Model 'GPT-6 Luna' was not listed in the provider catalog.",
     };
     const calls = mockApi(() => current);
-    renderPage();
+    renderPage("/settings/services");
 
     expect(await screen.findByText("Model not listed")).toBeVisible();
     current = { ...baseStatus, model: "~openai/gpt-luna-latest" };
@@ -272,7 +379,7 @@ describe("SettingsPage Intelligence summary", () => {
       catalog_count: 0,
       error: "Provider returned HTTP 503: upstream unavailable",
     }));
-    renderPage();
+    renderPage("/settings/services");
 
     expect(await screen.findByText("Catalog check failed")).toBeVisible();
     expect(screen.getByText(/HTTP 503/)).toBeVisible();
@@ -289,7 +396,7 @@ describe("SettingsPage Intelligence summary", () => {
       catalog_count: 0,
       error: "AI is disabled for this task.",
     }));
-    renderPage();
+    renderPage("/settings/services");
 
     expect(await screen.findByText("Task disabled")).toBeVisible();
     expect(screen.getByText("AI is disabled for this task.")).toBeVisible();
@@ -298,7 +405,7 @@ describe("SettingsPage Intelligence summary", () => {
   });
 });
 
-describe("SettingsPage online lookups", () => {
+describe("Settings › AI and online services: online lookups", () => {
   it("shows one Online lookups section instead of separate lookup sections", async () => {
     mockApi(() => baseStatus);
     const fallback = vi.mocked(api.get).getMockImplementation()!;
@@ -333,7 +440,7 @@ describe("SettingsPage online lookups", () => {
       path === "/settings/online-search"
         ? Promise.resolve(onlineSearch)
         : fallback(path)) as typeof api.get);
-    renderPage();
+    renderPage("/settings/services");
 
     expect(
       await screen.findByRole("heading", { name: "Online manual search", level: 3 }),

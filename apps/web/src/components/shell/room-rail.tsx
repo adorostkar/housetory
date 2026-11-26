@@ -15,6 +15,7 @@ import {
   DoorOpen,
   FileText,
   Hammer,
+  ListChecks,
   Handshake,
   House,
   LayoutGrid,
@@ -86,10 +87,11 @@ const under = (base: string) => (pathname: string) =>
 /** Everything that is not a room. On the phone these roll up over the rooms. */
 export const MORE_DESTINATIONS: Destination[] = [
   { to: "/loans", label: "Loans", short: "Loans", icon: Handshake, match: (path) => under("/loans")(path) || under("/borrowed")(path) },
-  { to: "/rooms", label: "Places", short: "Places", icon: MapPin, match: (path) => path === "/rooms" || under("/containers")(path) },
+  { to: "/rooms", label: "Places", short: "Places", icon: MapPin, match: (path) => path === "/rooms" || under("/containers")(path) || under("/labels")(path) },
   { to: "/documents", label: "Documents", short: "Docs", icon: FileText, match: under("/documents") },
   { to: "/purchases", label: "Purchases", short: "Buys", icon: Wallet, match: (path) => isFinancialsPath(path) && !under("/insurance")(path) },
   { to: "/insurance", label: "Insurance", short: "Insure", icon: ShieldCheck, match: under("/insurance") },
+  { to: "/stocktake", label: "Stocktake", short: "Count", icon: ListChecks, match: under("/stocktake") },
   { to: "/review", label: "Review", short: "Review", icon: ClipboardCheck, match: under("/review") },
   { to: "/settings", label: "Settings", short: "Settings", icon: Settings, match: under("/settings") },
 ];

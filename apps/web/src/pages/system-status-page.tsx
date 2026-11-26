@@ -2,14 +2,17 @@ import { ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { PageHeader } from "@/components/page-header";
+import { SystemHealthSummary } from "@/components/system-health-summary";
 import { SystemStatusPanel } from "@/components/system-status-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useScrollToHash } from "@/hooks/use-scroll-to-hash";
 import { useSession } from "@/lib/queries";
 
 export function SystemStatusPage() {
   const session = useSession();
   const isOwner = session.data?.role === "owner";
+  useScrollToHash(!session.isPending);
 
   return (
     <div className="animate-fade-up">
@@ -41,7 +44,10 @@ export function SystemStatusPage() {
           </Button>
         </section>
       ) : (
-        <SystemStatusPanel isOwner title="Detailed status" />
+        <div className="grid min-w-0 gap-5">
+          <SystemHealthSummary isOwner detailsLink={false} />
+          <SystemStatusPanel isOwner title="Detailed status" />
+        </div>
       )}
     </div>
   );

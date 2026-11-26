@@ -17,12 +17,19 @@ function timestamp(value: string | null | undefined) {
   });
 }
 
-export function SystemHealthSummary({ isOwner }: { isOwner: boolean }) {
+export function SystemHealthSummary({
+  isOwner,
+  detailsLink = true,
+}: {
+  isOwner: boolean;
+  /** Set to false on the System status screen itself, where the link would point to the same page. */
+  detailsLink?: boolean;
+}) {
   const statusQuery = useSystemStatusSummary(isOwner);
 
   if (!isOwner) {
     return (
-      <section id="system-status" className="surface p-5 sm:p-6">
+      <section id="system-status" className="surface scroll-mt-24 p-5 sm:p-6">
         <h2 className="flex items-center gap-2 font-display text-[1.35rem] tracking-[-0.02em]">
           <Activity className="size-4 text-muted-foreground" />
           System health
@@ -47,7 +54,7 @@ export function SystemHealthSummary({ isOwner }: { isOwner: boolean }) {
   return (
     <section
       id="system-status"
-      className="surface p-5 sm:p-6"
+      className="surface scroll-mt-24 p-5 sm:p-6"
       aria-labelledby="system-health-heading"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -94,9 +101,11 @@ export function SystemHealthSummary({ isOwner }: { isOwner: boolean }) {
             >
               Retry
             </Button>
-            <Button size="sm" variant="outline" asChild>
-              <Link to="/settings/system-status">Open System status</Link>
-            </Button>
+            {detailsLink && (
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/settings/system-status">Open System status</Link>
+              </Button>
+            )}
           </div>
         </div>
       ) : data.status === "healthy" ? (
@@ -168,12 +177,14 @@ export function SystemHealthSummary({ isOwner }: { isOwner: boolean }) {
             ? `Checked ${timestamp(data.generated_at)}.`
             : "This is a passive status check and does not call external providers."}
         </p>
-        <Button size="sm" variant="outline" asChild>
-          <Link to="/settings/system-status">
-            Open System status
-            <ArrowRight />
-          </Link>
-        </Button>
+        {detailsLink && (
+          <Button size="sm" variant="outline" asChild>
+            <Link to="/settings/system-status">
+              Open System status
+              <ArrowRight />
+            </Link>
+          </Button>
+        )}
       </div>
     </section>
   );

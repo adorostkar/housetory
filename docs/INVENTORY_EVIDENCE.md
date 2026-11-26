@@ -12,7 +12,7 @@ insurance dashboard, a new reporting framework, properties or stocktake.
 
 ## Where to start an export
 
-- **Overview:** **Export evidence** exports the current home.
+- **Insurance:** **Export evidence** exports the current home.
 - **Items:** select one or more loaded items, then use **Export evidence** in the
   bulk action bar.
 - **Room detail:** exports the room and its descendant rooms/items.

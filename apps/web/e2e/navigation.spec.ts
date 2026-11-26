@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const MORE = ["Places", "Documents", "Purchases", "Insurance", "Review", "Settings"];
+const MORE = ["Places", "Documents", "Purchases", "Insurance", "Stocktake", "Review", "Settings"];
 
 async function createItem(request: APIRequestContext, name: string) {
   const response = await request.post("/api/v1/items", { data: { name } });

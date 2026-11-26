@@ -9,7 +9,7 @@ import {
   Settings2,
 } from "lucide-react";
 import * as React from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { useScrollToHash } from "@/hooks/use-scroll-to-hash";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useContainers, useLabelTemplates } from "@/lib/queries";
 import type { LabelGeometry, LabelLayout, LabelPreset } from "@/lib/types";
@@ -75,6 +76,16 @@ export function LabelsPage() {
   const [copies, setCopies] = React.useState(1);
   const [startSlot, setStartSlot] = React.useState(0);
   const [calibration, setCalibration] = React.useState<Calibration>(() => loadCalibration());
+  const location = useLocation();
+  // Calibration is rarely needed, so it stays closed unless a link asks for it.
+  const [calibrationOpen, setCalibrationOpen] = React.useState(
+    location.hash === "#calibration",
+  );
+  React.useEffect(() => {
+    if (location.hash === "#calibration") setCalibrationOpen(true);
+  }, [location.hash, location.key]);
+  useScrollToHash();
+  const calibrated = calibration.offsetX !== 0 || calibration.offsetY !== 0;
   const [custom, setCustom] = React.useState<LabelGeometry | null>(null);
   const [customOpen, setCustomOpen] = React.useState(false);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
@@ -556,11 +567,21 @@ export function LabelsPage() {
             </div>
           </section>
 
-          <section className="surface p-4 sm:p-5">
-            <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-              <Settings2 className="size-3.5" /> Calibration
-            </h2>
-            <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
+          <details
+            id="calibration"
+            className="surface scroll-mt-24 px-4 sm:px-5"
+            open={calibrationOpen}
+            onToggle={(event) => setCalibrationOpen(event.currentTarget.open)}
+          >
+            <summary className="flex min-h-11 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              <Settings2 className="size-3.5" /> Advanced · Calibration
+              {calibrated && (
+                <Badge variant="brass" className="normal-case tracking-normal">
+                  Offsets in use: {calibration.offsetX} / {calibration.offsetY} mm
+                </Badge>
+              )}
+            </summary>
+            <p className="text-2xs leading-relaxed text-muted-foreground">
               Print the calibration sheet on plain paper, hold it against a label sheet,
               then adjust the offsets until the outlines align. Settings are saved in this
               browser.
@@ -583,7 +604,7 @@ export function LabelsPage() {
                       offsetX: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-8 text-2xs"
+                  className="mt-1 h-11 text-2xs lg:h-8"
                 />
               </div>
               <div>
@@ -603,14 +624,15 @@ export function LabelsPage() {
                       offsetY: Number(event.target.value) || 0,
                     }))
                   }
-                  className="mt-1 h-8 text-2xs"
+                  className="mt-1 h-11 text-2xs lg:h-8"
                 />
               </div>
             </div>
-            <div className="mt-3 flex flex-col gap-2">
+            <div className="mb-4 mt-3 flex flex-col gap-2">
               <Button
                 variant="outline"
                 size="sm"
+                className="h-11 lg:h-8"
                 disabled={calibrationDownload.isPending}
                 onClick={() => calibrationDownload.mutate()}
               >
@@ -620,12 +642,13 @@ export function LabelsPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-11 lg:h-8"
                 onClick={() => setCalibration({ offsetX: 0, offsetY: 0 })}
               >
                 Reset offsets
               </Button>
             </div>
-          </section>
+          </details>
 
           <section className="surface p-4 text-2xs leading-relaxed text-muted-foreground">
             <p className="flex items-center gap-1.5 font-medium text-foreground/80">

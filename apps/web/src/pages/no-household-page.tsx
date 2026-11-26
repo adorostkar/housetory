@@ -23,7 +23,7 @@ export function NoHouseholdPage() {
   return (
     <AuthLayout
       title="Start a household."
-      subtitle="This account is signed in but is not a member of a household yet. Create one, or open an invitation from an owner."
+      subtitle="You are signed in, but this account is not in a household yet. Create one here, or open an invitation from an owner."
     >
       <div className="space-y-5 text-xs leading-relaxed text-muted-foreground">
         <p className="flex items-center gap-2 rounded-xl border border-border/70 bg-card/60 p-4 text-foreground">
@@ -40,7 +40,7 @@ export function NoHouseholdPage() {
               {
                 onSuccess: () => {
                   toast.success("Household created");
-                  navigate("/", { replace: true });
+                  navigate("/items", { replace: true });
                 },
                 onError: (error) => toast.error(getApiErrorMessage(error)),
               },
@@ -58,7 +58,11 @@ export function NoHouseholdPage() {
               required
             />
           </Field>
-          <Field label="First property" htmlFor="no-household-property">
+          <Field
+            label="First property"
+            htmlFor="no-household-property"
+            hint="A house or flat in this household. You can add more later."
+          >
             <Input
               id="no-household-property"
               value={propertyName}
@@ -69,12 +73,15 @@ export function NoHouseholdPage() {
           </Field>
           <Button
             type="submit"
-            className="w-full"
+            className="h-11 w-full"
             disabled={create.isPending || !name.trim() || !propertyName.trim()}
           >
             {create.isPending ? <Spinner /> : <Plus />}
             Create household
           </Button>
+          <p className="text-center text-2xs">
+            You become its owner. Next, you add your first item.
+          </p>
         </form>
         <p className="rounded-xl border border-border/70 bg-card/40 p-4">
           Have an invitation? Open the invitation link from your email while signed
@@ -83,7 +90,7 @@ export function NoHouseholdPage() {
         </p>
         <Button
           variant="outline"
-          className="w-full"
+          className="h-11 w-full"
           disabled={logout.isPending}
           onClick={() =>
             logout.mutate(undefined, {

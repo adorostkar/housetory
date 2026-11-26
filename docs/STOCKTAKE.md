@@ -10,7 +10,9 @@ stocktake claim, or a replacement for normal item editing.
 
 ## Where to start
 
-- Open a **room** or **container** and use the compact stocktake strip.
+- Open **More → Stocktake** to see stocktakes in progress, start one for a room
+  or container, and find recent ones.
+- Or open a **room** or **container** and use its stocktake line.
 - **Start stocktake** captures the current expected items in that scope and its
   explicit descendants.
 - **History** lists in-progress, completed and abandoned sessions for that

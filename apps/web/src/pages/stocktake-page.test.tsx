@@ -11,6 +11,7 @@ import type {
   StocktakeReview,
   StocktakeSessionDetail,
 } from "@/lib/types";
+import { StocktakeIndexPage } from "@/pages/stocktake-index-page";
 import { StocktakePage } from "@/pages/stocktake-page";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -319,36 +320,98 @@ beforeEach(() => {
 });
 
 describe("StocktakePage", () => {
-  it("shows explicit checklist state and records a present observation only on request", async () => {
+  it("starts on what is left and records Present in one tap, with no dialog", async () => {
     renderPage();
     expect(await screen.findByRole("heading", { name: "Room: Workshop" })).toBeVisible();
+    // Unchecked is the default view while counting: the checked Drill is not listed.
+    expect(screen.getByRole("button", { name: /^Unchecked/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("Drill")).not.toBeInTheDocument();
     expect(screen.getAllByText(/Not checked yet/)).toHaveLength(2);
     expect(screen.getAllByText(/Opening this page does not mark it present/)).toHaveLength(2);
+    expect(screen.getByTestId("stocktake-progress")).toHaveTextContent("0 of 3 items checked · 3 left");
     expect(vi.mocked(api.post)).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: /^Unchecked/ }));
-    await waitFor(() => expect(screen.queryByText("Drill")).not.toBeInTheDocument());
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Mark Tent present" }),
-    );
-    expect(await screen.findByRole("dialog")).toBeVisible();
-    expect(screen.getByText("Mark as present")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Save present" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mark Tent present" }));
     await waitFor(() =>
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/stocktake/sessions/session-1/observations",
         expect.objectContaining({
+          request_id: expect.any(String),
           status: "present",
           snapshot_item_id: "snap-2",
           counted_quantity: 1,
+          notes: null,
           expected_on_loan_quantity: 0,
           expected_item_updated_at: ITEM_UPDATED,
         }),
       ),
     );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Tent")).not.toBeInTheDocument());
     expect(screen.getByText("Rope")).toBeVisible();
+    expect(screen.getByTestId("stocktake-progress")).toHaveTextContent("2 of 3 items checked · 1 left");
+
+    // The other views are still one tap away.
+    await userEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(await screen.findByText("Drill")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Mark Drill present" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change the result for Drill" })).toBeVisible();
+  });
+
+  it("sends each one-tap Present with its own request id", async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Mark Tent present" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Mark Rope present" }));
+    await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalledTimes(2));
+    const ids = vi
+      .mocked(api.post)
+      .mock.calls.map(([, body]) => (body as { request_id: string }).request_id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("keeps the dialog for the other results and for an item that changed since the start", async () => {
+    currentSession = session({
+      items: currentSession.items.map((row) =>
+        row.snapshot_item_id === "snap-3" ? { ...row, changed_since_snapshot: true } : row,
+      ),
+    });
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Other results for Tent" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Missing" }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    expect(screen.getByText(/will not be deleted, archived or written/)).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // Rope changed after the stocktake began, so its numbers are shown before saving.
+    await userEvent.click(screen.getByRole("button", { name: "Mark Rope present" }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    expect(screen.getByText("Mark as present")).toBeVisible();
+    expect(vi.mocked(api.post)).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Save present" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/stocktake/sessions/session-1/observations",
+        expect.objectContaining({ status: "present", snapshot_item_id: "snap-3" }),
+      ),
+    );
+  });
+
+  it("reports a failed one-tap Present and leaves the item unchecked", async () => {
+    const { toast } = await import("sonner");
+    vi.mocked(api.post).mockRejectedValueOnce(new Error("The connection was lost."));
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Mark Tent present" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByText("Tent")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Mark Tent present" })).toBeEnabled();
+  });
+
+  it("keeps the explanation closed until asked for", async () => {
+    renderPage();
+    const summary = await screen.findByText("How this stocktake behaves");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
   });
 
   it("reviews old/current/new corrections, applies atomically and completes partial coverage explicitly", async () => {
@@ -386,5 +449,126 @@ describe("StocktakePage", () => {
       ),
     );
     expect(await screen.findByText("Completed · partial")).toBeVisible();
+  });
+});
+
+describe("StocktakeIndexPage", () => {
+  function renderIndex() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/stocktake"]}>
+          <Routes>
+            <Route path="/stocktake" element={<StocktakeIndexPage />} />
+            <Route path="/stocktake/:sessionId" element={<StocktakePage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  const { items: _items, unexpected_findings: _findings, ...summary } = session();
+  const running = { ...summary, checked_item_count: 1 };
+  const finished = {
+    ...summary,
+    id: "session-0",
+    scope_label: "Container: BOX-001 · Gear",
+    scope: { room_ids: [], container_ids: ["loc-1"], include_descendants: true },
+    status: "completed" as const,
+    checked_item_count: 3,
+    completed_at: "2026-11-01T11:00:00Z",
+    partial: false,
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === "/stocktake/sessions?status=in_progress&limit=20") {
+        return { items: [running], total: 1, limit: 20, offset: 0 };
+      }
+      if (path === "/stocktake/sessions?limit=20") {
+        return { items: [running, finished], total: 2, limit: 20, offset: 0 };
+      }
+      if (path === "/rooms") {
+        return {
+          items: [
+            { id: "room-1", name: "Workshop" },
+            { id: "room-2", name: "Garage" },
+          ],
+        };
+      }
+      if (path === "/storage-locations") {
+        return { items: [{ id: "loc-1", room_id: "room-1", identifier: "BOX-001", name: "Gear" }] };
+      }
+      if (path === "/stocktake/sessions/session-1") return currentSession;
+      if (path === "/stocktake/sessions/session-2") {
+        return { ...currentSession, id: "session-2", scope_label: "Room: Garage" };
+      }
+      throw new Error(`Unexpected GET ${path}`);
+    });
+    vi.mocked(api.post).mockImplementation(async (path: string) => {
+      if (path === "/stocktake/sessions") return { ...summary, id: "session-2" };
+      throw new Error(`Unexpected POST ${path}`);
+    });
+  });
+
+  it("puts work in progress first, with resume, and finished stocktakes after it", async () => {
+    renderIndex();
+    const resume = await screen.findByRole("link", { name: /Room: Workshop/ });
+    expect(resume).toHaveAttribute("href", "/stocktake/session-1");
+    expect(resume).toHaveTextContent("1 of 3 items checked · 2 left");
+    expect(resume).toHaveTextContent("Resume");
+    const done = await screen.findByRole("link", { name: /Container: BOX-001 · Gear/ });
+    expect(done).toHaveAttribute("href", "/stocktake/session-0");
+    expect(done).toHaveTextContent("Completed");
+    expect(done).toHaveTextContent("View");
+    expect(screen.getAllByRole("link", { name: /Room: Workshop/ })).toHaveLength(1);
+  });
+
+  it("returns to the stocktake list from a session opened there, also after filtering", async () => {
+    renderIndex();
+    await userEvent.click(await screen.findByRole("link", { name: /Room: Workshop/ }));
+    expect(await screen.findByRole("heading", { name: "Room: Workshop" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(screen.getByRole("link", { name: "Back to stocktakes" })).toHaveAttribute(
+      "href",
+      "/stocktake",
+    );
+  });
+
+  it("starts a stocktake of the chosen room and opens it", async () => {
+    renderIndex();
+    const place = await screen.findByLabelText("Room or container to check");
+    expect(screen.getByRole("button", { name: "Start stocktake" })).toBeDisabled();
+    await userEvent.selectOptions(place, await screen.findByRole("option", { name: "Garage" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start stocktake" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith("/stocktake/sessions", {
+        room_ids: ["room-2"],
+        container_ids: [],
+        include_descendants: true,
+        request_id: expect.any(String),
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "Room: Garage" })).toBeVisible();
+  });
+
+  it("offers Resume, not a second stocktake, for a place that is being checked", async () => {
+    renderIndex();
+    const place = await screen.findByLabelText("Room or container to check");
+    await userEvent.selectOptions(place, await screen.findByRole("option", { name: "Workshop" }));
+
+    expect(await screen.findByRole("link", { name: "Resume stocktake" })).toHaveAttribute(
+      "href",
+      "/stocktake/session-1",
+    );
+    expect(screen.queryByRole("button", { name: "Start stocktake" })).not.toBeInTheDocument();
+    await userEvent.selectOptions(
+      place,
+      screen.getByRole("option", { name: "BOX-001 · Gear (Workshop)" }),
+    );
+    expect(await screen.findByRole("button", { name: "Start stocktake" })).toBeEnabled();
   });
 });
