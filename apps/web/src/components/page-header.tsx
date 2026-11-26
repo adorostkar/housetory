@@ -39,7 +39,7 @@ export function PageHeader({
       {backTo && (
         <Link
           to={backTo}
-          className="mb-5 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-5 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground coarse:-my-2 coarse:mb-3 coarse:min-h-11"
         >
           <ChevronLeft className="size-3.5" />
           {backLabel ?? "Back"}

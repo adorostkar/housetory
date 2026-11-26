@@ -135,19 +135,20 @@ All application endpoints are versioned under `/api/v1`.
 | Labels | `GET /labels/templates`, `POST /labels/pdf`, `GET/POST /labels/calibration.pdf` |
 | Categories | `GET/POST /categories`, `PATCH/DELETE /categories/{id}` |
 | Tags | `GET/POST /tags`, `PATCH/DELETE /tags/{id}` |
-| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag/purchase-information filters, `include_descendants` and sorting |
+| Items | `GET/POST /items`, `GET/PATCH/DELETE /items/{id}`; list supports `q`, room/place/category/tag/purchase-information filters, `ids` (at most 100 known items), `include_descendants` and sorting, including `location_asc` (property, room, storage place, name). With `q` the result is ordered by how well the name matches; the chosen sort breaks ties |
 | Bulk organisation | `POST /items/bulk/move`, `POST /items/bulk/tags`, `POST /items/bulk/category`; bounded atomic batches with required request-id replay safety |
 | Photos | `GET/POST /items/{id}/photos`, `POST /items/{id}/photos/{photo_id}/primary`, `DELETE /photos/{id}`, plus room/location equivalents, authenticated file/thumbnail routes and cover selection |
 | Documents | `GET/POST /documents`, `GET/PATCH/DELETE /documents/{id}`, `GET /documents/{id}/file`, `GET /documents/{id}/original`, `POST /documents/{id}/ocr`, `POST /documents/{id}/ocr/apply`, legacy `POST /items/{id}/documents` |
 | Document scans | `POST/GET/DELETE /documents/scans`, add/update/delete/reorder pages, authenticated original/cleaned page files, idempotent `POST /documents/scans/{id}/commit` |
-| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` |
+| Document extraction | `GET /documents/{id}/extraction`, `POST /documents/{id}/extraction/matches`, idempotent `POST /documents/{id}/extraction/apply` (the lines of one extraction version can be applied in parts), `POST /documents/{id}/extraction/lines/{line_id}/skip` and `/restore` |
 | Purchases | `GET/POST /purchases`, `GET/PATCH/DELETE /purchases/{id}`; one purchase may reference several items and reviewed per-item allocations |
 | Warranties | `GET /warranties` with status/item filters and counts; warranty writes use the item endpoints |
 | Ownership | `GET /overview`, `GET /financial-overview` |
 | Insurance | `POST /insurance-valuations/scope-preview`, `POST/GET /insurance-valuations/batches/{request_id}`, cancel, `POST/GET /insurance-lists/{job_id}`, PDF/CSV downloads |
 | Exports | `GET /exports/documents.csv`, `/exports/purchases.csv`, `/exports/warranties.csv`, `/exports/inventory.csv` |
 | Search | `GET /search/quick` bounded item/container/location results with loan state and effective question terms; `POST /search/query` is the explicit search and answer flow. Structured intents execute fixed read-only tools; ambiguous questions fall back to ordinary matches plus an assistant handoff. |
-| Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply |
+| Imports | `GET/POST /imports` (with optional room/location review context), `GET/DELETE /imports/{id}`, source/file downloads, retry, hierarchy-aware explicit apply, `POST /imports/{id}/entries/{entry_id}/restore` (a skipped or rejected row goes back into the review) |
+| Assistant | `GET /assistant/tools`, `POST/GET /assistant/runs`, `GET /assistant/runs/{id}`, `POST /assistant/runs/{id}/cancel`, `/steer` (a message while the request runs) and `/retry`; `/assistant/actions/proposals` create, edit, destinations, apply, `POST …/{id}/undo` (an applied edit or a move of one item), refresh, cancel, pending and read |
 | Voice | `GET /voice/config`, `POST /voice` (private audio + optional room/location context), `GET /voice/{id}` (recording, upload and transcription only; the transcript is handed to the assistant or Add items) |
 | Lending | `GET/POST /loans`, `GET/PATCH /loans/{id}`, partial returns, cancel, `GET /items/{id}/loans`, item/container history and `POST /history/{event_id}/undo` |
 | Documents/AI | `GET /documents/{id}/related-items` |
@@ -609,10 +610,24 @@ deployment.
   (Radix primitives + CVA + local UI components).
 - TanStack Query owns server state; there is no global state store.
 - React Router 7 with route-level lazy loading and a protected shell.
-- Routes: overview, rooms, room detail, items, item create/edit/detail,
-  documents, document detail/OCR review, purchases, warranties, imports, import
-  review/apply, containers, container detail, labels, assistant, recognition,
-  keyword/smart search, settings, setup, login, 404.
+- Routes: items (the start page; `/` redirects to `/items`), item
+  create/edit/detail, rooms, room detail, containers, container detail, labels,
+  review, loans, loan and borrowed detail, documents, document detail/OCR
+  review and file viewer, purchases, warranties, insurance, imports, import
+  review/apply, stocktake index and session, settings and its screens, setup,
+  login, 404. There is no Overview page. `/search`, `/assistant`, `/scan`,
+  `/recognize` and `/add-items` are redirects: search goes to the item list, the
+  assistant opens as a panel, and capture opens Add items.
+- The shell (`components/app-shell.tsx`, `components/shell/`) has no top header
+  and no tab bar. On a phone a rail of rooms sits on the left (All, each
+  top-level room, On loan, More) and can be hidden; one bar at the bottom holds
+  the show/hide button, the search and ask field and Add. On desktop the rooms
+  are a sidebar with names and counts and the bar sits at the bottom of the main
+  column. More rolls its choices (Places, Documents, Purchases, Insurance,
+  Stocktake, Review, Settings) up over the rooms. From 1200 px an item (detail,
+  new, edit) opens in a panel on the right, beside the page it was opened from.
+  The assistant is a sheet from the bottom on a phone and a box above the bar on
+  desktop.
 - The UI is an installable PWA: web manifest, Apple meta tags, generated icons,
   standalone display and an app-shell service worker that never caches API
   data.
@@ -620,26 +635,27 @@ deployment.
   full-screen viewer with keyboard/thumbnail navigation, and an iPhone camera
   capture action.
 - Document library, OCR review, purchase management with multi-item selection,
-  warranty dashboards, ownership/financial overview, import review, assistant and
+  warranty dashboards, ownership totals (on the Purchases page), import review, assistant and
   recognition use the same typed API client and React Query invalidation model.
   OCR/import/recognition status polls while queued or processing and stops after a
   terminal state.
 - Import review preserves per-field provenance, source excerpts and vault context;
   missing locations can be created inline but only by explicit user action.
-  Assistant answers render grounded references and cannot mutate data.
+  Assistant answers render grounded references. An answer by itself changes
+  nothing; changes go through the proposals and the direct-apply policy below.
 - Unified search/assistant: typing performs bounded keyword matching; Enter submits
   the query. Clear structured intents use deterministic fixed-tool answers with
   item/loan/document references. Simple loan answers lead with a direct
   borrower/quantity/date sentence and a natural home-path sentence, using stored
   brand/name without fabricating models; no internal intent labels or generic
   disclaimer are shown. Question-like quick results offer an explicit assistant
-  handoff. The dedicated Assistant keeps the conversation, shows provider/privacy
+  handoff. The assistant panel keeps the conversation, shows provider/privacy
   details in a secondary disclosure and passes the prior turns for context.
   Filters and result counts remain server-derived and household-scoped.
 - Typed commands (move, lend, borrow, return, rename, set a field, start a
   review) are understood only by the AI tool engine (`POST /assistant/runs`,
-  `services/assistant_tools` + `services/ai_tools`), which prepares reviewed
-  proposals through `/assistant/actions/proposals` (create, edit, apply, refresh,
+  `services/assistant_tools` + `services/ai_tools`), which prepares
+  proposals through `/assistant/actions/proposals` (create, edit, apply, undo, refresh,
   cancel, pending; stale checks and idempotent apply). There is no AI intent
   classifier and no phrase interpreter: `/assistant/actions/intent` and
   `/assistant/actions/interpret` were removed. Without an Assistant model the
@@ -648,6 +664,37 @@ deployment.
   notice; a Search-only model does not enable typed commands. Those actions
   stay available through the normal buttons and forms, and reviews start from
   the Review page.
+- **Direct changes.** `services/assistant_tools/policy.py` decides on the server
+  whether a prepared change is applied at once or stays a proposal. The model
+  only says whether the user stated the change (`basis`); the application
+  checks it. Only two kinds can be applied directly: `edit_item` (name,
+  description, brand, model, serial number, quantity, condition of one item) and
+  `move_items` for one item. All of these must hold: the role is owner or
+  member; the model marked the change `user_stated`; every new value, or the
+  name or identifier of the destination, stands in the user's own words of this
+  request; no value is cleared; a quantity is at least 1 and not below what is
+  on loan; the moved item does not hold other things; no tool returned text of
+  a document or a web page in this request or in the four turns before it; at
+  most three direct changes per request. Anything else is shown as a proposal with the reason. A direct
+  apply is the same apply as the user's own, with a request ID made from the
+  proposal, so a repeat changes nothing twice.
+  `POST /assistant/actions/proposals/{id}/undo` puts an applied edit or
+  single-item move back. It refuses (`undo_not_safe`) when the record changed
+  again afterwards, so Undo never overwrites newer work. A move is undone
+  through the item's own history. Other kinds (loans, returns, borrowed
+  records, moves of several items, a saved manual) have no Undo here.
+- **Steering and stop.** `POST /assistant/runs/{id}/steer` adds a message to a
+  request that is still running (at most six per request). The next model step
+  sees it and every finished tool result is kept; a model step that was decided
+  without it is dropped. The web app sends a message that is only a stop word
+  (“stop”, “cancel”, “avbryt”, “stopp”) to `/cancel` instead. A stopped request
+  says what was finished and kept, and what had already left the server. A run
+  reports `progress`: a few words from its real state (the tool that runs, or
+  waiting), not an estimate. `answer_kind` is `general` for general guidance
+  that rests on no household record; such an answer needs no tool call.
+- The page a request came from (`page_context`) is only the default subject. A
+  page record that is gone or outside the scope is left out and does not stop
+  the request. A request that names another thing is about that thing.
 - The tool engine also opens and reads item manuals. Page text is stored per
   document in `document_page_texts` by the `documents.read_pages` job, and the
   `documents.map` job caches an AI-built map of sections and topics in
@@ -670,8 +717,14 @@ deployment.
   opened as a capture or extraction review. See
   [`docs/ITEM_MANUALS.md`](docs/ITEM_MANUALS.md).
 - The tool engine also finds a manual online. `find_manuals_online` calls the
-  reviewed online workflow of the item page (confirmed identity, configured
-  search provider, exact-model evidence). It saves nothing. Confirming an identity and downloading a candidate are the
+  reviewed online workflow of the item page (product identity, configured
+  search provider, exact-model evidence). When the item records a complete
+  brand and model and the user confirmed no identity before, those are stored
+  as the identity and searched at once; the user is asked only when they are
+  missing or generic, or when a variant the user named differs from a confirmed
+  identity. The one clear match is saved in the same task when the user asked
+  for the manual (`save_clear_match`), the role may write, and no document or
+  web text was read in the conversation. Otherwise confirming an identity and downloading a candidate are the
   proposals `confirm_manual_identity` and `save_manual`: the user applies them
   through `/assistant/actions/proposals`, and Apply runs the same functions as
   the item page. Attached manuals are read before anything is searched online.
@@ -681,7 +734,7 @@ deployment.
   nothing answers from search snippets.
 - The tool engine checks an answer against what the tools of the request did,
   and sends it back to the model once for each reason: no tool was used at
-  all; the last tool call had invalid arguments (its result names the wrong
+  all (unless the answer is general guidance, kind `general`); the last tool call had invalid arguments (its result names the wrong
   argument, and a second such answer ends the request with an error, not with
   the model's claim); manual pages are named that were not read in this
   request; cited pages have words OCR was unsure about. A call the model
@@ -693,7 +746,9 @@ deployment.
   one `Tool(...)` entry per capability: its name, the description the model
   reads, a typed argument model, the handler that carries it out, the role it
   needs (`permission`), other needs (`requires`, for example a configured
-  search service) and two engine flags (`reuse_result`, `once_per_request`).
+  search service), two engine flags (`reuse_result`, `once_per_request`),
+  `untrusted_content` (the result carries document or web text), `progress`
+  (the words shown while it runs) and `sends` (what leaves the server).
   Nothing else lists the tools:
   - `execute` validates the arguments, checks role and needs, checks the items
     the call names against the frozen scope, and runs the tool's handler. It
@@ -738,9 +793,12 @@ deployment.
      existing tool. The tool calls the feature's service function. It does not
      copy its logic. A new tool is one `Tool(...)` registration with its
      handler; no dispatch code, prompt text or JSON file is edited.
-  2. *Changes* go through a proposal that the user applies. Apply calls the
+  2. *Changes* go through a proposal. Apply calls the
      same service function as the normal button or form, with the same
-     permission, scope and stale checks. The assistant never writes directly.
+     permission, scope and stale checks. The user applies it, unless the kind
+     is on the short direct-apply list of `policy.py` and passes its checks. A
+     new kind is reviewed by default; add it to that list only when it can be
+     undone safely.
   3. The tool result names the real condition (not set up, not allowed,
      nothing found, failed) and the action that fits it, so the assistant
      does not have to guess. A need that holds for the whole household (a
@@ -762,8 +820,11 @@ deployment.
      the assistant cannot reach is a decision, not an oversight.
 - Purchase-information filters expose Missing/Unknown, Recorded, Not applicable and
   missing date/price with the same semantics as overview, search and assistant.
-- Sparse overviews collapse empty value/warranty sections while recent items, rooms
-  and outstanding loans lead. Active filter chips and empty category/tag filtering
+- There is no Overview page. Its totals are a closed **Totals** line on the
+  Purchases page and its warranty groups a closed **Warranty watch** line on the
+  Warranties page (`GET /overview` still serves both). The item list shows one
+  short row of notices (findings to review, loans past due, warranties expiring)
+  only when there is something to do. Active filter chips and empty category/tag filtering
   keep bulk selection safe.
 - Container list/detail, bulk creation, explicit fixed-place conversion,
   cross-room move, deterministic/AI/manual summaries, QR dialog and label
@@ -772,23 +833,25 @@ deployment.
 - Item cards resolve the nearest container from `location_path`; item detail
   links to container pages; room place menus link to container pages and show
   identifiers.
-- Item detail puts open-loan truth directly beneath the title: borrower or
-  multi-borrower summary, owned/at-home/on-loan quantities, optional recorded due
-  date, overdue text and per-loan Record return actions for writers. Viewers see
-  the same state without mutation controls. While units are loaned, the stored
-  room/container is labelled “Usual home location” and explained as the recorded
-  home for at-home stock only. The detailed lending card and history remain.
+- Item detail is one narrow column: the title, a **Lives in** row (the recorded
+  place, with Move), a **Right now** row, the photo strip and tabs (Contents for
+  an item that stores things, Info, Documents, Loans, History). The Right now
+  row holds the open-loan truth: borrower or
+  multi-borrower summary, owned/here/on-loan quantities, optional recorded due
+  date, overdue text and per-loan Return actions for writers. Viewers see
+  the same state without mutation controls. The Loans tab and history remain.
 - The Loans page has a New loan picker over active household inventory with current
   available stock, disabled fully loaned items and picker/loading/no-match/error
   states. The existing Lend and Return dialogs enforce server stock/archive checks
   and idempotency. Outstanding rows show plain borrower text, item-detail link,
   recorded home/dates, independent View details and direct Record return actions;
   closed rows and viewers have no return action.
-- Empty item galleries use a compact single Take photo/Choose photo pair; actual
-  photography retains the full gallery, ordering, removal, lightbox and upload
-  controls.
-- The Documents page adds a multi-page scan dialog alongside the unchanged
-  single-file upload. Draft pages have thumbnails, original/cleaned previews,
+- Item photos are a strip of small thumbnails with an Add photo tile (camera or
+  library). A thumbnail opens the lightbox; ordering, the cover and removal are
+  behind **Manage photos**.
+- The Documents page has a multi-page scan dialog alongside the
+  single-file upload. The upload saves the file as soon as it is chosen, with
+  Undo; details and items are optional steps after that. Draft pages have thumbnails, original/cleaned previews,
   keyboard-adjustable crop corners, rotation, color/document mode, contrast,
   reorder/remove controls and a persistent save/cancel footer. Saved scans show a
   page strip with exact original page downloads and identify the cleaned PDF as
@@ -796,18 +859,26 @@ deployment.
 - Document detail adds a progressive extraction review: editable document fields,
   provenance/uncertainty, product/charge line cards, exact/approximate match
   reasons, manual item search, create/link/update/skip choices, explicit new-stock,
-  warranty, purchase/attachment decisions and an itemised change preview. The
+  warranty, purchase/attachment decisions and an itemised change preview. Lines
+  can be applied one by one or as a selection, and skipped lines can be restored. The
   optional AI action is secondary and shows provider/consent state. The long review
   uses cards and internal progressive disclosure rather than a wide table, so it
   remains usable on mobile.
 - The Items page supports explicit loaded-record selection and a remembered
-  card/compact-list toggle. Checkboxes sit outside item links; archived rows are
-  disabled; viewers have no selection controls. Search/filter/sort changes clear
+  card/compact-list toggle. Checkboxes appear after **Select** is pressed and sit
+  outside item links; archived rows are
+  disabled; viewers have no selection controls. The list is ordered by Recent,
+  Newest, Name or Location. Recent is worked out in the browser from the items
+  opened on this device (`lib/recent-items.ts`, localStorage, per user and
+  household); it is not stored on the server. Search/filter/sort changes clear
   selection with visible feedback, and the UI never claims unloaded matches are
   selected. The compact rows show quantity, full place path and on-loan/at-home
   status without exposing borrower notes.
-- Design system: warm ivory/stone light mode, deep charcoal dark mode, system
-  SF typography with New York-style display serif, restrained sage/brass accents,
+- Design system: four colour themes (Current Housetory, Design D, Field notes,
+  Collected), each with a light and a dark form, chosen under Settings →
+  Appearance and kept on the device. A theme changes colours only. The default
+  is warm ivory/stone in light mode and deep charcoal in dark mode, with system
+  SF typography, a New York-style display serif, restrained sage/brass accents,
   subtle borders and soft shadows. Reduced-motion preferences are respected.
 - No placeholder production data or non-functional controls. Empty states are
   real first-run states.

@@ -114,6 +114,12 @@ Blocked with a clear explanation:
 Undo requires the same owner/member write permission as the original action.
 Viewers can read history but cannot lend, return, correct, cancel or undo.
 
+A move of one item that the assistant applied directly has an **Undo** button
+on its card in the assistant. That button
+(`POST /assistant/actions/proposals/{id}/undo`) uses this same item-move undo,
+with the same checks. If the move was already undone from the item's history,
+the card says so.
+
 ## Restore-assisted item-move undo
 
 Deleting an empty storage place retains a recoverable tombstone. If a later item
@@ -154,16 +160,18 @@ original history event is locked and can only receive one compensating event.
 
 ## UI
 
-- **Loans** is a small addition to the existing navigation. It lists open loans by
+- **Loans** is reached from **On loan** in the room rail (the sidebar on
+  desktop), which shows a badge with the number of past-due loans. It lists open loans by
   default, with borrower, item link, quantity, lent/due dates, status and an
   optional local-date past-due filter.
-- Item details have a **Lend** action, owned/at-home/on-loan quantities, open-loan
-  links and a history timeline.
+- Item details have a **Lend** action and the owned/here/on-loan quantities in
+  the **Right now** row, open-loan links, a **Loans** tab and a **History** tab
+  with the timeline.
 - Loan detail shows borrower/date/quantity context, returns, corrections,
   cancellation and history with safe undo controls.
-- Container detail shows movement history, including inherited-content counts.
-- Overview shows a compact loan banner only when loans exist; the existing layout
-  and shell are unchanged.
+- Container detail shows movement history (closed until opened), including inherited-content counts.
+- There is no Overview page any more. The item list shows a “N loans past due”
+  notice only when a loan is past due.
 
 ## Permissions and privacy
 
@@ -189,9 +197,10 @@ borrower messaging is intentionally out of scope.
 
 ## Representative screenshots
 
-The existing shell, typography, palette, cards, rounded controls and spacing are
-unchanged. The only navigation change is one **Loans** item; lending and history
-surfaces reuse the existing compact card and dialog patterns.
+These are older screens, from when this milestone was built. At that time the
+shell was unchanged and the only navigation change was one **Loans** item. The
+shell, the item page and the Loans page have been replaced since; see
+[`MOBILE_FIRST_PROGRAMME.md`](MOBILE_FIRST_PROGRAMME.md).
 
 Desktop item detail with owned/at-home/on-loan quantities, Lend action and history:
 

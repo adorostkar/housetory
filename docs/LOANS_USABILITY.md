@@ -7,20 +7,41 @@ changed.
 
 ## New loan from the Loans page
 
-The Loans page now has a **New loan** action (owner/member only):
+The Loans page has a **New loan** action (owner/member only). It opens one
+surface, not a chain of dialogs:
 
-1. Search or browse active household inventory. Archived items are excluded.
-2. Each result shows its recorded brand/model and home path plus the currently
-   available quantity. Fully loaned items are disabled.
-3. **Choose** opens the existing Lend dialog with the selected item and available
-   stock. Borrower, quantity, lent date, optional return date and private notes
-   use the same validation and idempotency as item-detail lending.
-4. The server rechecks archived state and available stock when saving. If stock
-   changed after the picker loaded, the dialog shows the existing
+1. Two chips choose the direction: **Lend out** (the default) or **Borrow**.
+   One short line under them says what the choice means.
+2. To lend, the surface starts with the three essentials: **Item**, **Borrower**
+   and **Quantity**. The item field searches active household inventory and
+   shows a few matches with their home place and the units available. Archived
+   items are excluded and fully loaned items are disabled. Typing narrows the
+   list. A chosen item can be changed.
+3. **More options** is closed at first. It holds **Lent on** (today unless it is
+   changed), **Due back** and **Private notes**. Its row shows the current
+   choice, for example "today, no due date". It opens by itself when a date is
+   not valid, so the error is never hidden.
+4. To borrow, the essentials are **Item name**, **Owner** and **Quantity**. Brand,
+   model, dates, photo, keeping place and notes are under **More options**.
+5. Validation, idempotency and the server rechecks are unchanged. If stock
+   changed after the item was chosen, the surface shows the existing
    `insufficient_available_stock` or `item_archived` error rather than
    over-lending.
-5. Successful creation switches the list to Outstanding, refreshes loans and
-   inventory queries, and returns focus to New loan after the dialog closes.
+6. Successful creation switches the list to Outstanding, refreshes loans and
+   inventory queries, and returns focus to New loan after the surface closes.
+
+The Lend dialog on an item page uses the same fields with the item fixed.
+
+## Loans page layout
+
+- The list starts directly under the title. One line replaces the three summary
+  cards, for example "5 out · 1 past due · 2 borrowed". The past-due part is a
+  shortcut to the past-due filter.
+- Two chips (**Lent out**, **Borrowed**) and the search field stay in view. With
+  no chip pressed, both directions are shown.
+- **Filters** opens the status, person and past-due filters. The button shows
+  how many of them are active. Active filters also appear as chips that can be
+  removed one by one. All filters stay in the URL as before.
 
 No borrower account or person record is created.
 
@@ -74,11 +95,15 @@ presentation is more natural:
 Removed from user-facing answers: “Grounded answer”, “whereabouts of …”, built-in
 loan quantity/count repetition, “loaned units are not recorded there” and the
 generic due-date guarantee disclaimer. Due dates are still recorded facts.
-Search helper text is now “Search for an item or ask a question.”
+The placeholder of the search and ask field is now “Search or ask…”.
 The model/provider/consent state remains available in the Assistant’s secondary
 privacy details.
 
 ## Verification
+
+This is the record of the original follow-up. The counts are from that time.
+The current tests are in `loans-page.test.tsx`, `loan-dialogs.test.tsx`,
+`e2e/lending.spec.ts` and `e2e/simple-loan-names.spec.ts`.
 
 - 268 PostgreSQL tests, 117 Vitest tests and 31 disposable-stack Playwright
   workflows pass.
@@ -105,6 +130,9 @@ picker before/after, natural search/assistant examples on desktop/mobile).
 - No live paid-provider or remote deployment was used.
 
 ## Screenshots
+
+These are older screens. They show the Loans page, the New loan picker and the
+search results page as they were before the mobile-first programme.
 
 Loans page before:
 

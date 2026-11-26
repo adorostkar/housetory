@@ -6,8 +6,11 @@ replacement estimates.
 
 ## One simple workflow
 
-Open **Insurance** from Overview, an item, or the mobile More menu. Choose whole
-household, property, room, container or explicitly selected items, then review
+Open **Insurance** from **More** in the room rail (the sidebar on desktop), from
+the tabs on the Purchases and Warranties pages, or from the ⋯ menu of an item.
+The page has three steps: **Scope**, **Review** and **Export**. In Scope, choose whole
+household, property, room, container or explicitly selected items. The scope
+folds to one line once the review starts. In Review, check
 one table:
 
 - include or exclude each item;
@@ -17,8 +20,9 @@ one table:
 - leave the amount blank when value is unknown. Blank is not zero; an explicit
   zero is still valid.
 
-The default currency comes from the household Settings. Choose the review date,
-then generate a dated PDF and CSV. Large inventories can be estimated in batches
+The default currency comes from the household Settings. Choose the review date
+in Scope. The Export step first shows a summary (items included, how many have
+a value, how many are unknown, and the total); then generate a dated PDF and CSV. Large inventories can be estimated in batches
 of up to 10 eligible items. Items with insufficient identity information remain
 available for manual review instead of being silently excluded.
 
@@ -73,7 +77,8 @@ evidence snapshots. In the ordinary UI they are read-only **Earlier estimates**:
 - item create/edit does not offer current-value controls and omits all
   current-value keys on save;
 - item detail shows older values without an Apply/Estimate action;
-- Overview reports purchase facts only, without current-value cards/rankings.
+- the **Totals** on the Purchases page (the former Overview page) report
+  purchase facts only, without current-value cards/rankings.
 
 The new Insurance workflow is the only primary place for creating fresh
 replacement estimates. Generic receipt/photo evidence export remains a separate

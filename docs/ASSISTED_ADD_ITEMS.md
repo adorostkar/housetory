@@ -1,9 +1,9 @@
 # Assisted add items
 
-**Add items** opens one smart input: a dialog on large screens and a bottom
+**Add** in the bottom bar opens one smart input, **Add items**: a dialog on large screens and a bottom
 sheet below the `lg` breakpoint. There is no separate chooser or `/add-items`
-page; `/add-items?room_id=…` deep links open the same overlay on `/` with that
-context.
+page; `/add-items?room_id=…` deep links open the same overlay on the item list
+(`/` redirects to `/items`) with that context.
 
 ## One input
 
@@ -13,6 +13,12 @@ removable thumbnail. A live chip shows what will be sent: **Text**, **Link**
 (the whole box is one `http(s)://` URL), **Photo** or **Photo + note**. A photo
 together with a link is blocked with a warning. **Review items** (or
 Cmd/Ctrl+Enter) submits; Enter inserts a newline.
+
+A PDF, or a photo marked as **Document**, is not interpreted as items. The
+button is then **Save document**: the original is saved to the library at once
+and the document page opens. The document type is optional (it is “Other
+document” unless Invoice, Receipt, Manual or Warranty is chosen). The message
+that follows has **Undo**, which removes the document that was just saved.
 
 The microphone is its own flow and is only available when the box and photo are
 empty and voice transcription is configured. Stop uploads the recording,
@@ -24,7 +30,8 @@ A context chip (`Room · Place` or `No place yet`) shows and edits the default
 property/room/place sent with every submission. **or fill in the form yourself**
 opens `/items/new` with the same context. The purchase date is set during review.
 
-Submission paths all end at the ordinary `/imports/{batchId}` review:
+Submission paths all end at the same import review. It opens in the assistant
+panel; `/imports/{batchId}` shows the same review as a page:
 
 | Input | Existing processing reused |
 | --- | --- |
@@ -33,9 +40,17 @@ Submission paths all end at the ordinary `/imports/{batchId}` review:
 | Microphone | `POST /voice` for transcription only, poll `GET /voice/{id}`, then `POST /imports` with the transcript |
 | One product URL | `POST /imports` with `product_url`, worker-side safe page retrieval |
 
-The user confirms entries in the same review before anything is created. Missing
-locations open the **Where is it?** controls immediately. Recognition suggestions
-flagged for review start unselected. Duplicate checks, inline room/place creation,
+The user confirms entries in the same review before anything is created. Each
+entry is one closed row that shows what will be saved; uncertain values are
+marked “check”, including a room or place that could not be settled. **Edit**
+opens the row with the place controls, and the row opens by itself when adding
+it fails because of the place. No row is selected at the start. **Add item** adds one row, and
+the checkboxes with **Add N selected items** add several. **Skip** moves a row
+to the **Skipped** list at the end; **Undo** in the message or **Restore** there
+brings it back with its edits
+(`POST /imports/{batchId}/entries/{entryId}/restore`). Reject is inside the
+opened row and can also be restored. A possible duplicate is not taken by
+**Select all**; the user decides it. Duplicate checks, inline room/place creation,
 purchase editing and the existing atomic apply/idempotency rules are unchanged.
 
 ## Recognition adaptation

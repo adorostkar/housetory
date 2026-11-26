@@ -14,8 +14,9 @@ multi-household work.
 
 - **Add manual** on an item opens the ordinary document upload in manual mode.
   The current item ID is submitted automatically, so the dialog does not ask the
-  user to choose compatible items again. A PDF, image or text manual can be
-  uploaded with a title and notes but without any make/model fields. The exact
+  user to choose compatible items again. The manual is saved as soon as the
+  file is chosen, with **Undo**; a title and notes can be added afterwards, and
+  no make/model fields are asked. The exact
   original is preserved and the normal document limits, duplicate warning, OCR,
   scan and authenticated download behavior still apply. To cover additional
   items later, use **Link existing** from those items rather than repeating the
@@ -50,7 +51,9 @@ Housetory keeps a clear line here.
   app does not pretend to answer.
 
 **Ask about this item** opens the assistant on the item page. The assistant
-already knows which item the page shows.
+already knows which item the page shows. The item is only the default subject:
+a question that names another thing is about that thing, and the × on the
+**This item** chip removes the item from the question.
 
 ### Page text is stored with the document
 
@@ -156,7 +159,7 @@ is registered once” in `ARCHITECTURE.md`.
 | `search_manual` | Finds pages that contain given words and shows the matching lines. It points to pages; it returns no page text. |
 | `look_at_manual_page` | Draws one page and lets a vision model read it. For garbled text, drawings, symbols and tables. The look runs as its own job and the request waits for it. The result is stored with the page. |
 | `process_manual` | Queues the reading of pages that were not tried yet, one more try of pages whose reading failed, or the map. Needs the owner or member role. The assistant then waits and reads the manual again by itself. |
-| `find_manuals_online` | Searches the configured provider for the manual of an item and returns the reviewed candidates. Takes the item and, when the user named one, a variant. Saves nothing. Needs the owner or member role. See “The assistant finds a manual online”. |
+| `find_manuals_online` | Searches the configured provider for the manual of an item and returns the reviewed candidates. Takes the item, a variant when the user named one, and `save_clear_match` (true only when the user asked to find, download, save or attach the manual). It may save the one clear match. Needs the owner or member role. See “The assistant finds a manual online”. |
 | `prepare_action` | Also prepares the two manual proposals: `confirm_manual_identity` and `save_manual`. The user applies them. |
 
 The assistant is told to read further when the pages it has do not answer the
@@ -245,23 +248,38 @@ The steps of one conversation:
 1. The user asks about an item. The assistant reads what is attached first.
 2. No manual is attached, or the manuals do not cover the question. The
    assistant calls `find_manuals_online`.
-3. The product identity is not confirmed. Nothing is searched. When the item
-   records a real brand and model, the tool itself prepares a
-   `confirm_manual_identity` proposal with them. When they are missing or
-   generic, the assistant asks the user to read them from the product label
-   and prepares the proposal from the answer.
-4. The user checks the card and presses **Apply**. Only this stores the
-   identity. It does not change the item's brand or model.
+3. The product identity. There is no routine confirmation any more:
+   - When the item records a complete brand and model and the user confirmed
+     no identity before, the tool stores them as the item's manual identity and
+     searches at once. The result says that the brand and model are the ones
+     recorded on the item and were not checked against its label.
+   - When they are missing or generic, nothing is searched. The assistant asks
+     the user to read them from the product label and prepares a
+     `confirm_manual_identity` proposal from the answer. The user applies it.
+   - When the user names a variant that differs from an identity they
+     confirmed earlier, nothing is searched until they have applied a proposal
+     with that variant.
+4. An identity the user confirmed earlier is never replaced by the recorded
+   brand and model. Storing the identity does not change the item's brand or
+   model.
 5. The assistant searches. It gets the candidates that show the exact model,
    with the identifiers each source really shows. Similar models are left out.
-6. A `save_manual` proposal is prepared for one candidate. The tool prepares it
-   itself when one candidate is the clear choice: the only one with a file, or
+6. One candidate is the clear choice when it is the only one with a file, or
    the only one with a file from the manufacturer or another official source.
-   Otherwise the assistant chooses or asks. The card shows the title, the
+   The search code decides this, never the model. The tool prepares a
+   `save_manual` proposal for it.
+7. The clear choice is saved in the same task, without a card to apply, when
+   all of this holds: the user asked to find, download, save or attach the
+   manual; the user is an owner or member; and no text of a document or a web
+   page was read earlier in the conversation. The file is downloaded with all
+   checks of “Download safety”, stored as a Manual document and attached to the
+   item. The assistant says what was saved and from where. The manual can be
+   removed under **Documents & manuals** on the item; this save has no Undo
+   button.
+   In every other case (a question that only needs a manual, no clear choice,
+   several candidates) the save stays a proposal. The card shows the title, the
    publisher, the identifiers the source shows, the source page and the file
-   address.
-7. The user presses **Apply**. Only now the file is downloaded, with all checks
-   of “Download safety”, stored as a Manual document and attached to the item.
+   address, and the user presses **Apply**.
 8. The pages are read by the normal jobs. The assistant reads the manual with
    `read_manual` and answers with page citations.
 
@@ -287,23 +305,23 @@ Three steps are done by the application and not left to the model, because a
 real model did not do them reliably (see “Verification with a real model”):
 
 - With a brand and model on the item, the model still asked the user for them
-  in words and prepared no proposal. So the tool prepares the proposal.
+  in words. So the tool uses the recorded brand and model itself.
 - After **Apply**, the model answered “I will now search” and called no tool.
   So the request starts with the next step.
 - With one clear candidate, the model wrote “please apply the proposal” and
-  had prepared none. So the tool prepares the proposal for that candidate.
+  had prepared none. So the tool prepares the proposal for that candidate, and
+  saves it when the rules of step 7 hold.
 
 All three only do what the user's request or the user's Apply already decided.
-The user still checks and applies every proposal.
 
 Rules the tools enforce, whatever the model decides:
 
 | Rule | How |
 | --- | --- |
 | Attached manuals come first | `find_manuals_online` refuses with `read_attached_first` when the item has documentation and no manual tool was used in this conversation. |
-| No search without a confirmed identity | The identity gate of the item page. The tool returns `manual_identity_required` and the brand and model recorded on the item. |
-| Nobody but the user confirms an identity | A proposal is only a preview. Generic values are refused when it is prepared. |
-| The assistant cannot download or attach | Only **Apply** by a signed-in owner or member does. A viewer gets `read_only_role`. |
+| No search without a complete identity | The identity gate of the item page. A complete brand and model recorded on the item are stored as the identity. Without them the tool returns `manual_identity_required` and what is recorded on the item. |
+| Generic values are never an identity | Generic values are refused when the recorded brand and model are checked and when a proposal is prepared. An identity the user typed is stored only when the user applies its proposal. |
+| A download needs the user's request or the user's Apply | The one clear match is saved only when the user asked for the manual and no document or web text was read before in the conversation. Otherwise only **Apply** by a signed-in owner or member downloads and attaches. A viewer gets `read_only_role`. |
 | No second copy | A candidate that is already saved is refused with `manual_already_saved`. A file whose content is already in the library is attached, not stored again. |
 | No second card | A manual proposal that already waits for the same user with the same content is shown again; no new one is made. |
 | No guessed file address | A source page without a PDF link is refused with `manual_source_page_only`. |
@@ -314,18 +332,25 @@ The tool result says what the situation is:
 
 | Situation | What the assistant is told |
 | --- | --- |
-| Identity not confirmed | A proposal with the item's brand and model is prepared: tell the user to check it. Without a real brand and model: ask the user for them. Never guess. |
+| No complete brand and model on the item | Nothing was searched. Ask the user for them from the product label. Never guess. |
 | Search not set up | Known before the tool is tried: the tool is marked unavailable in the catalogue of the request, with the stored reason (for example that no key is saved) and what still works (**Add manual**, reading attached manuals). A call is refused with the same words (`manual_search_unconfigured`), before any identity is asked for. |
 | Search failed | The provider's error. The search service or the internet may be down. |
 | No source shows the exact model | Say so. Ask the user to check the model and variant on the label. |
 | The user named another variant | Nothing is searched. A proposal with that variant is prepared (`manual_variant_not_confirmed`). After **Apply** the search looks for that variant only. |
-| Candidates | A proposal for the one clear candidate is prepared: tell the user to check the source. Without a clear one: choose only a candidate that shows the confirmed model and variant, or ask. |
+| Candidates | The one clear candidate was saved (say what and from where), or a proposal for it is prepared (tell the user to check the source, and why it was not saved at once). Without a clear one: choose only a candidate that shows the model and variant, or ask. |
 
-What leaves the server: `find_manuals_online` sends the confirmed manufacturer,
+What leaves the server: `find_manuals_online` sends the manufacturer,
 model and variant, and nothing else. No question text, name or other household
 detail is sent. Titles and snippets that come back are untrusted text. The
 assistant gets them shortened, and the web app shows the sources as outside
-links under **Online sources**.
+links, marked “online source”, in the one **Sources (n)** list under the answer.
+After such text was read, the assistant applies no change directly in that
+conversation; every change is a proposal.
+
+General guidance and a specific product are kept apart. A general question
+(how a thing is usually done) may be answered without a manual, labelled as
+general guidance. Limits, settings and steps of one specific product are given
+only from a page or source a tool returned.
 
 ### Citations
 
@@ -390,7 +415,7 @@ and the same access checks as a download.
   served as a download (`Content-Disposition: attachment`).
 - An image is shown as an image. A text file is shown as plain text.
 - `?page=N` opens a PDF at page N. Citations use it.
-- Zoom buttons stay under the app header. Zooming, turning the phone and
+- Zoom buttons stay at the top of the page. Zooming, turning the phone and
   resizing the window keep the place being read.
 - Only pages near the screen are drawn, so a long manual does not fill the
   memory.
@@ -419,9 +444,14 @@ model to contain a digit: legitimate letter-only models such as `Sonos One` are
 accepted. Generic values such as “Unknown”, “Heavy drill”, “cordless drill”,
 “tool” or “manual” are rejected, as are empty/one-character fragments.
 
-The UI pre-fills item brand and model only as suggestions; the user must check
-the physical label and confirm. The assistant can prepare the same confirmation
-as a `confirm_manual_identity` proposal; it is stored only when the user applies it. Saving the profile never edits the item's brand,
+On the item page (**Find manual**) the UI pre-fills item brand and model only as
+suggestions; the user must check
+the physical label and confirm. The assistant does not ask for this routine
+confirmation: when the item records a complete brand and model and no identity
+was confirmed before, `find_manuals_online` stores them as the identity (with
+the same validation) and searches. When they are missing or generic, the
+assistant asks, and prepares a `confirm_manual_identity` proposal that is
+stored only when the user applies it. Saving the profile never edits the item's brand,
 model or other fields. Regional, hardware or revision variants can be recorded;
 when a variant is present, candidate evidence must show the variant or the
 concatenated model form (for example DeWalt `DCD791B` for model `DCD791` with
@@ -465,7 +495,7 @@ Registration/configuration (household owner, no restart):
    [Brave API dashboard](https://api-dashboard.search.brave.com/). Review
    Brave's current plan, quota and terms; a paid tier may be required for the
    volume you need.
-2. Sign in as the household owner and open **Settings → Online search**. Paste
+2. Sign in as the household owner and open **Settings → AI and online services** (the Online search part). Paste
    the token into the write-only **Brave Search API key** field, enable
    **Online manual search**, and save. The key is encrypted at rest with the
    installation credential key and is never returned to the browser, written to
@@ -482,7 +512,7 @@ Registration/configuration (household owner, no restart):
    model**.
 
 Optional connection validation (user-triggered, bounded): the owner can press
-**Test connection** in Settings → Online search and confirm the dialog. Housetory
+**Test connection** in Settings → AI and online services and confirm the dialog. Housetory
 sends one fixed neutral query (`Housetory connectivity test`) to the Brave
 endpoints and reports the result. It sends no inventory, manual, borrower or
 household content, does not download anything and may use subscription quota. The
@@ -521,7 +551,7 @@ Household provider selection is controlled by the saved Settings row:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MANUAL_SEARCH_PROVIDER` | `auto` | Operator fallback when no household row exists: `auto`, `brave`, `gateway` or `none` |
-| `BRAVE_SEARCH_API_KEY` | empty | Operator-only fallback key; prefer Settings → Online search |
+| `BRAVE_SEARCH_API_KEY` | empty | Operator-only fallback key; prefer Settings → AI and online services |
 | `BRAVE_SEARCH_BASE_URL` | `https://api.search.brave.com` | Official endpoint or compatible operator test/proxy base |
 | `BRAVE_SEARCH_COUNTRY` | empty | Optional Brave country code |
 | `BRAVE_SEARCH_LANG` | empty | Optional Brave search language code |
@@ -673,7 +703,8 @@ tool that answers from search snippets.
   gap. The tool was removed.
 
 For a question about a product without a manual, the assistant finds the
-manual online, the user saves it, and the answer comes from its pages with
+manual online, the manual is saved (by the user's Apply, or at once when the
+user asked for the manual), and the answer comes from its pages with
 page citations.
 
 ## OCR and citation limitations
@@ -768,13 +799,22 @@ Not live-verified in this milestone: calling the real Brave Search API with a
 real subscription token, downloading a real vendor PDF, and calling a paid cloud
 model for manual synthesis. No real Brave credential is stored by this change.
 To verify live, register a Brave Search API token, save it under
-**Settings → Online search** as the household owner, use the explicit
+**Settings → AI and online services** as the household owner, use the explicit
 **Test connection** action if desired, then perform one deliberate search and
 one download while watching the API/worker logs. Configure a consented assistant
 provider only if AI synthesis is wanted. No live network, paid AI, email or
 remote deployment is performed by the automated tests.
 
 ## Verification with a real model
+
+> **Older record.** These runs were made before the mobile-first programme.
+> They show the earlier flow, in which the identity was always confirmed with a
+> proposal and every manual was saved with **Apply**. The current flow (the
+> recorded brand and model are used without a confirmation, the one clear match
+> can be saved in the same task, general guidance is labelled) is covered by
+> scripted tests only (`tests/test_assistant_online_manuals.py`,
+> `tests/test_assistant_tools.py`). It was not tried with a real model. Links to
+> videos were not built.
 
 Scripted tests prove that the tools and proposals work. They cannot show what a
 model does with them. So the conversations were run with a real model, on
@@ -866,6 +906,8 @@ Limits that remain:
   is about the purchase form, not about manuals.
 
 ## Representative screenshots
+
+All screenshots in this section are older screens.
 
 The walkthrough used a disposable Compose stack, a synthetic text manual and a
 fixture Brave-compatible search service through the real Brave adapter. No real

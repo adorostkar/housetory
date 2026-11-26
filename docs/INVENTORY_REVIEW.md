@@ -55,6 +55,10 @@ stale.
 
 ## Applying changes
 
+Each suggestion is one closed row that shows what would change (old value →
+new value). An actionable row has **Apply change** (or **Apply changes**) and
+**Skip**. A checkbox only selects a row for **Apply N selected changes**.
+
 Category, naming and combined AI organisation suggestions are actionable. The server:
 
 - locks and rechecks the item against the exact analysis version;
@@ -70,7 +74,13 @@ with the applied snapshot, then restores the exact prior category and tag IDs. O
 taxonomy records must still exist; newly created taxonomy records may remain. Undo
 records a separate history event. Stale or unsafe undos are refused honestly.
 
-Dismissal records a history event. Possible duplicates, missing details and
+Dismissal records a history event. In the queue the button is **Skip**. A
+skipped suggestion leaves the list and waits under **Skipped (n)** at the end.
+**Undo** in the message, or **Restore** there, makes it pending again
+(`POST /inventory-review/suggestions/{id}/undo` on a dismissed suggestion).
+Restoring changes nothing else, and accepting it later still checks that the
+item did not change. If the same suggestion is already pending again, nothing
+is restored. Possible duplicates, missing details and
 location wording are advisory and cannot be accepted as automatic mutations.
 Bulk accept applies only compatible pending category/name/organisation suggestions and
 reports applied/skipped/stale/unsupported outcomes. The `organisation` queue type and
@@ -221,6 +231,9 @@ across a changed queue.
 
 
 ## Walkthrough screenshots
+
+These are older screens, taken before the shared review row and the new
+navigation.
 
 - [Suggestion queue and review scope](walkthrough/inventory-review/01-suggestion-queue.png)
 - [Accepted change with undo](walkthrough/inventory-review/02-accepted-with-undo.png)

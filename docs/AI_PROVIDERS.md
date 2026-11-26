@@ -2,15 +2,17 @@
 
 Housetory routes the four text tasks — Assistant, document interpretation, smart
 imports and natural-language search — through one **Default text model** in
-**Settings → AI providers**. Optional **Advanced task overrides** keep their own
+**Settings → AI and online services → AI providers**. Optional **Advanced task overrides** keep their own
 provider/model and remain unchanged when the default changes. **Vision & voice**
 has separate capability-specific choices. Provider names do not imply support: the
 server validates discovered input/output modalities, API endpoints and model
 capabilities before saving, and revalidates audio routing before sending a
 recording.
 
-The default/override and navigation walkthrough is in
-[`SIMPLIFICATION3.md`](SIMPLIFICATION3.md).
+The default/override walkthrough is in
+[`SIMPLIFICATION3.md`](SIMPLIFICATION3.md). The navigation part of that file is
+out of date; the current navigation is in
+[`MOBILE_FIRST_PROGRAMME.md`](MOBILE_FIRST_PROGRAMME.md).
 
 ## Task/provider compatibility
 
@@ -103,10 +105,11 @@ or falls back to another provider. Individual Test buttons remain available.
 
 ## System status
 
-Main **Settings** shows a compact, owner-only system-health summary. It counts
+The **Settings** index has an owner-only **System status** row with a small
+badge: “Healthy”, “N need attention” or “Unavailable”. The count covers
 core readiness problems, failed worker jobs and failures in features that are
 actually configured. Optional services that are not configured are listed
-separately and do not count as outages. The summary links to the dedicated
+separately and do not count as outages. The row opens the dedicated
 **Settings → System status** page.
 
 The detailed page shows the deployed release commit/build/channel/identity,
@@ -119,7 +122,8 @@ API keys, job payloads, prompts, borrower notes or inventory details. A catalog
 listing is not a successful inference test; only an explicit task test marks a task
 live-tested.
 
-The compact Settings summary and dedicated detailed page are captured in
+The earlier compact Settings summary (an older screen; it is now the badge on
+the System status row) and the dedicated detailed page are captured in
 [`01-settings-summary-light.png`](walkthrough/system-status-page/01-settings-summary-light.png)
 and [`02-detailed-status-light.png`](walkthrough/system-status-page/02-detailed-status-light.png).
 

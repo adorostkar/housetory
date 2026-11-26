@@ -47,7 +47,7 @@ one active property; otherwise the caller must choose one explicitly.
 
 ## Property management
 
-- **Settings → Properties** lists active and archived properties with room,
+- **Settings → Household → Properties** lists active and archived properties with room,
   item and unit counts.
 - Owners and members can create, rename, describe, archive/restore and delete
   properties under the existing household write rules.
@@ -77,7 +77,8 @@ hierarchy lock before archiving or deleting.
 
 ### Cross-property room subtree move
 
-A **top-level** room can be moved to another active property from the room page.
+A **top-level** room can be moved to another active property from the room page
+(**Move to property** in its ⋯ menu; shown when there is more than one property).
 The flow is explicit:
 
 1. preview the source/destination properties and affected rooms, places, items,
@@ -112,15 +113,20 @@ snapshots; new events include property snapshots.
 
 ## Filters and scope
 
-- Rooms, items and containers have an **All properties** selector. It is the
+- Rooms, items and containers have an **All properties** selector (on Items it
+  is under **Filters**). It is the
   default when no remembered selection exists.
+- With more than one property, a home tile at the top of the room rail (the
+  sidebar on desktop) chooses which property's rooms the rail shows. The list
+  pages follow the same choice, and the rail follows a choice made on a list
+  page.
 - A selected property is remembered in local storage and reflected in the URL
   (`property_id`), so refresh/back navigation retains it. Choosing All clears it.
 - Changing property clears room/location filters and any loaded bulk selection so
   a hidden selection cannot be applied to another property.
 - Property filters are enforced server-side for room, item and container list
   routes. They are not frontend-only.
-- The global quick search, search page, assistant and current-home evidence
+- The global quick search, assistant and current-home evidence
   export default to all properties in the household and label property paths.
   A deliberately selected browse filter does not silently rewrite every search
   or assistant query.
@@ -148,7 +154,7 @@ snapshots; new events include property snapshots.
 
 ## Counts, reports and exports
 
-- Household overview, financial and ownership totals remain household-wide and
+- Household financial and ownership totals (now on the Purchases page) remain household-wide and
   are not multiplied by properties. Shared purchase totals are counted once,
   exactly as before.
 - Property filters only narrow room/item/container browsing. They do not create
@@ -199,7 +205,7 @@ container or room moves property, the URL/identifier stays stable.
   cross-property room move with preserved IDs/QR/loans and populated-property
   archive/delete guards.
 
-Screenshots:
+Screenshots (older screens, taken before the room rail and the Settings index):
 
 ![All properties room groups](walkthrough/properties/01-rooms-all-properties-light.png)
 

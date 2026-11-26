@@ -11,8 +11,11 @@ tag replacement or batch undo.
 Selection is deliberately limited to records that are **already loaded** in the
 Items page:
 
-- Each card and compact row has a native checkbox. The checkbox is outside the
-  item link, so selecting an item never navigates to it.
+- Selection is on request. The list shows no checkboxes until **Select** (in the
+  title row) is pressed. Then each card and compact row has a native checkbox.
+  The checkbox is outside the item link, so selecting an item never navigates
+  to it. Clearing the selection, or finishing a bulk action, hides the
+  checkboxes again.
 - **Select all loaded** selects every non-archived record currently loaded by the
   page query, not every record matching the filters. The control is labelled with
   the loaded count.
@@ -25,15 +28,23 @@ Items page:
   cannot be submitted.
 - Viewers see no selection controls or bulk action bar. Owner and member roles can
   select and submit batches.
+- With at least one record selected, an action bar sits above the bottom bar. It
+  shows the selected count and units, **Move**, **Tags** and **More** (Category,
+  Images, Review, Export evidence), and a button that clears the selection.
 - Changing search, room, place, category, tag, archived state or sort clears the
-  selection and shows a short notice. The card/list view toggle does not change
+  selection and shows a short notice. The sort orders are Recent, Newest, Name
+  and Location. The card/list view toggle does not change
   the queried records and preserves selection. Navigating away or refreshing the
   page also clears it because selection is component state, not a saved query.
+- Compact rows are shown until the user picks a view. The choice is then kept
+  on the device.
 - If a selected record disappears from the loaded result after a refetch, it is
   removed from the selection rather than acted on unseen.
 
-The card and compact row both show the item name, recorded quantity, room and
-container/place path, category and on-loan/at-home status. Borrower names and
+The card and compact row both show the item name, room and
+container/place path and, when units are out, the on-loan/at-home status. The
+compact row shows the quantity only when it is more than one, and the category
+only on wider screens. Borrower names and
 notes stay on the lending surfaces and are not exposed in item list rows.
 
 ## Bulk actions
@@ -194,6 +205,9 @@ keyboard use, loaded-versus-total wording, move/tag/category actions, loan warni
 compact list persistence and mobile layout.
 
 ## Representative screenshots
+
+These are older screens. They were taken before the room rail, the bottom bar
+and selection on request.
 
 Card view with loaded-only selection and the bulk action bar:
 

@@ -10,8 +10,8 @@ Borrower and owner-name inputs now share one household-scoped autocomplete
 control on:
 
 - item-detail **Lend**;
-- **New loan → Lend out an item** (including contents-included lending);
-- **New loan → Borrow from someone**;
+- **New loan → Lend out** (including contents-included lending);
+- **New loan → Borrow**;
 - individual loan and borrowed-record **Correct** dialogs;
 - the Loans-page person filter.
 
@@ -47,12 +47,14 @@ read the current stored names.
 
 ## Loans-page person filter and history
 
-A single **Filter by person** input sits beside the existing direction and
-Outstanding/Returned/All/past-due controls. There is no People tab and no new
+A single person input sits under **Filters** on the Loans page, next to the
+status (Outstanding/Returned/All) and past-due controls. An active person
+filter also shows as a chip that can be removed. There is no People tab and no new
 directory page. Selecting or typing a person:
 
 - filters both lent-out (`borrower_name`) and borrowed-in (`owner_name`) records;
-- keeps the existing direction badges and All / Lent out / Borrowed views;
+- keeps the existing direction badges and the **Lent out** / **Borrowed** chips
+  (with neither pressed, both directions are shown);
 - composes with Outstanding, Returned, All, past-due, item scope and text search;
 - stays in the URL as `?person=…`, so reload and the existing detail back link
   return to the filtered view.
@@ -88,6 +90,9 @@ availability, due dates and returns unchanged.
 - No paid inference calls, real credentials or real inventory records were used.
 
 ## Screenshots
+
+These are older screens, taken before the Loans page layout and the New loan
+surface were changed.
 
 ![Household name suggestions](walkthrough/simple-loan-names/01-loans-person-suggestions.png)
 

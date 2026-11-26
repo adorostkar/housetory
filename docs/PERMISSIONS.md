@@ -9,8 +9,11 @@ membership again. A session stores the selected household id, not a global role.
 | Read inventory, rooms, places, containers, photos, documents, manuals, purchases, warranties, search, assistant | Yes | Yes | Yes |
 | Search/assistant across **All my places** for every current membership | Yes | Yes | Yes (read-only, current memberships only) |
 | Create a household and become its owner; switch the current workspace | Yes (account-level) | Yes (account-level) | Yes (account-level) |
-| Ask attached-manual or read-only online product questions | Yes | Yes | Yes |
+| Ask questions about attached manuals | Yes | Yes | Yes |
 | Upload/attach manuals, save confirmed product identity, search online or download online candidates | Yes | Yes | No |
+| Have the assistant apply a clearly stated edit or move of one item directly, and undo it (`POST /assistant/actions/proposals/{id}/undo`) | Yes | Yes | No |
+| Send a message to, or stop, one's own running assistant request (`POST /assistant/runs/{id}/steer`, `/cancel`) | Yes | Yes | Yes |
+| Restore a skipped import row or a skipped document line | Yes | Yes | No |
 | Create/update/delete inventory, rooms, places, containers, taxonomy | Yes | Yes | No |
 | Enable/remove item-owned storage, link/unlink existing containers, lend contents explicitly | Yes | Yes | No |
 | Upload/delete/order/cover item and entity photographs | Yes | Yes | No |

@@ -34,6 +34,8 @@ export default async function globalSetup(config: FullConfig) {
   }
   const authDir = path.join(path.dirname(fileURLToPath(import.meta.url)), ".auth");
   fs.mkdirSync(authDir, { recursive: true });
-  await context.storageState({ path: path.join(authDir, "state.json") });
+  await context.storageState({
+    path: process.env.E2E_AUTH_STATE ?? path.join(authDir, "state.json"),
+  });
   await context.dispose();
 }

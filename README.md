@@ -61,16 +61,24 @@ Tailscale is optional.
 - Hierarchy-aware browsing: room and place filters include descendants, counts
   aggregate nested items, and room selections are deep-linkable.
 - Items with search across room, place, category, tag and item fields; quantities,
-  condition, categories and tags.
+  condition, categories and tags. The item list is ordered by **Recent**
+  (the default), **Newest**, **Name** or **Location**. Recent puts the items
+  opened last first. The opened items are remembered on the device only, so
+  another phone or browser has its own order.
 - Multiple item, room and container photographs with validation, thumbnail
   generation, EXIF stripping, HEIC conversion, cover selection, explicit
-  reordering and a full-screen viewer. Room/container photo areas use a compact
-  bounded empty state, then a responsive cover and compact thumbnails.
+  reordering and a full-screen viewer. Photos are shown as a strip of small
+  thumbnails; **Manage** opens reordering, the cover choice and delete. A room or
+  container without photos shows no photo area; **Add photo** is in its ⋯ menu.
 - Direct **Take Photo** and **Choose Photo** actions for items, movable
   containers, rooms and storage locations, with preview, retake, cancel and
   upload progress.
 - A dedicated document library for receipts, invoices, warranty certificates,
   manuals, specifications and other files, associated with one or many items.
+  A document is saved as soon as the file is chosen, with **Undo**. The type
+  is never asked first (it starts as “Receipt” on the Documents page and as
+  “Other” elsewhere). The type, the title, the items and the check of what was
+  read are optional steps after that.
 - PDF, JPEG, PNG, WebP, HEIC and text uploads; original uploads are preserved,
   safe downloads are normalized, and older documents remain readable.
 - **Inventory evidence package**: select items, rooms, containers or the current
@@ -177,9 +185,13 @@ Tailscale is optional.
   its tools, uses a cached AI-built map to find them, and cites the pages it
   really read with links that open the file at that page. Without an AI
   provider the app says that questions are unavailable; it does not imitate an
-  answer. Online search and download require a deliberate,
-  server-enforced manufacturer + complete model confirmation, reviewed candidates
-  and a configured search provider. The owner adds one encrypted Brave Search API
+  answer. Online search and download need a complete manufacturer and model,
+  reviewed candidates and a configured search provider; the server enforces
+  this. On the item page the user confirms the manufacturer and model. The
+  assistant uses the brand and model recorded on the item when they are
+  complete, and asks only when they are missing or in conflict. When the user
+  asked for the manual and there is one clear match, the assistant saves it in
+  the same task; otherwise it shows a proposal to apply. The owner adds one encrypted Brave Search API
   key and enables manual discovery in **Settings → AI and online services**; an
   operator-only environment fallback and the advanced manual gateway remain
   available. Similar products are never auto-accepted. See
@@ -192,9 +204,12 @@ Tailscale is optional.
   duplicating the amount, receipt or merchant.
 - Warranties with provider, start date, duration, calculated expiration,
   certificate document, coverage notes, status and configurable reminders.
-- Ownership overview with historical purchase transaction value, category and
-  room breakdowns, and items missing purchase information. Current-value cards
-  and rankings are intentionally not maintained in the ordinary UI.
+- Ownership totals on the **Purchases** page (a closed **Totals** line that
+  opens): item and room counts, historical purchase transaction value, category
+  and room breakdowns, and items missing purchase information. The **Warranties**
+  page has a closed **Warranty watch** line. There is no separate Overview page
+  any more. Current-value cards and rankings are intentionally not maintained in
+  the ordinary UI.
 - **Insurance replacement lists**: select inventory, request bounded background
   AI replacement estimates or enter values manually, edit/exclude rows in one
   review table, and generate dated PDF/CSV snapshots. Existing consented AI and
@@ -212,11 +227,13 @@ Tailscale is optional.
   **Upload file** action.
 - Import review with per-field provenance, source context, inline missing-room and
   missing-place creation, duplicate candidates, merge/skip/reject decisions,
-  partial approval, retry safety and import history.
+  partial approval, retry safety and import history. No row is selected at the
+  start. Skipped and rejected rows wait in a **Skipped** list and can be
+  restored with their edits.
 - First-class Obsidian parsing: YAML frontmatter, properties, wikilinks and
   aliases, embeds, nested tags, Markdown tables, checklists, nested folders,
   attachment resolution, broken-link reporting and vault structure.
-- One unified search and read-only grounded assistant flow: direct inventory
+- One unified search and grounded assistant flow: direct inventory
   lookup first, configured consented AI only when interpretation is needed, and
   honest direct-only results when no provider is available. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
@@ -237,16 +254,16 @@ Tailscale is optional.
   longer owned** preserves the record with an outcome/date/note and restore;
   deletion remains separate. See
   [`docs/ITEM_FORM_AND_FILES.md`](docs/ITEM_FORM_AND_FILES.md).
-- One prominent global search box in the desktop top bar and near the top of
-  every mobile inventory page, with grouped local suggestions while typing and
+- One global search and ask field in the bar at the bottom of the screen, on
+  phones and on desktop, with grouped local suggestions while typing and
   the same submit-time result flow everywhere. On Items, this same input updates
   the list's `q` filter, so there is no duplicate Items search or Advanced search
-  mode. There is no competing sidebar search box or separate keyword/Ask mode on
-  the results page.
+  mode. A search orders the items by how well the name matches. There is no
+  second search box and no separate results page.
 - Multi-object **AI Scan Items** from one photograph: editable suggestions,
   quantities, duplicate review, room-only or room-plus-container destinations,
   per-suggestion overrides and approved bulk creation. Fixed fixtures are flagged
-  for review and are not preselected. Nothing is written automatically.
+  for review. No suggestion is preselected. Nothing is written automatically.
 - **Lending with partial returns and safe undo**: lend quantity-bearing items to a
   borrower display name without moving them out of their room/container. Owned,
   at-home and on-loan quantities stay distinct; several open loans and partial
@@ -255,10 +272,10 @@ Tailscale is optional.
   the same borrower and dates, while parent-only lending never implies children
   left home. New loan can be started from the Loans page with an
   inventory search and current available stock; every outstanding row has direct
-  Record return, separate View details and item navigation. The item title area
-  prominently states the borrower and quantity truth, labels the stored
-  room/container as the usual home while units are out, and offers Record return
-  directly (choosing the relevant loan when several are open). Borrower inputs
+  Record return, separate View details and item navigation. Under its title the
+  item page has a **Right now** row that states the borrower and the quantities,
+  next to the **Lives in** row with the recorded room/container, and offers
+  Return directly (one button per loan when several are open). Borrower inputs
   suggest existing household names from prior loan records, while any directly
   typed name is saved only with that loan; there is no person directory or Add
   person step. The Loans page has a person filter that composes with direction,
@@ -272,8 +289,9 @@ Tailscale is optional.
   temporarily held from an external owner with item/brand/model, quantity, owner
   display name, borrowed/due dates, keeping property/room/container, optional
   private notes and one private actual photo. One mixed Loans list uses protected
-  **Lent out** / **Borrowed** direction badges and All / Lent out / Borrowed
-  filters, with distinct Record return and Return to owner actions. Owner display
+  **Lent out** / **Borrowed** direction badges and two **Lent out** / **Borrowed**
+  chips (with neither pressed, both directions are shown), with distinct Record
+  return and Return to owner actions. Owner display
   names use the same household-scoped suggestions; the simple person filter shows
   what a person currently has from you and what you have borrowed from them,
   including returned history. Status, direction, past-due and text filters stay
@@ -293,7 +311,8 @@ Tailscale is optional.
   preview and atomically restore that container identity and return one eligible
   item without recreating other contents or missing hierarchy. See
   [`docs/LENDING_HISTORY_UNDO.md`](docs/LENDING_HISTORY_UNDO.md).
-- **Bulk organisation and compact list view**: select only the loaded item records
+- **Bulk organisation and compact list view**: press **Select** to show the
+  checkboxes, select only the loaded item records
   and move, add/remove tags or explicitly set/clear a category in bounded atomic
   batches. The previews show destination, selected records/units and active-loan
   impact; changing search, filters, sort or archived state clears selection with
@@ -313,32 +332,53 @@ Tailscale is optional.
   tax/discount/shipping evidence and uncertain values. Likely existing items are
   ranked by household-scoped serial/model/name/brand evidence, with manual search,
   create/link/update/skip choices, optional consented AI field/line refinement and
-  match re-ranking, and an itemised change preview. Reviewed product-line amounts
+  match re-ranking, and an itemised change preview. Lines can be applied one by
+  one or in selected groups; a skipped line waits in a **Skipped** list and can
+  be restored. Later parts of the same document add to the purchase that the
+  first part recorded. Reviewed product-line amounts
   persist as per-item purchase allocations under the shared purchase total; linking
   a receipt does not increase stock unless explicitly requested, and manuals are not
   treated as proof of purchase. See
   [`docs/INTELLIGENT_EXTRACTION.md`](docs/INTELLIGENT_EXTRACTION.md).
-- **Unified search and grounded assistant**: one prominent global input labelled
-  “Search or ask about your inventory…”, shared by the desktop top bar, mobile
-  pages, results page and secondary Assistant. Typing shows cheap direct
+- **Unified search and grounded assistant**: one global input in the bottom bar
+  (placeholder “Search or ask…”), on phones and on desktop. The robot button
+  in it opens the assistant: a sheet from the bottom on a phone, a box above the
+  bar on desktop. Typing shows cheap direct
   item/container/place matches; Enter submits one flow that resolves direct
   inventory first and automatically uses the configured consented assistant only
-  when interpretation or fallback matching is needed. Typed actions (move, lend,
+  when interpretation or fallback matching is needed. On an item, room, place or
+  document page the field shows a chip such as **This item**. The page is then
+  the default subject of a question; a question that names another thing is
+  about that thing, and the × on the chip removes the page from the question.
+  Typed actions (move, lend,
   borrow, return, rename, set a field, start a review) need the AI assistant:
   without an Assistant model the input runs in **local search mode**, which
   searches and answers questions but does not interpret actions; use the
-  item's buttons and forms, or the Review page, instead. Persian/Arabic question
+  item's buttons and forms, or the Review page, instead. A small allowlist,
+  enforced by the server, lets the assistant apply a change at once when the
+  user stated it clearly: an edit of one item's fields, or a move of one item
+  to a named room or place. Such a change is shown with **Undo**. Every other
+  change (lending, borrowing, returns, several items, cleared values, anything
+  worked out by the assistant, anything after a document or web page was read)
+  stays a proposal that the user applies. While a request runs, the page shows
+  what is being done, a new message changes the rest of the work, and typing
+  “stop” (or pressing **Stop assistant**) ends it. Persian/Arabic question
   marks, letter variants and ZWNJ are normalised without stripping scripts;
   plain multilingual questions need no punctuation. Answers are in the user's
-  language, preserve original names/models/IDs and are grounded only in current
-  authorised records. Short follow-ups retain bounded resolved items, candidates
+  language and preserve original names/models/IDs. Facts about the household
+  come only from current authorised records. A general question (how a thing
+  is usually done) needs no inventory lookup; such an answer is labelled
+  “General guidance · not from your records”. Short follow-ups retain bounded resolved items, candidates
   and loan references, and all-my-places answers use each household's own
   provider. Wider scopes send only validated per-household context and bounded
   per-partition dialogue memory, never raw mixed-household conversation prose.
-  Answers render through a safe prose subset whose direction follows the
+  Answers render through a safe prose subset (paragraphs, headings, bullet and
+  numbered lists, small tables, bold, italic, inline code) whose direction follows the
   question, with original Latin names/models/paths isolated for mixed RTL text.
+  Everything an answer rests on is in one closed **Sources (n)** list.
   Direct lookup, AI-assisted answers and AI-unavailable fallbacks are visibly
-  distinct. See
+  distinct. This behaviour is covered by scripted tests only; it was not tried
+  with a real AI model. See
   [`docs/UNIFIED_SEARCH.md`](docs/UNIFIED_SEARCH.md).
 - **Voice-note inventory entry** through **Add items**: record with explicit
   microphone permission or upload WebM/Ogg/WAV/MP3/M4A audio; the transcript is
@@ -359,9 +399,10 @@ Tailscale is optional.
   imports and natural-language search, with preserved advanced overrides. Text
   tasks explicitly inherit the saved default or keep their own provider/model;
   saving an override survives default changes even when it equals the default.
-  Changing the default updates only inherited text tasks. Core navigation keeps
-  Items/Rooms/Loans prominent and moves occasional Review/Purchases/Warranties/
-  Assistant routes into calm sections/More. Unconfigured scheduled review stays
+  Changing the default updates only inherited text tasks. Navigation keeps the
+  item list, the rooms and **On loan** in the rail (the sidebar on desktop).
+  **More** holds Places, Documents, Purchases (with Warranties), Insurance,
+  Stocktake, Review and Settings. Unconfigured scheduled review stays
   behind Advanced and off by default. Vision and
   voice remain separate capability-specific choices, with capability warnings and
   explicit remote-processing consent. Local, private-network and remote endpoints are labelled separately.
@@ -809,7 +850,7 @@ download safety and page-citation limits are documented in
 | `IMPORT_MAX_FILE_MB` | `10` | Maximum single extracted vault file |
 
 `AI_CREDENTIAL_KEY` is required before API keys can be saved in **Settings → AI
-providers**. Generate one Fernet key and keep it with your password-manager or
+and online services → AI providers**. Generate one Fernet key and keep it with your password-manager or
 secret backup; a database backup cannot decrypt saved credentials without it.
 The key is never stored in PostgreSQL and is never returned to the browser.
 `APP_BASE_URL` with an `https://` scheme requires `COOKIE_SECURE=true`; the API
@@ -921,12 +962,13 @@ household membership with one of three roles:
 Viewers can read attached manuals, ask attached-manual questions and download
 documents, but cannot upload/attach manuals, save product identities, search
 online or download online candidates. The full matrix is in
-[`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). The UI
-continues to show one shared household; there is no household creation or
-switching flow yet. Cross-household isolation remains enforced on every
+[`docs/PERMISSIONS.md`](docs/PERMISSIONS.md). One account can belong to several
+households; the household selector (desktop sidebar, or **Settings →
+Household** on a phone) switches between them and creates a new one. See
+[`docs/HOUSEHOLDS.md`](docs/HOUSEHOLDS.md). Cross-household isolation remains enforced on every
 household-scoped route.
 
-Owners invite people under **Settings → Members & invitations**. Invitations are
+Owners invite people under **Settings → Members and invitations**. Invitations are
 single-use, expiring links bound to the invited email and assigned role. New
 accounts choose their own password; existing accounts must sign in with the
 invited email first. Password recovery is account-level and returns the same
@@ -972,26 +1014,32 @@ configured are reported separately and do not count as core outages.
 
 ### Camera and photo management
 
-Item, room and container screens expose **Take Photo** and **Choose Photo**.
+Item, room and container screens can take a photo with the camera or choose one
+from the library. On an item this is the **Add photo** tile in the photo strip;
+on a room or container it is **Add photo** in the ⋯ menu.
 Camera capture uses the rear camera hint where supported, presents a local
 preview, and supports retake, cancel, upload progress, validation errors and
 retry. The photo is uploaded directly; it does not need to be saved to the
 iPhone photo library first. Existing secure image processing normalizes
 orientation, strips metadata and converts HEIC/HEIF to a browser-safe format.
 Room and storage-location photos reuse the same authenticated storage pipeline.
-Their empty state is a compact card with one Take photo / Choose photo group; it
-does not reserve a cover-sized blank canvas. Existing photos use a bounded cover
-and a compact thumbnail/add row.
+A room or container without photos shows no photo area at all. Existing photos
+are a strip of small thumbnails; a thumbnail opens the photo full screen, and
+**Manage** opens reordering, the cover choice and delete.
 
 ### AI Scan Items
 
-Open **AI scan** from the navigation, an item list, a room or a container. The
+Press **Add** in the bottom bar and take or attach a photo. Add knows the room
+or container of the page it was opened from. The
 default destination can be a room by itself or a room plus an optional
 container/storage location; each suggestion can override both before approval.
 After upload, an explicitly configured vision task returns separate editable
-suggestions. Review name, quantity, category, brand/model, confidence, review
-flags, possible duplicates and destination; then approve only the selected
-suggestions. Apply is explicit, idempotent and reports partial failures. The
+suggestions. They open in the same review as an import: one closed row per
+suggestion with its name, quantity and the values that will be saved. Uncertain
+values are marked “check”. No row is selected at the start. **Add item** adds
+one row; the checkboxes and **Add N selected items** add several. **Skip** moves
+a row to the **Skipped** list, where **Restore** brings it back. Adding is
+explicit, idempotent and reports partial failures. The
 source photograph is retained as provenance and is not automatically used as
 every item's cover.
 
@@ -1000,20 +1048,23 @@ assigned, Housetory does not silently call the assistant model: it reports the
 actionable configuration error and may fall back to OCR-readable text. AI or OCR
 fallback, unavailable, empty and failed states are labelled explicitly. Fixed
 architecture such as windows, walls, doors and installed radiators is flagged for
-review and excluded from approval by default; ambiguous observations are marked
+review; ambiguous observations are marked
 for review rather than promoted to confident possessions. The QR/manifest and
 vision path are described further in the walkthrough.
 
 ### Hierarchical imports
 
-**Add items → Import a list or file** opens the import workflow. It accepts TXT,
+The import page at `/imports` opens the import workflow (**Upload file** or
+**Paste notes**). It has no menu entry in the current navigation; open the
+address directly. It accepts TXT,
 Markdown, CSV, XLSX, DOCX, PDF, images and Obsidian ZIP exports. There is no
 separate Obsidian tab. When the source contains a recognizable room/container
 structure, Housetory builds a review tree instead of flat items. Starting from a
 room or container carries a review default; flat entries without their own
 location inherit it, while source hierarchy and explicit destinations always win. Expand branches, edit names, quantities, entity types, parents and
-legacy identifiers, review duplicates and source text, then approve individual
-entries, branches or the whole tree. Rooms and containers are created before their
+legacy identifiers, review duplicates and source text, then add individual
+records, or select records (a record can be selected with its contents) and add
+the selection. Skipped records can be restored. Rooms and containers are created before their
 contents. Index pages, instructions and empty example containers are skipped;
 a “Box list (template)” section that contains real populated records is still
 imported. Parenthesized quantities, model numbers, dimensions and ages are
@@ -1246,7 +1297,8 @@ docker compose down                   # stop, keep data
   `GET/POST /items/{id}/manuals`, confirmed `manual-profile`, attach-existing,
   `GET /documents/{id}/text` (stored page text), and reviewed `manual-search`
   candidate/download
-  endpoints. The assistant uses the same steps as tools and saves a manual
+  endpoints. The assistant uses the same steps as tools. It saves the one clear
+  match itself when the user asked for the manual; any other manual is saved
   only through a proposal that the user applies.
 - Evidence exports add `POST /evidence-exports/preview`,
   `POST /evidence-exports`, household-scoped status/cancel/retry/list routes and
@@ -1254,8 +1306,9 @@ docker compose down                   # stop, keep data
   a separate private exports volume.
 - Stocktake adds household-scoped session start/list/detail, observation,
   refresh, review/apply, complete/abandon and compact scope-summary routes. The
-  checklist, review and finish UI lives at `/stocktake/{sessionId}` and is
-  reachable from room/container detail without new primary navigation.
+  checklist, review and finish UI lives at `/stocktake/{sessionId}`. It is
+  reachable from **More → Stocktake** (`/stocktake`) and from room/container
+  detail.
 - Properties add household-scoped CRUD/list routes, property filters on rooms/
   items/containers, a top-level room subtree move preview/apply route and
   property management in Settings. Property IDs are never treated as a
@@ -1264,11 +1317,24 @@ docker compose down                   # stop, keep data
   household-scoped endpoints.
 - Imports expose upload, history, source/file downloads, retry and explicit
   approve/merge/skip/reject application.
+  `POST /imports/{id}/entries/{entry_id}/restore` puts a skipped or rejected row
+  back into the review. Document extraction adds
+  `POST /documents/{id}/extraction/lines/{line_id}/skip` and `/restore`; the
+  apply endpoint accepts the lines of one document in parts.
+- Items: `GET /items` accepts `ids` (at most 100) to narrow the list to known
+  items, and `sort=location_asc` (property, room, storage place, name). With a
+  search term the result is ordered by how well the name matches.
 - Search exposes the deterministic quick-search endpoint for items, containers
-  and fixed locations, plus the existing dedicated search page and explicit
-  natural-language flow.
-- AI endpoints expose provider status, grounded assistant, smart search, photo
-  recognition and read-only document relationship suggestions.
+  and fixed locations, plus the explicit search and answer flow
+  (`POST /search/query`). There is no search page; `/search` redirects to the
+  item list.
+- AI endpoints expose provider status, the assistant, smart search, photo
+  recognition and read-only document relationship suggestions. The assistant
+  runs under `/assistant/runs` (create, read, cancel, retry and
+  `POST /assistant/runs/{id}/steer` for a message while a request runs). Its
+  changes are proposals under `/assistant/actions/proposals` (create, edit,
+  apply, refresh, cancel and `POST …/proposals/{id}/undo` for an applied edit or
+  a move of one item).
 - Containers expose create/bulk/convert, live detail with live contents counts,
   identifier lookup, cross-room move, QR SVG, label templates, label PDF
   generation and calibration PDFs. Owned containers move with their owning item

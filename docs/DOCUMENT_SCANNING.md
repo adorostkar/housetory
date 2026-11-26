@@ -9,10 +9,13 @@ automatic item creation.
 ## Where scanning fits
 
 - **Documents → Scan pages** opens the multi-page editor from the library.
-- **Item → Documents → Scan** opens the same editor with that item preselected;
-  the linked items can still be reviewed before saving.
+- **Item → Documents → Scan pages** opens the same editor with that item
+  attached. The editor shows “Attached to: (item name)”; more items can be added
+  before saving.
 - **Documents → Add document** remains the straightforward single-file path for
-  PDFs, images and text. Multi-page PDFs from scanner apps are attached unchanged.
+  PDFs, images and text. The file is saved as soon as it is chosen, with
+  **Undo**; type, title, merchant, date, notes and items are optional steps
+  after that. Multi-page PDFs from scanner apps are attached unchanged.
 - Existing item attachments, library search, OCR review, downloads, exports and
   deletion keep working.
 - **Document → Clean up scan** opens the same editor for saved image-backed
@@ -70,8 +73,10 @@ items from a photograph.
    uploaded page; the cleaned preview is a reversible derivative. If a browser
    cannot display the original HEIC image, the cleaned copy is shown with a note
    and the original remains downloadable.
-6. Fill optional title, type, merchant and document date, review linked items, and
-   save. Title, type and date are compact; no purchase fields are required.
+6. Save. Nothing else is needed. Two closed, optional steps sit above the save
+   button: **Attach to an item** (or **Attach to more items** when the scan was
+   started from an item) and **Add details** (type, title, merchant and document
+   date). No purchase fields are required.
 7. **Cancel scan** deletes the draft pages. Stale drafts older than 24 hours are
    pruned when the API starts or another scan is created. Page originals and
    derivatives are deleted with the draft, document or item.
@@ -198,6 +203,9 @@ metadata and request-id stability on retry. The browser workflow covers desktop 
 mobile capture, edit, reorder, save, document pages and cancel.
 
 ## Representative screenshots
+
+These are older screens. The linked items and details are now closed optional
+steps, and the page behind the editor has the new navigation.
 
 Multi-page editor with original/cleaned comparison, corner handles, rotation,
 mode, contrast and private draft status:

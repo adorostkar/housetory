@@ -12,7 +12,9 @@ implement later stocktake/property/household work.
 
 ## Flow
 
-1. Upload a file or finish a scan as before. The worker runs OCR on the cleaned
+1. Upload a file or finish a scan as before. An uploaded file is saved as soon
+   as it is chosen; the document type is optional and can be changed later. The
+   worker runs OCR on the cleaned
    scan PDF or the ordinary document artifact and records the source artifact.
 2. Deterministic extraction proposes document fields, product/charge lines,
    quantities, monetary values and evidence excerpts. No value is invented when a
@@ -20,10 +22,16 @@ implement later stocktake/property/household work.
 3. The Document detail page shows a compact review: editable document fields,
    product line cards, source evidence, warnings, likely household matches,
    manual search, create/update/link/skip choices, and a purchase/warranty review.
-4. The user explicitly chooses which lines are inventory-worthy and confirms. The
-   apply endpoint validates the complete reviewed payload and commits one
-   transaction, or rolls everything back.
-5. A request id makes retries safe. Re-applying a previously applied extraction
+4. The user explicitly chooses which lines are inventory-worthy and confirms.
+   Each line is one closed row that says what it would do. No line is selected
+   at the start. A line can be applied by itself with its own button (**Add
+   item**, **Apply changes** or **Link to item**), or several lines can be
+   selected and applied together. Each apply validates the reviewed payload and
+   commits one transaction, or rolls everything back. Lines that were not
+   applied stay pending.
+5. A request id makes retries safe. Applying more lines of the same extraction
+   version continues the work: an applied line is never applied twice. A full
+   re-apply of a previously applied extraction
    requires an explicit acknowledgment. Exact duplicate file content is warned
    about but never merged or deleted automatically.
 
@@ -108,7 +116,12 @@ AI path and do not use a paid provider or live credentials.
 
 Each reviewed line can choose:
 
-- **skip** — leave the line out of inventory and purchase changes;
+- **skip** — leave the line out of inventory and purchase changes. **Skip** on a
+  row is remembered by the server
+  (`POST /documents/{id}/extraction/lines/{line_id}/skip`). The line moves to
+  the **Skipped** list at the end and keeps its edits. **Restore** there, or
+  **Undo** in the message, puts it back (`…/restore`). Skipping never changes
+  inventory. A line that was applied cannot be skipped;
 - **link** — attach the document/purchase evidence to an existing item without
   changing stock;
 - **update** — explicitly update selected item fields and/or move the item;
@@ -124,7 +137,10 @@ Stock rules:
 - Creating an item creates exactly the reviewed quantity. Lines left as skip do not
   create items.
 - A purchase can be created, linked to an existing selected purchase, or left
-  unchanged. Housetory still stores one shared purchase total for the linked items,
+  unchanged. When lines are applied in parts, a later part adds to the purchase
+  that an earlier part of the same document recorded; a second purchase is not
+  made. The later part must keep the same currency, and the parts together
+  cannot go over the purchase total. Housetory still stores one shared purchase total for the linked items,
   but reviewed product-line amounts are also persisted as explicit per-item
   allocations. Tax/discount/shipping amounts remain separate and are not invented or
   equal-split across items.
@@ -174,10 +190,16 @@ created or linked:
 - If the OCR/extraction proposal changed, `extraction_stale` requires a refresh.
 - A previously applied extraction returns a warning and is blocked unless the user
   explicitly allows a re-apply. The same request id still replays the original.
-- The reviewed apply is atomic: all chosen item creates/updates, purchase/allocation
+  The exception is continuing: a request for the same extraction version with
+  at least one line that was not applied before is accepted, and lines that
+  were applied earlier are passed over (`already_applied_line_ids`).
+- A document that was attached in the assistant stays in the review queue
+  while a product line is neither applied nor skipped. A manual attached there
+  is saved and read; it opens no purchase-style review.
+- Each reviewed apply is atomic: all chosen item creates/updates, purchase/allocation
   changes, warranty changes, document links and metadata changes commit together, or
   none do.
-  There is no partial-success response. Invalid/deleted/archived items, stale
+  There is no partial-success response within one apply. Invalid/deleted/archived items, stale
   destinations, conflicting updates and revoked member access return useful errors
   and leave all data unchanged.
 - Viewers can read an extraction proposal and its deterministic matches but cannot
@@ -245,6 +267,9 @@ selection, apply, purchase/allocation creation and stock preservation, plus mock
 AI field/line refinement through accept/edit/apply and allocation readback.
 
 ## Representative screenshots
+
+These are older screens. The lines are now closed rows with their own apply and
+Skip buttons, and the page has the new navigation.
 
 Desktop document-field and product-line review with exact identifier matching,
 source evidence, charge separation and manual/create/skip actions:

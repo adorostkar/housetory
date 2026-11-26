@@ -21,7 +21,7 @@ stocktake claim, or a replacement for normal item editing.
   household. Progress is saved after each observation, so a refresh or network
   retry does not lose previous checks.
 
-No new top-level navigation was added.
+Stocktake has its own page under **More**. It is not in the bottom bar.
 
 ## Scope and snapshot
 
@@ -63,6 +63,13 @@ deletes historic observations. Archived items are not expected items.
 | Quantity discrepancy | The counted at-home quantity differs from the recorded at-home quantity. | Reviewed quantity correction only |
 | Couldn't check | Explicitly not checked. It is not counted as verified. | No |
 | Unexpected | An unrecorded item was found. It can link an existing item or use the normal item form. | No automatic create or duplicate |
+
+On the checklist **Present** is one tap on the row (it reads “All N present”
+when more than one unit is expected at home). The other results are one tap
+further, under **Other** (**Change** once a result is recorded); each opens a
+short dialog. The list starts on **Unchecked** and a short progress line stays
+in view. When the item changed since the session started, or no unit is
+recorded at home, Present opens the dialog first and does not save at once.
 
 Every observation records the verifier, time, counted quantity (where relevant),
 observed location, optional notes, current owned/at-home/on-loan context and an
@@ -134,8 +141,10 @@ quantity, loan quantities, room or place changed later, the historical date is
 retained but labelled **Changed since** (including in evidence exports). It is
 not presented as still verified at the current state.
 
-Room and container pages show a compact last-completed session summary with
-checked coverage, a partial label and a link to the session history. Item cards
+Room and container pages show one quiet stocktake line: the last completed
+session with its checked coverage and a partial label, **Start stocktake**, and
+a button for the session history. The line sits below the contents. While a
+stocktake is in progress it moves above the contents and offers **Resume**. Item cards
 show a small checked date; item details show the status, quantity/time and a
 session link.
 
@@ -211,7 +220,8 @@ calls are used.
   abandonment, mobile and light/dark screenshots.
 
 Representative screenshots are in
-[`docs/walkthrough/stocktake/`](walkthrough/stocktake/):
+[`docs/walkthrough/stocktake/`](walkthrough/stocktake/) (older screens, taken
+before one-tap Present and the stocktake line on room pages):
 
 ![Review old, current and proposed values](walkthrough/stocktake/00-review-desktop-light.png)
 

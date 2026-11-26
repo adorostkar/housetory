@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:8090";
+// Set E2E_AUTH_STATE to run against several disposable stacks at the same time.
+const storageState = process.env.E2E_AUTH_STATE ?? "./e2e/.auth/state.json";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,7 +13,7 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL,
-    storageState: "./e2e/.auth/state.json",
+    storageState,
     channel: process.env.E2E_CHANNEL ?? "chrome",
     ignoreHTTPSErrors: process.env.E2E_IGNORE_HTTPS === "true",
     launchOptions:

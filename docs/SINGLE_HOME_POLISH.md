@@ -1,6 +1,15 @@
 > **Current behaviour:** the sidebar/mobile quick-search entry and the separate
 > Ask Housetory handoff described below were superseded by the unified global
 > search flow. See [`UNIFIED_SEARCH.md`](UNIFIED_SEARCH.md).
+>
+> The mobile-first programme
+> ([`MOBILE_FIRST_PROGRAMME.md`](MOBILE_FIRST_PROGRAMME.md)) replaced more of
+> what this file describes: the search field is now in the bottom bar; the
+> Overview page was removed (its totals are on Purchases, its warranty watch on
+> Warranties); the item page shows the loan state in a **Right now** row and
+> photos as a strip of thumbnails; and the AI assistant is no longer read-only
+> (it can apply a clearly stated edit or move of one item, with Undo). The text
+> below is the record of this milestone as it was built.
 
 # Single-home polish: unified search, grounded assistant and everyday refinements
 
@@ -106,7 +115,7 @@ adds the nullable column and leaves every existing item untouched.
 
 ## Other polish in this milestone
 
-- **Overview** now leads with items, rooms, recently added records, room cards and
+- **Overview** (removed since) led with items, rooms, recently added records, room cards and
   a compact outstanding-loan summary. Empty purchase/current-value and warranty
   panels collapse to one-line summaries; useful value cards still appear when data
   exists. Borrower notes are not shown on the overview.
@@ -116,11 +125,10 @@ adds the nullable column and leaves every existing item untouched.
 - **Items filters** hide empty category/tag options, show removable active-filter
   chips and a reset action, and clear bulk selection with visible feedback when a
   filter changes. The remembered card/compact-list view is unchanged.
-- **Item photos** use a compact empty state and one Take photo / Choose photo
-  control pair; populated galleries keep their existing gallery, lightbox and
-  ordering controls. The follow-up
-  [`ITEM_LOAN_STATUS.md`](ITEM_LOAN_STATUS.md) also surfaces open-loan truth under
-  the item title and labels stored places as the usual home while units are out.
+- **Item photos** used a compact empty state and one Take photo / Choose photo
+  control pair (replaced since by the thumbnail strip). The follow-up
+  [`ITEM_LOAN_STATUS.md`](ITEM_LOAN_STATUS.md) describes how the item page shows
+  open loans today.
 - **Documents** no longer offer an export action for an empty library; Scan pages
   and Add document remain primary, and export returns when documents exist.
 - **Assistant** leads with the question and grounded inventory content. Provider
@@ -154,6 +162,9 @@ adds the nullable column and leaves every existing item untouched.
 - Live paid-provider quality and latency were not validated.
 
 ## Screenshots
+
+All of these are older screens. The Overview page and the search results page
+they show no longer exist.
 
 Before (prior local build):
 

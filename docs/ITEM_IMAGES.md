@@ -15,9 +15,12 @@ photographs, change inventory facts, or count as a stocktake/evidence observatio
 The detail page always uses the actual photo gallery first. Non-photographic
 imagery is shown only when no actual photo exists, with an explicit
 `Reference image` or `AI illustration` label. The item card/list thumbnail
-follows the same priority. Both actual photos and representative reference/AI
-images use the same bounded responsive frame (240 px phone, 320 px tablet,
-340 px desktop) with `object-contain`; placeholders stay compact at 150 px.
+follows the same priority. On the item page, actual photos and the
+representative reference/AI image are small square thumbnails (96 px) in one
+strip, with `object-contain`, so nothing is cropped. A photo thumbnail opens the
+photo full screen. The image-source controls (**Find online image**, **Use
+icon**, **Image details**, remove) are behind **Manage photos**; a viewer sees
+the same place as **About the image**.
 Reference/AI images cannot stretch the frame through intrinsic height or flex.
 Public reference images sit on a consistent white canvas in card, row and detail
 frames so white product backgrounds blend cleanly in either theme. Files are not
@@ -57,7 +60,7 @@ built-in rows cannot be created.
 
 The supported integration is the documented **Brave Image Search API**
 (`GET /res/v1/images/search`, `X-Subscription-Token`). It reuses the same
-household Brave Search API key configured under **Settings → Online search** for
+household Brave Search API key configured under **Settings → AI and online services → Online search** for
 manual discovery, plus the installation country/language, base-URL and timeout
 settings. No custom gateway is required for images. Manual document search
 remains a separate feature with its own enable control.
@@ -180,7 +183,7 @@ domain allowlist and does not ask for per-domain approval:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| **Settings → Online search → optional source restriction (advanced)** | empty | Empty means public websites. A non-empty list is a deliberate optional restriction to registrable domains; subdomains are included. Schemes, paths, ports, wildcards and IP addresses are rejected. |
+| **Settings → AI and online services → Online search → optional source restriction (advanced)** | empty | Empty means public websites. A non-empty list is a deliberate optional restriction to registrable domains; subdomains are included. Schemes, paths, ports, wildcards and IP addresses are rejected. |
 | `ITEM_IMAGE_PERMITTED_SOURCE_DOMAINS` | empty | Optional operator-only legacy restriction when no household online-search row exists. Empty means public-web lookup, not disabled. |
 | `ITEM_IMAGE_PERMITTED_LICENSES` | `cc0,cc-by,cc-by-sa,public-domain` | Provider-supplied license identifiers accepted as explicit evidence when present. |
 | `ITEM_IMAGE_MANUFACTURER_DOMAINS` | empty | Optional operator `brand=domain|domain` additions or overrides for provenance checks. |
@@ -202,7 +205,8 @@ downloaded or decoded, the category-icon fallback remains and the error states
 the actual failure rather than asking for a domain setup that is no longer
 required.
 
-Online search Settings walkthrough:
+Online search Settings walkthrough (older screens; the card is now on
+**Settings → AI and online services**):
 [not configured](walkthrough/online-search/01-not-configured.png),
 [saved write-only key](walkthrough/online-search/02-saved-write-only-key.png),
 [test confirmation](walkthrough/online-search/03-test-confirmation.png),
@@ -255,7 +259,8 @@ unchanged. Provider credentials and task choices for active tasks are preserved.
 ## Household reference-image settings and permissions
 
 Automatic public reference-image lookup remains available and is still off by
-default. Its settings are owner-managed. AI illustration toggles and daily caps
+default. Its settings are owner-managed, under **Settings → Household → Item
+images**. AI illustration toggles and daily caps
 were removed from the normal API and UI; historical database columns remain
 unused for migration safety.
 
@@ -366,6 +371,8 @@ portrait, square and AI fixture images at phone/tablet/desktop widths:
 and [AI portrait mobile](walkthrough/photo-sizing/10-ai-portrait-mobile.png).
 Item-image screenshots are in
 [`docs/walkthrough/item-images/`](walkthrough/item-images/).
+All of these are older screens: they show the earlier large photo frame, which
+is now a strip of small thumbnails.
 
 Final local verification after simplification batch 1: backend/frontend tests,
 typecheck, build and disposable Playwright regression pass; exact counts are in

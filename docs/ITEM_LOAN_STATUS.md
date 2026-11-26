@@ -7,57 +7,63 @@ work.
 
 ## Title-area loan state
 
-The item header now shows a prominent, text-backed loan panel directly beneath the
-title for any item with open loans:
+Under the title the item page has two rows: **Lives in** (the recorded place)
+and **Right now**. For any item with open loans the Right now row states the
+loan in text:
 
-- **Fully loaned, one borrower:** “On loan to Mohsen”, with owned/at-home/on-loan
-  quantities and the recorded return date or “No return date set”.
-- **Partially loaned:** an accurate quantity summary such as “1 of 3 units on loan
-  to Mohsen”, plus owned, at-home and on-loan counts.
-- **Multiple borrowers/loans:** a total summary plus one row per open loan with
-  borrower name, outstanding quantity and recorded due date; no single borrower is
-  shown as holding all stock.
-- **Overdue:** an explicit “Past due” text badge in addition to the tone.
-- **Returned/cancelled or no open loan:** no loan panel is shown; the existing
-  lending card reports that everything is at home and history retains the closed
+- **Fully loaned, one borrower:** “With Mohsen”, then “Lent (date) · due (date)”
+  or “no return date”. When more than one unit is owned, the line also shows
+  the owned, here and on-loan counts.
+- **Partially loaned:** an accurate quantity summary such as “1 of 3 with
+  Mohsen”, plus owned, here and on-loan counts, and a second line “2 here”.
+- **Multiple borrowers/loans:** a total summary (“2 of 3 on loan” or “All 3
+  units on loan”) plus one row per open loan with
+  borrower name, outstanding quantity and dates; no single borrower is
+  shown as holding all stock. At most four rows are shown; a link opens all
+  open loans of the item.
+- **Overdue:** an explicit “Past due” text badge on a single loan, and
+  “· past due” in the row of each overdue loan when there are several.
+- **Returned/cancelled or no open loan:** the row says “Here” (and “all N” when
+  more than one unit is owned); the **Loans** tab and history retain the closed
   loan.
-- **No return date:** shown as “No return date set”, never guessed.
-- Private borrower notes are not rendered in the header or status panel.
+- **No return date:** shown as “no return date”, never guessed.
+- Private borrower notes are not rendered in the Right now row.
 
-The panel includes one **Record return** action when exactly one loan is open.
+The row has one **Return** action when exactly one loan is open.
 When several loans are open, each loan row has its own
-**Record return from [borrower]** action, so the user chooses the relevant loan.
+**Return** action (labelled “Return from [borrower]” for screen readers), so the
+user chooses the relevant loan.
 Both paths reuse `ReturnLoanDialog`, the existing backend quantity validation,
-partial returns, idempotency and history/undo. Viewers see the loan state but no
+partial returns, idempotency and history/undo. **Lend** is in the same row
+while units are here. Viewers see the loan state but no
 return, lend or edit controls.
 
 ## Usual home location
 
-While any units are on loan, the Details row is labelled **Usual home location**
-instead of Place. It explains:
+The **Usual home location** label was removed with the new item page. The
+recorded room/container is always shown in the **Lives in** row, with its links
+and a **Move** button. Where the units are now is said by the **Right now** row
+next to it: with the borrower, or how many are here.
 
-- fully loaned: all owned units are out; the room/container is the recorded home,
-  not a current physical location;
-- partially loaned: the recorded home applies to the at-home units only; loaned
-  units are not recorded there.
-
-This preserves the existing room/container links and the detailed lending card.
 The item is not moved to a fictitious borrower location.
 
 ## Empty photo state
 
-The empty gallery now:
+The item's photos are a strip of small thumbnails:
 
-- uses a compact 150 px minimum-height panel rather than a large image placeholder;
-- has one clear **Take photo** / **Choose photo** control pair;
-- no longer renders the additional compact gallery toolbar while empty;
-- keeps the full-size gallery, cover/order controls, removal, navigation and
-  lightbox once a photo exists.
-
-Populated galleries are unchanged apart from the existing consolidated upload
-controls.
+- without a photo, the strip shows one small tile (“No photograph yet”, or the
+  reference image) and an **Add photo** tile with a camera button and a library
+  button;
+- with photos, each thumbnail opens the photo full screen (the lightbox), and
+  the Add photo tile stays at the end;
+- **Manage photos** opens the cover/order controls, removal and the image
+  source; they are closed by default.
 
 ## Verification
+
+This is the record of the original follow-up. The counts are from that time.
+The current tests are in `item-loan-status.test.tsx`, `photo-gallery.test.tsx`,
+`item-detail-page.test.tsx` and `e2e/item-status.spec.ts`.
 
 - 267 PostgreSQL tests (existing lending validation unchanged)
 - 114 Vitest tests, including title status for fully/partially/multiple loaned
@@ -71,7 +77,7 @@ controls.
 - No real Heavy drill/Mohsen loan or other household record was used as a test
   fixture
 
-Screenshots are under `docs/walkthrough/item-status-followup/` (before/after,
+Screenshots are under `docs/walkthrough/item-status-followup/` (older screens: before/after,
 light/dark, desktop/mobile, full/partial/multiple states, empty and populated
 photos).
 

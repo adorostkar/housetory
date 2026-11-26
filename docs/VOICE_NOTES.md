@@ -59,7 +59,7 @@ manual IDs are validated when saved. See
 
 ### Configuration steps
 
-1. Open **Settings → AI providers** as the household owner.
+1. Open **Settings → AI and online services → AI providers** as the household owner.
 2. Add OpenAI with base URL `https://api.openai.com/v1`, Google Gemini with its
    normal API base URL, or OpenRouter with `https://openrouter.ai/api/v1`.
 3. Enter the API key. Keys remain encrypted server-side and are never returned
@@ -76,7 +76,8 @@ manual IDs are validated when saved. See
 6. In **Advanced task overrides → Smart imports**, choose the chat model that
    should interpret the edited transcript, or let it inherit the default text
    model.
-7. Open **Add items → Record a voice note**.
+7. Press **Add** in the bottom bar and use the microphone in Add items, or use
+   the microphone in the search and ask field of the bottom bar.
 
 No provider credentials are required for automated tests. The automated suite
 uses mocked transcription and interpretation responses; no paid AI calls are

@@ -10,8 +10,15 @@ The first card contains only what is needed to add an item:
 
 1. name;
 2. quantity and condition;
-3. property, room and storage location, including the contextual place supplied
-   by **Add items**.
+3. the place, including the contextual place supplied by **Add items**. The
+   place is one line (home › room › storage place) with **Change**. It opens the
+   property, room and storage-location fields. It starts open when no room is
+   known yet, and a place error opens it.
+
+The form is one narrow column. Save and Cancel stay at the bottom of the screen
+while the form scrolls, above the bottom bar and the keyboard. On a wide desktop
+screen (1200 px and more) the new and edit forms open in the side panel, next
+to the page they were opened from.
 
 Brand, model, serial number, description, category and tags are grouped in one
 optional **Identity & organisation** section. Purchase and Warranty are separate
@@ -21,6 +28,9 @@ current-value editing. All optional cards start collapsed and expand in place, s
 purchase details get the full form width instead of a narrow desktop side column.
 
 ![Edit form, collapsed optional sections](walkthrough/simplification2/07-after-item-form.png)
+
+The screenshots in this file are older screens. The form and the item page are
+now one narrow column, and the item page has tabs.
 
 Each optional card shows a compact summary before expansion, such as
 `Shared purchase · receipt linked`, `$50 per unit · $50 for 1 unit`,
@@ -82,7 +92,8 @@ action for mistakes, with the existing loan/storage safeguards.
 
 ## Documents & manuals
 
-The item page now has one **Documents & manuals** surface instead of a separate
+The item page has one **Documents & manuals** surface, on its **Documents**
+tab, instead of a separate
 Manuals card and Documents card. It lists every attached document once, including
 manuals that also appear in the manual API.
 
@@ -103,17 +114,22 @@ Available actions are context-sensitive:
   household roles when the assistant is set up; writes remain
   owner/member only.
 
-**Add manual** submits the current item ID with the file, title and notes and does
-not show a second compatible-item selector. It does not require make/model fields.
+**Add manual** and **Upload document** save the file as soon as it is chosen,
+attached to the current item, and offer **Undo**. The dialog then shows
+“Attached to: (item name)”. Title and notes (and for a document the type,
+merchant and date) are an optional **Add details** step. Add manual does
+not show a second compatible-item selector and does not require make/model fields.
 Additional compatible items can be linked later through **Link existing** on those
 items. The global Documents upload and ordinary item document upload retain their
 existing item selectors and fields.
 
 Existing `Document` rows and `item_documents` links are reused. No attachment is
 copied, duplicated or deleted by the merge. Manual answers still use actual stored
-manual text with page/section citations. Online manual discovery still requires a
+manual text with page/section citations. **Find manual** on the item page still requires a
 deliberately confirmed exact manufacturer/model and a configured provider; an
-uploaded or linked manual does not require make/model fields. Ordinary offline
+uploaded or linked manual does not require make/model fields. The assistant
+uses the brand and model recorded on the item when they are complete; see
+[`ITEM_MANUALS.md`](ITEM_MANUALS.md). Ordinary offline
 documents remain in the same library. On a manual's detail page, extracted text
 stays available while purchase-style extraction review is an optional collapsed
 advanced action; other document types keep the existing review presentation.
@@ -148,7 +164,7 @@ domain list.
   fields.
 - Linking an existing document requires a deliberate choice. There is no automatic
   merge by title, merchant or manual text.
-- Online manual discovery is still restricted to a confirmed exact model and a
+- Online manual discovery is still restricted to an exact model and a
   configured search provider; this change does not add a provider.
 - Technical image provenance is available on demand rather than removed.
 - Actual item photographs remain separate from reference/AI display images and

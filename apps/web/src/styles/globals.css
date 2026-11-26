@@ -421,6 +421,15 @@
     }
   }
 
+  /* Touch screens: native checkboxes and radio buttons are easier to hit. They stay square. */
+  @media (pointer: coarse) {
+    input[type="checkbox"],
+    input[type="radio"] {
+      min-width: 1.375rem;
+      min-height: 1.375rem;
+    }
+  }
+
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;

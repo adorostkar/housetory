@@ -1,6 +1,6 @@
 # Simplification 3: default AI setup, calmer navigation and optional schedules
 
-> **Navigation section superseded.** Current navigation is Overview, Items, Places (Rooms and Containers tabs), Loans, Documents, Financials and Review. See `docs/PRODUCT_DESIGN_REVIEW.md`.
+> **Navigation section superseded.** This file is an older record. The current navigation is the room rail and one bottom bar of Design D. Settings is now an index, and AI providers are under **Settings → AI and online services**. See [`MOBILE_FIRST_PROGRAMME.md`](MOBILE_FIRST_PROGRAMME.md).
 
 This batch keeps the existing permissions, stored task assignments, provider
 credentials, consent, search context and visual style. It reduces setup and

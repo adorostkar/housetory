@@ -65,7 +65,7 @@ export function SectionNav({
               onClick={(event) => go(event, section.id)}
               aria-current={active === section.id ? "location" : undefined}
               className={cn(
-                "inline-flex h-8 items-center whitespace-nowrap rounded-full border px-3 text-2xs font-medium transition-colors",
+                "inline-flex h-8 items-center whitespace-nowrap rounded-full border px-3 text-2xs font-medium transition-colors coarse:h-11 coarse:px-4",
                 active === section.id
                   ? "border-sage/40 bg-sage-soft text-foreground"
                   : "border-border/70 text-muted-foreground hover:text-foreground",

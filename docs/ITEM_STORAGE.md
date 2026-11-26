@@ -10,13 +10,16 @@ home while its contents stay independently searchable and movable.
 
 ![Item page with contents](walkthrough/item-storage/01-item-contents.png)
 
+The screenshots in this file are older screens. The item page is now one narrow
+column with tabs, and the contents are on its **Contents** tab.
+
 ## One link, one identity
 
 `StorageLocation.owner_item_id` is a nullable, unique foreign key to `items`.
 There is no second inventory record, no second value and no separate manually
 named space.
 
-- **Item → Store items inside** creates a container with its own permanent
+- **Item → Store items inside** (at the end of the item's **Info** tab) creates a container with its own permanent
   identifier and QR code. Clicking it again is idempotent and returns the same
   storage place.
 - **Existing container → Add ownership details** either creates one owned item or
@@ -43,8 +46,12 @@ cannot be an ambiguous aggregate of several storage interiors.
 
 ## Contents and movement
 
-The item page shows live direct and nested counts, category totals, search,
-direct/nested scope, ordinary item cards, bulk actions and **Add items**.
+An item that stores things gets a **Contents** tab, shown first. It has the
+storage identity (identifier, container page, label), search inside the item,
+**Include nested** / **Direct only**, a sort (by location first), compact item
+rows and bulk actions. Checkboxes appear after **Select** is pressed. Adding
+items uses the **Add** button in the bottom bar, which knows this item's
+storage place; an empty Contents tab also offers **Add items**.
 
 ![Mobile contents](walkthrough/item-storage/05-item-contents-mobile.png)
 

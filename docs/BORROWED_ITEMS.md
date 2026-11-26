@@ -29,6 +29,16 @@ Quantities are deliberately separate:
 These never appear in owned item counts, total quantity, purchase/current value,
 insurance totals, evidence packages or owned stocktake quantities.
 
+## Recording a borrowed item
+
+**New loan** on the Loans page opens one surface. The **Borrow** chip switches it
+to a borrowed record. It asks for the item name, the owner and the quantity.
+Brand, model, dates, photo, keeping place and notes are under **More options**;
+"Borrowed on" is today unless it is changed.
+
+On room and container pages, **Borrowed items kept here** is a short list below
+the contents. Its explanation is behind "About borrowed items".
+
 ## Returns, corrections, cancellation and history
 
 - Partial returns are append-only `borrowed_returns` rows. Each return records

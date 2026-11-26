@@ -13,10 +13,10 @@ insurance dashboard, a new reporting framework, properties or stocktake.
 ## Where to start an export
 
 - **Insurance:** **Export evidence** exports the current home.
-- **Items:** select one or more loaded items, then use **Export evidence** in the
-  bulk action bar.
-- **Room detail:** exports the room and its descendant rooms/items.
-- **Container detail:** exports the selected container, descendant containers
+- **Items:** press **Select**, select one or more loaded items, then use
+  **More → Export evidence** in the bulk action bar.
+- **Room detail:** **Export evidence** in the ⋯ menu exports the room and its descendant rooms/items.
+- **Container detail:** **Export evidence** in the ⋯ menu exports the selected container, descendant containers
   and the owned item that provides the storage place. The owner item is included
   once, so its purchase/warranty/value evidence is not silently omitted and no
   item is double counted.

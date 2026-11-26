@@ -1,7 +1,8 @@
 # Scoped place management
 
 Room, storage-place and container item lists reuse the Items-tab bulk selection
-and action workflow. The same item cards, checkboxes, `Move`, `Tags`, `Category`,
+and action workflow. The same item rows and cards, checkboxes (shown after
+**Select** is pressed), `Move`, `Tags`, `Category`,
 `Images` and evidence-export actions are used rather than a second implementation.
 
 ## Scoped selection
@@ -19,7 +20,8 @@ and action workflow. The same item cards, checkboxes, `Move`, `Tags`, `Category`
 
 Item cards opened from a room, container/place, or filtered Items page carry a
 safe, same-app `from` path and display label. Item detail then shows
-**Back to [origin]**. Edit, Save, Cancel and Back preserve that origin even after
+**Back to [origin]**. On a wide desktop screen (1200 px and more) the item opens
+in a panel beside that page, and the control reads **Close**. Edit, Save, Cancel and Back preserve that origin even after
 the item is moved to another room/place. Standard Items navigation still works.
 
 Only relative same-app paths are accepted. External URLs, protocol-relative URLs,
@@ -138,6 +140,43 @@ Containers now expose consistent delete actions:
 
 The existing room-place menu uses the same dialogs and transaction.
 
+## Room and container page layout
+
+A room is a place in the room rail, so its page is the everyday list of what is
+in that room.
+
+- **Contents first.** The title row has the name, the counts, **Select** and the
+  ⋯ menu. Under the place chips there is one row of tools, as on the item list:
+  sort, **Filters** and the view buttons. Filters opens the search inside this
+  place and the nested/direct choice (shown only when something can be nested
+  there). An active search or "Direct only" shows as a chip that can be removed.
+  Compact rows are the default view.
+- **Selection on request.** Checkboxes and "Select all loaded" appear only after
+  **Select** is pressed. The Contents tab of an item that stores things works
+  the same way.
+- **Places as chips.** Places inside a room are one row of chips above the list.
+  A chip narrows the list to that place. The chosen place then shows **Open**
+  (its own page) and a ⋯ menu with edit, add nested place, move contents and
+  delete. Sub-rooms and nested containers are chips that open their page.
+- **One ⋯ menu.** Add a place, add a sub-room, add photo, edit, move contents,
+  move to property, containers, export evidence and delete are in "Room
+  options". A container has "Container options" with edit, add photo, move
+  container, move contents, ownership, QR code, print label, export evidence and
+  delete. Adding items uses the Add button in the bottom bar, which knows the
+  room or container.
+- **Below the contents.** Notes, photographs (a strip of thumbnails; **Manage**
+  opens the large view with reorder, cover and delete), the stocktake line,
+  borrowed items kept here, and for containers the identity line with QR,
+  related documents and the movement history (closed until opened).
+- **Empty photo area.** Nothing is shown. "Add photo" in the ⋯ menu opens a small
+  upload row.
+- **Back.** A top-level room has no Back link; the rail is the way around. A
+  sub-room links back to its parent room. A container links back to the place
+  or room that holds it.
+
+Delete and move still open the same previews and confirmations with the full
+consequences.
+
 ## Permissions
 
 The new routes use the existing household write guard and `require_auth`
@@ -161,6 +200,9 @@ history remain household-scoped; cross-household IDs are not reachable.
   retention lifecycle is required before any permanent cleanup.
 
 ## Walkthrough screenshots
+
+These are older screens. The room and container pages now have the layout
+described in “Room and container page layout”.
 
 - [Box item list with scoped selection](walkthrough/place-management/01-box-bulk-selection.png)
 - [Move selected items to a room](walkthrough/place-management/02-box-move-dialog.png)
