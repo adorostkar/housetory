@@ -21,6 +21,14 @@ describe("StickySaveBar", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
+  it("sticks to its scroller above the app bar and the keyboard, and is never fixed", () => {
+    render(<StickySaveBar dirty onSave={vi.fn()} onDiscard={vi.fn()} />);
+    const bar = screen.getByTestId("sticky-save-bar");
+    expect(bar).toHaveClass("sticky");
+    expect(bar).not.toHaveClass("fixed");
+    expect(bar.className).toContain("var(--shell-bar-height,0px)+var(--keyboard-inset,0px)");
+  });
+
   it("disables save when it cannot save", () => {
     render(<StickySaveBar dirty canSave={false} onSave={vi.fn()} onDiscard={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();

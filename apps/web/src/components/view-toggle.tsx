@@ -1,15 +1,20 @@
 import { LayoutGrid, List } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
 export type ItemsView = "grid" | "list";
 
-const STORAGE_KEY = "housetory.items.view";
+// The earlier key was written on every visit, so it could not tell a choice from
+// the default. This one is written only when the user picks a view.
+const STORAGE_KEY = "housetory.items.view.v2";
 
-/** Grid/list preference shared by the Items and Home pages. */
+/**
+ * Grid/list preference for the item lists. Compact rows are shown until the
+ * user picks a view; the choice is then kept on this device.
+ */
 export function useItemsView(
-  fallback: () => ItemsView = () => "grid",
+  fallback: () => ItemsView = () => "list",
 ): [ItemsView, (view: ItemsView) => void] {
   const [view, setView] = useState<ItemsView>(() => {
     try {
@@ -21,15 +26,16 @@ export function useItemsView(
     return fallback();
   });
 
-  useEffect(() => {
+  const choose = (next: ItemsView) => {
+    setView(next);
     try {
-      localStorage.setItem(STORAGE_KEY, view);
+      localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // Browsing-private storage failures should not break the list.
     }
-  }, [view]);
+  };
 
-  return [view, setView];
+  return [view, choose];
 }
 
 export function ViewToggle({
@@ -52,17 +58,17 @@ export function ViewToggle({
       aria-pressed={view === value}
       onClick={() => onChange(value)}
     >
-      <Icon className="size-3.5" />
+      <Icon className="size-4" aria-hidden="true" />
     </button>
   );
   return (
     <div
-      className="flex items-center gap-0 rounded-lg border border-border/70 bg-card/55 p-0.5 sm:gap-1 sm:p-1"
+      className="flex shrink-0 items-center gap-0 rounded-lg border border-border/70 bg-card/55 p-0.5 sm:gap-1 sm:p-1"
       role="group"
       aria-label="Item view"
     >
-      {button("grid", "Card view", LayoutGrid)}
       {button("list", "Compact list view", List)}
+      {button("grid", "Card view", LayoutGrid)}
     </div>
   );
 }

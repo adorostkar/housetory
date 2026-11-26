@@ -396,7 +396,13 @@ export interface ItemFilters {
   purchase_info?: string;
   include_archived?: boolean;
   include_descendants?: boolean;
-  sort?: "created_desc" | "created_asc" | "name_asc" | "name_desc" | "updated_desc";
+  sort?:
+    | "created_desc"
+    | "created_asc"
+    | "name_asc"
+    | "name_desc"
+    | "updated_desc"
+    | "location_asc";
 }
 
 export function useItems(filters: ItemFilters, limit = 24, enabled = true) {
@@ -418,6 +424,21 @@ export function useItems(filters: ItemFilters, limit = 24, enabled = true) {
       return nextOffset < lastPage.total ? nextOffset : undefined;
     },
     enabled,
+  });
+}
+
+/** The given items (at most 100) that also match the filters. Used for recently opened items. */
+export function useItemsByIds(filters: ItemFilters, ids: string[], enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.items, "summary", "ids", filters, ids],
+    queryFn: ({ signal }) =>
+      api.get<ItemSummaryList>(
+        `/items${buildQuery({ ...filters, limit: 100, representation: "summary" })}${ids
+          .map((id) => `&ids=${encodeURIComponent(id)}`)
+          .join("")}`,
+        { signal },
+      ),
+    enabled: enabled && ids.length > 0,
   });
 }
 

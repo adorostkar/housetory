@@ -7,6 +7,7 @@ import { itemLocationPath, useItemPathScope } from "@/components/item-location-p
 import { Badge } from "@/components/ui/badge";
 import { ITEM_DISPOSITION_LABELS } from "@/lib/labels";
 import { itemHref, rememberListScroll, type ItemOrigin } from "@/lib/navigation";
+import { holdRecentItemsSnapshot } from "@/lib/recent-items";
 import type { ItemListEntry } from "@/lib/types";
 import {
   cn,
@@ -15,6 +16,12 @@ import {
   formatDate,
   itemContainer,
 } from "@/lib/utils";
+
+/** An item is being opened from a list: the list keeps its place and its order. */
+function leaveList(origin: ItemOrigin | null) {
+  rememberListScroll(origin);
+  holdRecentItemsSnapshot();
+}
 
 interface ItemSelection {
   selected: boolean;
@@ -47,7 +54,7 @@ export function ItemCard({
   const card = (
     <Link
       to={itemHref(item.id, origin, item.household?.id)}
-      onClick={() => rememberListScroll(origin ?? null)}
+      onClick={() => leaveList(origin ?? null)}
       className={cn(
         "group flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/75 bg-card/85 shadow-soft transition-[transform,border-color,box-shadow] duration-300 ease-smooth hover:-translate-y-0.5 hover:border-border hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         selection?.selected && "border-sage/60 shadow-lift ring-2 ring-sage/45",
@@ -282,19 +289,19 @@ export function ItemRow({
   const row = (
     <Link
       to={itemHref(item.id, origin, item.household?.id)}
-      onClick={() => rememberListScroll(origin ?? null)}
+      onClick={() => leaveList(origin ?? null)}
       className={cn(
-        "group flex min-w-0 items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-secondary/60",
+        "group flex min-h-11 min-w-0 items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-secondary/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
         selection?.selected && "bg-sage-soft/45 ring-1 ring-sage/35",
       )}
     >
-      <div className="relative size-14 shrink-0 overflow-hidden rounded-xl bg-secondary/70">
+      <div className="relative size-12 shrink-0 overflow-hidden rounded-lg bg-secondary/70">
         {photo ? (
           <img
             src={photo.thumbnail_url}
             alt=""
             loading="lazy"
-            className="size-full bg-secondary/30 object-contain p-1.5"
+            className="size-full bg-secondary/30 object-contain p-1"
           />
         ) : representative?.thumbnail_url || representative?.url ? (
           <img
@@ -302,7 +309,7 @@ export function ItemRow({
             alt=""
             loading="lazy"
             className={cn(
-              "size-full object-contain p-1.5",
+              "size-full object-contain p-1",
               representative.source_type === "reference" ? "bg-white" : "bg-secondary/30",
             )}
           />
@@ -316,24 +323,33 @@ export function ItemRow({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-medium">{item.name}</p>
-          <Badge variant="outline" className="shrink-0 tabular-nums">
-            ×{item.quantity}
-          </Badge>
-          {onLoan > 0 && (
-            <Badge variant="brass" className="shrink-0">
-              {onLoan} on loan · {Math.max(0, item.quantity - onLoan)} at home
-            </Badge>
-          )}
-          {item.is_archived && (
-            <Badge variant="secondary">
-              {item.disposition
-                ? ITEM_DISPOSITION_LABELS[item.disposition]
-                : "Archived"}
+        <div className="flex min-w-0 items-start gap-2">
+          {/* The name may take two lines; a long name is not cut to one. */}
+          <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-snug [overflow-wrap:anywhere]">
+            {item.name}
+          </p>
+          {item.quantity > 1 && (
+            <Badge variant="outline" className="shrink-0 tabular-nums">
+              ×{item.quantity}
             </Badge>
           )}
         </div>
+        {(onLoan > 0 || item.is_archived) && (
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            {onLoan > 0 && (
+              <Badge variant="brass">
+                {onLoan} on loan · {Math.max(0, item.quantity - onLoan)} at home
+              </Badge>
+            )}
+            {item.is_archived && (
+              <Badge variant="secondary">
+                {item.disposition
+                  ? ITEM_DISPOSITION_LABELS[item.disposition]
+                  : "Archived"}
+              </Badge>
+            )}
+          </div>
+        )}
         <p
           className="mt-0.5 truncate text-2xs text-muted-foreground"
           title={path.full || undefined}
@@ -346,17 +362,20 @@ export function ItemRow({
           ) : (
             path.short || "No location"
           )}
-          {item.category ? ` · ${item.category.name}` : ""}{" "}
-          {item.purchase?.price_cents != null && (
-            <span className="text-muted-foreground">
-              · {hidePurchaseValue ? "••••••" : formatCurrency(item.purchase.price_cents, item.purchase.currency)}
-              {item.purchase.is_shared ? " shared" : ""}
-            </span>
-          )}
+          {/* Category and price are extra; they show where the row has room for them. */}
+          <span className="hidden sm:inline">
+            {item.category ? ` · ${item.category.name}` : ""}
+            {item.purchase?.price_cents != null &&
+              ` · ${
+                hidePurchaseValue
+                  ? "••••••"
+                  : formatCurrency(item.purchase.price_cents, item.purchase.currency)
+              }${item.purchase.is_shared ? " shared" : ""}`}
+          </span>
         </p>
       </div>
       {item.warranty?.end_date && (
-        <span className="hidden text-2xs text-muted-foreground sm:block">
+        <span className="hidden shrink-0 text-2xs text-muted-foreground sm:block">
           Until {formatDate(item.warranty.end_date)}
         </span>
       )}
@@ -365,7 +384,7 @@ export function ItemRow({
   if (!selection) return row;
   return (
     <div className="relative flex min-w-0 items-center">
-      <label className="ml-2 flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-card/70 sm:size-7">
+      <label className="ml-1 flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70 bg-card/70 sm:size-7">
         <input
           type="checkbox"
           className="size-4 cursor-pointer accent-primary disabled:cursor-not-allowed"

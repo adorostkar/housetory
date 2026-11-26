@@ -1,5 +1,40 @@
+import { ChevronLeft, X } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
+
+/**
+ * The one control at the top of an item page or form. It goes back to where the
+ * item was opened from. In the desktop side panel it reads "Close".
+ */
+export function ItemPageClose({
+  to,
+  label,
+  presentation = "page",
+}: {
+  to: string;
+  label: string;
+  presentation?: "page" | "panel";
+}) {
+  return (
+    <Link
+      to={to}
+      className="-ml-2 inline-flex min-h-11 min-w-0 items-center gap-1 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      {presentation === "panel" ? (
+        <>
+          <X className="size-4 shrink-0" aria-hidden="true" />
+          Close
+        </>
+      ) : (
+        <>
+          <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">{label}</span>
+        </>
+      )}
+    </Link>
+  );
+}
 
 export function InfoRow({
   icon: Icon,

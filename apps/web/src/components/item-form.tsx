@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Plus } from "lucide-react";
+import { Check, ChevronDown, MapPin, Plus } from "lucide-react";
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -68,6 +68,8 @@ interface ItemFormProps {
   returnTo?: string;
   cancelTo?: string;
   origin?: ItemOrigin | null;
+  /** "panel" when the form is shown in the desktop side panel, which scrolls by itself. */
+  presentation?: "page" | "panel";
 }
 
 /** Which form this is: one item's edit form, or a new-item form with its starting context. */
@@ -113,6 +115,7 @@ function ItemFormFields(props: ItemFormProps) {
     returnTo,
     cancelTo,
     origin,
+    presentation = "page",
   } = props;
   const navigate = useNavigate();
   const template = item ?? duplicateOf;
@@ -208,6 +211,9 @@ function ItemFormFields(props: ItemFormProps) {
   React.useEffect(() => {
     if (!item?.purchase?.currency && !currencyTouched) setCurrency(defaultCurrency);
   }, [currencyTouched, defaultCurrency, item?.purchase?.currency]);
+  const [placeOpen, setPlaceOpen] = React.useState(
+    !(template?.room?.id ?? defaultRoomId),
+  );
   const [identityOpen, setIdentityOpen] = React.useState(false);
   const [purchaseOpen, setPurchaseOpen] = React.useState(false);
   const [legacyEstimateOpen, setLegacyEstimateOpen] = React.useState(false);
@@ -229,6 +235,16 @@ function ItemFormFields(props: ItemFormProps) {
     locationsQuery.data?.items ?? [],
     locationId,
   );
+  // The place is one line (home, room, storage place) until it is opened to change it.
+  const placeSummary = [
+    properties.length > 1
+      ? properties.find((property) => property.id === propertyId)?.name
+      : null,
+    ...(roomId ? roomPath(roomsQuery.data?.items ?? [], roomId).map((entry) => entry.name) : []),
+    ...selectedLocationPath.map((location) => locationLabel(location)),
+  ]
+    .filter(Boolean)
+    .join(" › ");
   const parsedQuantity = /^\d+$/.test(quantity) ? Number(quantity) : 0;
   const hasReviewedAllocation = Boolean(
     item?.purchase?.allocations.some((allocation) => allocation.item_id === item?.id),
@@ -591,9 +607,12 @@ function ItemFormFields(props: ItemFormProps) {
     createTag.mutate(tagName);
   };
 
+  // A place error must be seen, so it opens the place even when it was closed.
+  const placeExpanded = placeOpen || Boolean(fieldErrors?.room_id);
+
   return (
     <>
-      <form onSubmit={submit} className="space-y-6" noValidate>
+      <form onSubmit={submit} className="space-y-5" noValidate>
         {generalError && <FormError message={generalError} />}
         {protection.draftOffer && (
           <ItemDraftBanner
@@ -620,7 +639,7 @@ function ItemFormFields(props: ItemFormProps) {
                 />
               </Field>
 
-              <div className="grid gap-5 sm:grid-cols-[130px_minmax(0,1fr)]">
+              <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-4">
                 <Field
                   label="Quantity"
                   htmlFor="item-quantity"
@@ -658,11 +677,42 @@ function ItemFormFields(props: ItemFormProps) {
                 </Field>
               </div>
 
-              <div className="rounded-xl border border-border/60 bg-background/30 p-3.5">
-                <p className="mb-3 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                  Place
-                </p>
-                <div className="space-y-4">
+              <div className="rounded-xl border border-border/60 bg-background/30">
+                <button
+                  type="button"
+                  aria-expanded={placeExpanded}
+                  aria-controls="item-place-panel"
+                  onClick={() => setPlaceOpen(!placeExpanded)}
+                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  <MapPin className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                      Place
+                    </span>
+                    <span
+                      data-testid="item-place-summary"
+                      className={cn(
+                        "block text-sm leading-snug [overflow-wrap:anywhere]",
+                        !placeSummary && "text-muted-foreground",
+                      )}
+                    >
+                      {placeSummary || "No place yet"}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1 text-2xs font-medium text-muted-foreground">
+                    {placeExpanded ? "Done" : placeSummary ? "Change" : "Choose"}
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={cn("size-3.5 transition-transform", placeExpanded && "rotate-180")}
+                    />
+                  </span>
+                </button>
+                <div
+                  id="item-place-panel"
+                  hidden={!placeExpanded}
+                  className="space-y-4 border-t border-border/60 px-3.5 py-3.5"
+                >
                   {properties.length > 0 && (
                     <Field label="Property" htmlFor="item-property">
                       <Select
@@ -684,7 +734,7 @@ function ItemFormFields(props: ItemFormProps) {
                     </Field>
                   )}
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-4">
                     <Field label="Room" htmlFor="item-room" error={fieldErrors?.room_id}>
                       <Select
                         id="item-room"
@@ -739,13 +789,6 @@ function ItemFormFields(props: ItemFormProps) {
                       </Select>
                     </Field>
                   </div>
-                  {selectedLocationPath.length > 1 && (
-                    <p className="text-2xs leading-relaxed text-muted-foreground">
-                      {selectedLocationPath
-                        .map((location) => locationLabel(location))
-                        .join(" / ")}
-                    </p>
-                  )}
                 </div>
               </div>
             </FormSection>
@@ -758,7 +801,7 @@ function ItemFormFields(props: ItemFormProps) {
               open={identityOpen}
               onToggle={() => setIdentityOpen((current) => !current)}
             >
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-5">
                 <Field label="Brand" htmlFor="item-brand" optional>
                   <Input
                     id="item-brand"
@@ -978,7 +1021,7 @@ function ItemFormFields(props: ItemFormProps) {
               {priceInvalid && (
                 <FormError message="Enter a valid price, such as 129.00." />
               )}
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-5">
                 <Field label="Merchant" htmlFor="purchase-vendor" optional>
                   <Input
                     id="purchase-vendor"
@@ -997,7 +1040,7 @@ function ItemFormFields(props: ItemFormProps) {
                   />
                 </Field>
               </div>
-              <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_130px]">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,7rem)] gap-4">
                 <Field
                   label={
                     priceBasisActive === "unit"
@@ -1078,7 +1121,7 @@ function ItemFormFields(props: ItemFormProps) {
                     )}
                 </div>
               )}
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-5">
                 <Field label="Order number" htmlFor="purchase-order" optional>
                   <Input
                     id="purchase-order"
@@ -1145,7 +1188,7 @@ function ItemFormFields(props: ItemFormProps) {
                   placeholder="Manufacturer or retailer"
                 />
               </Field>
-              <div className="grid gap-5 sm:grid-cols-3">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-5">
                 <Field label="Starts" htmlFor="warranty-start" optional>
                   <Input
                     id="warranty-start"
@@ -1192,7 +1235,7 @@ function ItemFormFields(props: ItemFormProps) {
                   />
                 </Field>
               </div>
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-5">
                 <Field label="Reminder (days)" htmlFor="warranty-reminder" optional>
                   <Input
                     id="warranty-reminder"
@@ -1233,7 +1276,16 @@ function ItemFormFields(props: ItemFormProps) {
             </OptionalFormSection>
         </div>
 
-        <div className="flex flex-col-reverse items-stretch gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-end">
+        {/* Save stays in reach: the footer sticks to the bottom of whatever scrolls the form. */}
+        <div
+          data-testid="item-form-footer"
+          className={cn(
+            "sticky z-20 -mx-1 flex items-center justify-end gap-3 border-t border-border/70 bg-background/95 px-1 py-3 backdrop-blur-xl",
+            presentation === "panel"
+              ? "bottom-0"
+              : "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px))]",
+          )}
+        >
           <Button
             type="button"
             variant="ghost"
@@ -1251,6 +1303,7 @@ function ItemFormFields(props: ItemFormProps) {
           <Button
             type="submit"
             size="lg"
+            className="min-w-0"
             disabled={
               save.isPending ||
               !name.trim() ||

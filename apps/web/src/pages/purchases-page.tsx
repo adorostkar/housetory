@@ -1,13 +1,17 @@
 import { useMutation } from "@tanstack/react-query";
 import {
+  ChevronDown,
   Download,
+  MoreHorizontal,
   Package,
   Pencil,
   Plus,
   ReceiptText,
   Search,
+  SlidersHorizontal,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -19,6 +23,7 @@ import { ErrorState } from "@/components/error-state";
 import { Field, FormError } from "@/components/form-field";
 import { InvoiceImportButtons } from "@/components/invoice-import-buttons";
 import { ItemMultiSelect } from "@/components/item-multi-select";
+import { PurchaseTotals } from "@/components/purchase-totals";
 import { ReceiptPicker } from "@/components/receipt-picker";
 import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +50,7 @@ import {
   usePurchases,
 } from "@/lib/queries";
 import type { Purchase, PurchaseFormInput } from "@/lib/types";
-import { formatCurrency, formatDate, pluralize } from "@/lib/utils";
+import { cn, formatCurrency, formatDate, pluralize } from "@/lib/utils";
 
 export function PurchasesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,6 +64,9 @@ export function PurchasesPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Purchase | null>(null);
   const [purchaseToDelete, setPurchaseToDelete] = React.useState<Purchase | null>(null);
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
+  const [moreActionsOpen, setMoreActionsOpen] = React.useState(false);
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
 
   const purchasesQuery = usePurchases({
     q: debouncedSearch.trim() || undefined,
@@ -89,6 +97,57 @@ export function PurchasesPage() {
   const purchases = purchasesQuery.data?.items ?? [];
   const hasFilters = Boolean(debouncedSearch.trim() || currency || dateFrom || dateTo);
 
+  // The search stays in view, so it is not counted as a filter.
+  const filterChips = [
+    currency
+      ? {
+          key: "currency",
+          label: currency,
+          remove: () => {
+            setCurrency("");
+            updateParam("currency", "");
+          },
+        }
+      : null,
+    dateFrom
+      ? {
+          key: "date_from",
+          label: `From ${formatDate(dateFrom)}`,
+          remove: () => {
+            setDateFrom("");
+            updateParam("date_from", "");
+          },
+        }
+      : null,
+    dateTo
+      ? {
+          key: "date_to",
+          label: `To ${formatDate(dateTo)}`,
+          remove: () => {
+            setDateTo("");
+            updateParam("date_to", "");
+          },
+        }
+      : null,
+  ].filter((chip): chip is NonNullable<typeof chip> => chip !== null);
+
+  const clearFilters = () => {
+    setSearch("");
+    setCurrency("");
+    setDateFrom("");
+    setDateTo("");
+    setSearchParams({}, { replace: true });
+  };
+
+  const toggleExpanded = (purchaseId: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(purchaseId)) next.delete(purchaseId);
+      else next.add(purchaseId);
+      return next;
+    });
+  };
+
   const openCreate = () => {
     setEditing(null);
     setDialogOpen(true);
@@ -97,110 +156,176 @@ export function PurchasesPage() {
   return (
     <PageLayout
       header={{
-        eyebrow: "Ownership",
         title: "Purchases",
-        description: "What you paid, where it came from, and the receipt trail. One purchase can cover several items.",
-        actions: (
-          <>
-            <Button variant="outline" asChild>
-              <a href="/api/v1/exports/purchases.csv">
-                <Download />
-                Export
-              </a>
-            </Button>
-            {canWrite && <InvoiceImportButtons />}
-            {canWrite && (
-              <Button onClick={openCreate}>
-                <Plus />
-                Add purchase
+        titleAddon: (
+          <div className="mt-0.5 flex items-center justify-between gap-2">
+            <p className="min-w-0 text-xs text-muted-foreground">
+              {purchasesQuery.data
+                ? `${pluralize(purchasesQuery.data.total, "purchase")}${hasFilters ? " matching" : ""}`
+                : "Loading…"}
+            </p>
+            <div className="flex shrink-0 items-center gap-1">
+              {canWrite && (
+                <Button onClick={openCreate}>
+                  <Plus />
+                  Add purchase
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="More purchase actions"
+                aria-expanded={moreActionsOpen}
+                aria-controls="purchase-more-actions"
+                onClick={() => setMoreActionsOpen((open) => !open)}
+              >
+                <MoreHorizontal />
               </Button>
-            )}
-          </>
+            </div>
+          </div>
         ),
       }}
     >
-      <div className="surface p-4 sm:p-5">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_150px_150px_150px]">
-          <div className="relative min-w-0">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                updateParam("q", event.target.value);
-              }}
-              placeholder="Search merchant, order, notes or item…"
-              aria-label="Search purchases"
-              className="h-10 pl-10"
-            />
-          </div>
-          <Select
-            aria-label="Filter purchases by currency"
-            value={currency}
-            onChange={(event) => {
-              setCurrency(event.target.value);
-              updateParam("currency", event.target.value);
-            }}
-            className="h-10"
-          >
-            <option value="">All currencies</option>
-            {CURRENCIES.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </Select>
+      {moreActionsOpen && (
+        <div id="purchase-more-actions" className="mb-4 flex flex-wrap items-center gap-2">
+          {canWrite && <InvoiceImportButtons />}
+          <Button variant="outline" asChild>
+            <a href="/api/v1/exports/purchases.csv">
+              <Download />
+              Export
+            </a>
+          </Button>
+        </div>
+      )}
+      <PurchaseTotals />
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[10rem] flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            type="date"
-            value={dateFrom}
-            aria-label="Purchases from date"
+            type="search"
+            value={search}
             onChange={(event) => {
-              setDateFrom(event.target.value);
-              updateParam("date_from", event.target.value);
+              setSearch(event.target.value);
+              updateParam("q", event.target.value);
             }}
-            className="h-10"
-          />
-          <Input
-            type="date"
-            value={dateTo}
-            aria-label="Purchases to date"
-            onChange={(event) => {
-              setDateTo(event.target.value);
-              updateParam("date_to", event.target.value);
-            }}
-            className="h-10"
+            placeholder="Search purchases"
+            aria-label="Search purchases"
+            className="pl-10"
           />
         </div>
-        <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-3">
-          <p className="text-2xs text-muted-foreground">
-            {purchasesQuery.data
-              ? `${pluralize(purchasesQuery.data.total, "purchase")}${hasFilters ? " matching" : ""}`
-              : "Loading…"}
-          </p>
-          {hasFilters && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearch("");
-                setCurrency("");
-                setDateFrom("");
-                setDateTo("");
-                setSearchParams({}, { replace: true });
-              }}
-              className="text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Clear filters
-            </button>
+        <button
+          type="button"
+          className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-expanded={filtersOpen}
+          aria-controls="purchase-filters"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <SlidersHorizontal className="size-4 text-muted-foreground" aria-hidden="true" />
+          <span>Filters</span>
+          {filterChips.length > 0 && (
+            <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+              <span className="sr-only">Active filters: </span>
+              {filterChips.length}
+            </Badge>
           )}
-        </div>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              filtersOpen && "rotate-180",
+            )}
+          />
+        </button>
       </div>
 
-      <div className="mt-7">
+      {(filtersOpen || filterChips.length > 0) && (
+        <div className="surface mb-2 p-3.5">
+          {filtersOpen && (
+            <div
+              id="purchase-filters"
+              className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] items-end gap-2"
+            >
+              <Select
+                aria-label="Filter purchases by currency"
+                value={currency}
+                onChange={(event) => {
+                  setCurrency(event.target.value);
+                  updateParam("currency", event.target.value);
+                }}
+                className="rounded-lg text-sm"
+              >
+                <option value="">All currencies</option>
+                {CURRENCIES.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </Select>
+              <label className="block min-w-0 text-2xs text-muted-foreground">
+                From
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  aria-label="Purchases from date"
+                  onChange={(event) => {
+                    setDateFrom(event.target.value);
+                    updateParam("date_from", event.target.value);
+                  }}
+                  className="mt-0.5 rounded-lg text-sm"
+                />
+              </label>
+              <label className="block min-w-0 text-2xs text-muted-foreground">
+                To
+                <Input
+                  type="date"
+                  value={dateTo}
+                  aria-label="Purchases to date"
+                  onChange={(event) => {
+                    setDateTo(event.target.value);
+                    updateParam("date_to", event.target.value);
+                  }}
+                  className="mt-0.5 rounded-lg text-sm"
+                />
+              </label>
+            </div>
+          )}
+          {filterChips.length > 0 && (
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-1.5",
+                filtersOpen && "mt-3 border-t border-border/60 pt-3",
+              )}
+            >
+              {filterChips.map((chip) => (
+                <Badge key={chip.key} variant="secondary" className="gap-1 py-0 pl-2.5 pr-0 text-2xs">
+                  <span className="max-w-56 truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={chip.remove}
+                    className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                    aria-label={`Remove ${chip.label}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="ml-1 min-h-11 text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:min-h-0"
+              >
+                Clear filters
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3">
         {purchasesQuery.isPending ? (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-44 rounded-2xl" />
+          <div className="grid gap-2 lg:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-16 rounded-2xl" />
             ))}
           </div>
         ) : purchasesQuery.isError ? (
@@ -217,175 +342,34 @@ export function PurchasesPage() {
                 ? "Try a broader search or clear the filters."
                 : "Record the date, amount, merchant and receipt. Link one purchase to several items when they were bought together."
             }
-            actionLabel={hasFilters ? undefined : "Add your first purchase"}
-            onAction={hasFilters ? undefined : openCreate}
+            actionLabel={hasFilters || !canWrite ? undefined : "Add your first purchase"}
+            onAction={hasFilters || !canWrite ? undefined : openCreate}
             secondary={
               hasFilters ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSearch("");
-                    setCurrency("");
-                    setDateFrom("");
-                    setDateTo("");
-                    setSearchParams({}, { replace: true });
-                  }}
-                >
+                <Button variant="outline" onClick={clearFilters}>
                   Clear filters
                 </Button>
               ) : undefined
             }
           />
         ) : (
-          <div className="stagger grid gap-3 lg:grid-cols-2">
+          <div className="grid items-start gap-2 lg:grid-cols-2">
             {purchases.map((purchase) => (
-              <article key={purchase.id} className="surface p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="min-w-0 break-words font-display text-[1.12rem] font-medium leading-snug tracking-[-0.01em] text-foreground/90">
-                        {purchase.merchant || purchase.vendor || "Unnamed purchase"}
-                      </h2>
-                      {purchase.is_shared && (
-                        <Badge variant="brass">
-                          <Users className="size-3" />
-                          Shared · {purchase.item_count}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-1 text-2xs text-muted-foreground">
-                      {purchase.purchase_date
-                        ? formatDate(purchase.purchase_date)
-                        : "No purchase date"}
-                      {purchase.order_number ? ` · ${purchase.order_number}` : ""}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {purchase.price_cents != null ? (
-                      <p className="font-display text-[1.2rem] font-medium leading-none tracking-[-0.02em] tabular-nums text-foreground/85">
-                        {formatCurrency(purchase.price_cents, purchase.currency)}
-                      </p>
-                    ) : (
-                      <p className="text-2xs text-muted-foreground">No amount</p>
-                    )}
-                    {canWrite && (
-                      <div className="mt-2 flex justify-end gap-0.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditing(purchase);
-                            setDialogOpen(true);
-                          }}
-                          className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                          aria-label={`Edit purchase from ${purchase.merchant ?? "unknown merchant"}`}
-                        >
-                          <Pencil className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPurchaseToDelete(purchase)}
-                          className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          aria-label={`Delete purchase from ${purchase.merchant ?? "unknown merchant"}`}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {purchase.items.length > 0 && (
-                  <div className="mt-3.5">
-                    <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                      Items in this purchase
-                    </p>
-                    <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
-                      {purchase.items.map((item) => (
-                        <Link
-                          key={item.id}
-                          to={`/items/${item.id}`}
-                          className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium leading-snug text-foreground/85 transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        >
-                          <Package className="size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
-                          <span className="min-w-0 break-words text-left">{item.name}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {purchase.allocations.length > 0 && (
-                  <div className="mt-3 rounded-xl border border-border/60 bg-secondary/20 p-3 text-2xs">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium text-foreground/80">
-                        Reviewed item allocations
-                      </span>
-                      <span className="tabular-nums text-muted-foreground">
-                        {formatCurrency(purchase.allocated_total_cents, purchase.currency)}{" "}
-                        allocated
-                      </span>
-                    </div>
-                    <ul className="mt-2 space-y-1.5">
-                      {purchase.allocations.map((allocation) => (
-                        <li
-                          key={allocation.id}
-                          className="flex flex-wrap items-baseline justify-between gap-2 text-muted-foreground"
-                        >
-                          <span className="min-w-0 truncate">
-                            {allocation.item.name} ×{allocation.quantity}
-                            <span className="ml-1 text-muted-foreground">
-                              {allocation.description}
-                            </span>
-                          </span>
-                          <span className="shrink-0 tabular-nums">
-                            {allocation.allocated_cents == null
-                              ? "amount unknown"
-                              : formatCurrency(
-                                  allocation.allocated_cents,
-                                  allocation.currency,
-                                )}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                    {purchase.unallocated_cents != null && purchase.unallocated_cents !== 0 && (
-                      <p className="mt-2 border-t border-border/60 pt-2 text-2xs text-muted-foreground">
-                        {purchase.unallocated_cents > 0
-                          ? `${formatCurrency(
-                              purchase.unallocated_cents,
-                              purchase.currency,
-                            )} of the purchase total is not allocated to product lines.`
-                          : `Product allocations exceed the purchase total by ${formatCurrency(
-                              Math.abs(purchase.unallocated_cents),
-                              purchase.currency,
-                            )} because of recorded discounts or charges.`}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border/60 pt-3 text-2xs">
-                  {purchase.receipt ? (
-                    <Link
-                      to={`/documents/${purchase.receipt.id}`}
-                      className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                    >
-                      <ReceiptText className="size-3.5" />
-                      {purchase.receipt.title}
-                    </Link>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                      <ReceiptText className="size-3.5" />
-                      No receipt attached
-                    </span>
-                  )}
-                  {purchase.notes && (
-                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                      {purchase.notes}
-                    </span>
-                  )}
-                </div>
-              </article>
+              <PurchaseRow
+                key={purchase.id}
+                purchase={purchase}
+                open={expanded.has(purchase.id)}
+                onToggle={() => toggleExpanded(purchase.id)}
+                onEdit={
+                  canWrite
+                    ? () => {
+                        setEditing(purchase);
+                        setDialogOpen(true);
+                      }
+                    : undefined
+                }
+                onDelete={canWrite ? () => setPurchaseToDelete(purchase) : undefined}
+              />
             ))}
           </div>
         )}
@@ -414,6 +398,191 @@ export function PurchasesPage() {
         }}
       />
     </PageLayout>
+  );
+}
+
+/**
+ * One purchase as a short row: merchant, date, total and item count.
+ * Opening it shows the items, the reviewed allocations and the receipt.
+ */
+function PurchaseRow({
+  purchase,
+  open,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  purchase: Purchase;
+  open: boolean;
+  onToggle: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const detailsId = React.useId();
+  const merchant = purchase.merchant || purchase.vendor || "Unnamed purchase";
+  return (
+    <article className="surface" data-testid="purchase-row">
+      <h2>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={detailsId}
+          onClick={onToggle}
+          className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left transition-colors hover:bg-secondary/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-foreground/90">
+              {merchant}
+            </span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-2xs font-normal text-muted-foreground">
+              <span>
+                {purchase.purchase_date ? formatDate(purchase.purchase_date) : "No purchase date"}
+                {" · "}
+                {pluralize(purchase.item_count, "item")}
+              </span>
+              {purchase.is_shared && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-brass/15 bg-brass-soft px-2 font-medium text-brass">
+                  <Users className="size-3" aria-hidden="true" />
+                  Shared · {purchase.item_count}
+                </span>
+              )}
+            </span>
+          </span>
+          <span className="shrink-0 text-right text-sm font-medium tabular-nums text-foreground/85">
+            {purchase.price_cents != null ? (
+              formatCurrency(purchase.price_cents, purchase.currency)
+            ) : (
+              <span className="text-2xs font-normal text-muted-foreground">No amount</span>
+            )}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </button>
+      </h2>
+
+      {open && (
+        <div id={detailsId} className="space-y-3 border-t border-border/60 px-3.5 pb-3.5 pt-3">
+          {purchase.order_number && (
+            <p className="text-2xs text-muted-foreground">Order {purchase.order_number}</p>
+          )}
+
+          {purchase.items.length > 0 && (
+            <div>
+              <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                Items in this purchase
+              </p>
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
+                {purchase.items.map((item) => (
+                  <Link
+                    key={item.id}
+                    to={`/items/${item.id}`}
+                    className="group inline-flex min-h-9 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium leading-snug text-foreground/85 transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 coarse:min-h-11"
+                  >
+                    <Package className="size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
+                    <span className="min-w-0 break-words text-left">{item.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {purchase.allocations.length > 0 && (
+            <div className="rounded-xl border border-border/60 bg-secondary/20 p-3 text-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-foreground/80">Reviewed item allocations</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatCurrency(purchase.allocated_total_cents, purchase.currency)} allocated
+                </span>
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                {purchase.allocations.map((allocation) => (
+                  <li
+                    key={allocation.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2 text-muted-foreground"
+                  >
+                    <span className="min-w-0 break-words">
+                      {allocation.item.name} ×{allocation.quantity}
+                      <span className="ml-1 text-muted-foreground">{allocation.description}</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums">
+                      {allocation.allocated_cents == null
+                        ? "amount unknown"
+                        : formatCurrency(allocation.allocated_cents, allocation.currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {purchase.unallocated_cents != null && purchase.unallocated_cents !== 0 && (
+                <p className="mt-2 border-t border-border/60 pt-2 text-2xs text-muted-foreground">
+                  {purchase.unallocated_cents > 0
+                    ? `${formatCurrency(
+                        purchase.unallocated_cents,
+                        purchase.currency,
+                      )} of the purchase total is not allocated to product lines.`
+                    : `Product allocations exceed the purchase total by ${formatCurrency(
+                        Math.abs(purchase.unallocated_cents),
+                        purchase.currency,
+                      )} because of recorded discounts or charges.`}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs">
+            {purchase.receipt ? (
+              <Link
+                to={`/documents/${purchase.receipt.id}`}
+                className="inline-flex min-h-9 items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:min-h-11"
+              >
+                <ReceiptText className="size-3.5" />
+                {purchase.receipt.title}
+              </Link>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <ReceiptText className="size-3.5" />
+                No receipt attached
+              </span>
+            )}
+            {(onEdit || onDelete) && (
+              <span className="ml-auto flex items-center gap-1">
+                {onEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onEdit}
+                    aria-label={`Edit purchase from ${purchase.merchant ?? "unknown merchant"}`}
+                  >
+                    <Pencil />
+                    Edit
+                  </Button>
+                )}
+                {onDelete && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onDelete}
+                    aria-label={`Delete purchase from ${purchase.merchant ?? "unknown merchant"}`}
+                  >
+                    <Trash2 />
+                    Delete
+                  </Button>
+                )}
+              </span>
+            )}
+          </div>
+          {purchase.notes && (
+            <p className="whitespace-pre-line text-2xs leading-relaxed text-muted-foreground">
+              {purchase.notes}
+            </p>
+          )}
+        </div>
+      )}
+    </article>
   );
 }
 

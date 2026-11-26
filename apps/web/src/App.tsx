@@ -37,11 +37,6 @@ import { NoHouseholdPage } from "@/pages/no-household-page";
 import { ResetPasswordPage } from "@/pages/reset-password-page";
 import { SetupPage } from "@/pages/setup-page";
 
-const OverviewPage = React.lazy(() =>
-  import("@/pages/overview-page").then((module) => ({
-    default: module.OverviewPage,
-  })),
-);
 const RoomsPage = React.lazy(() =>
   import("@/pages/rooms-page").then((module) => ({
     default: module.RoomsPage,
@@ -208,6 +203,93 @@ const NotFoundPage = React.lazy(() =>
   })),
 );
 
+/**
+ * Every page inside the app shell. The shell renders this table itself, so that on
+ * a wide screen it can keep a list on screen while an item is open beside it.
+ */
+const SHELL_ROUTES = (
+  <>
+    <Route index element={<StartRedirect />} />
+    <Route element={<PlacesLayout />}>
+      <Route path="rooms" element={<RoomsPage />} />
+      <Route path="containers" element={<ContainersPage />} />
+    </Route>
+    <Route path="rooms/:roomId" element={<RoomDetailPage />} />
+    <Route path="items" element={<ItemsPage />} />
+    <Route element={<RequireWriter />}>
+      <Route path="items/new" element={<ItemNewPage />} />
+      <Route path="items/:itemId/edit" element={<ItemEditPage />} />
+      <Route path="add-items" element={<AddItemsRedirect />} />
+    </Route>
+    <Route path="items/:itemId" element={<ItemDetailPage />} />
+    <Route path="review" element={<ReviewPage />} />
+    <Route path="loans" element={<LoansPage />} />
+    <Route path="loans/:loanId" element={<LoanDetailPage />} />
+    <Route
+      path="borrowed/:borrowedId"
+      element={<BorrowedDetailPage />}
+    />
+    <Route path="documents" element={<DocumentsPage />} />
+    <Route
+      path="documents/:documentId"
+      element={<DocumentDetailPage />}
+    />
+    <Route
+      path="documents/:documentId/view"
+      element={<DocumentViewPage />}
+    />
+    <Route element={<FinancialsLayout />}>
+      <Route path="purchases" element={<PurchasesPage />} />
+      <Route path="warranties" element={<WarrantiesPage />} />
+      <Route path="insurance" element={<InsurancePage />} />
+    </Route>
+    <Route element={<RequireWriter />}>
+      <Route path="imports" element={<ImportsPage />} />
+      <Route path="imports/:batchId" element={<ImportDetailPage />} />
+    </Route>
+    <Route path="assistant" element={<LegacyAssistantRedirect />} />
+    <Route element={<RequireWriter />}>
+      {/* Photo capture now lives in Add items; old links keep their place context. */}
+      <Route path="scan" element={<AddItemsRedirect />} />
+      <Route path="recognize" element={<AddItemsRedirect />} />
+    </Route>
+    <Route
+      path="containers/:containerId"
+      element={<ContainerDetailPage />}
+    />
+    <Route path="stocktake" element={<StocktakeIndexPage />} />
+    <Route path="stocktake/:sessionId" element={<StocktakePage />} />
+    <Route element={<RequireWriter />}>
+      <Route path="labels" element={<LabelsPage />} />
+    </Route>
+    <Route path="search" element={<LegacySearchRedirect />} />
+    <Route path="settings" element={<SettingsPage />} />
+    <Route path="settings/account" element={<AccountSettingsPage />} />
+    <Route path="settings/household" element={<SettingsHouseholdPage />} />
+    <Route path="settings/appearance" element={<SettingsAppearancePage />} />
+    <Route path="settings/services" element={<SettingsServicesPage />} />
+    <Route path="settings/advanced" element={<SettingsAdvancedPage />} />
+    <Route path="settings/members" element={<MembersSettingsPage />} />
+    <Route path="settings/ai" element={<AiSettingsPage />} />
+    <Route
+      path="settings/system-status"
+      element={<SystemStatusPage />}
+    />
+    <Route path="*" element={<NotFoundPage />} />
+  </>
+);
+
+/** The item pages again, for the side panel next to a list on a wide screen. */
+const ITEM_PANEL_ROUTES = (
+  <>
+    <Route element={<RequireWriter />}>
+      <Route path="items/new" element={<ItemNewPage presentation="panel" />} />
+      <Route path="items/:itemId/edit" element={<ItemEditPage presentation="panel" />} />
+    </Route>
+    <Route path="items/:itemId" element={<ItemDetailPage presentation="panel" />} />
+  </>
+);
+
 export default function App() {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -344,76 +426,10 @@ export default function App() {
           }
         />
         <Route element={<RequireAuth />}>
-          <Route element={<AppShell />}>
-            <Route index element={<StartRedirect />} />
-            <Route path="overview" element={<OverviewPage />} />
-            <Route element={<PlacesLayout />}>
-              <Route path="rooms" element={<RoomsPage />} />
-              <Route path="containers" element={<ContainersPage />} />
-            </Route>
-            <Route path="rooms/:roomId" element={<RoomDetailPage />} />
-            <Route path="items" element={<ItemsPage />} />
-            <Route element={<RequireWriter />}>
-              <Route path="items/new" element={<ItemNewPage />} />
-              <Route path="items/:itemId/edit" element={<ItemEditPage />} />
-              <Route path="add-items" element={<AddItemsRedirect />} />
-            </Route>
-            <Route path="items/:itemId" element={<ItemDetailPage />} />
-            <Route path="review" element={<ReviewPage />} />
-            <Route path="loans" element={<LoansPage />} />
-            <Route path="loans/:loanId" element={<LoanDetailPage />} />
-            <Route
-              path="borrowed/:borrowedId"
-              element={<BorrowedDetailPage />}
-            />
-            <Route path="documents" element={<DocumentsPage />} />
-            <Route
-              path="documents/:documentId"
-              element={<DocumentDetailPage />}
-            />
-            <Route
-              path="documents/:documentId/view"
-              element={<DocumentViewPage />}
-            />
-            <Route element={<FinancialsLayout />}>
-              <Route path="purchases" element={<PurchasesPage />} />
-              <Route path="warranties" element={<WarrantiesPage />} />
-              <Route path="insurance" element={<InsurancePage />} />
-            </Route>
-            <Route element={<RequireWriter />}>
-              <Route path="imports" element={<ImportsPage />} />
-              <Route path="imports/:batchId" element={<ImportDetailPage />} />
-            </Route>
-            <Route path="assistant" element={<LegacyAssistantRedirect />} />
-            <Route element={<RequireWriter />}>
-              {/* Photo capture now lives in Add items; old links keep their place context. */}
-              <Route path="scan" element={<AddItemsRedirect />} />
-              <Route path="recognize" element={<AddItemsRedirect />} />
-            </Route>
-            <Route
-              path="containers/:containerId"
-              element={<ContainerDetailPage />}
-            />
-            <Route path="stocktake" element={<StocktakeIndexPage />} />
-            <Route path="stocktake/:sessionId" element={<StocktakePage />} />
-            <Route element={<RequireWriter />}>
-              <Route path="labels" element={<LabelsPage />} />
-            </Route>
-            <Route path="search" element={<LegacySearchRedirect />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="settings/account" element={<AccountSettingsPage />} />
-            <Route path="settings/household" element={<SettingsHouseholdPage />} />
-            <Route path="settings/appearance" element={<SettingsAppearancePage />} />
-            <Route path="settings/services" element={<SettingsServicesPage />} />
-            <Route path="settings/advanced" element={<SettingsAdvancedPage />} />
-            <Route path="settings/members" element={<MembersSettingsPage />} />
-            <Route path="settings/ai" element={<AiSettingsPage />} />
-            <Route
-              path="settings/system-status"
-              element={<SystemStatusPage />}
-            />
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
+          <Route
+            path="*"
+            element={<AppShell routes={SHELL_ROUTES} panelRoutes={ITEM_PANEL_ROUTES} />}
+          />
         </Route>
       </Routes>
       <Toaster />

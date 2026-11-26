@@ -1,9 +1,9 @@
 import {
   BookOpen,
-  ChevronRight,
   Download,
   FileText,
   Image as ImageIcon,
+  MoreHorizontal,
   ReceiptText,
   ScrollText,
   ShieldCheck,
@@ -12,9 +12,19 @@ import {
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { DOCUMENT_TYPE_LABELS, OCR_STATUS_LABELS } from "@/lib/labels";
 import type { DocumentSummary, DocumentType } from "@/lib/types";
-import { formatDate, formatFileSize, pluralize } from "@/lib/utils";
+import { cn, formatDate, formatFileSize, pluralize } from "@/lib/utils";
+
+const controlClass =
+  "flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring coarse:size-11";
 
 const TYPE_ICONS: Record<DocumentType, typeof FileText> = {
   receipt: ReceiptText,
@@ -25,6 +35,10 @@ const TYPE_ICONS: Record<DocumentType, typeof FileText> = {
   other: FileText,
 };
 
+/**
+ * One document as a short row: icon, title, one line of facts and one control.
+ * It fits a 320 px screen. `compact` drops the badges for use inside other lists.
+ */
 export function DocumentCard({
   document,
   onDelete,
@@ -38,54 +52,50 @@ export function DocumentCard({
     ? ImageIcon
     : TYPE_ICONS[document.document_type] ?? FileText;
   const ocrTone =
-    document.ocr_status === "succeeded"
-      ? "sage"
-      : document.ocr_status === "failed"
-        ? "destructive"
-        : document.ocr_status === "queued" || document.ocr_status === "processing"
-          ? "brass"
-          : "outline";
+    document.ocr_status === "failed"
+      ? "destructive"
+      : document.ocr_status === "queued" || document.ocr_status === "processing"
+        ? "brass"
+        : "outline";
+  // "Extracted" is the normal state, so only the other states are shown.
+  const showOcr = document.ocr_status !== "succeeded";
 
   return (
-    <article className={`relative group rounded-xl transition-colors focus-within:ring-2 focus-within:ring-ring/40 ${compact ? "flex items-center gap-3 py-3 hover:bg-secondary/25" : "surface p-4 hover:border-brass/40 sm:p-5"}`}>
-      <span
-        className={
-          compact
-            ? "flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary/80 text-muted-foreground"
-            : "flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-foreground/55 transition-colors group-hover:text-foreground"
-        }
-      >
-        <Icon className={compact ? "size-4" : "size-5"} strokeWidth={1.6} />
+    <article
+      className={cn(
+        "group relative flex min-w-0 items-start gap-3 rounded-xl transition-colors focus-within:ring-2 focus-within:ring-ring/40",
+        compact ? "py-3 hover:bg-secondary/25" : "surface p-3 hover:border-brass/40",
+      )}
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary/80 text-muted-foreground">
+        <Icon className="size-4" strokeWidth={1.6} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Link
-            to={`/documents/${document.id}`}
-            className="min-w-0 truncate text-sm font-medium underline-offset-4 after:absolute after:inset-0 after:rounded-xl hover:underline focus-visible:outline-none"
-          >
-            {document.title}
-          </Link>
-          {!compact && (
-            <Badge variant="outline" className="shrink-0">
-              {DOCUMENT_TYPE_LABELS[document.document_type]}
-            </Badge>
-          )}
-          {!compact && document.page_count > 1 && (
-            <Badge variant="secondary" className="shrink-0">
-              {pluralize(document.page_count, "page")}
-            </Badge>
-          )}
-          <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" aria-hidden />
-        </div>
-        <p className="mt-1 truncate text-2xs text-muted-foreground">
+        <Link
+          to={`/documents/${document.id}`}
+          className="block truncate text-sm font-medium underline-offset-4 after:absolute after:inset-0 after:rounded-xl hover:underline focus-visible:outline-none"
+        >
+          {document.title}
+        </Link>
+        <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
           {document.merchant ? `${document.merchant} · ` : ""}
           {document.document_date ? `${formatDate(document.document_date)} · ` : ""}
           {formatFileSize(document.byte_size)}
           {document.item_count > 0 ? ` · ${pluralize(document.item_count, "item")}` : ""}
         </p>
         {!compact && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <Badge variant={ocrTone}>OCR: {OCR_STATUS_LABELS[document.ocr_status]}</Badge>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="shrink-0">
+              {DOCUMENT_TYPE_LABELS[document.document_type]}
+            </Badge>
+            {document.page_count > 1 && (
+              <Badge variant="secondary" className="shrink-0">
+                {pluralize(document.page_count, "page")}
+              </Badge>
+            )}
+            {showOcr && (
+              <Badge variant={ocrTone}>OCR: {OCR_STATUS_LABELS[document.ocr_status]}</Badge>
+            )}
             {document.items.slice(0, 2).map((item) => (
               <Link
                 key={item.id}
@@ -106,24 +116,45 @@ export function DocumentCard({
           </div>
         )}
       </div>
-      <div className="relative z-10 flex w-fit shrink-0 items-center gap-0.5">
-        <a
-          href={document.url}
-          className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          aria-label={`Download ${document.title}`}
-          title="Download"
-        >
-          <Download className="size-3.5" />
-        </a>
-        {onDelete && (
-          <button
-            type="button"
-            onClick={() => onDelete(document)}
-            className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            aria-label={`Delete ${document.title}`}
+      <div className="relative z-10 -my-1 -mr-1 shrink-0">
+        {onDelete ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={controlClass}
+                aria-label={`Options for ${document.title}`}
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <a href={document.url} aria-label={`Download ${document.title}`}>
+                  <Download />
+                  Download
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                destructive
+                onSelect={() => onDelete(document)}
+                aria-label={`Delete ${document.title}`}
+              >
+                <Trash2 />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <a
+            href={document.url}
+            className={controlClass}
+            aria-label={`Download ${document.title}`}
+            title="Download"
           >
-            <Trash2 className="size-3.5" />
-          </button>
+            <Download className="size-4" />
+          </a>
         )}
       </div>
     </article>

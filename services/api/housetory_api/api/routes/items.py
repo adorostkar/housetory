@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from ...db import get_db
@@ -13,6 +13,7 @@ from ...models import (
     ImportEntry,
     Item,
     ItemPhoto,
+    Property,
     Purchase,
     Room,
     StorageLocation,
@@ -112,14 +113,15 @@ def list_items(
     category_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     purchase_info: PurchaseInfoFilter | None = None,
+    ids: Annotated[list[uuid.UUID] | None, Query(max_length=100)] = None,
     include_descendants: bool = False,
     include_archived: bool = False,
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     offset: Annotated[int, Query(ge=0)] = 0,
     representation: Literal["full", "summary"] = "full",
-    sort: Literal["created_desc", "created_asc", "name_asc", "name_desc", "updated_desc"] = (
-        "created_desc"
-    ),
+    sort: Literal[
+        "created_desc", "created_asc", "name_asc", "name_desc", "updated_desc", "location_asc"
+    ] = "created_desc",
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ItemList | ItemSummaryList:
@@ -163,6 +165,9 @@ def list_items(
         conditions.append(Item.tags.any(Tag.id == tag_id))
     if purchase_info is not None:
         conditions.append(purchase_info_filter_clause(purchase_info))
+    if ids:
+        # Narrows the list to known items. Every other filter and the household still apply.
+        conditions.append(Item.id.in_(ids))
     term = (q or "").strip()
     if term:
         search = f"%{term}%"
@@ -208,24 +213,48 @@ def list_items(
         conditions.append(or_(*search_conditions))
 
     total = int(db.scalar(select(func.count(Item.id)).where(*conditions)) or 0)
-    ordering = {
-        "created_desc": [Item.created_at.desc()],
-        "created_asc": [Item.created_at.asc()],
-        "name_asc": [func.lower(Item.name).asc()],
-        "name_desc": [func.lower(Item.name).desc()],
-        "updated_desc": [Item.updated_at.desc()],
-    }[sort] + [Item.id.asc()]
-    items = db.scalars(
-        select(Item)
-        .options(
-            *(
-                item_summary_load_options(compact_purchase=True)
-                if representation == "summary"
-                else item_load_options()
-            )
+    statement = select(Item).options(
+        *(
+            item_summary_load_options(compact_purchase=True)
+            if representation == "summary"
+            else item_load_options()
         )
-        .where(*conditions)
-        .order_by(*ordering)
+    )
+    if sort == "location_asc":
+        # Property, room, storage place, then name. Items without a place come last.
+        statement = (
+            statement.outerjoin(StorageLocation, StorageLocation.id == Item.storage_location_id)
+            .outerjoin(Room, Room.id == func.coalesce(Item.room_id, StorageLocation.room_id))
+            .outerjoin(Property, Property.id == Room.property_id)
+        )
+        ordering = [
+            func.lower(Property.name).asc().nulls_last(),
+            func.lower(Room.name).asc().nulls_last(),
+            func.lower(StorageLocation.name).asc().nulls_last(),
+            func.lower(Item.name).asc(),
+        ]
+    else:
+        ordering = {
+            "created_desc": [Item.created_at.desc()],
+            "created_asc": [Item.created_at.asc()],
+            "name_asc": [func.lower(Item.name).asc()],
+            "name_desc": [func.lower(Item.name).desc()],
+            "updated_desc": [Item.updated_at.desc()],
+        }[sort]
+    if term:
+        # A search is ordered by how well the name matches. The chosen sort only breaks ties.
+        name = func.lower(Item.name)
+        needle = term.lower()
+        relevance = case(
+            (name == needle, 0),
+            (name.like(f"{needle}%"), 1),
+            (name.like(f"%{needle}%"), 2),
+            else_=3,
+        )
+        ordering = [relevance.asc(), *ordering]
+    items = db.scalars(
+        statement.where(*conditions)
+        .order_by(*ordering, Item.id.asc())
         .limit(limit)
         .offset(offset)
     ).all()

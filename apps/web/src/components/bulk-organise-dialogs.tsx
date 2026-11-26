@@ -45,7 +45,10 @@ function useRequestId(open: boolean) {
   return requestId;
 }
 
-function selectionSummary(items: ItemListEntry[]) {
+/** What a move needs to know about an item. A list entry or a full item both fit. */
+export type MovableItem = Pick<ItemListEntry, "id" | "quantity" | "is_archived" | "on_loan_quantity">;
+
+function selectionSummary(items: MovableItem[]) {
   return {
     count: items.length,
     units: items.reduce((sum, item) => sum + item.quantity, 0),
@@ -54,7 +57,7 @@ function selectionSummary(items: ItemListEntry[]) {
   };
 }
 
-function SelectionSummary({ items }: { items: ItemListEntry[] }) {
+function SelectionSummary({ items }: { items: MovableItem[] }) {
   const summary = selectionSummary(items);
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/20 px-3.5 py-3 text-2xs leading-relaxed text-muted-foreground">
@@ -99,11 +102,14 @@ export function BulkMoveDialog({
   onOpenChange,
   items,
   onCompleted,
+  itemName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: ItemListEntry[];
+  items: MovableItem[];
   onCompleted: (result: BulkMoveResult) => void;
+  /** Set when one item is moved from its own page; the wording then names it. */
+  itemName?: string;
 }) {
   const roomsQuery = useRooms(undefined, open);
   const locationsQuery = useLocations(undefined, open);
@@ -156,12 +162,15 @@ export function BulkMoveDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <MoveRight className="size-4 text-brass" />
-            Move selected items
+            <MoveRight className="size-4 shrink-0 text-brass" />
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              {itemName ? `Move ${itemName}` : "Move selected items"}
+            </span>
           </DialogTitle>
           <DialogDescription>
-            This changes each record's home room/place. It does not change quantities,
-            loans or create locations.
+            {itemName
+              ? "This changes where the item lives. It does not change quantities or loans."
+              : "This changes each record's home room/place. It does not change quantities, loans or create locations."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -218,12 +227,16 @@ export function BulkMoveDialog({
           <div className="rounded-xl border border-border/60 bg-background/35 px-3.5 py-2.5 text-2xs leading-relaxed text-muted-foreground">
             <p className="font-medium text-foreground/80">Preview</p>
             <p className="mt-1">
-              {summary.count} selected item(s), {summary.units} recorded unit(s). Moving
-              the same total quantity to the chosen home; no quantity split is created.
+              {itemName
+                ? `All ${pluralize(summary.units, "recorded unit")} move`
+                : `${summary.count} selected item(s), ${summary.units} recorded unit(s). Moving
+              the same total quantity`}{" "}
+              to the chosen home; no quantity split is created.
             </p>
             <p className="mt-1">
-              Individual move history is recorded and can be undone from each item's
-              timeline.
+              {itemName
+                ? "The move is recorded in the item's history and can be undone there."
+                : "Individual move history is recorded and can be undone from each item's timeline."}
             </p>
           </div>
           {error && <FormError message={error} />}
@@ -237,7 +250,7 @@ export function BulkMoveDialog({
               title={summary.archived ? "Restore archived items first." : undefined}
             >
               {move.isPending ? <Spinner /> : <ArrowRight />}
-              Move selected
+              {itemName ? "Move" : "Move selected"}
             </Button>
           </DialogFooter>
         </form>

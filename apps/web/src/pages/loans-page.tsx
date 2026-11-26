@@ -1,40 +1,35 @@
 import {
-  AlertTriangle,
+  ChevronDown,
   HandCoins,
   Package,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
-  BorrowRecordDialog,
-  NewLoanChoiceDialog,
+  NewLoanDialog,
+  type NewLoanDirection,
   ReturnBorrowedDialog,
 } from "@/components/borrowed-dialogs";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
-import { LoanItemPickerDialog } from "@/components/loan-item-picker";
+import { ReturnLoanDialog } from "@/components/loan-dialogs";
 import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { PersonNameInput } from "@/components/person-name-input";
-import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { LOAN_STATUS_LABELS, LOAN_STATUS_TONE } from "@/lib/labels";
 import { useBorrowedList, useCanWrite, useLoans } from "@/lib/queries";
-import type {
-  BorrowedRecord,
-  ItemListEntry,
-  Loan,
-  LoanFilterStatus,
-} from "@/lib/types";
+import type { BorrowedRecord, Loan, LoanFilterStatus } from "@/lib/types";
 import { borrowedLocationPrefix, borrowedPlaceLabel } from "@/lib/borrowed";
-import { cn, formatDate, pluralize } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const FILTERS: Array<{ value: LoanFilterStatus; label: string }> = [
   { value: "open", label: "Outstanding" },
@@ -44,8 +39,8 @@ const FILTERS: Array<{ value: LoanFilterStatus; label: string }> = [
 
 type Direction = "all" | "lent_out" | "borrowed";
 
-const DIRECTIONS: Array<{ value: Direction; label: string }> = [
-  { value: "all", label: "All" },
+/** Two chips. With neither pressed, both directions are shown. */
+const DIRECTIONS: Array<{ value: Exclude<Direction, "all">; label: string }> = [
   { value: "lent_out", label: "Lent out" },
   { value: "borrowed", label: "Borrowed" },
 ];
@@ -86,10 +81,9 @@ export function LoansPage() {
   const canWrite = useCanWrite();
   const [search, setSearch] = React.useState(qParam);
   const [person, setPerson] = React.useState(personParam);
-  const [choiceOpen, setChoiceOpen] = React.useState(false);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [borrowOpen, setBorrowOpen] = React.useState(false);
-  const [selectedItem, setSelectedItem] = React.useState<ItemListEntry | null>(null);
+  const [newLoan, setNewLoan] = React.useState<NewLoanDirection | null>(null);
+  const [newLoanDirection, setNewLoanDirection] = React.useState<NewLoanDirection>("lend");
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [returnLoan, setReturnLoan] = React.useState<Loan | null>(null);
   const [returnBorrowed, setReturnBorrowed] = React.useState<BorrowedRecord | null>(
     null,
@@ -192,11 +186,37 @@ export function LoansPage() {
   });
 
   const lentOpenCount = loanData?.outstanding_count ?? 0;
-  const lentUnits = loanData?.on_loan_quantity ?? 0;
   const borrowedOpenCount = borrowedData?.open_count ?? 0;
-  const borrowedHeld = borrowedData?.outstanding_quantity ?? 0;
-  const overdueCount =
-    (loanData?.overdue_count ?? 0) + (borrowedData?.overdue_count ?? 0);
+  const overdueCount = itemId
+    ? (loanData?.overdue_count ?? 0)
+    : (loanData?.overdue_count ?? 0) + (borrowedData?.overdue_count ?? 0);
+  // A link can ask for a status that is not one of the three usual choices.
+  const statusOptions = FILTERS.some((filter) => filter.value === status)
+    ? FILTERS
+    : [
+        ...FILTERS,
+        {
+          value: status,
+          label: LOAN_STATUS_LABELS[status as keyof typeof LOAN_STATUS_LABELS] ?? status,
+        },
+      ];
+  const statusLabel =
+    statusOptions.find((filter) => filter.value === status)?.label ?? "Outstanding";
+  // The direction chips and the search stay in view, so they are not counted.
+  const filterChips = [
+    status !== "open"
+      ? { key: "status", label: statusLabel, remove: () => updateFilters({ status: null }) }
+      : null,
+    overdue
+      ? { key: "overdue", label: "Past due", remove: () => updateFilters({ overdue: null }) }
+      : null,
+    personParam.trim()
+      ? { key: "person", label: `Person: ${personParam.trim()}`, remove: clearPerson }
+      : null,
+    itemId
+      ? { key: "item", label: "One item", remove: () => updateFilters({ item_id: null }) }
+      : null,
+  ].filter((chip): chip is NonNullable<typeof chip> => chip !== null);
   const visibleTotal =
     (direction === "borrowed" ? 0 : loans.length) +
     (direction === "lent_out" ? 0 : borrowed.length);
@@ -207,20 +227,9 @@ export function LoansPage() {
   const restoreNewLoanFocus = () => {
     window.requestAnimationFrame(() => newLoanButtonRef.current?.focus());
   };
-  const beginNewLoan = () => {
-    if (itemId) {
-      setPickerOpen(true);
-      return;
-    }
-    setChoiceOpen(true);
-  };
-  const selectItem = (item: ItemListEntry) => {
-    setPickerOpen(false);
-    setSelectedItem(item);
-  };
-  const closeSelectedItem = () => {
-    setSelectedItem(null);
-    restoreNewLoanFocus();
+  const beginNewLoan = (direction: NewLoanDirection = "lend") => {
+    setNewLoanDirection(direction);
+    setNewLoan(direction);
   };
   const refetchBoth = () => {
     void loansQuery.refetch();
@@ -230,187 +239,180 @@ export function LoansPage() {
   return (
     <PageLayout
       header={{
-        eyebrow: "Inventory · Lending",
         title: "Loans",
-        description: itemId
-          ? "Owned-item lending history, with borrowed-from-others records kept separate."
-          : "Who has your things and what you're keeping for someone else. Lent-out goods are household-owned; borrowed goods belong to another person and never become owned stock.",
-        actions: (
-          <>
+        titleAddon: (
+          <div className="mt-0.5 flex items-center justify-between gap-3">
+            <p className="min-w-0 text-xs text-muted-foreground" data-testid="loans-summary">
+              {lentOpenCount} out ·{" "}
+              {overdueCount > 0 ? (
+                <button
+                  type="button"
+                  aria-pressed={overdue}
+                  onClick={() => updateFilters({ overdue: overdue ? null : "1" })}
+                  className="inline-flex min-h-9 items-center font-medium text-destructive underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring coarse:min-h-11"
+                >
+                  {overdueCount} past due
+                </button>
+              ) : (
+                "0 past due"
+              )}
+              {itemId ? "" : ` · ${borrowedOpenCount} borrowed`}
+            </p>
             {canWrite && (
-              <Button ref={newLoanButtonRef} onClick={beginNewLoan}>
+              <Button ref={newLoanButtonRef} className="shrink-0" onClick={() => beginNewLoan()}>
                 <HandCoins />
                 New loan
               </Button>
             )}
-            <Button variant="outline" asChild>
-              <Link to="/items">Inventory</Link>
-            </Button>
-          </>
+          </div>
         ),
       }}
     >
-      <div className="grid grid-cols-2 gap-3.5 sm:gap-4 xl:grid-cols-3">
-        <StatCard
-          label="Lent out"
-          value={lentOpenCount}
-          detail={pluralize(lentUnits, "owned unit") + " with others"}
-          icon={Package}
-          accent
-        />
-        <StatCard
-          label="Borrowed"
-          value={itemId ? 0 : borrowedOpenCount}
-          detail={
-            itemId
-              ? "Not shown for an item-specific view"
-              : pluralize(borrowedHeld, "unit") + " held here"
-          }
-          icon={HandCoins}
-        />
-        <StatCard
-          label="Past due"
-          value={itemId ? loanData?.overdue_count ?? 0 : overdueCount}
-          detail="Based on your local date"
-          icon={AlertTriangle}
-          className="col-span-2 xl:col-span-1"
-        />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {!itemId && (
+          <div className="flex shrink-0 gap-1.5" role="group" aria-label="Loan direction">
+            {DIRECTIONS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                aria-pressed={direction === entry.value}
+                onClick={() =>
+                  updateFilters({
+                    direction: direction === entry.value ? null : entry.value,
+                  })
+                }
+                className={cn(
+                  "min-h-9 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring coarse:min-h-11",
+                  direction === entry.value
+                    ? entry.value === "borrowed"
+                      ? "border-brass/30 bg-brass-soft text-brass"
+                      : "border-sage/30 bg-sage-soft text-accent-foreground"
+                    : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="relative min-w-[10rem] flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-10"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Person or item"
+            aria-label="Search loans"
+          />
+        </div>
+        <button
+          type="button"
+          className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-expanded={filtersOpen}
+          aria-controls="loan-filters"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <SlidersHorizontal className="size-4 text-muted-foreground" aria-hidden="true" />
+          <span>Filters</span>
+          {filterChips.length > 0 && (
+            <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+              <span className="sr-only">Active filters: </span>
+              {filterChips.length}
+            </Badge>
+          )}
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              filtersOpen && "rotate-180",
+            )}
+          />
+        </button>
       </div>
 
-      <section className="mt-6 surface p-4 sm:p-5">
-        <div className="flex flex-col gap-3">
-          {itemId && (
-            <p className="text-2xs text-muted-foreground">
-              Showing loans for one owned item. Borrowed-from-others records are omitted.{" "}
-              <Link to="/loans" className="underline underline-offset-4 hover:text-foreground">
-                Clear
-              </Link>
-            </p>
-          )}
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            {!itemId && (
-              <div
-                className="flex flex-wrap gap-1.5"
-                role="tablist"
-                aria-label="Loan direction"
+      {(filtersOpen || filterChips.length > 0) && (
+        <div className="surface mb-3 p-3.5">
+          {filtersOpen && (
+            <div
+              id="loan-filters"
+              className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] items-center gap-2"
+            >
+              <Select
+                aria-label="Loan status"
+                value={status}
+                onChange={(event) =>
+                  updateFilters({
+                    status: event.target.value === "open" ? null : event.target.value,
+                  })
+                }
+                className="rounded-lg text-sm"
               >
-                {DIRECTIONS.map((entry) => (
-                  <button
-                    key={entry.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={direction === entry.value}
-                    onClick={() =>
-                      updateFilters({
-                        direction: entry.value === "all" ? null : entry.value,
-                      })
-                    }
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
-                      direction === entry.value
-                        ? entry.value === "borrowed"
-                          ? "border-brass/30 bg-brass-soft text-brass"
-                          : entry.value === "lent_out"
-                            ? "border-sage/30 bg-sage-soft text-accent-foreground"
-                            : "border-foreground/15 bg-foreground text-background"
-                        : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {entry.label}
-                  </button>
+                {statusOptions.map((filter) => (
+                  <option key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </option>
                 ))}
-              </div>
-            )}
-            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Loan filters">
-              {FILTERS.map((filter) => (
-                <button
-                  key={filter.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={status === filter.value}
-                  onClick={() =>
-                    updateFilters({
-                      status: filter.value === "open" ? null : filter.value,
-                    })
-                  }
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-2xs font-medium transition-colors",
-                    status === filter.value
-                      ? "border-foreground/15 bg-foreground text-background"
-                      : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <label className="flex items-center gap-2 text-2xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  className="size-3.5 accent-primary"
-                  checked={overdue}
-                  onChange={(event) =>
-                    updateFilters({
-                      overdue: event.target.checked ? "1" : null,
-                    })
-                  }
-                />
-                Past due only
-              </label>
-              <div className="relative min-w-0 sm:w-48">
+              </Select>
+              <div className="relative min-w-0">
                 <PersonNameInput
                   id="loans-person-filter"
                   ariaLabel="Filter loans by person"
                   value={person}
                   onChange={setPerson}
-                  placeholder="Filter by person"
-                  className={cn(
-                    "h-9 text-xs",
-                    person.trim() && "pr-8",
-                  )}
+                  placeholder="Person"
+                  className={cn("rounded-lg text-sm", person.trim() && "pr-11")}
                 />
                 {person.trim() && (
                   <button
                     type="button"
                     aria-label="Clear person filter"
-                    className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                    className="absolute right-0 top-0 z-10 flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
                     onClick={clearPerson}
                   >
                     <X className="size-3.5" />
                   </button>
                 )}
               </div>
-              <div className="relative min-w-0 sm:w-64">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="h-9 pl-8 text-xs"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Person, owner or item"
-                  aria-label="Search loans"
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={overdue}
+                  onChange={(event) =>
+                    updateFilters({ overdue: event.target.checked ? "1" : null })
+                  }
                 />
-              </div>
+                Past due only
+              </label>
             </div>
-          </div>
-          {personParam.trim() && (
-            <p className="text-2xs leading-relaxed text-muted-foreground">
-              Showing{" "}
-              {direction === "all"
-                ? "lent-out and borrowed records"
-                : direction === "lent_out"
-                  ? "lent-out records"
-                  : "borrowed records"}{" "}
-              for{" "}
-              <span className="font-medium text-foreground">
-                {personParam.trim()}
-              </span>
-              . Outstanding, returned, all and past-due filters still apply.
-            </p>
+          )}
+          {filterChips.length > 0 && (
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-1.5",
+                filtersOpen && "mt-3 border-t border-border/60 pt-3",
+              )}
+            >
+              {filterChips.map((chip) => (
+                <Badge key={chip.key} variant="secondary" className="gap-1 py-0 pl-2.5 pr-0 text-2xs">
+                  <span className="max-w-56 truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={chip.remove}
+                    className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                    aria-label={`Remove ${chip.label}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
           )}
         </div>
+      )}
 
-        <div className="mt-4 space-y-2.5">
+      <section aria-label="Loans list">
+        <div className="space-y-2.5">
           {rows.length === 0 ? (
             hasFilters ? (
               <p className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-xs text-muted-foreground">
@@ -425,7 +427,7 @@ export function LoansPage() {
                     : "This household has no open lent-out loans right now."
                 }
                 actionLabel={canWrite ? "New loan" : "Browse inventory"}
-                onAction={canWrite ? beginNewLoan : undefined}
+                onAction={canWrite ? () => beginNewLoan("lend") : undefined}
                 actionTo={canWrite ? undefined : "/items"}
               />
             ) : direction === "borrowed" ? (
@@ -437,7 +439,7 @@ export function LoansPage() {
                     : "This household has no borrowed-from-others records right now."
                 }
                 actionLabel={canWrite ? "Borrow from someone" : "Browse inventory"}
-                onAction={canWrite ? () => setBorrowOpen(true) : undefined}
+                onAction={canWrite ? () => beginNewLoan("borrow") : undefined}
                 actionTo={canWrite ? undefined : "/items"}
               />
             ) : (
@@ -449,7 +451,7 @@ export function LoansPage() {
                     : "This household has no open lending or borrowed records right now."
                 }
                 actionLabel={canWrite ? "New loan" : "Browse inventory"}
-                onAction={canWrite ? beginNewLoan : undefined}
+                onAction={canWrite ? () => beginNewLoan("lend") : undefined}
                 actionTo={canWrite ? undefined : "/items"}
                 secondary={
                   canWrite ? (
@@ -496,64 +498,23 @@ export function LoansPage() {
         )}
       </section>
 
-      <NewLoanChoiceDialog
-        open={choiceOpen}
+      <NewLoanDialog
+        open={newLoan !== null}
+        initialDirection={newLoanDirection}
         onOpenChange={(open) => {
-          setChoiceOpen(open);
-          if (!open) restoreNewLoanFocus();
-        }}
-        onLendOwned={() => {
-          setChoiceOpen(false);
-          setPickerOpen(true);
-        }}
-        onBorrow={() => {
-          setChoiceOpen(false);
-          setBorrowOpen(true);
-        }}
-      />
-
-      <LoanItemPickerDialog
-        open={pickerOpen}
-        onOpenChange={(open) => {
-          setPickerOpen(open);
-          if (!open) restoreNewLoanFocus();
-        }}
-        onSelect={selectItem}
-      />
-
-      <BorrowRecordDialog
-        open={borrowOpen}
-        onOpenChange={(open) => {
-          setBorrowOpen(open);
-          if (!open) restoreNewLoanFocus();
-        }}
-        onCreated={() => {
-          updateFilters({ direction: null, status: null });
-          refetchBoth();
+          if (open) return;
+          setNewLoan(null);
           restoreNewLoanFocus();
         }}
+        onLent={() => {
+          updateFilters({ status: null });
+          refetchBoth();
+        }}
+        onBorrowed={() => {
+          updateFilters({ direction: null, status: null });
+          refetchBoth();
+        }}
       />
-
-      {selectedItem && (
-        <LendLoanDialog
-          open={Boolean(selectedItem)}
-          onOpenChange={(open) => {
-            if (!open) closeSelectedItem();
-          }}
-          itemId={selectedItem.id}
-          itemName={selectedItem.name}
-          available={Math.max(
-            0,
-            selectedItem.quantity - (selectedItem.on_loan_quantity ?? 0),
-          )}
-          onCreated={() => {
-            updateFilters({ status: null });
-            setSelectedItem(null);
-            refetchBoth();
-            restoreNewLoanFocus();
-          }}
-        />
-      )}
 
       {returnLoan && (
         <ReturnLoanDialog

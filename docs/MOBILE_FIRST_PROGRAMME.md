@@ -12,9 +12,9 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | --- | --- | --- |
 | 0 | Three new UI designs in Figma | Done. **Design D approved on 26 Nov 2026.** |
 | 1 | Shared mobile behaviour, shell and navigation | Done (see "Phase 1 record") |
-| 2 | Capture, documents and reviews | Not started |
-| 3 | Natural assistant behaviour | Not started |
-| 4 | Inventory-first navigation and everyday flows | Not started |
+| 2 | Capture, documents and reviews | Done (see "Phase 2 record") |
+| 3 | Natural assistant behaviour | Done (see "Phase 3 record") |
+| 4 | Inventory-first navigation and everyday flows | Done (see "Phase 4 record") |
 | 5 | Secondary flows and account design | Done (see "Phase 5 record") |
 | 6 | Verification and final handoff | Not started |
 
@@ -235,6 +235,178 @@ Checks:
 
 Not checked yet: a real iPhone, and the other end-to-end files. Many of them
 still name the old navigation. They are updated in Phase 6.
+
+## Phase 2 record
+
+What was built:
+
+- **Adding a document.** The file is saved as soon as it is chosen, dropped or
+  photographed. Undo deletes it again. After that the surface shows a preview
+  and the real reading state. "Attach to an item" and "Add details" are optional
+  and start closed. From an item page, a chip shows "Attached to: (item)". No
+  type, merchant, date or item is needed. The same flow is used on the
+  Documents page, on an item, and for the scan dialog. Through the assistant,
+  a file is saved as "Other document" unless a type is chosen.
+- **Manuals** do not open a purchase-style review any more. They are left out
+  of the "to review" list.
+- **One review row** (`components/review-row.tsx`) for photo recognition,
+  imports, hierarchy imports and details read from a document. A row is closed
+  at first. It shows name, quantity and what would happen: the read values for
+  a new item, or old → new for an existing one. Uncertain values are marked
+  "check". Name and quantity can be changed in the row. Other fields are under
+  "More details".
+- **Selection.** Checkboxes only select. Nothing is selected at the start.
+  There is an explicit "Select all". Each row has its own "Add item" or "Apply
+  changes". The bulk button says what it will do, for example "Add 3 selected
+  items", and is off when nothing is selected. New items and updates have
+  separate counts.
+- **No more Import/Skip/Reject dropdowns.** Merge choices show only for a
+  possible duplicate.
+- **Skip with Undo.** Skip moves the row to a "Skipped (n)" part at the end. A
+  message offers Undo. The server remembers the skip and the edits, so it is
+  still there after a reload, and Restore brings the row back. New server
+  calls: restore an import entry; skip and restore a document line; undo a
+  dismissed suggestion.
+- **Details read from a document** can be applied line by line. A line is never
+  applied twice. All parts go to one purchase, and the parts together cannot
+  be more than the purchase total. A document stays in the "to review" count
+  until every line is applied or skipped.
+- **Errors** sit beside the field. After a partial failure, the rows that
+  worked are done and the rows that failed stay selected.
+- **Suggestions in chat** start as one quiet line, for example "2 possible
+  corrections · View suggestions".
+
+Limits:
+
+- Photo recognition rows have no small picture each. The source photo is shown
+  once, above the rows.
+- Line-by-line apply works inside one reading of the document. If the document
+  is read again by AI after a part was applied, the older "already applied"
+  rule is used.
+- In Add items, a document still opens its page after saving, with an Undo
+  message. It does not use the shared dialog.
+
+Checks: backend tests for capture reviews, imports, hierarchy imports,
+recognition, inventory review, documents and document extraction pass. One new
+test applies 1 of 3 lines, reloads, skips and restores, sends the first line
+again, tries to go over the total, then finishes: 3 items, 1 purchase, nothing
+unallocated. Unit tests cover: nothing pre-selected, a row cannot be added
+twice, the bulk label, skip and restore, a manual does not open a review, and
+saving without details. The add-a-document flow was also tried in the running
+app at 390 px: save on choose, then Undo.
+
+## Phase 3 record
+
+What was built:
+
+- **The page is the default subject only.** With the "This item" chip, a
+  question is about that item unless it names something else. Then it is about
+  that. Removing the chip sends no page at all. A page record that is archived
+  or gone is skipped; it no longer fails the question.
+- **General questions** are answered without looking in the inventory first.
+  Facts about recorded things, and limits or instructions for one product,
+  still need evidence. General advice is said to be general.
+- **Where a fact comes from.** Item details now say if a value was typed by a
+  person, came from a source, or is an estimate.
+- **Direct changes with Undo.** The server has a small allowlist: editing one
+  item, and moving one item. A change is applied at once only when the new
+  value or the place name is in the person's own words. It stays a preview
+  when it is guessed, clears a value, sets zero, goes below what is on loan,
+  touches more than one item, touches an item that holds other items, would be
+  the fourth direct change in one request, or comes after text from a document
+  or a web page was read. Viewers cannot change anything. Text inside
+  documents and web pages never counts as permission.
+- **Undo** puts the old values back only if the record still has the applied
+  values. If someone changed it since, Undo changes nothing and says why.
+  A replayed request does not apply twice.
+- **Manuals.** When brand and model are recorded and consistent, the assistant
+  searches without asking to confirm them. It still asks when they are missing
+  or conflict. One clear match can be saved in the same task when the person
+  asked for that.
+- **Stop and steer.** While a request runs, the message field stays open. The
+  words stop, cancel, avbryt or stopp end the request. Any other text changes
+  the rest of the work; finished steps are kept. The stop message lists what
+  was finished and what was already sent.
+- **Progress** lines come from the real tool state. There are no percentages.
+- **Answers** can use headings, numbered lists and tables. A table scrolls
+  sideways on a small screen. Sources are one closed "Sources (n)" list.
+
+New server calls: `POST /assistant/runs/{id}/steer` and
+`POST /assistant/actions/proposals/{id}/undo`.
+
+Not built:
+
+- **Video links.** The search service's video results could not be checked
+  without a network call, so nothing was guessed.
+- Lending and returning through the assistant stay previews.
+- A saved manual has no Undo in the assistant.
+
+Checks and their limits:
+
+- Backend assistant tests and the assistant unit tests pass, with new tests for
+  each point above (for example: on a drill page, "where is the tent?" looks up
+  the tent).
+- **No real AI model was used.** No provider is configured here. All model
+  behaviour above is proved only with scripted answers. The system prompt is
+  3,987 of 4,000 characters and an earlier real-model run was sensitive to its
+  wording, so a real-model check is still needed.
+
+## Phase 4 record
+
+What was built:
+
+- **Overview is removed.** The app opens in the item list. Totals and purchase
+  breakdowns moved to the top of Purchases. The warranty watch moved to
+  Warranties. Both are one line until opened.
+- **Item list.** Title with the count, one tools row (sort, Filters, view), a
+  short notice row only when there is something to do (findings to review,
+  loans past due, warranties ending), then compact rows. Cards are still
+  available. Checkboxes, "Select all loaded (N)" and the "only loaded items"
+  sentence appear after pressing Select.
+- **Sort:** Recent (default), Newest, Name, Location. The choice is remembered.
+  Recent uses the later of "added" and "opened". The order does not change
+  while browsing, so opening an item and coming back keeps the place.
+- **Search** results are ordered by how well the name matches. The sort control
+  is hidden during a search.
+- **Item page**, one column: name; "Lives in" with Move; "Right now" with Lend
+  or Return; small photos that open full screen; then tabs: Contents (for items
+  that hold things), Info, Documents, Loans, History. Photo source details are
+  under "Manage photos". Record details are folded.
+- **Item panel on desktop.** On screens 1200 px and wider an item opens beside
+  the page it was opened from. Editing opens in the same panel. The list stays
+  where it was. Below 1200 px the item is a full page.
+- **Item form.** One place field that opens property, room and storage place.
+  Save stays in view. Optional parts stay closed.
+- **Bulk actions.** A compact bar above the bottom bar: Move, Tags, More, Clear.
+  It hides while the keyboard is open. The selection survives opening an item.
+  A message says so when a selection was cut down.
+- **Rooms and containers.** Contents first. Places are a row of chips. An empty
+  photo area shows nothing; "Add photo" is in the ⋯ menu. Stocktake is one
+  line. All management is in one ⋯ menu. Delete and move still show what
+  happens to the contents.
+- **Loans.** The list starts under the title, with one summary line. Lent and
+  borrowed are two chips. Other filters are behind "Filters" with a count. A
+  new loan starts with item, person and quantity; dates and notes are under
+  "More options".
+- **Documents and Purchases.** Search is always visible; other filters open on
+  request with a count. A purchase is a compact row that opens to show items,
+  allocations and the receipt.
+
+Decisions:
+
+- Recently opened items are remembered **on the device only**, per person and
+  household, at most 50, and are cleared on sign-out. Another device shows a
+  different Recent order.
+- The remembered card or row choice uses a new key. Someone who had chosen
+  cards must choose once more.
+- Insurance for one item moved into the item's ⋯ menu.
+- The item list's Filters are closed on desktop too.
+
+Checks: backend item tests (ids filter, location sort, match order) and the
+unit tests of all changed pages pass. `e2e/navigation.spec.ts` has 10 checks,
+all passing against a throwaway local stack, including the desktop panel.
+The item list, item page, room page and desktop panel were looked at in the
+running app at 390 px and 1440 px.
 
 ## Phase 5 record
 

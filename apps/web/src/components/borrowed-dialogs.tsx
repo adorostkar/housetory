@@ -13,7 +13,10 @@ import { toast } from "sonner";
 
 import { CameraUpload } from "@/components/camera-upload";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Disclosure } from "@/components/disclosure";
 import { Field, FormError } from "@/components/form-field";
+import { LendLoanForm } from "@/components/loan-dialogs";
+import { LoanItemPicker } from "@/components/loan-item-picker";
 import { PersonNameInput } from "@/components/person-name-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,8 +33,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useCanWrite } from "@/lib/queries";
-import type { BorrowedDetail, BorrowedRecord } from "@/lib/types";
-import { localDateISO } from "@/lib/utils";
+import type { BorrowedDetail, BorrowedRecord, ItemListEntry, LoanDetail } from "@/lib/types";
+import { cn, formatDate, localDateISO } from "@/lib/utils";
 import {
   KeepingPlaceFields,
   invalidateBorrowed,
@@ -39,17 +42,68 @@ import {
   useRequestId,
 } from "@/components/borrowed-dialog-shared";
 
-export function NewLoanChoiceDialog({
+export type NewLoanDirection = "lend" | "borrow";
+
+const NEW_LOAN_DIRECTIONS: Array<{
+  value: NewLoanDirection;
+  label: string;
+  icon: typeof Package;
+  note: string;
+}> = [
+  {
+    value: "lend",
+    label: "Lend out",
+    icon: Package,
+    note: "Something the household owns goes to someone. It keeps its home place.",
+  },
+  {
+    value: "borrow",
+    label: "Borrow",
+    icon: HandCoins,
+    note: "Something that belongs to someone else is kept here. It never becomes owned stock.",
+  },
+];
+
+/**
+ * One surface for a new loan in either direction. It starts with the item, the
+ * person and the quantity. Everything else is under "More options".
+ */
+export function NewLoanDialog({
   open,
   onOpenChange,
-  onLendOwned,
-  onBorrow,
+  initialDirection = "lend",
+  onLent,
+  onBorrowed,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onLendOwned: () => void;
-  onBorrow: () => void;
+  initialDirection?: NewLoanDirection;
+  onLent?: (loan: LoanDetail) => void;
+  onBorrowed?: (record: BorrowedDetail) => void;
 }) {
+  const [direction, setDirection] = React.useState<NewLoanDirection>(initialDirection);
+  const [item, setItem] = React.useState<ItemListEntry | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setDirection(initialDirection);
+    setItem(null);
+  }, [open, initialDirection]);
+
+  const lendItem = React.useMemo(
+    () =>
+      item
+        ? {
+            id: item.id,
+            name: item.name,
+            available: Math.max(0, item.quantity - (item.on_loan_quantity ?? 0)),
+          }
+        : null,
+    [item],
+  );
+  const current = NEW_LOAN_DIRECTIONS.find((entry) => entry.value === direction);
+  const close = () => onOpenChange(false);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -58,57 +112,68 @@ export function NewLoanChoiceDialog({
             <ArrowLeftRight className="size-4 text-brass" />
             New loan
           </DialogTitle>
-          <DialogDescription>
-            Choose the direction. Lent-out goods are household-owned; borrowed goods
-            belong to someone else and never become owned inventory.
-          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={onLendOwned}
-            className="group rounded-2xl border border-border/70 bg-background/40 p-4 text-left transition-colors hover:border-sage/40 hover:bg-sage-soft/40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/10"
-          >
-            <span className="flex size-10 items-center justify-center rounded-full bg-sage-soft text-accent-foreground">
-              <Package className="size-4" />
-            </span>
-            <span className="mt-3 block text-sm font-medium">Lend out an item</span>
-            <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
-              Choose something the household owns and record who has it.
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={onBorrow}
-            className="group rounded-2xl border border-border/70 bg-background/40 p-4 text-left transition-colors hover:border-brass/40 hover:bg-brass-soft/40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/10"
-          >
-            <span className="flex size-10 items-center justify-center rounded-full bg-brass-soft text-brass">
-              <HandCoins className="size-4" />
-            </span>
-            <span className="mt-3 block text-sm font-medium">Borrow from someone</span>
-            <span className="mt-1 block text-2xs leading-relaxed text-muted-foreground">
-              Track a possession kept here temporarily without adding fake owned stock.
-            </span>
-          </button>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Loan direction">
+            {NEW_LOAN_DIRECTIONS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                aria-pressed={direction === entry.value}
+                onClick={() => setDirection(entry.value)}
+                className={cn(
+                  "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring coarse:min-h-11",
+                  direction === entry.value
+                    ? entry.value === "borrow"
+                      ? "border-brass/30 bg-brass-soft text-brass"
+                      : "border-sage/30 bg-sage-soft text-accent-foreground"
+                    : "border-border/70 bg-card/50 text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <entry.icon className="size-3.5" aria-hidden="true" />
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <DialogDescription className="text-xs">{current?.note}</DialogDescription>
         </div>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-        </DialogFooter>
+        {direction === "lend" ? (
+          <LendLoanForm
+            open={open}
+            item={lendItem}
+            itemField={
+              <Field label="Item" htmlFor="new-loan-item">
+                <LoanItemPicker
+                  inputId="new-loan-item"
+                  active={open}
+                  selected={item}
+                  onSelect={setItem}
+                  onClear={() => setItem(null)}
+                />
+              </Field>
+            }
+            onCancel={close}
+            onCreated={onLent}
+            onDone={close}
+          />
+        ) : (
+          <BorrowRecordForm open={open} onCancel={close} onCreated={onBorrowed} onDone={close} />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-export function BorrowRecordDialog({
+function BorrowRecordForm({
   open,
-  onOpenChange,
+  onCancel,
   onCreated,
+  onDone,
 }: {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onCancel: () => void;
   onCreated?: (record: BorrowedDetail) => void;
+  onDone: () => void;
 }) {
   const client = useQueryClient();
   const requestId = useRequestId(open);
@@ -122,6 +187,7 @@ export function BorrowRecordDialog({
   const [dueOn, setDueOn] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [photo, setPhoto] = React.useState<File | null>(null);
+  const [moreOpen, setMoreOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -135,6 +201,7 @@ export function BorrowRecordDialog({
     setDueOn("");
     setNotes("");
     setPhoto(null);
+    setMoreOpen(false);
     setError(null);
   }, [open]);
 
@@ -175,150 +242,162 @@ export function BorrowRecordDialog({
         `Recorded ${record.quantity} × ${record.item_name} borrowed from ${record.owner_name}`,
       );
       onCreated?.(record);
-      onOpenChange(false);
+      onDone();
     },
     onError: (caught) => setError(getApiErrorMessage(caught)),
   });
 
+  const datesInvalid = !borrowedOn || Boolean(dueOn && dueOn < borrowedOn);
   const invalid =
     !itemName.trim() ||
     !ownerName.trim() ||
     !Number.isInteger(Number(quantity)) ||
     Number(quantity) < 1 ||
-    !borrowedOn ||
-    Boolean(dueOn && dueOn < borrowedOn);
+    datesInvalid;
+  const extras = [
+    borrowedOn === localDateISO() ? "today" : formatDate(borrowedOn),
+    dueOn ? `due ${formatDate(dueOn)}` : "no due date",
+    ...(brand.trim() || model.trim() ? ["brand or model added"] : []),
+    ...(photo ? ["photo chosen"] : []),
+    ...(place.roomId || place.propertyId ? ["place chosen"] : []),
+    ...(notes.trim() ? ["notes added"] : []),
+  ].join(", ");
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <HandCoins className="size-4 text-brass" />
-            Borrow from someone
-          </DialogTitle>
-          <DialogDescription>
-            Record a possession that belongs to someone else. It is kept and counted
-            separately from household-owned inventory. No owner account, email or reminder
-            is created.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            create.mutate();
-          }}
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Item name" htmlFor="borrowed-item">
-              <Input
-                id="borrowed-item"
-                value={itemName}
-                maxLength={200}
-                onChange={(event) => setItemName(event.target.value)}
-                placeholder="e.g. Tile cutter"
-                autoFocus
-              />
-            </Field>
-            <Field label="Owner display name" htmlFor="borrowed-owner">
-              <PersonNameInput
-                id="borrowed-owner"
-                value={ownerName}
-                onChange={setOwnerName}
-                placeholder="Who owns it"
-              />
-            </Field>
-            <Field label="Brand" htmlFor="borrowed-brand" optional>
-              <Input
-                id="borrowed-brand"
-                value={brand}
-                maxLength={120}
-                onChange={(event) => setBrand(event.target.value)}
-              />
-            </Field>
-            <Field label="Model" htmlFor="borrowed-model" optional>
-              <Input
-                id="borrowed-model"
-                value={model}
-                maxLength={120}
-                onChange={(event) => setModel(event.target.value)}
-              />
-            </Field>
-            <Field label="Quantity" htmlFor="borrowed-quantity">
-              <Input
-                id="borrowed-quantity"
-                type="number"
-                min={1}
-                value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
-              />
-            </Field>
-            <Field label="Borrowed on" htmlFor="borrowed-on">
-              <Input
-                id="borrowed-on"
-                type="date"
-                value={borrowedOn}
-                onChange={(event) => setBorrowedOn(event.target.value)}
-              />
-            </Field>
-            <Field label="Due back" htmlFor="borrowed-due" optional>
-              <Input
-                id="borrowed-due"
-                type="date"
-                min={borrowedOn}
-                value={dueOn}
-                onChange={(event) => setDueOn(event.target.value)}
-              />
-            </Field>
-            <Field label="Actual photo" htmlFor="borrowed-photo" optional>
-              <div id="borrowed-photo">
-                <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-2xs text-muted-foreground transition-colors hover:bg-secondary/60">
-                  <ImageOff className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {photo ? photo.name : "Choose a photo of the borrowed item"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                    className="sr-only"
-                    onChange={(event) => setPhoto(event.target.files?.[0] ?? null)}
-                  />
-                </label>
-              </div>
-            </Field>
-          </div>
-          <KeepingPlaceFields
-            propertyId={place.propertyId}
-            roomId={place.roomId}
-            locationId={place.locationId}
-            onPropertyChange={place.setPropertyId}
-            onRoomChange={place.setRoomId}
-            onLocationChange={place.setLocationId}
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (invalid) return;
+        setError(null);
+        create.mutate();
+      }}
+    >
+      <Field label="Item name" htmlFor="borrowed-item">
+        <Input
+          id="borrowed-item"
+          value={itemName}
+          maxLength={200}
+          onChange={(event) => setItemName(event.target.value)}
+          placeholder="e.g. Tile cutter"
+          autoFocus
+        />
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+        <Field label="Owner display name" htmlFor="borrowed-owner">
+          <PersonNameInput
+            id="borrowed-owner"
+            value={ownerName}
+            onChange={setOwnerName}
+            placeholder="Who owns it"
           />
-          <Field label="Private notes" htmlFor="borrowed-notes" optional>
-            <Textarea
-              id="borrowed-notes"
-              className="min-h-20"
-              maxLength={4000}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Only visible to household members with access."
+        </Field>
+        <Field label="Quantity" htmlFor="borrowed-quantity">
+          <Input
+            id="borrowed-quantity"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={quantity}
+            onChange={(event) => setQuantity(event.target.value)}
+          />
+        </Field>
+      </div>
+      <Disclosure
+        label="More options"
+        hint={moreOpen ? undefined : extras}
+        open={moreOpen || datesInvalid}
+        onOpenChange={setMoreOpen}
+        contentClassName="space-y-4 pt-2"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Borrowed on" htmlFor="borrowed-on">
+            <Input
+              id="borrowed-on"
+              type="date"
+              value={borrowedOn}
+              onChange={(event) => setBorrowedOn(event.target.value)}
             />
           </Field>
-          {error && <FormError message={error} />}
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={invalid || create.isPending}>
-              {create.isPending ? <Spinner /> : <HandCoins />}
-              Record borrowed item
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          <Field
+            label="Due back"
+            htmlFor="borrowed-due"
+            optional
+            error={
+              dueOn && dueOn < borrowedOn ? "Due back cannot be before Borrowed on." : undefined
+            }
+          >
+            <Input
+              id="borrowed-due"
+              type="date"
+              min={borrowedOn}
+              value={dueOn}
+              onChange={(event) => setDueOn(event.target.value)}
+            />
+          </Field>
+          <Field label="Brand" htmlFor="borrowed-brand" optional>
+            <Input
+              id="borrowed-brand"
+              value={brand}
+              maxLength={120}
+              onChange={(event) => setBrand(event.target.value)}
+            />
+          </Field>
+          <Field label="Model" htmlFor="borrowed-model" optional>
+            <Input
+              id="borrowed-model"
+              value={model}
+              maxLength={120}
+              onChange={(event) => setModel(event.target.value)}
+            />
+          </Field>
+          <Field label="Actual photo" htmlFor="borrowed-photo" optional className="sm:col-span-2">
+            <div id="borrowed-photo">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-2xs text-muted-foreground transition-colors hover:bg-secondary/60">
+                <ImageOff className="size-4" />
+                <span className="min-w-0 flex-1 truncate">
+                  {photo ? photo.name : "Choose a photo of the borrowed item"}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                  className="sr-only"
+                  onChange={(event) => setPhoto(event.target.files?.[0] ?? null)}
+                />
+              </label>
+            </div>
+          </Field>
+        </div>
+        <KeepingPlaceFields
+          propertyId={place.propertyId}
+          roomId={place.roomId}
+          locationId={place.locationId}
+          onPropertyChange={place.setPropertyId}
+          onRoomChange={place.setRoomId}
+          onLocationChange={place.setLocationId}
+        />
+        <Field label="Private notes" htmlFor="borrowed-notes" optional>
+          <Textarea
+            id="borrowed-notes"
+            className="min-h-20"
+            maxLength={4000}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Only visible to household members with access."
+          />
+        </Field>
+      </Disclosure>
+      {error && <FormError message={error} />}
+      <DialogFooter>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={invalid || create.isPending}>
+          {create.isPending ? <Spinner /> : <HandCoins />}
+          Record borrowed item
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 

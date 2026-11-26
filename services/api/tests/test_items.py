@@ -127,6 +127,113 @@ def test_search_and_filters_understand_room_location_hierarchy(owner_client):
     assert owner_client.get("/api/v1/items", params={"q": "   "}).json()["total"] == 3
 
 
+def test_ids_filter_narrows_the_list_and_keeps_other_filters(owner_client):
+    kitchen = owner_client.post("/api/v1/rooms", json={"name": "Kitchen"}).json()
+    kettle = owner_client.post(
+        "/api/v1/items", json={"name": "Kettle", "room_id": kitchen["id"]}
+    ).json()["item"]
+    lamp = owner_client.post("/api/v1/items", json={"name": "Lamp"}).json()["item"]
+    owner_client.post("/api/v1/items", json={"name": "Rug"})
+
+    both = owner_client.get(
+        "/api/v1/items",
+        params={"ids": [kettle["id"], lamp["id"], str(uuid.uuid4())], "sort": "name_asc"},
+    )
+    assert both.status_code == 200, both.text
+    assert [item["name"] for item in both.json()["items"]] == ["Kettle", "Lamp"]
+    assert both.json()["total"] == 2
+
+    scoped = owner_client.get(
+        "/api/v1/items",
+        params={"ids": [kettle["id"], lamp["id"]], "room_id": kitchen["id"]},
+    ).json()
+    assert [item["id"] for item in scoped["items"]] == [kettle["id"]]
+
+    too_many = owner_client.get(
+        "/api/v1/items", params={"ids": [str(uuid.uuid4()) for _ in range(101)]}
+    )
+    assert too_many.status_code == 422
+
+
+def test_location_sort_orders_by_room_then_place_then_name(owner_client):
+    attic = owner_client.post("/api/v1/rooms", json={"name": "attic"}).json()
+    kitchen = owner_client.post("/api/v1/rooms", json={"name": "Kitchen"}).json()
+    shelf = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": kitchen["id"], "name": "Shelf", "kind": "shelf"},
+    ).json()
+    drawer = owner_client.post(
+        "/api/v1/storage-locations",
+        json={"room_id": kitchen["id"], "name": "drawer", "kind": "drawer"},
+    ).json()
+
+    def add(name, room=None, location=None):
+        return owner_client.post(
+            "/api/v1/items",
+            json={"name": name, "room_id": room, "storage_location_id": location},
+        ).json()["item"]["id"]
+
+    add("Unplaced")
+    add("Whisk", kitchen["id"], shelf["id"])
+    add("Table", kitchen["id"])
+    add("Spoon", kitchen["id"], drawer["id"])
+    add("fork", kitchen["id"], drawer["id"])
+    add("Trunk", attic["id"])
+
+    listed = owner_client.get("/api/v1/items", params={"sort": "location_asc"})
+    assert listed.status_code == 200, listed.text
+    assert [item["name"] for item in listed.json()["items"]] == [
+        "Trunk", "fork", "Spoon", "Whisk", "Table", "Unplaced",
+    ]
+    assert listed.json()["total"] == 6
+    pages = [
+        owner_client.get(
+            "/api/v1/items",
+            params={
+                "sort": "location_asc",
+                "limit": 2,
+                "offset": offset,
+                "representation": "summary",
+            },
+        ).json()["items"]
+        for offset in (0, 2, 4)
+    ]
+    assert [item["name"] for page in pages for item in page] == [
+        "Trunk", "fork", "Spoon", "Whisk", "Table", "Unplaced",
+    ]
+
+
+def test_search_orders_by_name_relevance_before_the_chosen_sort(owner_client):
+    category = owner_client.post("/api/v1/categories", json={"name": "Drill bits"}).json()
+    other = owner_client.post(
+        "/api/v1/items", json={"name": "Countersink", "category_id": category["id"]}
+    ).json()["item"]["id"]
+
+    def add(name):
+        return owner_client.post("/api/v1/items", json={"name": name}).json()["item"]["id"]
+
+    contains = add("Cordless drill")
+    prefix_b = add("Drill stand")
+    exact = add("DRILL")
+    prefix_a = add("Drill press")
+
+    newest = owner_client.get("/api/v1/items", params={"q": "drill"}).json()
+    assert [item["id"] for item in newest["items"]] == [exact, prefix_a, prefix_b, contains, other]
+
+    by_name = owner_client.get("/api/v1/items", params={"q": " Drill ", "sort": "name_desc"}).json()
+    assert [item["id"] for item in by_name["items"]] == [exact, prefix_b, prefix_a, contains, other]
+
+    paged = [
+        owner_client.get(
+            "/api/v1/items", params={"q": "drill", "limit": 2, "offset": offset}
+        ).json()["items"]
+        for offset in (0, 2, 4)
+    ]
+    assert [item["id"] for page in paged for item in page] == [
+        exact, prefix_a, prefix_b, contains, other,
+    ]
+
+
 def test_create_item_with_purchase_warranty_and_tags(owner_client):
     room, location, category, tag = setup_taxonomy(owner_client)
     response = owner_client.post(

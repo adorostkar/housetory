@@ -1,4 +1,3 @@
-import { HandCoins, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +9,16 @@ function unitLabel(count: number) {
   return count === 1 ? "unit" : "units";
 }
 
+function loanDates(loan: Loan) {
+  return `Lent ${formatDate(loan.lent_on)} · ${
+    loan.due_on ? `due ${formatDate(loan.due_on)}` : "no return date"
+  }`;
+}
+
+/**
+ * Who has the item right now, with a Return button for each open loan. It
+ * renders nothing when no unit is on loan. Private loan notes are not shown.
+ */
 export function ItemLoanStatus({
   ownedQuantity,
   atHomeQuantity,
@@ -36,106 +45,87 @@ export function ItemLoanStatus({
 
   const borrowers = [...new Set(activeLoans.map((loan) => loan.borrower_name))];
   const fullyLoaned = atHomeQuantity <= 0;
-  const singleLoan = activeLoans.length === 1;
+  const singleLoan = activeLoans.length === 1 ? activeLoans[0] : undefined;
   const singleBorrower = borrowers.length === 1;
-  const overdue = activeLoans.some((loan) => loan.overdue);
   const heading =
     fullyLoaned && singleBorrower
-      ? `On loan to ${borrowers[0]}`
-      : fullyLoaned
-        ? `All ${onLoanQuantity} ${unitLabel(onLoanQuantity)} are on loan`
-        : singleBorrower
-          ? `${onLoanQuantity} of ${ownedQuantity} ${unitLabel(ownedQuantity)} on loan to ${borrowers[0]}`
-          : `${onLoanQuantity} of ${ownedQuantity} ${unitLabel(ownedQuantity)} on loan`;
-  const singleDue = singleLoan
-    ? activeLoans[0]?.due_on
-      ? `Due ${formatDate(activeLoans[0].due_on)}`
-      : "No return date set"
-    : null;
+      ? `With ${borrowers[0]}`
+      : singleBorrower
+        ? `${onLoanQuantity} of ${ownedQuantity} with ${borrowers[0]}`
+        : fullyLoaned
+          ? `All ${onLoanQuantity} ${unitLabel(onLoanQuantity)} on loan`
+          : `${onLoanQuantity} of ${ownedQuantity} on loan`;
 
   return (
-    <div className="mt-4 max-w-2xl rounded-2xl border border-brass/30 bg-brass-soft/35 px-4 py-3.5 text-left">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="min-w-0">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <HandCoins className="size-4 shrink-0 text-brass" aria-hidden="true" />
-            <p className="text-sm font-medium leading-snug text-foreground">
-              {heading}
-            </p>
-            {overdue && <Badge variant="brass">Past due</Badge>}
-          </div>
-          <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-            Owned {ownedQuantity} · at home {atHomeQuantity} · on loan{" "}
-            {onLoanQuantity}
-            {singleDue ? ` · ${singleDue}` : ""}
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium leading-snug">
+            <span className="min-w-0 [overflow-wrap:anywhere]">{heading}</span>
+            {singleLoan?.overdue && <Badge variant="brass">Past due</Badge>}
           </p>
-
-          {!singleLoan && (
-            <ul className="mt-2 space-y-1.5">
-              {activeLoans.slice(0, 4).map((loan) => (
-                <li
-                  key={loan.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/35 px-2.5 py-1.5 text-2xs"
-                >
-                  <Link
-                    to={`/loans/${loan.id}`}
-                    className="min-w-0 font-medium text-foreground/85 underline-offset-4 hover:underline"
-                  >
-                    {loan.borrower_name} · {loan.outstanding_quantity} of{" "}
-                    {loan.quantity} on loan
-                  </Link>
-                  <span className="flex items-center gap-2 text-muted-foreground">
-                    {loan.due_on
-                      ? `Due ${formatDate(loan.due_on)}`
-                      : "No due date recorded"}
-                    {loan.overdue && <Badge variant="brass">Past due</Badge>}
-                    {canWrite && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-2xs"
-                        onClick={() => onReturnLoan(loan)}
-                        aria-label={`Record return from ${loan.borrower_name}`}
-                      >
-                        <RotateCcw className="size-3" />
-                        Return
-                      </Button>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {activeLoans.length > 4 && (
-            <Link
-              to={`/loans?item_id=${activeLoans[0]?.item_id ?? ""}`}
-              className="mt-2 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              All {activeLoans.length} open loans
-            </Link>
-          )}
-
-          <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
-            {fullyLoaned
-              ? "The recorded room and container are its usual home, not a current physical location while loaned out."
-              : `The recorded room and container are where the ${atHomeQuantity} at-home ${unitLabel(atHomeQuantity)} normally live.`}
+          <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
+            {singleLoan ? loanDates(singleLoan) : `${activeLoans.length} open loans`}
+            {ownedQuantity > 1 &&
+              ` · owned ${ownedQuantity} · here ${atHomeQuantity} · on loan ${onLoanQuantity}`}
           </p>
         </div>
-
         {canWrite && singleLoan && (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="shrink-0 self-start"
-            onClick={() => onReturnLoan(activeLoans[0]!)}
+            className="h-11 shrink-0"
+            onClick={() => onReturnLoan(singleLoan)}
           >
-            <RotateCcw />
-            Record return
+            Return
           </Button>
         )}
       </div>
+
+      {!singleLoan && (
+        <ul className="mt-2 space-y-1.5">
+          {activeLoans.slice(0, 4).map((loan) => (
+            <li
+              key={loan.id}
+              className="flex items-center justify-between gap-2 rounded-lg border border-border/50 bg-background/35 py-1 pl-2.5 pr-1 text-2xs"
+            >
+              <span className="min-w-0">
+                <Link
+                  to={`/loans/${loan.id}`}
+                  className="font-medium text-foreground/85 underline-offset-4 hover:underline"
+                >
+                  {loan.borrower_name} · {loan.outstanding_quantity} of {loan.quantity}
+                </Link>
+                <span className="block text-muted-foreground">
+                  {loanDates(loan)}
+                  {loan.overdue && " · past due"}
+                </span>
+              </span>
+              {canWrite && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-11 shrink-0"
+                  onClick={() => onReturnLoan(loan)}
+                  aria-label={`Return from ${loan.borrower_name}`}
+                >
+                  Return
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {activeLoans.length > 4 && (
+        <Link
+          to={`/loans?item_id=${activeLoans[0]?.item_id ?? ""}`}
+          className="mt-2 inline-flex min-h-11 items-center text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          All {activeLoans.length} open loans
+        </Link>
+      )}
     </div>
   );
 }

@@ -112,6 +112,60 @@ describe("Loan dialogs", () => {
     expect(payload.lent_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it("keeps dates and notes under More options and sends what is set there", async () => {
+    renderDialog(
+      <LendLoanDialog
+        open
+        onOpenChange={vi.fn()}
+        itemId="item-1"
+        itemName="Ethernet cable"
+        available={2}
+      />,
+    );
+    expect(screen.getByLabelText("Borrower")).toBeVisible();
+    expect(screen.getByLabelText("Quantity")).toHaveValue(1);
+    expect(screen.getByText("2 at home")).toBeVisible();
+    const more = screen.getByRole("button", { name: /More options/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Lent on")).not.toBeInTheDocument();
+
+    await userEvent.click(more);
+    const lentOn = screen.getByLabelText("Lent on") as HTMLInputElement;
+    expect(lentOn.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await userEvent.clear(lentOn);
+    await userEvent.type(lentOn, "2026-02-01");
+    await userEvent.type(screen.getByLabelText(/Due back/), "2026-02-10");
+    await userEvent.type(screen.getByLabelText(/Private notes/), "With the case");
+    await userEvent.type(screen.getByLabelText("Borrower"), "Sam");
+    await userEvent.click(screen.getByRole("button", { name: /Record loan/ }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    const [, payload] = vi.mocked(api.post).mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({
+      borrower_name: "Sam",
+      quantity: 1,
+      lent_on: "2026-02-01",
+      due_on: "2026-02-10",
+      notes: "With the case",
+    });
+  });
+
+  it("says why a quantity above the units at home cannot be lent", async () => {
+    renderDialog(
+      <LendLoanDialog
+        open
+        onOpenChange={vi.fn()}
+        itemId="item-1"
+        itemName="Ethernet cable"
+        available={2}
+      />,
+    );
+    await userEvent.type(screen.getByLabelText("Borrower"), "Sam");
+    await userEvent.clear(screen.getByLabelText("Quantity"));
+    await userEvent.type(screen.getByLabelText("Quantity"), "3");
+    expect(screen.getByRole("alert")).toHaveTextContent("Only 2 at home.");
+    expect(screen.getByRole("button", { name: /Record loan/ })).toBeDisabled();
+  });
+
   it("records a partial return with the outstanding quantity", async () => {
     renderDialog(
       <ReturnLoanDialog open onOpenChange={vi.fn()} loan={loan} />,

@@ -306,6 +306,30 @@ describe("ItemCard image sources", () => {
     expect(screen.getByText("Reference")).toBeVisible();
   });
 
+  it("keeps a compact row to a small thumbnail, a name of up to two lines and the place", () => {
+    const view = render(
+      <MemoryRouter>
+        <ItemRow item={{ ...item, quantity: 1 }} />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link");
+    expect(link).toHaveClass("min-h-11");
+    expect(link.querySelector("img")?.parentElement).toHaveClass("size-12");
+    expect(screen.getByText(item.name)).toHaveClass("line-clamp-2");
+    expect(screen.getByText(item.name)).not.toHaveClass("truncate");
+    // One piece needs no badge.
+    expect(screen.queryByText("×1")).not.toBeInTheDocument();
+    view.unmount();
+
+    render(
+      <MemoryRouter>
+        <ItemRow item={{ ...item, quantity: 3, on_loan_quantity: 1 }} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("×3")).toBeVisible();
+    expect(screen.getByText("1 on loan · 2 at home")).toBeVisible();
+  });
+
   it("fits actual photos inside compact list thumbnails without cropping", () => {
     render(
       <MemoryRouter>

@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   CalendarDays,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Copy,
@@ -10,11 +11,12 @@ import {
   HandCoins,
   Hash,
   History,
-  MapPin,
   MoreHorizontal,
+  MoveRight,
   Pencil,
   ReceiptText,
   ShieldCheck,
+  Sparkles,
   Tag,
   Trash2,
   Wallet,
@@ -28,6 +30,7 @@ import {
 import { toast } from "sonner";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
+import { BulkMoveDialog } from "@/components/bulk-organise-dialogs";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorState } from "@/components/error-state";
 import { ItemDispositionDialog } from "@/components/item-disposition-dialog";
@@ -35,8 +38,6 @@ import { ItemDocumentsAndManuals } from "@/components/item-documents-manuals";
 import { ItemLoanStatus } from "@/components/item-loan-status";
 import { ItemStorageSection } from "@/components/item-storage-section";
 import { LendLoanDialog, ReturnLoanDialog } from "@/components/loan-dialogs";
-import { PageHeader } from "@/components/page-header";
-import { PageSkeleton } from "@/components/page-layout";
 import {
   ItemDetailTabList,
   parseItemDetailTab,
@@ -53,6 +54,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
 import {
@@ -62,6 +64,7 @@ import {
   useItemHistory,
   useItemLoans,
   useRooms,
+  useSession,
 } from "@/lib/queries";
 import type { ItemDetail, Loan } from "@/lib/types";
 import {
@@ -71,6 +74,7 @@ import {
   warrantyRemainingLabel,
 } from "@/lib/labels";
 import { appendOrigin, itemOrigin, readOrigin } from "@/lib/navigation";
+import { recordItemOpened } from "@/lib/recent-items";
 import {
   CONDITION_LABELS,
   formatCurrency,
@@ -79,13 +83,24 @@ import {
   locationLabel,
   roomPath,
 } from "@/lib/utils";
-import { Fragment, useState } from "react";
-import { InfoRow, LoanQuantity } from "@/pages/item-detail-parts";
+import { Fragment, useEffect, useId, useState } from "react";
+import { InfoRow, ItemPageClose, LoanQuantity } from "@/pages/item-detail-parts";
 
-export function ItemDetailPage() {
+/**
+ * One item, in a single narrow column. It is laid out by its own width, never
+ * by the width of the window, so the same page works on a phone, as a full
+ * page and inside the desktop side panel (`presentation="panel"`, where the
+ * control at the top reads "Close"). Its element ids are unique per instance.
+ */
+export function ItemDetailPage({
+  presentation = "page",
+}: {
+  presentation?: "page" | "panel";
+}) {
   const { itemId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = parseItemDetailTab(searchParams.get("tab"));
+  const idPrefix = useId();
+  const requestedTab = parseItemDetailTab(searchParams.get("tab"));
   const selectTab = (next: ItemDetailTab) =>
     setSearchParams(
       (prev) => {
@@ -106,6 +121,19 @@ export function ItemDetailPage() {
   const navigate = useNavigate();
   const invalidate = useInvalidateInventory();
   const canWrite = useCanWrite();
+  const session = useSession().data;
+  const userId = session?.user?.id;
+  const householdId = session?.household?.id;
+  const hasStorage = Boolean(itemQuery.data?.item.storage);
+  const tabs: ItemDetailTab[] = [
+    ...(hasStorage ? (["contents"] as const) : []),
+    "info",
+    "documents",
+    "loans",
+    "history",
+  ];
+  const tab: ItemDetailTab =
+    requestedTab && tabs.includes(requestedTab) ? requestedTab : tabs[0]!;
   const loansQuery = useItemLoans(
     itemId,
     Boolean(itemQuery.data) &&
@@ -115,7 +143,16 @@ export function ItemDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [dispositionOpen, setDispositionOpen] = useState(false);
   const [lendOpen, setLendOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [returnLoan, setReturnLoan] = useState<Loan | null>(null);
+
+  // Opening an item is what "Recent" in the item list is ordered by.
+  const openedId = itemQuery.data?.item.id;
+  useEffect(() => {
+    if (openedId && userId && householdId) {
+      recordItemOpened({ userId, householdId }, openedId);
+    }
+  }, [openedId, userId, householdId]);
 
   const archive = useMutation({
     mutationFn: (item: ItemDetail) =>
@@ -132,18 +169,41 @@ export function ItemDetailPage() {
     onSuccess: () => {
       invalidate();
       toast.success("Item deleted");
-      navigate("/items", { replace: true });
+      navigate(origin?.path ?? "/items", { replace: true });
     },
   });
 
-  if (itemQuery.isPending) return <PageSkeleton variant="detail" />;
+  const backTo = origin?.path ?? "/items";
+  const closeControl = (
+    <ItemPageClose
+      to={backTo}
+      label={origin ? `Back to ${origin.label}` : "All items"}
+      presentation={presentation}
+    />
+  );
+
+  if (itemQuery.isPending) {
+    return (
+      <div className="mx-auto w-full max-w-xl" aria-busy="true" aria-label="Loading">
+        {closeControl}
+        <Skeleton className="mt-3 h-8 w-2/3" />
+        <Skeleton className="mt-3 h-4 w-1/3" />
+        <Skeleton className="mt-5 h-28 rounded-2xl" />
+        <Skeleton className="mt-4 size-24 rounded-xl" />
+        <Skeleton className="mt-5 h-40 rounded-2xl" />
+      </div>
+    );
+  }
   if (itemQuery.isError) {
     return (
-      <ErrorState
-        title="This item is out of reach"
-        message="It may have been deleted, or the link may be out of date."
-        onRetry={() => void itemQuery.refetch()}
-      />
+      <div className="mx-auto w-full max-w-xl">
+        {closeControl}
+        <ErrorState
+          title="This item is out of reach"
+          message="It may have been deleted, or the link may be out of date."
+          onRetry={() => void itemQuery.refetch()}
+        />
+      </div>
     );
   }
 
@@ -171,165 +231,142 @@ export function ItemDetailPage() {
     purchaseUnitCents != null &&
     item.purchase?.price_cents != null &&
     item.purchase.price_cents % item.quantity !== 0;
+  const canLend = canWrite && !item.is_archived;
+  const quietLine = [
+    item.quantity === 1 ? "1 piece" : `${item.quantity} pieces`,
+    item.category?.name,
+    [item.brand, item.model].filter(Boolean).join(" "),
+  ].filter(Boolean);
+  const rowLabel =
+    "text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground";
 
   return (
-    <div className="animate-fade-up">
-      <PageHeader
-        eyebrow={item.category?.name ?? "Item"}
-        title={item.name}
-        description={
-          [item.brand, item.model].filter(Boolean).join(" · ") ||
-          item.description ||
-          undefined
-        }
-        backTo={origin?.path ?? "/items"}
-        backLabel={origin ? `Back to ${origin.label}` : "All items"}
-        actionsPlacement="title"
-        titleAddon={
-          loanSummary ? (
-            <ItemLoanStatus
-              ownedQuantity={item.quantity}
-              atHomeQuantity={available}
-              loans={loanSummary.loans}
-              canWrite={canWrite}
-              onReturnLoan={setReturnLoan}
-            />
-          ) : undefined
-        }
-        actions={
-          <>
-            {item.is_archived && (
-              <Badge
-                variant="secondary"
-                title={
-                  item.disposed_on ? `Recorded ${item.disposed_on}` : undefined
-                }
+    <article className="mx-auto w-full max-w-xl animate-fade-up">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        {closeControl}
+        {canWrite && (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button variant="outline" size="icon" className="size-11" asChild>
+              <Link
+                to={appendOrigin(`/items/${item.id}/edit`, origin)}
+                aria-label="Edit"
+                title="Edit"
               >
-                {item.disposition
-                  ? ITEM_DISPOSITION_LABELS[item.disposition]
-                  : "Archived"}
-              </Badge>
-            )}
-            {canWrite && (
-              <>
-                {!item.is_archived && (
-                  <Button
-                    variant="outline"
-                    disabled={available <= 0}
-                    title={
-                      available <= 0
-                        ? "All owned units are currently on loan."
-                        : "Record a borrower and due date without moving the item."
-                    }
-                    onClick={() => setLendOpen(true)}
-                  >
-                    <HandCoins />
-                    Lend
-                  </Button>
-                )}
-                <Button variant="outline" asChild>
+                <Pencil />
+              </Link>
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11"
+                  aria-label="Item options"
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild className="min-h-11">
                   <Link to={`/insurance?item_ids=${item.id}`}>
                     <ShieldCheck />
                     Insurance
                   </Link>
-                </Button>
-                <Button variant="outline" asChild>
-                  <Link to={appendOrigin(`/items/${item.id}/edit`, origin)}>
-                    <Pencil />
-                    Edit
-                  </Link>
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Item options"
+                </DropdownMenuItem>
+                {!item.is_archived && (
+                  <DropdownMenuItem asChild className="min-h-11">
+                    <Link to={appendOrigin(
+                      `/review?scope_type=items&item_ids=${item.id}`,
+                      itemOrigin(`/items/${item.id}?${searchParams.toString()}`, "item"),
+                    )}>
+                      <ClipboardCheck />
+                      Review this item
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {!item.is_archived && (
+                  <DropdownMenuItem asChild className="min-h-11">
+                    <Link
+                      to={appendOrigin(
+                        `/items/new?duplicate_of=${item.id}`,
+                        origin,
+                      )}
                     >
-                      <MoreHorizontal />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {!item.is_archived && (
-                      <DropdownMenuItem asChild>
-                        <Link to={appendOrigin(
-                          `/review?scope_type=items&item_ids=${item.id}`,
-                          itemOrigin(`/items/${item.id}?${searchParams.toString()}`, "item"),
-                        )}>
-                          <ClipboardCheck />
-                          Review this item
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    {!item.is_archived && (
-                      <DropdownMenuItem asChild>
-                        <Link
-                          to={appendOrigin(
-                            `/items/new?duplicate_of=${item.id}`,
-                            origin,
-                          )}
-                        >
-                          <Copy />
-                          Duplicate item
-                        </Link>
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem
-                      disabled={
-                        archive.isPending ||
-                        onLoan > 0 ||
-                        Boolean(item.storage?.active)
-                      }
-                      onSelect={() => {
-                        if (item.is_archived) archive.mutate(item);
-                        else setDispositionOpen(true);
-                      }}
-                    >
-                      {item.is_archived ? <ArchiveRestore /> : <Archive />}
-                      {item.is_archived
-                        ? "Restore item"
-                        : "Mark as no longer owned"}
-                    </DropdownMenuItem>
-                    {item.storage?.active && (
-                      <p className="px-2 py-1 text-2xs leading-relaxed text-muted-foreground">
-                        Remove storage capability before archiving or deleting
-                        this item.
-                      </p>
-                    )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      destructive
-                      disabled={onLoan > 0 || Boolean(item.storage?.active)}
-                      onSelect={() => setDeleteOpen(true)}
-                    >
-                      <Trash2 />
-                      Delete item
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
-            )}
-          </>
-        }
-      />
+                      <Copy />
+                      Duplicate item
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  className="min-h-11"
+                  disabled={
+                    archive.isPending ||
+                    onLoan > 0 ||
+                    Boolean(item.storage?.active)
+                  }
+                  onSelect={() => {
+                    if (item.is_archived) archive.mutate(item);
+                    else setDispositionOpen(true);
+                  }}
+                >
+                  {item.is_archived ? <ArchiveRestore /> : <Archive />}
+                  {item.is_archived
+                    ? "Restore item"
+                    : "Mark as no longer owned"}
+                </DropdownMenuItem>
+                {item.storage?.active && (
+                  <p className="px-2 py-1 text-2xs leading-relaxed text-muted-foreground">
+                    Remove storage capability before archiving or deleting
+                    this item.
+                  </p>
+                )}
+                {onLoan > 0 && (
+                  <p className="px-2 py-1 text-2xs leading-relaxed text-muted-foreground">
+                    Record the return of every loaned unit before archiving or
+                    deleting this item.
+                  </p>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  destructive
+                  className="min-h-11"
+                  disabled={onLoan > 0 || Boolean(item.storage?.active)}
+                  onSelect={() => setDeleteOpen(true)}
+                >
+                  <Trash2 />
+                  Delete item
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+      </div>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8">
-        <div className="min-w-0 space-y-4 lg:sticky lg:top-20">
-          <PhotoGallery
-            item={item}
-            representative={item.representative_image}
-          />
-          <ItemImageControls itemId={item.id} />
+      <header>
+        <h1 className="display-title-compact [overflow-wrap:anywhere]">{item.name}</h1>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+          <span>{quietLine.join(" · ")}</span>
+          {item.is_archived && (
+            <Badge
+              variant="secondary"
+              title={item.disposed_on ? `Recorded ${item.disposed_on}` : undefined}
+            >
+              {item.disposition
+                ? ITEM_DISPOSITION_LABELS[item.disposition]
+                : "Archived"}
+            </Badge>
+          )}
+        </p>
+      </header>
 
-          <section className="surface p-5">
-            <h2 className="mb-4 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-              Key facts
-            </h2>
-            <dl className="space-y-4">
-              <InfoRow
-                icon={MapPin}
-                label={onLoan > 0 ? "Usual home location" : "Place"}
-              >
+      <section
+        aria-label="Place and availability"
+        className="surface mt-4 divide-y divide-border/60"
+      >
+        <div className="px-4 py-3">
+          <p className={rowLabel}>Lives in</p>
+          <div className="mt-1 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5 pt-0.5 text-sm leading-snug">
                 {item.household && (
                   <>
                     <span className="font-medium text-foreground/80">
@@ -404,109 +441,170 @@ export function ItemDetailPage() {
                 ) : (
                   <span className="text-muted-foreground">Not assigned</span>
                 )}
-                {onLoan > 0 && available > 0 && (
-                  <span className="mt-1.5 block text-2xs leading-relaxed text-muted-foreground">
-                    {`This home location covers only the ${available} at-home ${available === 1 ? "unit" : "units"}.`}
-                  </span>
-                )}
-              </InfoRow>
-
-              <InfoRow icon={Tag} label="Category">
-                {item.category ? (
-                  <Link
-                    to={`/items?category_id=${item.category.id}`}
-                    className="inline-flex items-center gap-1.5 underline-offset-4 hover:underline"
-                  >
-                    <span
-                      className="size-1.5 rounded-full bg-current opacity-70"
-                      style={
-                        item.category.color
-                          ? { color: item.category.color }
-                          : undefined
-                      }
-                    />
-                    {item.category.name}
-                  </Link>
-                ) : (
-                  <span className="text-muted-foreground">Uncategorised</span>
-                )}
-              </InfoRow>
-
-              <InfoRow icon={Wallet} label="Quantity">
-                {onLoan > 0 ? (
-                  <span>
-                    Owned {item.quantity} ·{" "}
-                    <span className="text-accent-foreground">
-                      at home {available}
-                    </span>{" "}
-                    · <span className="text-brass">on loan {onLoan}</span>
-                  </span>
-                ) : (
-                  <span>
-                    {item.quantity} · {CONDITION_LABELS[item.condition]}
-                  </span>
-                )}
-              </InfoRow>
-            </dl>
-          </section>
+          </div>
+          {canWrite && !item.is_archived && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-11 shrink-0"
+              onClick={() => setMoveOpen(true)}
+            >
+              <MoveRight />
+              Move
+            </Button>
+          )}
+          </div>
         </div>
-
-        <div className="min-w-0">
-          <ItemDetailTabList value={tab} onChange={selectTab} />
-          <div
-            role="tabpanel"
-            id="item-tabpanel"
-            aria-labelledby={`item-tab-${tab}`}
-            tabIndex={0}
-            className="space-y-4 focus-visible:outline-none"
-          >
-            {tab === "details" && (
-              <section className="surface p-5 sm:p-6">
-                <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
-                  About this item
-                </h2>
-                {item.description ? (
-                  <p className="mt-3 whitespace-pre-line text-pretty text-sm leading-[1.75] text-muted-foreground">
-                    {item.description}
-                  </p>
-                ) : (
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                    No description yet.
-                    {canWrite && (
-                      <>
-                        {" "}
-                        <Link
-                          to={`/items/${item.id}/edit`}
-                          className="underline underline-offset-4 hover:text-foreground"
-                        >
-                          Add a little context
-                        </Link>
-                        .
-                      </>
-                    )}
-                  </p>
-                )}
-              </section>
+        <div className="px-4 py-3">
+          <p className={rowLabel}>Right now</p>
+          <div className="mt-1 min-w-0 space-y-2">
+            {onLoan > 0 && loanSummary && (
+              <ItemLoanStatus
+                ownedQuantity={item.quantity}
+                atHomeQuantity={available}
+                loans={loanSummary.loans}
+                canWrite={canWrite}
+                onReturnLoan={setReturnLoan}
+              />
             )}
-
-            {tab === "details" && <ItemStorageSection item={item} />}
-
-            {tab === "details" && (
-              <section className="surface p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                    Details
-                  </h2>
-                  {canWrite && (
-                    <Link
-                      to={`/items/${item.id}/edit`}
-                      className="text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                    >
-                      Edit
-                    </Link>
+            {onLoan > 0 && !loanSummary && (
+              <p className="pt-0.5 text-sm font-medium">
+                {onLoan} of {item.quantity} on loan
+              </p>
+            )}
+            {(onLoan <= 0 || available > 0) && (
+              <div className="flex items-start justify-between gap-3">
+                <p className="pt-0.5 text-sm leading-snug">
+                  {item.is_archived ? (
+                    <span className="text-muted-foreground">No longer owned</span>
+                  ) : onLoan > 0 ? (
+                    <span className="text-muted-foreground">
+                      {available} here
+                    </span>
+                  ) : (
+                    <>
+                      <span className="font-medium">Here</span>
+                      {item.quantity > 1 && (
+                        <span className="text-muted-foreground"> · all {item.quantity}</span>
+                      )}
+                    </>
                   )}
-                </div>
-                <dl className="space-y-4">
+                </p>
+                {canLend && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-11 shrink-0"
+                    disabled={available <= 0}
+                    title="Record a borrower and due date without moving the item."
+                    onClick={() => setLendOpen(true)}
+                  >
+                    <HandCoins />
+                    Lend
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <div className="mt-4">
+        <PhotoGallery item={item} representative={item.representative_image}>
+          <ItemImageControls itemId={item.id} />
+        </PhotoGallery>
+      </div>
+
+      <div className="mt-3 min-w-0">
+        <ItemDetailTabList
+          value={tab}
+          onChange={selectTab}
+          tabs={tabs}
+          idPrefix={idPrefix}
+          counts={{
+            contents: item.storage?.active ? item.storage.item_count : 0,
+            documents: item.documents.length,
+            loans: loanSummary?.outstanding_loan_count ?? (onLoan > 0 ? 1 : 0),
+          }}
+        />
+        <div
+          role="tabpanel"
+          id={`${idPrefix}-tabpanel`}
+          aria-labelledby={`${idPrefix}-tab-${tab}`}
+          tabIndex={0}
+          className="space-y-4 focus-visible:outline-none"
+        >
+          {tab === "contents" && <ItemStorageSection item={item} />}
+
+          {tab === "info" && (
+            <section className="surface p-5">
+              <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">
+                About this item
+              </h2>
+              {item.description ? (
+                <p className="mt-3 whitespace-pre-line text-pretty text-sm leading-[1.75] text-muted-foreground">
+                  {item.description}
+                </p>
+              ) : (
+                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  No description yet.
+                  {canWrite && (
+                    <>
+                      {" "}
+                      <Link
+                        to={`/items/${item.id}/edit`}
+                        className="underline underline-offset-4 hover:text-foreground"
+                      >
+                        Add a little context
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
+              <dl className="mt-5 space-y-4 border-t border-border/60 pt-4">
+                <InfoRow icon={Tag} label="Category">
+                  {item.category ? (
+                    <Link
+                      to={`/items?category_id=${item.category.id}`}
+                      className="inline-flex items-center gap-1.5 underline-offset-4 hover:underline"
+                    >
+                      <span
+                        className="size-1.5 rounded-full bg-current opacity-70"
+                        style={
+                          item.category.color
+                            ? { color: item.category.color }
+                            : undefined
+                        }
+                      />
+                      {item.category.name}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">Uncategorised</span>
+                  )}
+                </InfoRow>
+                {(item.brand || item.model) && (
+                  <InfoRow icon={Sparkles} label="Make">
+                    {[item.brand, item.model].filter(Boolean).join(" · ")}
+                  </InfoRow>
+                )}
+                <InfoRow icon={Wallet} label="Quantity">
+                  {onLoan > 0 ? (
+                    <span>
+                      Owned {item.quantity} ·{" "}
+                      <span className="text-accent-foreground">
+                        at home {available}
+                      </span>{" "}
+                      · <span className="text-brass">on loan {onLoan}</span>
+                    </span>
+                  ) : (
+                    <span>
+                      {item.quantity} · {CONDITION_LABELS[item.condition]}
+                    </span>
+                  )}
+                </InfoRow>
                   {item.last_verified && (
                     <InfoRow icon={ClipboardCheck} label="Last checked">
                       <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
@@ -665,11 +763,7 @@ export function ItemDetailPage() {
                       <span className="break-all">{item.serial_number}</span>
                     </InfoRow>
                   )}
-
-                  <InfoRow icon={CalendarDays} label="Added">
-                    {formatRelativeDate(item.created_at)}
-                  </InfoRow>
-                </dl>
+              </dl>
 
                 {item.tags.length > 0 && (
                   <div className="mt-5 flex flex-wrap gap-1.5 border-t border-border/60 pt-4">
@@ -682,87 +776,10 @@ export function ItemDetailPage() {
                     ))}
                   </div>
                 )}
-              </section>
-            )}
+            </section>
+          )}
 
-            {tab === "loans" && (
-              <section className="surface p-5">
-                <div className="mb-4 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <HandCoins
-                      className="size-4 text-muted-foreground"
-                      strokeWidth={1.7}
-                    />
-                    <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                      Lending
-                    </h2>
-                  </div>
-                  {canWrite && !item.is_archived && available > 0 && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setLendOpen(true)}
-                    >
-                      <HandCoins />
-                      Lend
-                    </Button>
-                  )}
-                </div>
-                {onLoan > 0 ? (
-                  <>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <LoanQuantity label="Owned" value={item.quantity} />
-                      <LoanQuantity
-                        label="At home"
-                        value={available}
-                        tone="sage"
-                      />
-                      <LoanQuantity
-                        label="On loan"
-                        value={onLoan}
-                        tone="brass"
-                      />
-                    </div>
-                    <ul className="mt-4 space-y-2">
-                      {(loanSummary?.loans ?? []).slice(0, 4).map((loan) => (
-                        <li key={loan.id}>
-                          <Link
-                            to={`/loans/${loan.id}`}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-2xs transition-colors hover:bg-secondary/30"
-                          >
-                            <span className="min-w-0 truncate">
-                              {loan.borrower_name} · {loan.outstanding_quantity}{" "}
-                              of {loan.quantity}
-                            </span>
-                            <span className="shrink-0 text-2xs text-muted-foreground">
-                              {loan.due_on
-                                ? `due ${formatDate(loan.due_on)}`
-                                : "no due date"}
-                            </span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                    {loanSummary && loanSummary.outstanding_loan_count > 4 && (
-                      <Link
-                        to={`/loans?item_id=${item.id}`}
-                        className="mt-3 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                      >
-                        All {loanSummary.outstanding_loan_count} open loans
-                      </Link>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {item.storage?.active
-                      ? "This owned item is at home. Its contents keep separate loan records; open or view an item to see its own current lending truth."
-                      : "Everything is at home. Lending records a borrower without moving this item out of its room or container."}
-                  </p>
-                )}
-              </section>
-            )}
-
-            {tab === "details" && (
+            {tab === "info" && (
               <section className="surface p-5">
                 <div className="mb-4 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -951,6 +968,118 @@ export function ItemDetailPage() {
               </section>
             )}
 
+          {tab === "info" && !item.storage && <ItemStorageSection item={item} />}
+
+          {tab === "info" && (
+            <details className="surface group">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-5 py-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground transition-colors hover:text-foreground">
+                Record details
+                <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+              </summary>
+              <dl className="space-y-4 border-t border-border/60 px-5 py-4">
+                <InfoRow icon={CalendarDays} label="Added">
+                  {formatRelativeDate(item.created_at)}
+                  <span className="text-muted-foreground"> · {formatDate(item.created_at)}</span>
+                </InfoRow>
+                <InfoRow icon={History} label="Changed">
+                  {formatRelativeDate(item.updated_at)}
+                </InfoRow>
+                {item.import_source && (
+                  <InfoRow icon={FileText} label="Import">
+                    <Link
+                      to={item.import_source.url}
+                      className="underline underline-offset-4 hover:text-foreground"
+                    >
+                      {item.import_source.title}
+                    </Link>
+                    {item.import_source.source_path && (
+                      <span className="block break-all text-2xs text-muted-foreground">
+                        {item.import_source.source_path}
+                      </span>
+                    )}
+                  </InfoRow>
+                )}
+              </dl>
+            </details>
+          )}
+
+            {tab === "loans" && (
+              <section className="surface p-5">
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <HandCoins
+                      className="size-4 text-muted-foreground"
+                      strokeWidth={1.7}
+                    />
+                    <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+                      Lending
+                    </h2>
+                  </div>
+                  {canWrite && !item.is_archived && available > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setLendOpen(true)}
+                    >
+                      <HandCoins />
+                      Lend
+                    </Button>
+                  )}
+                </div>
+                {onLoan > 0 ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <LoanQuantity label="Owned" value={item.quantity} />
+                      <LoanQuantity
+                        label="At home"
+                        value={available}
+                        tone="sage"
+                      />
+                      <LoanQuantity
+                        label="On loan"
+                        value={onLoan}
+                        tone="brass"
+                      />
+                    </div>
+                    <ul className="mt-4 space-y-2">
+                      {(loanSummary?.loans ?? []).slice(0, 4).map((loan) => (
+                        <li key={loan.id}>
+                          <Link
+                            to={`/loans/${loan.id}`}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-2xs transition-colors hover:bg-secondary/30"
+                          >
+                            <span className="min-w-0 truncate">
+                              {loan.borrower_name} · {loan.outstanding_quantity}{" "}
+                              of {loan.quantity}
+                            </span>
+                            <span className="shrink-0 text-2xs text-muted-foreground">
+                              {loan.due_on
+                                ? `due ${formatDate(loan.due_on)}`
+                                : "no due date"}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    {loanSummary && loanSummary.outstanding_loan_count > 4 && (
+                      <Link
+                        to={`/loans?item_id=${item.id}`}
+                        className="mt-3 inline-block text-2xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        All {loanSummary.outstanding_loan_count} open loans
+                      </Link>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {item.storage?.active
+                      ? "This owned item is at home. Its contents keep separate loan records; open or view an item to see its own current lending truth."
+                      : "Everything is at home. Lending records a borrower without moving this item out of its room or container."}
+                  </p>
+                )}
+              </section>
+            )}
+
             {tab === "documents" && (
               <section className="surface p-5">
                 <div className="mb-4 flex items-center justify-between gap-2">
@@ -1035,60 +1164,58 @@ export function ItemDetailPage() {
               </section>
             )}
 
-            {tab === "documents" && <ItemDocumentsAndManuals item={item} />}
-            {tab === "history" && (
-              <section className="surface mt-4 p-5 sm:p-6">
-                <div className="flex items-center gap-2">
-                  <History className="size-4 text-muted-foreground" />
-                  <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
-                    History
-                  </h2>
-                </div>
-                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-                  Moves and lending changes, with household member, time and
-                  preserved place names. Undo creates a new compensating event
-                  and is only offered while it is safe. If the original storage
-                  place was recoverably deleted, one item can be returned after
-                  an explicit container-restore preview; other former contents
+          {tab === "documents" && <ItemDocumentsAndManuals item={item} />}
+
+          {tab === "history" && (
+            <section className="surface p-5">
+              <div className="flex items-center gap-2">
+                <History className="size-4 text-muted-foreground" />
+                <h2 className="font-display text-[1.35rem] tracking-[-0.02em]">
+                  History
+                </h2>
+              </div>
+              <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
+                Moves and lending changes. Undo adds a new entry and is offered
+                only while it is safe.
+              </p>
+              <details className="group mt-1">
+                <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 text-2xs font-medium text-muted-foreground hover:text-foreground">
+                  More about undo
+                  <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+                </summary>
+                <p className="pb-2 text-2xs leading-relaxed text-muted-foreground">
+                  Each entry keeps the household member, the time and the
+                  place names as they were. If the original storage place was
+                  recoverably deleted, one item can be returned after an
+                  explicit container-restore preview; other former contents
                   are not recreated.
                 </p>
-                <div className="mt-4">
-                  <ActivityTimeline
-                    events={historyQuery.data?.items ?? []}
-                    emptyText="No moves or lending history yet. Legacy items do not have fabricated history."
-                    onChanged={() => {
-                      void historyQuery.refetch();
-                      void loansQuery.refetch();
-                    }}
-                  />
-                </div>
-              </section>
-            )}
-          </div>
+              </details>
+              <div className="mt-3">
+                <ActivityTimeline
+                  events={historyQuery.data?.items ?? []}
+                  emptyText="No moves or lending history yet. Legacy items do not have fabricated history."
+                  onChanged={() => {
+                    void historyQuery.refetch();
+                    void loansQuery.refetch();
+                  }}
+                />
+              </div>
+            </section>
+          )}
         </div>
       </div>
 
-      {item.import_source && (
-        <div className="surface mt-4 flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Import source
-            </p>
-            <p className="mt-1 text-xs">
-              {item.import_source.title}
-              {item.import_source.source_path
-                ? ` · ${item.import_source.source_path}`
-                : ""}
-            </p>
-          </div>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={item.import_source.url}>
-              Open import
-              <ChevronRight className="size-3.5" />
-            </Link>
-          </Button>
-        </div>
-      )}
+      <BulkMoveDialog
+        open={moveOpen}
+        onOpenChange={setMoveOpen}
+        items={[item]}
+        itemName={item.name}
+        onCompleted={() => {
+          void itemQuery.refetch();
+          void historyQuery.refetch();
+        }}
+      />
 
       <LendLoanDialog
         open={lendOpen}
@@ -1133,6 +1260,6 @@ export function ItemDetailPage() {
           await remove.mutateAsync(item.id);
         }}
       />
-    </div>
+    </article>
   );
 }

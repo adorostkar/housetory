@@ -2,13 +2,12 @@ import { Check, Undo2 } from "lucide-react";
 
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
-import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { cn } from "@/lib/utils";
 
 /**
- * Appears only while a form has unsaved changes. Fixed above the mobile bottom
- * nav (pinned to the bottom while the software keyboard is open), sticky at
- * the bottom of the content column on desktop.
+ * Appears only while a form has unsaved changes. It sticks to the bottom of
+ * whatever scrolls the form (the window, or a side panel), above the app's
+ * bottom bar and above the software keyboard. Put it after the form's fields.
  */
 export function StickySaveBar({
   dirty,
@@ -29,7 +28,6 @@ export function StickySaveBar({
   onDiscard: () => void;
   className?: string;
 }) {
-  const keyboardOpen = useSoftwareKeyboardOpen();
   if (!dirty) return null;
   return (
     <div
@@ -37,11 +35,8 @@ export function StickySaveBar({
       aria-label="Unsaved changes"
       data-testid="sticky-save-bar"
       className={cn(
-        "glass fixed inset-x-3 z-30 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg",
-        keyboardOpen
-          ? "bottom-2"
-          : "bottom-[calc(4.75rem+env(safe-area-inset-bottom))]",
-        "lg:sticky lg:inset-x-auto lg:bottom-4 lg:mt-6",
+        "glass sticky z-30 mt-6 flex items-center justify-between gap-3 rounded-2xl border border-border/70 px-4 py-2.5 shadow-lg",
+        "bottom-[calc(var(--shell-bar-height,0px)+var(--keyboard-inset,0px)+0.5rem)]",
         className,
       )}
     >
@@ -49,11 +44,11 @@ export function StickySaveBar({
         {statusText}
       </p>
       <div className="flex shrink-0 items-center gap-2">
-        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onDiscard}>
+        <Button type="button" size="sm" variant="ghost" className="h-11" disabled={saving} onClick={onDiscard}>
           <Undo2 />
           Discard
         </Button>
-        <Button type="button" size="sm" disabled={saving || !canSave} onClick={onSave}>
+        <Button type="button" size="sm" className="h-11" disabled={saving || !canSave} onClick={onSave}>
           {saving ? <Spinner /> : <Check />}
           {saveLabel}
         </Button>

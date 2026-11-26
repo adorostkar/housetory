@@ -3,11 +3,13 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
+  ChevronDown,
   MapPin,
   MoveRight,
   Printer,
   QrCode,
   Search,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import * as React from "react";
@@ -67,6 +69,10 @@ export function ContainersPage() {
   const [containerType, setContainerType] = React.useState("");
   const [empty, setEmpty] = React.useState<"all" | "full" | "empty">("all");
   const [createOpen, setCreateOpen] = React.useState(false);
+  // A link from a room arrives with that room chosen, so show the filters then.
+  const [filtersOpen, setFiltersOpen] = React.useState(() =>
+    Boolean(searchParams.get("room_id")),
+  );
   const [moveTarget, setMoveTarget] = React.useState<Container | null>(null);
   const [qrTarget, setQrTarget] = React.useState<Container | null>(null);
   const [convertTarget, setConvertTarget] = React.useState<Container | null>(null);
@@ -217,6 +223,9 @@ export function ContainersPage() {
   };
 
   const allSelected = containers.length > 0 && containers.every((entry) => selected.has(entry.id));
+  const activeFilterCount = [propertyId, roomId, containerType, empty !== "all"].filter(
+    Boolean,
+  ).length;
   const selectedIds = containers.filter((entry) => selected.has(entry.id)).map((entry) => entry.id);
 
   return (
@@ -224,7 +233,6 @@ export function ContainersPage() {
       header={{
         eyebrow: "Physical storage",
         title: "Containers",
-        description: "Boxes, bins, crates and bags with permanent identifiers, live contents and printable QR labels. Containers linked to owned items are managed from those item pages.",
         actions: (
           <>
             {canWrite && (
@@ -252,45 +260,67 @@ export function ContainersPage() {
         </div>
       )}
 
-      <section className="surface p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
-          <div className="inline-flex shrink-0 rounded-full border border-border/70 bg-background/50 p-1">
-            <button
-              type="button"
-              onClick={() => setView("containers")}
-              className={cn(
-                "rounded-full px-3.5 py-1.5 text-2xs font-medium",
-                view === "containers"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              Containers
-            </button>
-            <button
-              type="button"
-              onClick={() => setView("fixed")}
-              className={cn(
-                "rounded-full px-3.5 py-1.5 text-2xs font-medium",
-                view === "fixed"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              Fixed places
-            </button>
+      <section className="surface p-3.5 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="inline-flex shrink-0 rounded-full border border-border/70 bg-background/50"
+            role="group"
+            aria-label="Kind of place"
+          >
+            {(["containers", "fixed"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={view === value}
+                onClick={() => setView(value)}
+                className={cn(
+                  "min-h-9 rounded-full px-3.5 text-2xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring coarse:min-h-11",
+                  view === value ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+                )}
+              >
+                {value === "containers" ? "Containers" : "Fixed places"}
+              </button>
+            ))}
           </div>
-          <div className="relative min-w-0 flex-1 lg:min-w-[18rem]">
+          <div className="relative min-w-[10rem] flex-1">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search BOX-001, name or room"
+              placeholder="BOX-001, name or room"
               aria-label="Search containers"
               className="pl-10"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <button
+            type="button"
+            className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            aria-expanded={filtersOpen}
+            aria-controls="container-filters"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersHorizontal className="size-4 text-muted-foreground" aria-hidden="true" />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+                <span className="sr-only">Active filters: </span>
+                {activeFilterCount}
+              </Badge>
+            )}
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 text-muted-foreground transition-transform",
+                filtersOpen && "rotate-180",
+              )}
+            />
+          </button>
+        </div>
+        {filtersOpen && (
+          <div
+            id="container-filters"
+            className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2"
+          >
             <Select
               aria-label="Filter by property"
               value={propertyId}
@@ -341,7 +371,7 @@ export function ContainersPage() {
               <option value="full">Has items</option>
             </Select>
           </div>
-        </div>
+        )}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <button

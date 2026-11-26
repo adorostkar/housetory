@@ -21,6 +21,7 @@ import {
 } from "@/components/add-items";
 import {
   BulkItemActionBar,
+  BulkSelectButton,
   BulkSelectionControls,
   BulkSelectionNotice,
   useBulkSelection,
@@ -28,7 +29,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
-import { ItemCard } from "@/components/item-card";
+import { ItemRow } from "@/components/item-card";
 import { ItemStorageDialog } from "@/components/ownership-dialogs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,14 +45,44 @@ import {
   useItems,
 } from "@/lib/queries";
 import { itemOrigin } from "@/lib/navigation";
-import type { ItemDetail, ItemDetailResponse } from "@/lib/types";
-import { locationLabel, pluralize } from "@/lib/utils";
+import type { ItemDetail, ItemDetailResponse, ItemListEntry } from "@/lib/types";
+import { cn, locationLabel, pluralize } from "@/lib/utils";
 
 const SORTS = {
+  location_asc: "By place",
   name_asc: "Name A–Z",
   created_desc: "Newest first",
   updated_desc: "Recently updated",
 } as const;
+
+interface PlaceGroup {
+  key: string;
+  label: string;
+  items: ItemListEntry[];
+}
+
+/** Groups the items by the place they are in, named from the storage item downwards. */
+function groupByPlace(items: ItemListEntry[], storageLocationId: string): PlaceGroup[] {
+  const groups = new Map<string, PlaceGroup>();
+  for (const item of items) {
+    const path = item.location_path;
+    const start = path.findIndex((entry) => entry.id === storageLocationId);
+    const inside = start >= 0 ? path.slice(start + 1) : path;
+    const key = item.location?.id ?? "";
+    const label =
+      key === storageLocationId || inside.length === 0
+        ? "Directly inside"
+        : inside.map((entry) => locationLabel(entry)).join(" / ");
+    const group = groups.get(label) ?? { key: label, label, items: [] };
+    group.items.push(item);
+    groups.set(label, group);
+  }
+  const direct = groups.get("Directly inside");
+  return [
+    ...(direct ? [direct] : []),
+    ...[...groups.values()].filter((group) => group !== direct),
+  ];
+}
 
 export function ItemStorageSection({ item }: { item: ItemDetail }) {
   const canWrite = useCanWrite();
@@ -106,54 +137,45 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
   });
 
   if (!storage) {
+    // An offer to writers only. Viewers have nothing to read here.
+    if (!canWrite) return null;
     return (
-      <section className="surface p-5 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 font-display text-[1.35rem] tracking-[-0.02em]">
-              <PackageOpen className="size-4 text-brass" />
-              Store items inside
-            </h2>
-            <p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-              Use this item as a toolbox, box or piece of furniture that holds other items.
-            </p>
-            {item.quantity !== 1 ? (
-              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
-                Quantity must be 1 before storage can be enabled. Represent separate physical
-                boxes or furniture units as separate items; quantities are not split silently.
-              </p>
-            ) : !item.room ? (
-              <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
-                Assign this item to a room first so its storage place has a real location and
-                QR identity.
-              </p>
-            ) : null}
-          </div>
-          {canWrite && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={item.quantity !== 1 || !item.room || item.is_archived}
-              onClick={() => setDialogOpen(true)}
-            >
-              <PackageOpen />
-              Store items inside
-            </Button>
-          )}
-        </div>
-        {canWrite && (
-          <ItemStorageDialog
-            item={item}
-            open={dialogOpen}
-            onOpenChange={setDialogOpen}
-          />
-        )}
+      <section className="surface p-5">
+        <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+          <PackageOpen className="size-4" />
+          Holds other items?
+        </h2>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          Use this item as a toolbox, box or piece of furniture that holds other items.
+        </p>
+        {item.quantity !== 1 ? (
+          <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
+            Quantity must be 1 before storage can be enabled. Represent separate physical
+            boxes or furniture units as separate items; quantities are not split silently.
+          </p>
+        ) : !item.room ? (
+          <p className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/35 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
+            Assign this item to a room first so its storage place has a real location and
+            QR identity.
+          </p>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-3"
+          disabled={item.quantity !== 1 || !item.room || item.is_archived}
+          onClick={() => setDialogOpen(true)}
+        >
+          <PackageOpen />
+          Store items inside
+        </Button>
+        <ItemStorageDialog item={item} open={dialogOpen} onOpenChange={setDialogOpen} />
       </section>
     );
   }
 
   return (
-    <section className="surface p-5 sm:p-6">
+    <section className="surface p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -285,16 +307,6 @@ export function ItemStorageSection({ item }: { item: ItemDetail }) {
         />
       )}
 
-      {canWrite && (
-        <div className="mt-5 border-t border-border/60 pt-4">
-          <p className="text-2xs leading-relaxed text-muted-foreground">
-            Removing storage never deletes this item or its ownership details. Move out every
-            item, nested place and borrowed placement first; the server blocks an unsafe
-            removal and nothing is deleted.
-          </p>
-        </div>
-      )}
-
       <ConfirmDialog
         open={removeOpen}
         onOpenChange={setRemoveOpen}
@@ -323,7 +335,7 @@ function ContentsBody({
   const [search, setSearch] = React.useState("");
   const debounced = useDebouncedValue(search, 300);
   const [scope, setScope] = React.useState<"nested" | "direct">("nested");
-  const [sort, setSort] = React.useState<keyof typeof SORTS>("name_asc");
+  const [sort, setSort] = React.useState<keyof typeof SORTS>("location_asc");
   const itemsQuery = useItems(
     {
       q: debounced.trim() || undefined,
@@ -340,25 +352,37 @@ function ContentsBody({
     items,
     enabled: canWrite,
     scopeKey: filterSignature,
+    onRequest: true,
   });
 
+  // By place, the server returns the items place by place, so headings can sit between them.
+  const groups = sort === "location_asc" ? groupByPlace(items, storageLocationId) : null;
+  const renderRow = (child: ItemListEntry) => (
+    <ItemRow
+      key={child.id}
+      item={child}
+      origin={origin}
+      selection={selection.itemSelection(child)}
+    />
+  );
+
   return (
-    <div className="mt-5 border-t border-border/60 pt-4">
-      <div className="surface mb-4 p-3.5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                selection.clearSelection("Selection cleared because the search changed.");
-              }}
-              placeholder="Search inside this item"
-              aria-label="Search inside this item"
-              className="pl-10"
-            />
-          </div>
+    <div className="mt-4 border-t border-border/60 pt-4">
+      <div className="mb-3 space-y-2">
+        <div className="relative min-w-0">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              selection.clearSelection("Selection cleared because the search changed.");
+            }}
+            placeholder="Search inside this item"
+            aria-label="Search inside this item"
+            className="pl-10"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <div
             className="inline-flex rounded-full border border-border/70 bg-background/50 p-1"
             role="group"
@@ -373,53 +397,59 @@ function ContentsBody({
                   selection.clearSelection("Selection cleared because the scope changed.");
                   setScope(value);
                 }}
-                className={
-                  scope === value
-                    ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
-                    : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
-                }
+                className={cn(
+                  "min-h-9 rounded-full px-3 text-2xs font-medium",
+                  scope === value ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+                )}
               >
                 {value === "nested" ? "Include nested" : "Direct only"}
               </button>
             ))}
           </div>
-          <Select
-            aria-label="Sort items inside this item"
-            value={sort}
-            onChange={(event) => {
-              selection.clearSelection("Selection cleared because the sort changed.");
-              setSort(event.target.value as keyof typeof SORTS);
-            }}
-            className="h-9 rounded-lg text-xs lg:max-w-44"
-          >
-            {Object.entries(SORTS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
+          <div className="w-40">
+            <Select
+              aria-label="Sort items inside this item"
+              value={sort}
+              onChange={(event) => {
+                selection.clearSelection("Selection cleared because the sort changed.");
+                setSort(event.target.value as keyof typeof SORTS);
+              }}
+              className="rounded-lg text-sm"
+            >
+              {Object.entries(SORTS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <BulkSelectionControls
             selection={selection}
             showing={items.length}
             total={total}
           />
-          {addItemsContext && <AddItemsButton context={addItemsContext} variant="outline" size="sm" />}
+          <div className="ml-auto flex items-center gap-2">
+            {canWrite && items.length > 0 && <BulkSelectButton selection={selection} />}
+            {addItemsContext && (
+              <AddItemsButton context={addItemsContext} variant="outline" size="sm" />
+            )}
+          </div>
         </div>
       </div>
 
       <BulkSelectionNotice selection={selection} />
       <BulkItemActionBar
         items={selection.selectedItems}
-        onClear={() => selection.clearSelection()}
+        onClear={selection.stopSelecting}
         onNotice={selection.showNotice}
       />
 
       {itemsQuery.isPending ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Skeleton className="h-48 rounded-2xl" />
-          <Skeleton className="h-48 rounded-2xl" />
+        <div className="space-y-2">
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-16 rounded-xl" />
         </div>
       ) : itemsQuery.isError ? (
         <ErrorState
@@ -439,25 +469,28 @@ function ContentsBody({
         />
       ) : (
         <>
-          <div className="stagger grid gap-4 sm:grid-cols-2">
-            {items.map((child) => (
-              <div key={child.id} className="min-w-0">
-                <ItemCard
-                  item={child}
-                  origin={origin}
-                  selection={
-                    canWrite
-                      ? {
-                          selected: selection.selected.has(child.id),
-                          onToggle: () => selection.toggleItem(child.id),
-                          disabled: child.is_archived,
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-            ))}
-          </div>
+          {groups ? (
+            <div className="space-y-4">
+              {groups.map((group) => (
+                <section key={group.key} aria-label={group.label}>
+                  <h3 className="mb-1 flex items-baseline justify-between gap-2 px-1 text-2xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    <span className="min-w-0 truncate">{group.label}</span>
+                    <span className="shrink-0 font-normal normal-case tracking-normal">
+                      {group.items.length}
+                    </span>
+                  </h3>
+                  <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 p-1">
+                    {group.items.map(renderRow)}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 p-1">
+              {items.map(renderRow)}
+            </div>
+          )}
+          {selection.selectedItems.length > 0 && <div aria-hidden="true" className="h-24" />}
           {itemsQuery.hasNextPage && (
             <div className="mt-5 flex justify-center">
               <Button

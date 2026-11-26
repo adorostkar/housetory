@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -64,6 +65,7 @@ const photo = {
 function renderGallery(
   item: ItemDetail,
   representative: ItemDetail["representative_image"] = null,
+  children?: React.ReactNode,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -71,43 +73,69 @@ function renderGallery(
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PhotoGallery item={item} representative={representative} />
+        <PhotoGallery item={item} representative={representative}>
+          {children}
+        </PhotoGallery>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
 describe("PhotoGallery", () => {
-  it("uses one compact set of empty-photo upload controls", () => {
+  it("shows a small placeholder and one add tile when there is no photograph", () => {
     renderGallery(baseItem);
     expect(screen.getByText("No photograph yet")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Take photo" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Choose photo" })).toHaveLength(1);
-    expect(
-      screen.queryAllByRole("button", { name: "Take a photo" }),
-    ).toHaveLength(0);
-    expect(
-      screen.queryAllByRole("button", { name: "Choose a photo" }),
-    ).toHaveLength(0);
-    expect(screen.queryByLabelText("Add photographs")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
+    expect(screen.queryByTestId("photo-gallery-frame")).not.toBeInTheDocument();
   });
 
-  it("bounds the actual-photo gallery and shows the whole image without cropping", () => {
+  it("shows small thumbnails that open the whole photograph full screen", async () => {
     renderGallery({
       ...baseItem,
-      photos: [photo],
+      photos: [photo, { ...photo, id: "photo-2", sort_order: 1 }],
       primary_photo: photo,
     });
-    const frame = screen.getByTestId("photo-gallery-frame");
-    expect(frame).toHaveClass("h-[240px]", "sm:h-[320px]", "xl:h-[340px]");
-    const image = screen.getByAltText("Heavy drill photograph");
-    expect(image).toHaveClass("object-contain");
-    expect(image).not.toHaveClass("object-cover");
-    expect(image).not.toHaveClass("size-full");
-    expect(screen.getByRole("button", { name: /View Heavy drill photograph full screen/ })).toBeVisible();
+    const first = screen.getByRole("button", { name: "View photograph 1" });
+    expect(first).toHaveClass("size-24");
+    expect(first.querySelector("img")).toHaveClass("object-contain");
+    expect(first.querySelector("img")).toHaveAttribute("src", photo.thumbnail_url);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "View photograph 2" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
   });
 
-  it("fits a representative image inside a padded frame without cropping", () => {
+  it("keeps reordering, cover, delete and the image source behind Manage photos", async () => {
+    renderGallery(
+      {
+        ...baseItem,
+        photos: [photo, { ...photo, id: "photo-2", sort_order: 1 }],
+        primary_photo: photo,
+      },
+      null,
+      <p>image source</p>,
+    );
+    expect(screen.queryByText("image source")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete photograph" })).not.toBeInTheDocument();
+
+    const manage = screen.getByRole("button", { name: "Manage photos" });
+    await userEvent.click(manage);
+    expect(manage).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("image source")).toBeVisible();
+    expect(screen.getByText(/Photograph 1 of 2 · cover/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Move photograph earlier" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Set as cover photograph" })).not.toBeInTheDocument();
+
+    // While managing, a tap chooses the photograph instead of opening it.
+    await userEvent.click(screen.getByRole("button", { name: "Choose photograph 2" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/Photograph 2 of 2/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Set as cover photograph" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete photograph" })).toBeEnabled();
+  });
+
+  it("fits a representative image inside a small tile without cropping", () => {
     renderGallery(baseItem, {
       id: "image-ref",
       source_type: "reference",
@@ -127,30 +155,10 @@ describe("PhotoGallery", () => {
       provider_label: null,
       created_at: "2026-01-01T00:00:00Z",
     });
-    const frame = screen.getByTestId("photo-gallery-frame");
-    expect(frame).toHaveClass("h-[240px]", "sm:h-[320px]", "xl:h-[340px]");
-    expect(frame).not.toHaveClass("min-h-[150px]");
     const image = screen.getByRole("img", { name: /Reference image/i });
     expect(image).toHaveClass("object-contain");
-    expect(image).not.toHaveClass("object-cover");
-    expect(image.parentElement).toHaveClass("bg-white", "p-3", "sm:p-4");
+    expect(image.parentElement).toHaveClass("bg-white", "size-24");
+    expect(screen.getByText("Reference image")).toBeVisible();
     expect(screen.queryByText("No photograph yet")).not.toBeInTheDocument();
-  });
-
-  it("keeps one upload control pair for populated galleries", () => {
-    renderGallery({
-      ...baseItem,
-      photos: [photo],
-      primary_photo: photo,
-    });
-    expect(screen.getByAltText("Heavy drill photograph")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
-    expect(
-      screen.queryAllByRole("button", { name: "Take photo" }),
-    ).toHaveLength(0);
-    expect(
-      screen.queryAllByRole("button", { name: "Choose photo" }),
-    ).toHaveLength(0);
   });
 });

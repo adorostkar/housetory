@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { Download, Plus, ScanLine, Search, SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, Download, Plus, ScanLine, Search, SlidersHorizontal, X } from "lucide-react";
 import * as React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { DocumentUploadDialog } from "@/components/document-upload-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { PageLayout } from "@/components/page-layout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -21,7 +22,7 @@ import { useCanWrite } from "@/lib/queries";
 import { DOCUMENT_TYPE_OPTIONS } from "@/lib/labels";
 import { useDocuments, useInvalidateInventory } from "@/lib/queries";
 import type { DocumentSummary } from "@/lib/types";
-import { pluralize } from "@/lib/utils";
+import { formatDate, pluralize } from "@/lib/utils";
 
 export function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -33,6 +34,7 @@ export function DocumentsPage() {
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [scanOpen, setScanOpen] = React.useState(false);
   const [documentToDelete, setDocumentToDelete] = React.useState<DocumentSummary | null>(null);
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   const typeFilter = searchParams.get("type") ?? "";
   const merchantFilter = searchParams.get("merchant") ?? "";
@@ -78,6 +80,19 @@ export function DocumentsPage() {
   };
 
   const documents = documentsQuery.data?.items ?? [];
+  // The search stays in view, so it is not counted as a filter.
+  const filterChips = [
+    typeFilter
+      ? {
+          key: "type",
+          label:
+            DOCUMENT_TYPE_OPTIONS.find(([value]) => value === typeFilter)?.[1] ?? typeFilter,
+        }
+      : null,
+    merchantFilter ? { key: "merchant", label: `Merchant: ${merchantFilter}` } : null,
+    dateFrom ? { key: "date_from", label: `From ${formatDate(dateFrom)}` } : null,
+    dateTo ? { key: "date_to", label: `To ${formatDate(dateTo)}` } : null,
+  ].filter((chip): chip is NonNullable<typeof chip> => chip !== null);
   const hasFilters = Boolean(
     debouncedSearch.trim() || typeFilter || merchantFilter || dateFrom || dateTo,
   );
@@ -114,111 +129,168 @@ export function DocumentsPage() {
         ),
       }}
     >
-      <div className="surface p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                updateParam("q", event.target.value);
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[10rem] flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              updateParam("q", event.target.value);
+            }}
+            placeholder="Search documents"
+            aria-label="Search documents"
+            className={search ? "pl-10 pr-11" : "pl-10"}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                updateParam("q", "");
               }}
-              placeholder="Search filenames, extracted text, merchants, dates or items…"
-              aria-label="Search documents"
-              className="h-10 pl-10"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearch("");
-                  updateParam("q", "");
-                }}
-                className="absolute right-2.5 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
-                aria-label="Clear document search"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[680px] lg:shrink-0">
-            <Select
-              aria-label="Filter by document type"
-              value={typeFilter}
-              onChange={(event) => updateParam("type", event.target.value)}
-              className="h-10 rounded-lg text-xs"
+              className="absolute right-0 top-0 flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+              aria-label="Clear document search"
             >
-              <option value="">All types</option>
-              {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            <Input
-              type="date"
-              aria-label="Documents from date"
-              value={dateFrom}
-              onChange={(event) => updateParam("date_from", event.target.value)}
-              className="h-10 text-xs"
-            />
-            <Input
-              type="date"
-              aria-label="Documents to date"
-              value={dateTo}
-              onChange={(event) => updateParam("date_to", event.target.value)}
-              className="h-10 text-xs"
-            />
-            <Select
-              aria-label="Sort documents"
-              value={sort}
-              onChange={(event) => updateParam("sort", event.target.value)}
-              className="h-10 rounded-lg text-xs"
-            >
-              <option value="created_desc">Newest added</option>
-              <option value="created_asc">Oldest added</option>
-              <option value="document_date_desc">Document date</option>
-              <option value="title_asc">Title A–Z</option>
-            </Select>
-          </div>
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
-        <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="size-3.5 text-muted-foreground" />
-            <Input
-              value={merchantFilter}
-              onChange={(event) => updateParam("merchant", event.target.value)}
-              placeholder="Filter by merchant"
-              aria-label="Filter by merchant"
-              className="h-8 max-w-56 text-xs"
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xs text-muted-foreground">
-              {documentsQuery.data
-                ? `${pluralize(documentsQuery.data.total, "document")}${hasFilters ? " matching" : ""}`
-                : "Loading…"}
-            </span>
-            {hasFilters && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-          </div>
-        </div>
+        <button
+          type="button"
+          className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-input/90 bg-card/65 px-3 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-expanded={filtersOpen}
+          aria-controls="document-filters"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <SlidersHorizontal className="size-4 text-muted-foreground" aria-hidden="true" />
+          <span>Filters</span>
+          {filterChips.length > 0 && (
+            <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+              <span className="sr-only">Active filters: </span>
+              {filterChips.length}
+            </Badge>
+          )}
+          <ChevronDown
+            aria-hidden="true"
+            className={
+              filtersOpen
+                ? "size-4 rotate-180 text-muted-foreground transition-transform"
+                : "size-4 text-muted-foreground transition-transform"
+            }
+          />
+        </button>
       </div>
 
-      <div className="mt-7">
+      {(filtersOpen || filterChips.length > 0) && (
+        <div className="surface mb-2 p-3.5">
+          {filtersOpen && (
+            <div
+              id="document-filters"
+              className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] items-end gap-2"
+            >
+              <Select
+                aria-label="Filter by document type"
+                value={typeFilter}
+                onChange={(event) => updateParam("type", event.target.value)}
+                className="rounded-lg text-sm"
+              >
+                <option value="">All types</option>
+                {DOCUMENT_TYPE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                value={merchantFilter}
+                onChange={(event) => updateParam("merchant", event.target.value)}
+                placeholder="Merchant"
+                aria-label="Filter by merchant"
+                className="rounded-lg text-sm"
+              />
+              <label className="block min-w-0 text-2xs text-muted-foreground">
+                From
+                <Input
+                  type="date"
+                  aria-label="Documents from date"
+                  value={dateFrom}
+                  onChange={(event) => updateParam("date_from", event.target.value)}
+                  className="mt-0.5 rounded-lg text-sm"
+                />
+              </label>
+              <label className="block min-w-0 text-2xs text-muted-foreground">
+                To
+                <Input
+                  type="date"
+                  aria-label="Documents to date"
+                  value={dateTo}
+                  onChange={(event) => updateParam("date_to", event.target.value)}
+                  className="mt-0.5 rounded-lg text-sm"
+                />
+              </label>
+              <Select
+                aria-label="Sort documents"
+                value={sort}
+                onChange={(event) => updateParam("sort", event.target.value)}
+                className="rounded-lg text-sm"
+              >
+                <option value="created_desc">Newest added</option>
+                <option value="created_asc">Oldest added</option>
+                <option value="document_date_desc">Document date</option>
+                <option value="title_asc">Title A–Z</option>
+              </Select>
+            </div>
+          )}
+          {filterChips.length > 0 && (
+            <div
+              className={
+                filtersOpen
+                  ? "mt-3 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3"
+                  : "flex flex-wrap items-center gap-1.5"
+              }
+            >
+              {filterChips.map((chip) => (
+                <Badge key={chip.key} variant="secondary" className="gap-1 py-0 pl-2.5 pr-0 text-2xs">
+                  <span className="max-w-56 truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateParam(chip.key, "")}
+                    className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:size-7"
+                    aria-label={`Remove ${chip.label}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mb-3 flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-2xs text-muted-foreground">
+          {documentsQuery.data
+            ? `${pluralize(documentsQuery.data.total, "document")}${hasFilters ? " matching" : ""}`
+            : "Loading…"}
+        </span>
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="min-h-9 text-2xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline coarse:min-h-11"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      <div>
         {documentsQuery.isPending ? (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2 md:grid-cols-2">
             {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="h-32 rounded-2xl" />
+              <Skeleton key={index} className="h-20 rounded-xl" />
             ))}
           </div>
         ) : documentsQuery.isError ? (
@@ -249,7 +321,7 @@ export function DocumentsPage() {
             }
           />
         ) : (
-          <div className="stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2 md:grid-cols-2">
             {documents.map((document) => (
               <DocumentCard
                 key={document.id}
@@ -268,13 +340,8 @@ export function DocumentsPage() {
         </p>
       )}
 
-      <DocumentUploadDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        onUploaded={(document) => {
-          navigate(`/documents/${document.id}`);
-        }}
-      />
+      {/* The file is saved as soon as it is chosen; the dialog offers the optional steps. */}
+      <DocumentUploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
 
       <DocumentScanDialog
         open={scanOpen}

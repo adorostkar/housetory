@@ -25,10 +25,13 @@ export function PhotoLightbox({
     return index === -1 ? 0 : index;
   }, [initialPhotoId, photos]);
   const [index, setIndex] = useState(initialIndex);
-
-  useEffect(() => {
+  // Start from the chosen photograph in the same render that opens the viewer. Doing
+  // it in an effect would report the earlier photograph to the caller first.
+  const [seen, setSeen] = useState({ open, initialIndex });
+  if (seen.open !== open || seen.initialIndex !== initialIndex) {
+    setSeen({ open, initialIndex });
     if (open) setIndex(initialIndex);
-  }, [open, initialIndex]);
+  }
 
   useEffect(() => {
     if (!open || photos.length === 0) return;

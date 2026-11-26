@@ -10,7 +10,7 @@ interface Step {
   description: string;
   done: boolean;
   icon: typeof Package;
-  action: { label: string; onClick?: () => void; to?: string };
+  action?: { label: string; onClick?: () => void; to?: string };
 }
 
 export function FirstRunChecklist({
@@ -54,10 +54,9 @@ export function FirstRunChecklist({
     {
       key: "assistant",
       title: "Search or ask",
-      description: "Use the header search for quick matches or a conversation.",
+      description: "Type in the field at the bottom to find things or to ask a question.",
       done: false,
       icon: Bot,
-      action: { label: "Open items", to: "/items" },
     },
   ];
   const completed = steps.filter((step) => step.done).length;
@@ -101,11 +100,11 @@ export function FirstRunChecklist({
                   {step.description}
                 </span>
               </span>
-              {step.action.to ? (
+              {step.action?.to ? (
                 <Button variant="ghost" size="sm" asChild>
                   <Link to={step.action.to}>{step.action.label}</Link>
                 </Button>
-              ) : (
+              ) : step.action ? (
                 <Button
                   variant={step.done ? "ghost" : "outline"}
                   size="sm"
@@ -113,7 +112,7 @@ export function FirstRunChecklist({
                 >
                   {step.action.label}
                 </Button>
-              )}
+              ) : null}
             </li>
           );
         })}

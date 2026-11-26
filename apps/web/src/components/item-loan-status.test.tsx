@@ -58,32 +58,22 @@ function renderStatus(
 }
 
 describe("ItemLoanStatus", () => {
-  it("prominently identifies a fully loaned single-borrower item without exposing notes", () => {
+  it("says who has a fully lent item, with its dates, without exposing notes", () => {
     renderStatus();
-    expect(screen.getByText("On loan to Mohsen")).toBeVisible();
-    expect(screen.getByText(/Owned 1 · at home 0 · on loan 1/)).toBeVisible();
-    expect(screen.getByText(/No return date set/)).toBeVisible();
-    expect(
-      screen.getByText(/usual home, not a current physical location/),
-    ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Record return" })).toBeVisible();
+    expect(screen.getByText("With Mohsen")).toBeVisible();
+    expect(screen.getByText(/^Lent .*2026 · no return date$/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Return" })).toBeVisible();
     expect(screen.queryByText(/PRIVATE BORROWER NOTE/)).not.toBeInTheDocument();
   });
 
-  it("shows partial quantities and the at-home meaning of the recorded home", () => {
+  it("shows partial quantities next to the borrower", () => {
     renderStatus({
       ownedQuantity: 3,
       atHomeQuantity: 2,
       loans: [loan({ due_on: "2026-11-20" })],
     });
-    expect(
-      screen.getByText("1 of 3 units on loan to Mohsen"),
-    ).toBeVisible();
-    expect(screen.getByText(/at home 2 · on loan 1/)).toBeVisible();
-    expect(screen.getByText(/Due/)).toBeVisible();
-    expect(
-      screen.getByText(/where the 2 at-home units normally live/),
-    ).toBeVisible();
+    expect(screen.getByText("1 of 3 with Mohsen")).toBeVisible();
+    expect(screen.getByText(/due .*2026 · owned 3 · here 2 · on loan 1/)).toBeVisible();
   });
 
   it("lists each borrower for multiple loans and offers a return choice per loan", async () => {
@@ -98,24 +88,20 @@ describe("ItemLoanStatus", () => {
       atHomeQuantity: 1,
       loans: [mohsen, alex],
     });
-    expect(screen.getByText("2 of 3 units on loan")).toBeVisible();
-    expect(screen.getByText(/Mohsen · 1 of 1 on loan/)).toBeVisible();
-    expect(screen.getByText(/Alex · 1 of 1 on loan/)).toBeVisible();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Record return from Mohsen" }),
+    expect(screen.getByText("2 of 3 on loan")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Mohsen · 1 of 1" })).toHaveAttribute(
+      "href", "/loans/loan-mohsen",
     );
+    expect(screen.getByRole("link", { name: "Alex · 1 of 1" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Return from Mohsen" }));
     expect(onReturnLoan).toHaveBeenCalledWith(mohsen);
-    expect(
-      screen.queryByRole("button", { name: "Record return" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Return" })).not.toBeInTheDocument();
   });
 
   it("keeps state visible but hides return controls from viewers", () => {
     renderStatus({ canWrite: false });
-    expect(screen.getByText("On loan to Mohsen")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Record return" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("With Mohsen")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Return" })).not.toBeInTheDocument();
   });
 
   it("uses text as well as tone for overdue loans", () => {

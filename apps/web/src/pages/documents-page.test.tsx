@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,13 +26,13 @@ vi.mock("@/lib/queries", async (importOriginal) => {
   };
 });
 
-function renderPage() {
+function renderPage(entry = "/documents") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>
         <DocumentsPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -85,5 +86,34 @@ describe("DocumentsPage empty library", () => {
     ];
     renderPage();
     expect(screen.getByRole("link", { name: "Export" })).toBeVisible();
+  });
+});
+
+describe("DocumentsPage filters", () => {
+  it("keeps search in view and opens the other filters on request", async () => {
+    renderPage();
+    expect(screen.getByLabelText("Search documents")).toBeVisible();
+    const filters = screen.getByRole("button", { name: "Filters" });
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Filter by document type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter by merchant")).not.toBeInTheDocument();
+    await userEvent.click(filters);
+    expect(filters).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Filter by document type")).toBeVisible();
+    expect(screen.getByLabelText("Filter by merchant")).toBeVisible();
+    expect(screen.getByLabelText("Documents from date")).toBeVisible();
+    expect(screen.getByLabelText("Sort documents")).toBeVisible();
+  });
+
+  it("counts the active filters, without the search, and removes one from its chip", async () => {
+    renderPage("/documents?q=kettle&type=receipt&merchant=Acme&date_from=2026-01-01");
+    const filters = screen.getByRole("button", { name: /Filters/ });
+    expect(filters).toHaveTextContent("Active filters: 3");
+    expect(screen.getByText("Merchant: Acme")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Remove Merchant: Acme" }));
+    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent(
+      "Active filters: 2",
+    );
+    expect(screen.getByLabelText("Search documents")).toHaveValue("kettle");
   });
 });

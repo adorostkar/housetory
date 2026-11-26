@@ -1,32 +1,31 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Boxes,
+  Camera,
   Check,
   ChevronRight,
-  FileText,
+  Download,
   MapPin,
+  MoreHorizontal,
+  MoveRight,
+  PackageOpen,
   Pencil,
   Printer,
   QrCode,
-  Download,
-  PackageOpen,
-  MoveRight,
-  Search,
   Trash2,
   Truck,
+  Unlink,
 } from "lucide-react";
 import * as React from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ActivityTimeline } from "@/components/activity-timeline";
-import {
-  AddItemsButton,
-  useAddItems,
-  useRegisterAddItemsContext,
-} from "@/components/add-items";
+import { useAddItems, useRegisterAddItemsContext } from "@/components/add-items";
 import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
 import {
   BulkItemActionBar,
+  BulkSelectButton,
   BulkSelectionControls,
   BulkSelectionNotice,
   useBulkSelection,
@@ -36,18 +35,23 @@ import {
   ContainerMoveDialog,
   ContainerQrDialog,
 } from "@/components/container-dialogs";
+import { Disclosure } from "@/components/disclosure";
 import { ContainerOwnershipDialog } from "@/components/ownership-dialogs";
 import { EmptyState } from "@/components/empty-state";
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
-import { ItemCard } from "@/components/item-card";
+import { ItemCard, ItemRow } from "@/components/item-card";
+import { PageHeader } from "@/components/page-header";
+import { PlaceChipRow, PlaceLinkChip, PlaceListTools } from "@/components/place-chips";
 import {
   PlaceTransferDialog,
   type PlaceTransferSource,
 } from "@/components/place-transfer-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
-import { PageLayout, PageSkeleton } from "@/components/page-layout";
+import { PageSkeleton } from "@/components/page-layout";
+import { LocationIcon } from "@/components/room-card";
+import { useItemsView } from "@/components/view-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +62,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -72,8 +83,10 @@ import {
   useContainerHistory,
   useInvalidateInventory,
   useItems,
+  useLocationPhotos,
   useLocations,
   useRooms,
+  useStocktakeScopeSummary,
 } from "@/lib/queries";
 import { itemOrigin, useRestoreListScroll } from "@/lib/navigation";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -114,6 +127,10 @@ export function ContainerDetailPage() {
   const [evidenceOpen, setEvidenceOpen] = React.useState(false);
   const [emptyDeleteOpen, setEmptyDeleteOpen] = React.useState(false);
   const [transferMode, setTransferMode] = React.useState<"move" | "delete" | null>(null);
+  const [photoAddOpen, setPhotoAddOpen] = React.useState(false);
+  const photosQuery = useLocationPhotos(containerId || undefined);
+  const stocktakeSummary = useStocktakeScopeSummary({ containerId }, Boolean(containerId));
+  const [view, setView] = useItemsView();
   const scope = searchParams.get("scope") === "direct" ? "direct" : "nested";
   const sort = searchParams.get("sort") === "created_desc"
     ? "created_desc"
@@ -146,6 +163,7 @@ export function ContainerDetailPage() {
     items,
     enabled: canWrite,
     scopeKey: filterSignature,
+    onRequest: true,
   });
   useRegisterAssistantPageContext(
     selection.selectedItems.length
@@ -270,325 +288,217 @@ export function ContainerDetailPage() {
   const detail = containerQuery.data;
   const identifier = detail.identifier ?? detail.name;
   const roomLabel = detail.room.name;
-  const insideLabel = detail.path
-    .slice(0, -1)
-    .map((entry) => entry.name)
-    .join(" / ");
+  const ancestors = detail.path.slice(0, -1);
+  const insideLabel = ancestors.map((entry) => entry.name).join(" / ");
+  const parentPlace = ancestors[ancestors.length - 1];
+  const hasContents = detail.total_item_count > 0 || detail.child_count > 0;
+  const hasPhotos = (photosQuery.data?.items.length ?? 0) > 0;
+  const stocktakeActive = Boolean(stocktakeSummary.data?.active_session);
+  // Nested or direct only matters when this place holds other places.
+  const showScope = scope === "direct" || detail.child_count > 0;
+  const updateParam = (key: string, value: string, reason: string) => {
+    selection.clearSelection(`Selection cleared because the ${reason} changed.`);
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+  const photoManager = (
+    <EntityPhotoManager
+      kind="location"
+      entityId={detail.id}
+      name={identifier}
+      addOpen={photoAddOpen}
+      onAddOpenChange={setPhotoAddOpen}
+    />
+  );
 
   return (
-    <PageLayout
-      header={{
-        eyebrow: "Container",
-        title: identifier,
-        description:
-          detail.name !== identifier
-            ? detail.name
-            : detail.is_container
-              ? "Unnamed container"
-              : "Fixed storage place",
-        backTo: "/containers",
-        backLabel: "Containers",
-        actions: (
-          <>
-            {canWrite && (
-              <Button variant="outline" asChild>
-                <Link to={`/labels?ids=${detail.id}`}>
-                  <Printer />
-                  Print label
-                </Link>
-              </Button>
-            )}
-            <Button variant="outline" onClick={() => setQrOpen(true)}>
-              <QrCode />
-              QR
-            </Button>
-            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
-              <Download />
-              Export evidence
-            </Button>
-            {canWrite && detail.is_container && !detail.owner_item && (
-              <Button variant="outline" onClick={() => setMoveOpen(true)}>
-                <Truck />
-                Move
-              </Button>
-            )}
-            {canWrite &&
-              (detail.total_item_count > 0 || detail.child_count > 0) && (
-                <Button variant="outline" onClick={() => setTransferMode("move")}>
-                  <MoveRight />
-                  Move contents
-                </Button>
-              )}
-            {canWrite && !detail.owner_item && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (detail.total_item_count === 0 && detail.child_count === 0) {
-                    setEmptyDeleteOpen(true);
-                  } else {
-                    setTransferMode("delete");
-                  }
-                }}
-              >
-                <Trash2 />
-                Delete
-              </Button>
-            )}
-          </>
-        ),
-      }}
-    >
-      <StocktakeEntry containerId={detail.id} />
-
-      <BorrowedKeptHere locationId={detail.id} />
-
-      <section className="surface mb-4 p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={detail.is_container ? "sage" : "outline"}>
-                {detail.is_container
-                  ? CONTAINER_TYPE_LABELS[detail.container_type ?? "other"]
-                  : "Fixed place"}
-              </Badge>
-              <span className="text-2xs text-muted-foreground">
-                {pluralize(detail.total_item_count, "item")} · {detail.total_quantity} units ·{" "}
-                {pluralize(detail.child_count, "nested place")}
-              </span>
-            </div>
-            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <MapPin className="size-3.5" />
-              {detail.property && (
-                <>
-                  <span className="font-medium text-foreground/80">{detail.property.name}</span>
-                  <ChevronRight className="size-3" />
-                </>
-              )}
-              <span className="font-medium text-foreground/80">{roomLabel}</span>
-              {insideLabel && (
-                <>
-                  <ChevronRight className="size-3" />
-                  <span>{insideLabel}</span>
-                </>
-              )}
-            </p>
-            <p className="mt-1 text-2xs text-muted-foreground">
-              Updated {formatRelativeDate(detail.updated_at)}
-              {detail.label_generated_at
-                ? ` · label generated ${formatDate(detail.label_generated_at)}`
+    <div className="animate-fade-up">
+      <div className="mb-2 flex items-end justify-between gap-2">
+        <PageHeader
+          className="mb-0 min-w-0 flex-1 sm:mb-0 [&_h1]:[overflow-wrap:anywhere]"
+          eyebrow={detail.is_container ? "Container" : "Storage place"}
+          title={identifier}
+          backTo={
+            detail.parent_id ? `/containers/${detail.parent_id}` : `/rooms/${detail.room_id}`
+          }
+          backLabel={
+            detail.parent_id
+              ? (parentPlace?.identifier ?? parentPlace?.name ?? "Back")
+              : roomLabel
+          }
+          titleAddon={
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="container-count">
+              {detail.name !== identifier ? `${detail.name} · ` : ""}
+              {pluralize(detail.total_item_count, "item")}
+              {detail.child_count > 0
+                ? ` · ${pluralize(detail.child_count, "nested place")}`
                 : ""}
             </p>
-          </div>
-          {canWrite && (
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-              <Pencil />
-              Edit
-            </Button>
-          )}
-        </div>
-        {detail.description && (
-          <p className="mt-3 max-w-3xl whitespace-pre-line text-xs leading-relaxed text-foreground/75">
-            {detail.description}
-          </p>
-        )}
-      </section>
-
-      <section className="surface mb-4 p-4 sm:p-5">
-        <EntityPhotoManager kind="location" entityId={detail.id} name={identifier} />
-      </section>
-
-      <section className="surface mb-4 p-3.5 sm:p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                <PackageOpen className="size-4" />
-                Ownership details
-              </h2>
-              {detail.owner_item ? (
-                <Badge variant="sage">Owned item</Badge>
-              ) : (
-                <Badge variant="outline">Storage only</Badge>
+          }
+        />
+        <div className="flex shrink-0 items-center gap-1">
+          {canWrite && items.length > 0 && <BulkSelectButton selection={selection} />}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                aria-label="Container options"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canWrite && (
+                <>
+                  <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+                    <Pencil />
+                    Edit
+                  </DropdownMenuItem>
+                  {photosQuery.isSuccess && !hasPhotos && (
+                    <DropdownMenuItem onSelect={() => setPhotoAddOpen(true)}>
+                      <Camera />
+                      Add photo
+                    </DropdownMenuItem>
+                  )}
+                  {detail.is_container && !detail.owner_item && (
+                    <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
+                      <Truck />
+                      Move container
+                    </DropdownMenuItem>
+                  )}
+                  {hasContents && (
+                    <DropdownMenuItem onSelect={() => setTransferMode("move")}>
+                      <MoveRight />
+                      Move contents
+                    </DropdownMenuItem>
+                  )}
+                  {detail.owner_item ? (
+                    <DropdownMenuItem onSelect={() => setUnlinkOpen(true)}>
+                      <Unlink />
+                      Unlink owned item
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onSelect={() => setOwnershipOpen(true)}>
+                      <PackageOpen />
+                      Add ownership details
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                </>
               )}
-            </div>
-            {detail.owner_item ? (
-              <>
-                <Link
-                  to={`/items/${detail.owner_item.id}`}
-                  className="mt-2 block font-display text-[1.25rem] tracking-[-0.02em] underline-offset-4 hover:underline"
-                >
-                  {detail.owner_item.name}
+              <DropdownMenuItem onSelect={() => setQrOpen(true)}>
+                <QrCode />
+                QR code
+              </DropdownMenuItem>
+              {canWrite && (
+                <DropdownMenuItem asChild>
+                  <Link to={`/labels?ids=${detail.id}`}>
+                    <Printer />
+                    Print label
+                  </Link>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onSelect={() => setEvidenceOpen(true)}>
+                <Download />
+                Export evidence
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/containers">
+                  <Boxes />
+                  All containers
                 </Link>
-                <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-                  Purchase, warranty, photos, documents, value, tags and history are kept on
-                  this owned item. The container keeps its identifier, QR code and contents.
-                </p>
-                {detail.owner_item_detail && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {detail.owner_item_detail.purchase && (
-                      <Badge variant="outline">Purchase recorded</Badge>
-                    )}
-                    {detail.owner_item_detail.warranty && (
-                      <Badge
-                        variant={
-                          WARRANTY_STATUS_TONE[detail.owner_item_detail.warranty.status]
-                        }
-                      >
-                        {WARRANTY_STATUS_LABELS[detail.owner_item_detail.warranty.status]}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="mt-2 max-w-2xl text-2xs leading-relaxed text-muted-foreground">
-                Link an owned item to add purchase, warranty, photos, documents and value.
-              </p>
-            )}
-          </div>
-          {canWrite && detail.owner_item && (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/items/${detail.owner_item.id}`}>Open owned item</Link>
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setUnlinkOpen(true)}>
-                Unlink
-              </Button>
-            </div>
-          )}
-          {canWrite && !detail.owner_item && (
-            <Button variant="outline" size="sm" onClick={() => setOwnershipOpen(true)}>
-              <PackageOpen />
-              Add ownership details
-            </Button>
-          )}
+              </DropdownMenuItem>
+              {canWrite && !detail.owner_item && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    destructive
+                    onSelect={() => {
+                      if (hasContents) setTransferMode("delete");
+                      else setEmptyDeleteOpen(true);
+                    }}
+                  >
+                    <Trash2 />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </section>
+      </div>
 
-      <section className="mt-8">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
-              Inside {identifier}
-            </h2>
-            <p className="mt-1 text-2xs text-muted-foreground">
-              {scope === "direct"
-                ? "Only items assigned directly to this place."
-                : "Direct and nested items, including quantities and photos."}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
-              <span>
-                {pluralize(detail.summary.item_count, "item")} ·{" "}
-                {detail.summary.total_quantity} units total
-              </span>
-              <span>·</span>
-              <span>
-                {pluralize(detail.summary.direct_item_count, "item")} ·{" "}
-                {detail.summary.direct_total_quantity} directly here
-              </span>
-              {detail.summary.categories.slice(0, 6).map((category) => (
-                <Badge key={category.name} variant="outline">
-                  {category.name} · {category.item_count}
-                </Badge>
-              ))}
-            </div>
-          </div>
-          <AddItemsButton context={addItemsContext} variant="outline" size="sm" />
-        </div>
+      {stocktakeActive && (
+        <StocktakeEntry
+          containerId={detail.id}
+          className="mb-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3 py-1"
+        />
+      )}
 
-        <div className="surface mb-4 p-3.5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  selection.clearSelection(
-                    "Selection cleared because the search changed.",
-                  );
-                }}
-                placeholder="Search inside this place"
-                aria-label="Search inside this place"
-                className="pl-10"
-              />
-            </div>
-            <div
-              className="inline-flex rounded-full border border-border/70 bg-background/50 p-1"
-              role="group"
-              aria-label="Contents scope"
-            >
-              {(["nested", "direct"] as const).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={scope === value}
-                  onClick={() => {
-                    selection.clearSelection("Selection cleared because the scope changed.");
-                    setSearchParams(
-                      (previous) => {
-                        const next = new URLSearchParams(previous);
-                        if (value === "direct") next.set("scope", "direct");
-                        else next.delete("scope");
-                        return next;
-                      },
-                      { replace: true },
-                    );
-                  }}
-                  className={
-                    scope === value
-                      ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
-                      : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
-                  }
-                >
-                  {value === "nested" ? "Include nested" : "Direct only"}
-                </button>
-              ))}
-            </div>
-            <Select
-              aria-label="Sort items inside this place"
-              value={sort}
-              onChange={(event) => {
-                selection.clearSelection("Selection cleared because the sort changed.");
-                setSearchParams(
-                  (previous) => {
-                    const next = new URLSearchParams(previous);
-                    if (event.target.value === "name_asc") next.delete("sort");
-                    else next.set("sort", event.target.value);
-                    return next;
-                  },
-                  { replace: true },
-                );
-              }}
-              className="h-9 rounded-lg text-xs lg:max-w-44"
-            >
-              {Object.entries(ITEM_SORTS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="mt-3 border-t border-border/60 pt-3">
-            <BulkSelectionControls
-              selection={selection}
-              showing={items.length}
-              total={totalItems}
+      {!hasPhotos && photoAddOpen && <div className="mb-3">{photoManager}</div>}
+
+      {detail.children.length > 0 && (
+        <PlaceChipRow label="Nested places" className="mb-2">
+          {detail.children.map((child) => (
+            <PlaceLinkChip
+              key={child.id}
+              to={`/containers/${child.id}`}
+              name={child.identifier ? `${child.identifier} · ${child.name}` : child.name}
+              count={child.total_item_count}
+              icon={<LocationIcon kind={child.kind} className="size-3.5 shrink-0 opacity-70" />}
             />
-          </div>
-        </div>
+          ))}
+        </PlaceChipRow>
+      )}
+
+      <section aria-label={`Inside ${identifier}`} className="min-w-0">
+        <PlaceListTools
+          sort={sort}
+          sortOptions={Object.entries(ITEM_SORTS)}
+          sortLabel="Sort items inside this place"
+          onSortChange={(value) => updateParam("sort", value === "name_asc" ? "" : value, "sort")}
+          search={search}
+          searchLabel="Search inside this place"
+          onSearchChange={(value) => {
+            setSearch(value);
+            selection.clearSelection("Selection cleared because the search changed.");
+          }}
+          scope={scope}
+          showScope={showScope}
+          onScopeChange={(value) => updateParam("scope", value === "direct" ? "direct" : "", "scope")}
+          view={view}
+          showView={items.length > 0}
+          onViewChange={setView}
+        />
 
         <BulkSelectionNotice selection={selection} />
+
+        {items.length > 0 && selection.selecting && (
+          <div className="mb-2">
+            <BulkSelectionControls selection={selection} showing={items.length} total={totalItems} />
+          </div>
+        )}
+
+        {/* Clear, and finishing an action, also leave selection mode. */}
         <BulkItemActionBar
           items={selection.selectedItems}
-          onClear={() => selection.clearSelection()}
+          onClear={selection.stopSelecting}
           onNotice={selection.showNotice}
         />
 
         {itemsQuery.isPending ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <Skeleton className="h-52 rounded-2xl" />
-            <Skeleton className="h-52 rounded-2xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-16 rounded-2xl" />
+            <Skeleton className="h-16 rounded-2xl" />
           </div>
         ) : itemsQuery.isError ? (
           <ErrorState
@@ -598,45 +508,48 @@ export function ContainerDetailPage() {
         ) : items.length === 0 ? (
           <EmptyState
             title={
-              scope === "direct" ? "No direct items here." : "This container is empty."
+              qParam
+                ? "Nothing matches."
+                : scope === "direct"
+                  ? "No direct items here."
+                  : "This container is empty."
             }
             description={
-              scope === "direct"
-                ? "Nested places may still contain items. Switch to Include nested to see them."
-                : "Add an item and assign it here, or move an existing item into this place."
+              qParam
+                ? "Try a different search."
+                : scope === "direct"
+                  ? "Nested places may still contain items. Switch to Include nested to see them."
+                  : "Add an item and assign it here, or move an existing item into this place."
             }
-            actionLabel="Add items"
-            onAction={() => openAddItems(addItemsContext)}
+            actionLabel={qParam ? undefined : "Add items"}
+            onAction={qParam ? undefined : () => openAddItems(addItemsContext)}
+            className="py-10"
           />
         ) : (
           <>
-            <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {items.map((item) => (
-                <div key={item.id} className="min-w-0">
-                  <ItemCard
-                    item={item}
-                    origin={origin}
-                    selection={
-                      canWrite
-                        ? {
-                            selected: selection.selected.has(item.id),
-                            onToggle: () => selection.toggleItem(item.id),
-                            disabled: item.is_archived,
-                          }
-                        : undefined
-                    }
-                  />
-                  {scope === "nested" &&
-                    item.location?.id !== detail.id &&
-                    item.location && (
-                      <p className="mt-1.5 flex items-center gap-1 px-1 text-2xs text-muted-foreground">
-                        <MapPin className="size-3" />
-                        {itemContainer(item)?.identifier ?? item.location.name}
-                      </p>
-                    )}
-                </div>
-              ))}
-            </div>
+            {view === "grid" ? (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3.5 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-4">
+                {items.map((item) => (
+                  <div key={item.id} className="min-w-0">
+                    <ItemCard item={item} origin={origin} selection={selection.itemSelection(item)} />
+                    {scope === "nested" &&
+                      item.location?.id !== detail.id &&
+                      item.location && (
+                        <p className="mt-1.5 flex items-center gap-1 px-1 text-2xs text-muted-foreground">
+                          <MapPin className="size-3" />
+                          {itemContainer(item)?.identifier ?? item.location.name}
+                        </p>
+                      )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="surface divide-y divide-border/60 overflow-hidden p-1">
+                {items.map((item) => (
+                  <ItemRow key={item.id} item={item} origin={origin} selection={selection.itemSelection(item)} />
+                ))}
+              </div>
+            )}
             {itemsQuery.hasNextPage && (
               <div className="mt-6 flex justify-center">
                 <Button
@@ -650,74 +563,140 @@ export function ContainerDetailPage() {
             )}
           </>
         )}
+        {/* Room for the selection bar, so it never hides the end of the list. */}
+        {selection.selectedItems.length > 0 && <div aria-hidden="true" className="h-24" />}
       </section>
 
-      {detail.children.length > 0 && (
-        <section className="mt-8">
-          <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">Nested places</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {detail.children.map((child) => (
-              <Link
-                key={child.id}
-                to={`/containers/${child.id}`}
-                className="surface flex items-center justify-between gap-3 p-4 transition-colors hover:bg-secondary/30"
-              >
-                <div className="min-w-0">
-                  <p className="font-display text-[1.2rem] tracking-[-0.02em]">
-                    {child.identifier ?? child.name}
-                  </p>
-                  <p className="truncate text-2xs text-muted-foreground">
-                    {child.identifier ? child.name : child.kind} ·{" "}
-                    {pluralize(child.total_item_count, "item")}
-                  </p>
-                </div>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="surface mt-8 p-5 sm:p-6">
-        <h2 className="font-display text-[1.55rem] tracking-[-0.025em]">
-          Movement history
-        </h2>
-        <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-          Container moves describe the contents that moved with it. Items are not given
-          duplicate individual move events for an inherited container move.
-        </p>
-        <div className="mt-4">
-          <ActivityTimeline
-            events={historyQuery.data?.items ?? []}
-            emptyText="No container moves recorded yet."
-            onChanged={() => {
-              void historyQuery.refetch();
-              refreshContainer();
-            }}
-          />
+      <section
+        aria-label={`About ${identifier}`}
+        className="mt-8 space-y-3 border-t border-border/60 pt-4"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={detail.is_container ? "sage" : "outline"}>
+            {detail.is_container
+              ? CONTAINER_TYPE_LABELS[detail.container_type ?? "other"]
+              : "Fixed place"}
+          </Badge>
+          <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="size-3.5" aria-hidden="true" />
+            {detail.property && (
+              <>
+                <span className="font-medium text-foreground/80">{detail.property.name}</span>
+                <ChevronRight className="size-3" aria-hidden="true" />
+              </>
+            )}
+            <Link
+              to={`/rooms/${detail.room_id}`}
+              className="font-medium text-foreground/80 underline-offset-4 hover:underline"
+            >
+              {roomLabel}
+            </Link>
+            {insideLabel && (
+              <>
+                <ChevronRight className="size-3" aria-hidden="true" />
+                <span>{insideLabel}</span>
+              </>
+            )}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto shrink-0"
+            onClick={() => setQrOpen(true)}
+          >
+            <QrCode />
+            QR
+          </Button>
         </div>
-      </section>
-
-      {detail.documents.length > 0 && (
-        <section className="mt-8">
-          <h2 className="flex items-center gap-2 font-display text-[1.55rem] tracking-[-0.025em]">
-            <FileText className="size-4 text-muted-foreground" />
-            Related documents
-          </h2>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {detail.documents.map((document) => (
-              <Link
-                key={document.id}
-                to={`/documents/${document.id}`}
-                className="surface flex items-center justify-between gap-3 p-3.5 text-xs transition-colors hover:bg-secondary/30"
-              >
-                <span className="truncate">{document.title}</span>
-                <Badge variant="outline">{document.document_type.replace("_", " ")}</Badge>
-              </Link>
+        <p className="text-2xs leading-relaxed text-muted-foreground" data-testid="container-summary">
+          {pluralize(detail.summary.item_count, "item")} · {detail.summary.total_quantity} units
+          total · {pluralize(detail.summary.direct_item_count, "item")} ·{" "}
+          {detail.summary.direct_total_quantity} directly here · updated{" "}
+          {formatRelativeDate(detail.updated_at)}
+          {detail.label_generated_at
+            ? ` · label generated ${formatDate(detail.label_generated_at)}`
+            : ""}
+        </p>
+        {detail.summary.categories.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {detail.summary.categories.slice(0, 6).map((category) => (
+              <Badge key={category.name} variant="outline">
+                {category.name} · {category.item_count}
+              </Badge>
             ))}
           </div>
-        </section>
-      )}
+        )}
+        {detail.description && (
+          <p className="max-w-3xl whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+            {detail.description}
+          </p>
+        )}
+        {detail.owner_item && (
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <PackageOpen className="size-3.5" aria-hidden="true" />
+            Owned item:
+            <Link
+              to={`/items/${detail.owner_item.id}`}
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              {detail.owner_item.name}
+            </Link>
+            {detail.owner_item_detail?.purchase && (
+              <Badge variant="outline">Purchase recorded</Badge>
+            )}
+            {detail.owner_item_detail?.warranty && (
+              <Badge variant={WARRANTY_STATUS_TONE[detail.owner_item_detail.warranty.status]}>
+                {WARRANTY_STATUS_LABELS[detail.owner_item_detail.warranty.status]}
+              </Badge>
+            )}
+          </p>
+        )}
+        {hasPhotos && photoManager}
+        {!stocktakeActive && <StocktakeEntry containerId={detail.id} />}
+        <BorrowedKeptHere locationId={detail.id} />
+
+        {detail.documents.length > 0 && (
+          <div>
+            <h2 className="text-sm font-medium">Related documents</h2>
+            <ul className="mt-1 divide-y divide-border/60">
+              {detail.documents.map((document) => (
+                <li key={document.id}>
+                  <Link
+                    to={`/documents/${document.id}`}
+                    className="flex min-h-11 items-center justify-between gap-3 py-1.5 text-xs transition-colors hover:text-foreground"
+                  >
+                    <span className="min-w-0 truncate">{document.title}</span>
+                    <Badge variant="outline" className="shrink-0">
+                      {document.document_type.replace("_", " ")}
+                    </Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <Disclosure
+          label="Movement history"
+          buttonClassName="text-sm text-foreground"
+          contentClassName="pt-1"
+        >
+          <p className="text-2xs leading-relaxed text-muted-foreground">
+            A container move covers everything inside it. The items do not get their own move
+            entries.
+          </p>
+          <div className="mt-3">
+            <ActivityTimeline
+              events={historyQuery.data?.items ?? []}
+              emptyText="No container moves recorded yet."
+              onChanged={() => {
+                void historyQuery.refetch();
+                refreshContainer();
+              }}
+            />
+          </div>
+        </Disclosure>
+      </section>
 
       <ContainerQrDialog container={detail} open={qrOpen} onOpenChange={setQrOpen} />
       <ContainerOwnershipDialog
@@ -856,6 +835,6 @@ export function ContainerDetailPage() {
           }
         }}
       />
-    </PageLayout>
+    </div>
   );
 }

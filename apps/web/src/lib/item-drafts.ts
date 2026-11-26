@@ -1,3 +1,5 @@
+import { clearAllRecentItems } from "@/lib/recent-items";
+
 const DRAFT_PREFIX = "housetory:item-draft:v1:";
 
 export const ITEM_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -202,7 +204,8 @@ export const ITEM_DRAFTS_CLEARED_EVENT = "housetory:item-drafts-cleared";
 
 /**
  * Removes every item draft on this device, for every account. Open forms are
- * told so they do not write their draft back afterwards.
+ * told so they do not write their draft back afterwards. The recently opened
+ * items are private to an account in the same way, so they go too.
  */
 export function clearAllItemDrafts(): void {
   try {
@@ -210,5 +213,6 @@ export function clearAllItemDrafts(): void {
   } catch {
     // Nothing to clear when storage is unavailable.
   }
+  clearAllRecentItems();
   window.dispatchEvent(new Event(ITEM_DRAFTS_CLEARED_EVENT));
 }

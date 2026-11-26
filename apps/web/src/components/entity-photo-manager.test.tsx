@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EntityPhotoManager } from "@/components/entity-photo-manager";
@@ -41,13 +42,16 @@ function photo(id: string): Photo {
   };
 }
 
-function renderManager(kind: "room" | "location" = "room") {
+function renderManager(
+  kind: "room" | "location" = "room",
+  props: { addOpen?: boolean; onAddOpenChange?: (open: boolean) => void } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <EntityPhotoManager kind={kind} entityId="entity-1" name="Office" />
+      <EntityPhotoManager kind={kind} entityId="entity-1" name="Office" {...props} />
     </QueryClientProvider>,
   );
 }
@@ -58,39 +62,58 @@ beforeEach(() => {
 });
 
 describe("EntityPhotoManager", () => {
-  it("uses one compact upload control group when empty", () => {
-    renderManager();
-    expect(screen.getByText("Add a photograph")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Take photo" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Choose photo" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Take a photo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Choose a photo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^View photograph/ })).not.toBeInTheDocument();
+  it("takes no space when there are no photographs", () => {
+    const { container } = renderManager();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows a bounded cover and one thumbnail group for a single photo", () => {
-    photoState.photos = [photo("photo-1")];
+  it("shows one small upload row when adding is asked for, and can close it", async () => {
+    const onAddOpenChange = vi.fn();
+    renderManager("room", { addOpen: true, onAddOpenChange });
+    expect(screen.getByText("Add a photo.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Take photo" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Choose photo" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^View photograph/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close add photo" }));
+    expect(onAddOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("never offers the upload row to viewers", () => {
+    photoState.canWrite = false;
+    const { container } = renderManager("room", { addOpen: true });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows a strip of thumbnails and keeps the edit controls behind Manage", async () => {
+    photoState.photos = [photo("photo-1"), photo("photo-2")];
     renderManager();
+    expect(screen.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "View photograph 2" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
+    expect(screen.queryByTestId("entity-photo-frame")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete photograph" })).not.toBeInTheDocument();
+
+    const manage = screen.getByRole("button", { name: "Manage photographs" });
+    expect(manage).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(manage);
+    expect(screen.getByTestId("entity-photo-frame")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "View Office photograph full screen" }),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "View photograph 1" })).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Take a photo" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Choose a photo" })).toHaveLength(1);
-    expect(screen.queryByText("Add a photograph")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move photograph later" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete photograph" })).toBeVisible();
+    expect(screen.getByText("Cover")).toBeVisible();
   });
 
   it("keeps photos visible but hides upload and edit controls for viewers", () => {
     photoState.canWrite = false;
     photoState.photos = [photo("photo-1")];
     renderManager();
-    expect(
-      screen.getByRole("button", { name: "View Office photograph full screen" }),
-    ).toBeVisible();
     expect(screen.getByRole("button", { name: "View photograph 1" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Take a photo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Choose a photo" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Move photograph earlier" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manage/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete photograph" })).not.toBeInTheDocument();
   });
 

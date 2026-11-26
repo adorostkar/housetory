@@ -275,15 +275,67 @@ describe("LoansPage", () => {
     expect(screen.getByRole("button", { name: "Record return" })).toBeVisible();
   });
 
+  it("starts with the list under one summary line, with filters closed", () => {
+    state.borrowed = {
+      ...emptyBorrowedList,
+      items: [borrowed],
+      total: 1,
+      open_count: 1,
+    } satisfies BorrowedList;
+    renderPage();
+    expect(screen.getByTestId("loans-summary")).toHaveTextContent(
+      "1 out · 1 past due · 1 borrowed",
+    );
+    // No stat cards and no open filter panel before the rows.
+    expect(screen.queryByText("Based on your local date")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Past due only")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Loan status")).not.toBeInTheDocument();
+    const filters = screen.getByRole("button", { name: "Filters" });
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Search loans")).toBeVisible();
+    expect(
+      within(screen.getByRole("group", { name: "Loan direction" })).getAllByRole("button"),
+    ).toHaveLength(2);
+    expect(screen.getByTestId("loan-row")).toBeVisible();
+  });
+
+  it("shows the number of active filters and removes one from its chip", async () => {
+    renderPage(["/loans?person=Jack&status=returned&overdue=1&direction=borrowed&q=drill"]);
+    const filters = screen.getByRole("button", { name: /Filters/ });
+    // Direction and search stay in view, so they are not counted.
+    expect(filters).toHaveTextContent("Active filters: 3");
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(screen.getByRole("button", { name: "Remove Past due" }));
+    await waitFor(() => expect(state.loanFilters?.overdue).toBe(false));
+    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent(
+      "Active filters: 2",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Remove Returned" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Person: Jack" }));
+    await waitFor(() => expect(state.loanFilters?.person).toBeUndefined());
+    expect(screen.getByRole("button", { name: "Filters" })).not.toHaveTextContent(
+      "Active filters",
+    );
+  });
+
+  it("filters to past-due records from the summary line", async () => {
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "1 past due" }));
+    await waitFor(() => expect(state.loanFilters?.overdue).toBe(true));
+    expect(screen.getByTestId("location").textContent).toBe("/loans?overdue=1");
+    expect(screen.getByRole("button", { name: /Filters/ })).toHaveTextContent(
+      "Active filters: 1",
+    );
+  });
+
   it("keeps a person filter in the URL and applies it to both directions", async () => {
     renderPage(["/loans?person=Jack"]);
-    const input = screen.getByLabelText("Filter loans by person");
-    expect(input).toHaveValue("Jack");
     expect(state.loanFilters?.person).toBe("Jack");
     expect(state.borrowedFilters?.person).toBe("Jack");
-    expect(
-      screen.getByText(/Showing lent-out and borrowed records for/),
-    ).toHaveTextContent("Jack");
+    expect(screen.getByText("Person: Jack")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    const input = screen.getByLabelText("Filter loans by person");
+    expect(input).toHaveValue("Jack");
 
     await userEvent.clear(input);
     await waitFor(() => expect(state.loanFilters?.person).toBeUndefined());
@@ -291,9 +343,10 @@ describe("LoansPage", () => {
     await waitFor(() =>
       expect(screen.queryByLabelText("Clear person filter")).not.toBeInTheDocument(),
     );
+    expect(screen.queryByText("Person: Jack")).not.toBeInTheDocument();
   });
 
-  it("restores composed filters from the URL and keeps person on tab changes", async () => {
+  it("restores composed filters from the URL and keeps person on other changes", async () => {
     renderPage([
       "/loans?person=Jack&status=returned&direction=borrowed&overdue=1&q=drill",
     ]);
@@ -309,23 +362,18 @@ describe("LoansPage", () => {
       overdue: true,
       q: "drill",
     });
-    expect(
-      screen.getByRole("tab", { name: "Returned" }),
-    ).toHaveAttribute("aria-selected", "true");
-    expect(
-      screen.getByRole("tab", { name: "Borrowed" }),
-    ).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("Past due only")).toBeChecked();
+    const directions = screen.getByRole("group", { name: "Loan direction" });
+    expect(within(directions).getByRole("button", { name: "Borrowed" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByLabelText("Search loans")).toHaveValue("drill");
-    expect(screen.getByLabelText("Filter loans by person")).toHaveValue(
-      "Jack",
-    );
+    await userEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    expect(screen.getByLabelText("Loan status")).toHaveValue("returned");
+    expect(screen.getByLabelText("Past due only")).toBeChecked();
+    expect(screen.getByLabelText("Filter loans by person")).toHaveValue("Jack");
 
-    await userEvent.click(
-      within(
-        screen.getByRole("tablist", { name: "Loan filters" }),
-      ).getByRole("tab", { name: "All" }),
-    );
+    await userEvent.selectOptions(screen.getByLabelText("Loan status"), "all");
     await waitFor(() => expect(state.loanFilters?.status).toBe("all"));
     let location = screen.getByTestId("location").textContent ?? "";
     let params = new URLSearchParams(location.split("?")[1] ?? "");
@@ -335,11 +383,8 @@ describe("LoansPage", () => {
     expect(params.get("overdue")).toBe("1");
     expect(params.get("q")).toBe("drill");
 
-    await userEvent.click(
-      within(
-        screen.getByRole("tablist", { name: "Loan direction" }),
-      ).getByRole("tab", { name: "All" }),
-    );
+    // Pressing the active direction again shows both directions.
+    await userEvent.click(within(directions).getByRole("button", { name: "Borrowed" }));
     await waitFor(() => expect(state.loanFilters?.person).toBe("Jack"));
     location = screen.getByTestId("location").textContent ?? "";
     params = new URLSearchParams(location.split("?")[1] ?? "");
@@ -347,25 +392,22 @@ describe("LoansPage", () => {
     expect(params.get("person")).toBe("Jack");
     expect(params.get("overdue")).toBe("1");
     expect(params.get("q")).toBe("drill");
-    expect(screen.getByLabelText("Filter loans by person")).toHaveValue(
-      "Jack",
-    );
+    expect(screen.getByLabelText("Filter loans by person")).toHaveValue("Jack");
   });
 
-  it("keeps default /loans clean while preserving person across status tabs", async () => {
+  it("keeps default /loans clean while preserving person across status changes", async () => {
     renderPage();
     expect(screen.getByTestId("location").textContent).toBe("/loans");
-    expect(
-      screen.getByRole("tab", { name: "Outstanding" }),
-    ).toHaveAttribute("aria-selected", "true");
-    expect(
-      within(
-        screen.getByRole("tablist", { name: "Loan direction" }),
-      ).getByRole("tab", { name: "All" }),
-    ).toHaveAttribute("aria-selected", "true");
+    for (const button of within(
+      screen.getByRole("group", { name: "Loan direction" }),
+    ).getAllByRole("button")) {
+      expect(button).toHaveAttribute("aria-pressed", "false");
+    }
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(screen.getByLabelText("Loan status")).toHaveValue("open");
     expect(screen.getByLabelText("Past due only")).not.toBeChecked();
 
-    await userEvent.click(screen.getByRole("tab", { name: "Returned" }));
+    await userEvent.selectOptions(screen.getByLabelText("Loan status"), "returned");
     await waitFor(() => expect(state.loanFilters?.status).toBe("returned"));
     expect(screen.getByTestId("location").textContent).toBe(
       "/loans?status=returned",
@@ -380,7 +422,7 @@ describe("LoansPage", () => {
     expect(params.get("person")).toBe("Jack");
     expect(params.get("status")).toBe("returned");
 
-    await userEvent.click(screen.getByRole("tab", { name: "Outstanding" }));
+    await userEvent.selectOptions(screen.getByLabelText("Loan status"), "open");
     await waitFor(() => expect(state.loanFilters?.status).toBe("open"));
     location = screen.getByTestId("location").textContent ?? "";
     params = new URLSearchParams(location.split("?")[1] ?? "");
@@ -412,20 +454,33 @@ describe("LoansPage", () => {
     expect(payload).toMatchObject({ quantity: 1 });
   });
 
-  it("creates a new loan by choosing the owned-lending direction and an item", async () => {
+  it("creates a new loan on one surface: item, borrower and quantity first", async () => {
     renderPage();
     await userEvent.click(screen.getByRole("button", { name: "New loan" }));
-    expect(screen.getByRole("heading", { name: "New loan" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: /Lend out an item/ }));
-    expect(screen.getByText("2 available")).toBeVisible();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Choose Heavy drill for a new loan" }),
-    );
+    const dialog = screen.getByRole("dialog", { name: "New loan" });
     expect(
-      screen.getByRole("heading", { name: "Lend Heavy drill" }),
-    ).toBeVisible();
-    await userEvent.type(screen.getByLabelText("Borrower"), "Mohsen");
-    await userEvent.click(screen.getByRole("button", { name: /Record loan/ }));
+      within(dialog).getByRole("button", { name: "Lend out" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    // The three essentials are there from the start; the rest is closed.
+    expect(within(dialog).getByLabelText("Search inventory for a loan")).toBeVisible();
+    expect(within(dialog).getByLabelText("Borrower")).toBeVisible();
+    expect(within(dialog).getByLabelText("Quantity")).toBeVisible();
+    const more = within(dialog).getByRole("button", { name: /More options/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(more).toHaveTextContent("today, no due date");
+    expect(within(dialog).queryByLabelText("Lent on")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Due back/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Private notes/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Record loan/ })).toBeDisabled();
+
+    expect(within(dialog).getByText("2 available")).toBeVisible();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Choose Heavy drill for a new loan" }),
+    );
+    expect(within(dialog).getByTestId("loan-item-chosen")).toHaveTextContent("Heavy drill");
+    expect(within(dialog).getByText("2 at home")).toBeVisible();
+    await userEvent.type(within(dialog).getByLabelText("Borrower"), "Mohsen");
+    await userEvent.click(within(dialog).getByRole("button", { name: /Record loan/ }));
     await waitFor(() => expect(api.post).toHaveBeenCalled());
     const [path, payload] = vi.mocked(api.post).mock.calls[0] as [
       string,
@@ -436,7 +491,10 @@ describe("LoansPage", () => {
       item_id: "item-1",
       borrower_name: "Mohsen",
       quantity: 1,
+      due_on: null,
+      notes: null,
     });
+    expect(payload.lent_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("shows a mixed list with protected direction badges and direction filters", async () => {
@@ -458,13 +516,18 @@ describe("LoansPage", () => {
     expect(screen.getByText("from Ali")).toBeVisible();
     expect(screen.getByText("to Sam")).toBeVisible();
 
-    await userEvent.click(screen.getByRole("tab", { name: "Borrowed" }));
+    const directions = within(screen.getByRole("group", { name: "Loan direction" }));
+    await userEvent.click(directions.getByRole("button", { name: "Borrowed" }));
     expect(screen.queryByTestId("loan-row")).not.toBeInTheDocument();
     expect(screen.getByTestId("borrowed-row")).toBeVisible();
 
-    await userEvent.click(screen.getByRole("tab", { name: "Lent out" }));
+    await userEvent.click(directions.getByRole("button", { name: "Lent out" }));
     expect(screen.getByTestId("loan-row")).toBeVisible();
     expect(screen.queryByTestId("borrowed-row")).not.toBeInTheDocument();
+
+    await userEvent.click(directions.getByRole("button", { name: "Lent out" }));
+    expect(screen.getByTestId("loan-row")).toBeVisible();
+    expect(screen.getByTestId("borrowed-row")).toBeVisible();
   });
 
   it("records a partial return to a borrowed owner directly from the mixed row", async () => {
@@ -495,17 +558,25 @@ describe("LoansPage", () => {
     expect(payload).toMatchObject({ quantity: 1 });
   });
 
-  it("creates a borrowed record through the clear direction choice", async () => {
+  it("records a borrowed item on the same surface, with the rest under More options", async () => {
     vi.mocked(api.post).mockResolvedValue(borrowedDetail);
     renderPage();
     await userEvent.click(screen.getByRole("button", { name: "New loan" }));
-    await userEvent.click(screen.getByRole("button", { name: /Borrow from someone/ }));
-    expect(
-      screen.getByRole("heading", { name: "Borrow from someone" }),
-    ).toBeVisible();
-    await userEvent.type(screen.getByLabelText("Item name"), "Tile cutter");
-    await userEvent.type(screen.getByLabelText("Owner display name"), "Ali");
-    await userEvent.click(screen.getByRole("button", { name: "Record borrowed item" }));
+    const dialog = screen.getByRole("dialog", { name: "New loan" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Borrow" }));
+    expect(within(dialog).getByText(/never becomes owned stock/)).toBeVisible();
+    expect(within(dialog).queryByLabelText(/Brand/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Borrowed on")).not.toBeInTheDocument();
+    await userEvent.type(within(dialog).getByLabelText("Item name"), "Tile cutter");
+    await userEvent.type(within(dialog).getByLabelText("Owner display name"), "Ali");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: /More options/ }));
+    expect(within(dialog).getByLabelText("Borrowed on")).toBeVisible();
+    await userEvent.type(within(dialog).getByLabelText(/Brand/), "Rubi");
+
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Record borrowed item" }),
+    );
     await waitFor(() => expect(api.post).toHaveBeenCalled());
     const [path, payload] = vi.mocked(api.post).mock.calls[0] as [
       string,
@@ -515,8 +586,10 @@ describe("LoansPage", () => {
     expect(payload).toMatchObject({
       item_name: "Tile cutter",
       owner_name: "Ali",
+      brand: "Rubi",
       quantity: 1,
     });
+    expect(payload.borrowed_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("hides mutation controls from viewers but keeps item and loan navigation", () => {

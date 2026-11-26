@@ -226,8 +226,10 @@ describe("ItemForm optional sections", () => {
     expect(screen.getByRole("heading", { name: "The essentials" })).toBeVisible();
     expect(screen.getByLabelText("Item name")).toBeVisible();
     expect(screen.getByLabelText("Quantity")).toBeVisible();
-    expect(screen.getByLabelText("Room")).toBeVisible();
-    expect(screen.getByLabelText("Storage location")).toBeVisible();
+    expect(screen.getByTestId("item-place-summary")).toHaveTextContent(
+      "Workshop › SHELF-001 · Tool shelf",
+    );
+    expect(screen.getByLabelText("Room")).not.toBeVisible();
     expect(screen.getByText(/Shared purchase · \$100 transaction total/)).toBeVisible();
     expect(screen.getByText(/Stanley · Document: Toolbox warranty/)).toBeVisible();
     expect(screen.getByText(/Earlier record total \$50\b/)).toBeVisible();
@@ -291,6 +293,36 @@ describe("ItemForm optional sections", () => {
     expect(payload).not.toHaveProperty("current_value_cents");
     expect(payload).not.toHaveProperty("current_value_currency");
     expect(payload).not.toHaveProperty("current_value_basis");
+  });
+
+  it("shows the place as one line and opens room and storage place in the same surface", async () => {
+    renderForm();
+    const place = screen.getByRole("button", { name: /^Place/ });
+    expect(place).toHaveAttribute("aria-expanded", "false");
+    expect(place).toHaveTextContent("Change");
+
+    await userEvent.click(place);
+    expect(place).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("Room")).toBeVisible();
+    expect(screen.getByLabelText("Storage location")).toHaveValue("location-1");
+    await userEvent.selectOptions(screen.getByLabelText("Storage location"), "");
+    expect(screen.getByTestId("item-place-summary")).toHaveTextContent(/^Workshop$/);
+
+    await userEvent.click(place);
+    expect(screen.getByLabelText("Room")).not.toBeVisible();
+  });
+
+  it("opens the place for a new item and keeps Save in a footer that sticks to the scroller", () => {
+    renderForm(null);
+    expect(screen.getByTestId("item-place-summary")).toHaveTextContent("No place yet");
+    expect(screen.getByLabelText("Room")).toBeVisible();
+    expect(screen.getByLabelText("Storage location")).toBeVisible();
+
+    const footer = screen.getByTestId("item-form-footer");
+    expect(footer).toHaveClass("sticky");
+    expect(footer.className).toContain("var(--shell-bar-height,0px)+var(--keyboard-inset,0px)");
+    expect(within(footer).getByRole("button", { name: "Add to your home" })).toBeVisible();
+    expect(within(footer).getByRole("button", { name: "Cancel" })).toBeVisible();
   });
 
   it("creates a sub-room without losing the item draft", async () => {

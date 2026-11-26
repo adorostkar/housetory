@@ -30,7 +30,7 @@ export function FinancialsLayout() {
             to={withHousehold(tab.to, householdId)}
             className={({ isActive }) =>
               cn(
-                "-mb-px shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
+                "-mb-px flex min-h-11 shrink-0 items-center border-b-2 px-4 text-sm font-medium transition-colors",
                 isActive
                   ? "border-sage text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",

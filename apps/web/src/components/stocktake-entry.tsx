@@ -49,12 +49,15 @@ function coverageLabel(session: StocktakeSession) {
   )} checked`;
 }
 
+/** One quiet line about the stocktake of a room or container. */
 export function StocktakeEntry({
   roomId,
   containerId,
+  className,
 }: {
   roomId?: string;
   containerId?: string;
+  className?: string;
 }) {
   const canWrite = useCanWrite();
   const navigate = useNavigate();
@@ -94,77 +97,60 @@ export function StocktakeEntry({
     }
   };
 
-  const current = active ?? last;
   return (
     <>
-      <section className="surface mb-4 px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            <ClipboardCheck className="size-3.5" />
-            Stocktake
-          </span>
-          {summary.isPending ? (
-            <span className="text-2xs text-muted-foreground">Reading checks…</span>
-          ) : current ? (
-            <span className="min-w-0 text-xs text-muted-foreground">
-              {active ? (
-                <>
-                  <span className="font-medium text-foreground">In progress</span> ·{" "}
-                  {coverageLabel(active)}
-                </>
-              ) : (
-                <>
-                  Last checked {formatDate(last?.completed_at)} ·{" "}
-                  {coverageLabel(last as StocktakeSession)}
-                  {last?.partial ? " · partial" : ""}
-                </>
-              )}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              No completed stocktake recorded for this {roomId ? "room" : "container"} yet.
-            </span>
-          )}
-          {current && (
-            <Badge variant={STATUS_TONES[current.status]}>
-              {STATUS_LABELS[current.status]}
-            </Badge>
-          )}
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {current && (
-              <Button size="sm" variant="ghost" asChild>
-                <Link to={`/stocktake/${current.id}`}>
-                  {active ? "Resume" : "View last"}
-                </Link>
-              </Button>
-            )}
-            {canWrite && !active && (
-              <Button size="sm" variant="outline" onClick={() => void start()} disabled={starting}>
-                {starting ? <Spinner /> : <ClipboardCheck />}
-                Start stocktake
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setHistoryOpen(true)}
-              aria-label="Stocktake history"
-            >
-              <History />
-              History
-            </Button>
-          </div>
-        </div>
-        {active && (
-          <p className="mt-2 text-2xs leading-relaxed text-muted-foreground">
-            Progress is saved as you check items. Loan units are recorded separately and are
-            never marked missing.
-          </p>
+      <section
+        aria-label="Stocktake"
+        className={cn(
+          "flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground",
+          className,
         )}
-        <p className="mt-1 text-2xs leading-relaxed text-muted-foreground">
-          Borrowed-from-others records are kept separate and are never added to owned
-          stocktake quantities.
+      >
+        <ClipboardCheck className="size-3.5 shrink-0" aria-hidden="true" />
+        <p className="min-w-0 flex-1 basis-40">
+          {summary.isPending ? (
+            "Reading stocktake…"
+          ) : active ? (
+            <>
+              <span className="font-medium text-foreground">Stocktake in progress</span> ·{" "}
+              {coverageLabel(active)}
+            </>
+          ) : last ? (
+            <>
+              <Link
+                to={`/stocktake/${last.id}`}
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                Last stocktake {formatDate(last.completed_at)}
+              </Link>{" "}
+              · {coverageLabel(last)}
+              {last.partial ? " · partial" : ""}
+            </>
+          ) : (
+            "No stocktake yet"
+          )}
         </p>
+        <div className="flex shrink-0 items-center gap-1">
+          {active && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/stocktake/${active.id}`}>Resume</Link>
+            </Button>
+          )}
+          {canWrite && !active && (
+            <Button size="sm" variant="ghost" onClick={() => void start()} disabled={starting}>
+              {starting ? <Spinner /> : null}
+              Start stocktake
+            </Button>
+          )}
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setHistoryOpen(true)}
+            aria-label="Stocktake history"
+          >
+            <History />
+          </Button>
+        </div>
       </section>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
@@ -173,7 +159,9 @@ export function StocktakeEntry({
             <DialogTitle>Stocktake history</DialogTitle>
             <DialogDescription>
               Past checks for this {roomId ? "room" : "container"}. Completed and abandoned
-              sessions keep their observations.
+              sessions keep their observations. Progress is saved as you check items. Units on
+              loan are recorded separately and are never marked missing. Borrowed items are
+              kept separate and are never counted as owned stock.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto overscroll-contain">

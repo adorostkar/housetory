@@ -1,12 +1,14 @@
 import { CalendarDays, Download, Pencil, ShieldCheck } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { Disclosure } from "@/components/disclosure";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { PageLayout } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WarrantyWatch } from "@/components/warranty-watch";
 import {
   WARRANTY_STATUS_LABELS,
   WARRANTY_STATUS_TONE,
@@ -52,7 +54,6 @@ export function WarrantiesPage() {
       header={{
         eyebrow: "Ownership",
         title: "Warranties",
-        description: "Active coverage, upcoming expirations and what has already run out.",
         actions: (
           <Button variant="outline" asChild>
             <a href="/api/v1/exports/warranties.csv">
@@ -63,6 +64,7 @@ export function WarrantiesPage() {
         ),
       }}
     >
+      <WarrantyWatch />
       <div className="surface p-3 sm:p-4">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Warranty status">
           {FILTERS.map((filter) => {
@@ -81,8 +83,8 @@ export function WarrantiesPage() {
                 }
                 className={
                   active
-                    ? "rounded-full bg-primary px-3.5 py-2 text-2xs font-medium text-primary-foreground"
-                    : "rounded-full px-3.5 py-2 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    ? "min-h-9 rounded-full bg-primary px-3.5 text-2xs font-medium text-primary-foreground coarse:min-h-11"
+                    : "min-h-9 rounded-full px-3.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground coarse:min-h-11"
                 }
               >
                 {filter.label}
@@ -94,10 +96,16 @@ export function WarrantiesPage() {
           })}
         </div>
         {data && (
-          <p className="mt-2 px-2 text-2xs text-muted-foreground">
-            Reminders use the household window of {pluralize(data.reminder_days, "day")}, unless
-            an individual warranty overrides it.
-          </p>
+          <Disclosure
+            label="About reminders"
+            className="mt-1 px-2"
+            buttonClassName="text-2xs font-normal"
+          >
+            <p className="pb-1 text-2xs text-muted-foreground">
+              Reminders use the household window of {pluralize(data.reminder_days, "day")},
+              unless an individual warranty overrides it.
+            </p>
+          </Disclosure>
         )}
       </div>
 

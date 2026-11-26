@@ -1,7 +1,7 @@
 import { ClipboardCheck, Maximize2, Minimize2, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, Routes, useLocation, useNavigate, type Location } from "react-router-dom";
 
 import { AccountMenu } from "@/components/account-menu";
 import { AddItemsProvider, useAddItems } from "@/components/add-items";
@@ -24,30 +24,61 @@ import {
   ASSISTANT_TASK_COMPLETED_EVENT,
   type AssistantTaskCompletion,
 } from "@/lib/assistant-task-events";
+import { readOrigin } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 const AssistantPage = lazy(() =>
   import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
 );
 
-// Bar height: 48 px field, 8 px above, and the safe area (at least 8 px) below.
+// Phone bar: 48 px field, 8 px above, and the safe area (at least 8 px) below.
 const BAR_HEIGHT = "calc(3.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)))";
+// Desktop bar: 48 px field, 12 px above, 16 px below and the 1 px line.
+const DESKTOP_BAR_HEIGHT = "4.8125rem";
 
 const notifiedTaskKeys = new Set<string>();
 
-export function AppShell() {
+interface ShellRoutes {
+  /** The route table of every page in the shell. */
+  routes: React.ReactNode;
+  /** The item routes, drawn in the side panel on a wide screen. */
+  panelRoutes: React.ReactNode;
+}
+
+export function AppShell(props: ShellRoutes) {
   return (
     <SearchSessionProvider>
       <AssistantConversationProvider>
         <AddItemsProvider>
-          <AppShellLayout />
+          <AppShellLayout {...props} />
         </AddItemsProvider>
       </AssistantConversationProvider>
     </SearchSessionProvider>
   );
 }
 
-function AppShellLayout() {
+const ITEM_PATH = /^\/items\/[^/]+(?:\/edit)?$/;
+const PANEL_WIDTH = "min(30rem, 40vw)";
+
+/**
+ * On a wide screen an item opens beside the page it was opened from. This is that
+ * page: the item's recorded origin, or the item list.
+ */
+function pageBehindItem(location: Location): Location {
+  const origin = readOrigin(new URLSearchParams(location.search))?.path ?? "/items";
+  const url = new URL(origin, "http://housetory.invalid");
+  // An item opened from another item keeps the list behind it, not a second item.
+  const pathname = ITEM_PATH.test(url.pathname) ? "/items" : url.pathname;
+  return {
+    ...location,
+    pathname,
+    search: pathname === url.pathname ? url.search : "",
+    hash: "",
+    key: `behind:${pathname}`,
+  };
+}
+
+function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const location = useLocation();
   const navigate = useNavigate();
   const canWrite = useCanWrite();
@@ -72,6 +103,9 @@ function AppShellLayout() {
   const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length
     + (pendingActions.data?.total ?? 0);
   const desktop = useMediaQuery("(min-width: 1024px)");
+  const wide = useMediaQuery("(min-width: 1200px)");
+  const itemPanel = wide && ITEM_PATH.test(location.pathname);
+  const mainLocation = itemPanel ? pageBehindItem(location) : location;
   const [railOpen, setRailOpen] = useRememberedRail();
   const [assistantTall, setAssistantTall] = useState(false);
   const rail = useRailModel();
@@ -79,11 +113,11 @@ function AppShellLayout() {
   useEffect(() => {
     // Things fixed to the bottom of the screen (bulk bars, save bars) sit above the bar.
     const root = document.documentElement;
-    root.style.setProperty("--shell-bar-height", BAR_HEIGHT);
+    root.style.setProperty("--shell-bar-height", desktop ? DESKTOP_BAR_HEIGHT : BAR_HEIGHT);
     return () => {
       root.style.removeProperty("--shell-bar-height");
     };
-  }, []);
+  }, [desktop]);
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;
     setAssistantOpen(false);
@@ -161,6 +195,9 @@ function AppShellLayout() {
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+  }, [mainLocation.pathname]);
+
+  useLayoutEffect(() => {
     restoreAssistantFocus.current = false;
     setAssistantOpen(false);
   }, [location.pathname]);
@@ -291,7 +328,10 @@ function AppShellLayout() {
         />
       )}
 
-      <div className={cn("flex min-h-dvh min-w-0 flex-col", showRail && "pl-[4.125rem]")}>
+      <div
+        className={cn("flex min-h-dvh min-w-0 flex-col", showRail && "pl-[4.125rem]")}
+        style={itemPanel ? { paddingRight: PANEL_WIDTH } : undefined}
+      >
         <main
           className={cn(
             "mx-auto w-full max-w-[1320px] flex-1 px-4 sm:px-8 lg:px-12",
@@ -307,11 +347,11 @@ function AppShellLayout() {
             </div>
           )}
           <div
-            key={location.pathname}
+            key={mainLocation.pathname}
             className="animate-fade-in"
           >
             <Suspense fallback={<PageFallback />}>
-              <Outlet />
+              <Routes location={mainLocation}>{routes}</Routes>
             </Suspense>
           </div>
         </main>
@@ -341,6 +381,21 @@ function AppShellLayout() {
             )}
         </BottomBar>
       </div>
+      {itemPanel && (
+        <aside
+          aria-label="Item"
+          data-testid="item-panel"
+          className="fixed right-0 top-0 z-30 h-dvh overflow-y-auto overscroll-contain border-l border-border/70 bg-background px-6 pb-10 pt-6"
+          // The bar does not reach under the panel, so nothing in it needs to clear the bar.
+          style={{ width: PANEL_WIDTH, "--shell-bar-height": "0px" } as React.CSSProperties}
+        >
+          <div key={location.pathname} className="animate-fade-in">
+            <Suspense fallback={<PageFallback />}>
+              <Routes>{panelRoutes}</Routes>
+            </Suspense>
+          </div>
+        </aside>
+      )}
       <DialogPrimitive.Root open={assistantOpen} modal={!desktop} onOpenChange={(open) => { if (!open) closeAssistant(); }}>
         <DialogPrimitive.Portal>
           {!desktop && (
@@ -351,6 +406,7 @@ function AppShellLayout() {
           aria-describedby={undefined}
           data-testid="assistant-panel"
           data-tall={assistantTall || softwareKeyboardOpen}
+          style={{ "--item-panel": itemPanel ? PANEL_WIDTH : "0px" } as React.CSSProperties}
           onOpenAutoFocus={(event) => { event.preventDefault(); assistantHeading.current?.focus(); }}
           onCloseAutoFocus={(event) => { event.preventDefault(); }}
           onInteractOutside={(event) => { if (desktop) event.preventDefault(); }}
@@ -360,7 +416,7 @@ function AppShellLayout() {
             "inset-x-0 bottom-[var(--keyboard-inset,0px)] rounded-t-3xl border-t border-border/80 max-lg:data-[state=open]:animate-sheet-up",
             assistantTall || softwareKeyboardOpen ? "top-0 max-lg:rounded-t-none" : "top-[max(14dvh,env(safe-area-inset-top))]",
             // Desktop: a box above the bar, in the main column.
-            "lg:inset-x-auto lg:bottom-4 lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
+            "lg:inset-x-auto lg:bottom-4 lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem-var(--item-panel,0px)))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
             assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(100dvh-2rem))]",
           )}
         >

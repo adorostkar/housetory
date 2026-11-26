@@ -49,11 +49,22 @@ describe("DocumentCard", () => {
       "/documents/doc-1",
     );
     expect(screen.getByText("La Marzocco · Feb 14, 2026 · 2 KB · 2 items")).toBeInTheDocument();
-    expect(screen.getByText("OCR: Extracted")).toBeInTheDocument();
+    expect(screen.getByText("Receipt")).toBeInTheDocument();
+    // The normal "Extracted" state is not repeated on every row.
+    expect(screen.queryByText(/^OCR:/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download Espresso receipt" })).toHaveAttribute(
       "href",
       "/api/v1/documents/doc-1/file",
     );
+  });
+
+  it("shows the reading state when it is not the normal one", () => {
+    render(
+      <MemoryRouter>
+        <DocumentCard document={{ ...document, ocr_status: "failed" }} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("OCR: Failed")).toBeInTheDocument();
   });
 
   it("keeps item links and deletion independent and permission controlled", async () => {
@@ -62,7 +73,14 @@ describe("DocumentCard", () => {
       <MemoryRouter><DocumentCard document={document} onDelete={onDelete} /></MemoryRouter>,
     );
     expect(screen.getByRole("link", { name: "Espresso Machine" })).toHaveAttribute("href", "/items/item-1");
-    await userEvent.click(screen.getByRole("button", { name: "Delete Espresso receipt" }));
+    // With delete allowed, the two actions share one menu so the row stays narrow.
+    expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Options for Espresso receipt" }));
+    expect(screen.getByRole("menuitem", { name: "Download Espresso receipt" })).toHaveAttribute(
+      "href",
+      "/api/v1/documents/doc-1/file",
+    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete Espresso receipt" }));
     expect(onDelete).toHaveBeenCalledExactlyOnceWith(document);
     rerender(<MemoryRouter><DocumentCard document={document} compact /></MemoryRouter>);
     expect(screen.queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument();

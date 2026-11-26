@@ -1,13 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Star, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Star, Trash2 } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 
 import { CategoryIcon } from "@/components/category-icon";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CameraUpload } from "@/components/camera-upload";
 import { PhotoLightbox } from "@/components/photo-lightbox";
-import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useInvalidateInventory } from "@/lib/queries";
@@ -21,13 +20,25 @@ import type {
 import { useCanWrite } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
+const manageButton =
+  "flex size-11 items-center justify-center rounded-full border border-border/70 text-foreground/70 transition-colors hover:text-foreground disabled:opacity-30";
+
+/**
+ * Small photo thumbnails with an add tile. A thumbnail opens the photograph
+ * full screen. Reordering, the cover, deleting and anything passed as
+ * `children` (the image source) sit behind "Manage photos".
+ */
 export function PhotoGallery({
   item,
   representative,
+  children,
 }: {
   item: ItemDetail;
   representative?: ItemImage | null;
+  children?: React.ReactNode;
 }) {
+  const manageId = useId();
+  const [managing, setManaging] = useState(false);
   const canWrite = useCanWrite();
   const invalidate = useInvalidateInventory();
   const queryClient = useQueryClient();
@@ -138,107 +149,145 @@ export function PhotoGallery({
   const activeIsCover = Boolean(active && cover && active.id === cover.id);
   const atLimit = item.photos.length >= 20;
 
+  // The image keeps its own shape inside the square, so nothing is cropped.
+  const thumbnail =
+    "relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-secondary/40 p-1";
+  const thumbnailImage = "max-h-full max-w-full object-contain";
+
   return (
     <section aria-label="Photographs">
       <div
-        data-testid="photo-gallery-frame"
-        className={cn(
-          "group relative overflow-hidden rounded-2xl border border-border/75 bg-secondary/50",
-          active || representative?.url
-            ? "h-[240px] sm:h-[320px] xl:h-[340px]"
-            : "min-h-[150px]",
-        )}
+        data-testid="photo-strip"
+        className="no-scrollbar flex items-stretch gap-2 overflow-x-auto overflow-y-hidden pb-1"
       >
-        {active ? (
+        {item.photos.map((photo, index) => (
           <button
+            key={photo.id}
             type="button"
-            onClick={() => setLightboxOpen(true)}
-            className="flex size-full cursor-zoom-in items-center justify-center bg-secondary/30 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 sm:p-4"
-            aria-label={`View ${item.name} photograph full screen`}
+            onClick={() => {
+              setActiveId(photo.id);
+              if (!managing) setLightboxOpen(true);
+            }}
+            className={cn(
+              thumbnail,
+              "transition-[border-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              managing ? "cursor-pointer" : "cursor-zoom-in",
+              managing && photo.id === active?.id
+                ? "border-2 border-foreground/70"
+                : "border-border/75",
+            )}
+            aria-label={
+              managing ? `Choose photograph ${index + 1}` : `View photograph ${index + 1}`
+            }
+            aria-pressed={managing ? photo.id === active?.id : undefined}
           >
             <img
-              src={active.url}
-              alt={`${item.name} photograph`}
-              className="max-h-full max-w-full object-contain"
+              src={photo.thumbnail_url}
+              alt=""
+              loading="lazy"
+              className={thumbnailImage}
             />
-          </button>
-        ) : representative ? (
-          <>
-            {representative.url ? (
-              <div
-                className={cn(
-                  "flex size-full items-center justify-center p-3 sm:p-4",
-                  representative.source_type === "reference"
-                    ? "bg-white"
-                    : "bg-secondary/30",
-                )}
+            {index === 0 && (
+              <span
+                className="absolute bottom-1 right-1 flex size-4 items-center justify-center rounded-full bg-background/85 text-brass backdrop-blur-sm"
+                title="Cover"
               >
-                <img
-                  src={representative.thumbnail_url ?? representative.url}
-                  alt={`${item.name} ${representative.label.toLowerCase()}`}
-                  className="max-h-full max-w-full object-contain"
-                />
-              </div>
-            ) : (
-              <div className="image-placeholder flex size-full min-h-[150px] items-center justify-center">
-                <CategoryIcon
-                  category={item.category?.name}
-                  className="size-6 text-foreground/30"
-                />
-              </div>
+                <Star className="size-2.5 fill-current" />
+                <span className="sr-only">Cover</span>
+              </span>
             )}
-            <Badge
-              variant="secondary"
-              className="absolute left-3 top-3 z-10 gap-1 bg-background/85 backdrop-blur-md"
+          </button>
+        ))}
+
+        {item.photos.length === 0 &&
+          (representative?.url ? (
+            <div
+              className={cn(
+                thumbnail,
+                "border-border/75",
+                representative.source_type === "reference" && "bg-white",
+              )}
             >
-              {representative.label}
-            </Badge>
-          </>
-        ) : (
-          <div className="image-placeholder flex min-h-[150px] flex-col items-center justify-center px-5 py-5 text-center">
-            <span className="flex size-10 items-center justify-center rounded-full border border-foreground/10 bg-background/25 text-foreground/35 backdrop-blur-sm">
-              <CategoryIcon
-                category={item.category?.name}
-                className="size-4"
+              <img
+                src={representative.thumbnail_url ?? representative.url}
+                alt={`${item.name} ${representative.label.toLowerCase()}`}
+                className={thumbnailImage}
               />
-            </span>
-            <p className="mt-3 text-xs font-medium text-foreground/75">
-              No photograph yet
-            </p>
-            <p className="mt-1 text-2xs text-muted-foreground">
-              Take or choose a photo.
-            </p>
-            {canWrite && (
-              <div className="mt-4">
+              <span className="absolute inset-x-0 bottom-0 truncate bg-background/85 px-1.5 py-0.5 text-center text-2xs text-muted-foreground backdrop-blur-sm">
+                {representative.label}
+              </span>
+            </div>
+          ) : (
+            <div
+              className={cn(
+                thumbnail,
+                "image-placeholder flex-col gap-1.5 border-border/75 px-2 text-center",
+              )}
+            >
+              <CategoryIcon category={item.category?.name} className="size-5 text-foreground/35" />
+              <span className="text-2xs leading-tight text-muted-foreground">
+                No photograph yet
+              </span>
+            </div>
+          ))}
+
+        {canWrite && !atLimit && (
+          <div
+            className={cn(
+              thumbnail,
+              "flex-col gap-1.5 border-dashed border-border bg-transparent",
+            )}
+          >
+            {upload.isPending ? (
+              <>
+                <Spinner className="size-5" />
+                <span className="text-2xs text-muted-foreground">Adding…</span>
+              </>
+            ) : (
+              <>
                 <CameraUpload
+                  compact
                   label="Add item photograph"
                   busy={upload.isPending}
                   onUpload={async (file) => {
                     await upload.mutateAsync([file]);
                   }}
                 />
-              </div>
+                <span className="text-2xs text-muted-foreground">Add photo</span>
+              </>
             )}
           </div>
         )}
+      </div>
 
-        {active && (
-          <>
-            {activeIsCover && (
-              <Badge
-                variant="secondary"
-                className="absolute left-3 top-3 z-10 gap-1 bg-background/80 backdrop-blur-md"
-              >
-                <Star className="size-3 fill-current" />
-                Cover
-              </Badge>
-            )}
-            {canWrite && <div className="absolute right-3 top-3 z-10 flex gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+      <button
+        type="button"
+        aria-expanded={managing}
+        aria-controls={manageId}
+        onClick={() => setManaging((open) => !open)}
+        className="mt-1 inline-flex min-h-11 items-center gap-1 rounded-lg text-2xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {canWrite ? "Manage photos" : "About the image"}
+        <ChevronDown
+          aria-hidden="true"
+          className={cn("size-3.5 transition-transform", managing && "rotate-180")}
+        />
+      </button>
+
+      {managing && (
+        <div id={manageId} className="mt-1 space-y-3">
+          {canWrite && active && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-border/65 bg-card/45 px-3.5 py-2">
+              <p className="mr-auto text-2xs text-muted-foreground">
+                Photograph {activeIndex + 1} of {item.photos.length}
+                {activeIsCover ? " · cover" : ""}
+                {item.photos.length > 1 ? ". Tap a photo to choose it." : ""}
+              </p>
               <button
                 type="button"
                 onClick={() => moveActive(-1)}
                 disabled={activeIndex <= 0 || reorder.isPending}
-                className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-foreground disabled:opacity-30"
+                className={manageButton}
                 aria-label="Move photograph earlier"
               >
                 <ChevronLeft className="size-4" />
@@ -246,8 +295,10 @@ export function PhotoGallery({
               <button
                 type="button"
                 onClick={() => moveActive(1)}
-                disabled={activeIndex < 0 || activeIndex >= item.photos.length - 1 || reorder.isPending}
-                className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-foreground disabled:opacity-30"
+                disabled={
+                  activeIndex < 0 || activeIndex >= item.photos.length - 1 || reorder.isPending
+                }
+                className={manageButton}
                 aria-label="Move photograph later"
               >
                 <ChevronRight className="size-4" />
@@ -257,90 +308,25 @@ export function PhotoGallery({
                   type="button"
                   onClick={() => makeCover.mutate(active.id)}
                   disabled={makeCover.isPending}
-                  className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-brass disabled:opacity-50"
+                  className={manageButton}
                   aria-label="Set as cover photograph"
                 >
-                  {makeCover.isPending ? (
-                    <Spinner className="size-4" />
-                  ) : (
-                    <Star className="size-4" />
-                  )}
+                  {makeCover.isPending ? <Spinner className="size-4" /> : <Star className="size-4" />}
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setPhotoToDelete(active)}
-                className="flex size-9 items-center justify-center rounded-full bg-background/80 text-foreground/70 backdrop-blur-md transition-colors hover:text-destructive"
+                className={cn(manageButton, "hover:text-destructive")}
                 aria-label="Delete photograph"
               >
                 <Trash2 className="size-4" />
               </button>
-            </div>}
-          </>
-        )}
-
-        {canWrite && upload.isPending && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/65 backdrop-blur-sm">
-            <Spinner className="size-5" />
-            <span className="text-2xs font-medium text-foreground">
-              Adding photographs…
-            </span>
-          </div>
-        )}
-      </div>
-
-      {!active && representative && canWrite && (
-        <div className="mt-2 flex justify-end">
-          <CameraUpload
-            label="Add actual photo"
-            busy={upload.isPending}
-            onUpload={async (file) => {
-              await upload.mutateAsync([file]);
-            }}
-          />
+            </div>
+          )}
+          {children}
         </div>
       )}
-
-      <div className="mt-3 flex items-center gap-2 overflow-x-auto overflow-y-hidden pb-1 no-scrollbar">
-        {item.photos.map((photo, index) => (
-          <button
-            key={photo.id}
-            type="button"
-            onClick={() => setActiveId(photo.id)}
-            className={cn(
-              "relative size-16 shrink-0 overflow-hidden rounded-xl border-2 transition-[border-color,opacity] sm:size-20",
-              photo.id === active?.id
-                ? "border-foreground/70"
-                : "border-transparent opacity-65 hover:opacity-100",
-            )}
-            aria-label={`View photograph ${index + 1}`}
-            aria-pressed={photo.id === active?.id}
-          >
-            <img
-              src={photo.thumbnail_url}
-              alt=""
-              loading="lazy"
-              className="size-full object-cover"
-            />
-            {index === 0 && (
-              <span className="absolute bottom-1 right-1 flex size-4 items-center justify-center rounded-full bg-background/85 text-brass backdrop-blur-sm">
-                <Star className="size-2.5 fill-current" />
-              </span>
-            )}
-          </button>
-        ))}
-
-        {active && canWrite && !atLimit && (
-          <CameraUpload
-            compact
-            label="Add item photograph"
-            busy={upload.isPending}
-            onUpload={async (file) => {
-              await upload.mutateAsync([file]);
-            }}
-          />
-        )}
-      </div>
 
       <PhotoLightbox
         open={lightboxOpen}

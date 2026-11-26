@@ -2,28 +2,23 @@ import { useMutation } from "@tanstack/react-query";
 import {
   Boxes,
   Building2,
-  ChevronRight,
+  Camera,
   Download,
   MoreHorizontal,
   MoveRight,
   Pencil,
   Plus,
-  Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
-import {
-  AddItemsButton,
-  useAddItems,
-  useRegisterAddItemsContext,
-} from "@/components/add-items";
+import { useAddItems, useRegisterAddItemsContext } from "@/components/add-items";
 import { BorrowedKeptHere } from "@/components/borrowed-kept-here";
 import {
   BulkItemActionBar,
+  BulkSelectButton,
   BulkSelectionControls,
   BulkSelectionNotice,
   useBulkSelection,
@@ -33,9 +28,16 @@ import { EntityPhotoManager } from "@/components/entity-photo-manager";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
 import { EvidenceExportDialog } from "@/components/evidence-export-dialog";
-import { ItemCard } from "@/components/item-card";
+import { ItemCard, ItemRow } from "@/components/item-card";
 import { LocationDialog } from "@/components/location-dialog";
-import { PageLayout, PageSkeleton } from "@/components/page-layout";
+import { PageHeader } from "@/components/page-header";
+import { PageSkeleton } from "@/components/page-layout";
+import {
+  PlaceChipRow,
+  PlaceFilterChip,
+  PlaceLinkChip,
+  PlaceListTools,
+} from "@/components/place-chips";
 import {
   PlaceTransferDialog,
   type PlaceTransferSource,
@@ -44,17 +46,15 @@ import { RoomDialog } from "@/components/room-dialog";
 import { RoomPropertyMoveDialog } from "@/components/room-property-move-dialog";
 import { StocktakeEntry } from "@/components/stocktake-entry";
 import { LocationIcon, roomIcon } from "@/components/room-card";
+import { useItemsView } from "@/components/view-toggle";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, api, getApiErrorMessage } from "@/lib/api";
 import { useRegisterAssistantPageContext } from "@/lib/assistant-page-context";
@@ -66,16 +66,12 @@ import {
   useItems,
   useLocations,
   useProperties,
+  useRoomPhotos,
   useRooms,
+  useStocktakeScopeSummary,
 } from "@/lib/queries";
 import type { StorageLocation } from "@/lib/types";
-import {
-  cn,
-  flattenLocations,
-  pluralize,
-  roomDescendantsWithDepth,
-  roomPath,
-} from "@/lib/utils";
+import { flattenLocations, pluralize, roomPath } from "@/lib/utils";
 
 const ROOM_ITEM_SORTS = {
   created_desc: "Newest first",
@@ -125,12 +121,15 @@ export function RoomDetailPage() {
     source: PlaceTransferSource;
     mode: "move" | "delete";
   } | null>(null);
+  const [photoAddOpen, setPhotoAddOpen] = useState(false);
   const propertiesQuery = useProperties();
+  const photosQuery = useRoomPhotos(roomId || undefined);
+  const stocktakeSummary = useStocktakeScopeSummary({ roomId }, Boolean(roomId));
+  const [view, setView] = useItemsView();
 
   const rooms = roomsQuery.data?.items ?? [];
   const room = rooms.find((entry) => entry.id === roomId);
   const childRooms = rooms.filter((entry) => entry.parent_id === roomId);
-  const nestedRooms = roomDescendantsWithDepth(rooms, roomId);
   const locations = locationsQuery.data?.items ?? [];
   const flatLocations = flattenLocations(locations);
   const path = room ? roomPath(rooms, room.id) : [];
@@ -150,6 +149,7 @@ export function RoomDetailPage() {
     items,
     enabled: canWrite,
     scopeKey: filterSignature,
+    onRequest: true,
   });
   useRegisterAssistantPageContext(
     selection.selectedItems.length
@@ -341,449 +341,342 @@ export function RoomDetailPage() {
     setTransferTarget({ source: locationTransferSource(location), mode: "move" });
   };
 
+  const hasContents =
+    room.total_item_count > 0 || room.total_location_count > 0 || childRooms.length > 0;
+  const hasPhotos = (photosQuery.data?.items.length ?? 0) > 0;
+  const stocktakeActive = Boolean(stocktakeSummary.data?.active_session);
+  const propertyCount = propertiesQuery.data?.items.length ?? 0;
+  // Nested or direct only matters when something can be nested here.
+  const showScope =
+    scope === "direct" || room.total_location_count > 0 || childRooms.length > 0;
+  const locationLabel = (entry: StorageLocation) =>
+    entry.identifier ? `${entry.identifier} · ${entry.name}` : entry.name;
+  const openLocationDialog = (parentId?: string) => {
+    setEditingLocation(undefined);
+    setLocationParentId(parentId);
+    setLocationDialogOpen(true);
+  };
+  const photoManager = (
+    <EntityPhotoManager
+      kind="room"
+      entityId={room.id}
+      name={room.name}
+      addOpen={photoAddOpen}
+      onAddOpenChange={setPhotoAddOpen}
+    />
+  );
+
   return (
-    <PageLayout
-      header={{
-        eyebrow: [
-          room.property?.name,
-          ...(path.length > 1
-            ? path.slice(0, -1).map((entry) => entry.name)
-            : ["Your rooms"]),
-        ]
-          .filter(Boolean)
-          .join(" / "),
-        title: room.name,
-        description: room.description ?? undefined,
-        backTo: parent ? `/rooms/${parent.id}` : "/rooms",
-        backLabel: parent ? parent.name : "All rooms",
-        actions: (
-          <>
-            <Button variant="outline" asChild>
-              <Link to={`/containers?room_id=${room.id}`}>
-                <Boxes />
-                Containers
-              </Link>
-            </Button>
-            {canWrite && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEditingLocation(undefined);
-                  setLocationParentId(undefined);
-                  setLocationDialogOpen(true);
-                }}
-              >
-                <Plus />
-                Add a place
+    <div className="animate-fade-up">
+      {/* A top-level room is a place in the rail, so it has no Back link. */}
+      <div className="mb-2 flex items-end justify-between gap-2">
+        <PageHeader
+          className="mb-0 min-w-0 flex-1 sm:mb-0 [&_h1]:[overflow-wrap:anywhere]"
+          eyebrow={[room.property?.name, ...path.slice(0, -1).map((entry) => entry.name)]
+            .filter(Boolean)
+            .join(" / ")}
+          title={room.name}
+          {...(parent ? { backTo: `/rooms/${parent.id}`, backLabel: parent.name } : {})}
+          titleAddon={
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="room-count">
+              {pluralize(room.total_item_count, "item")}
+              {room.total_location_count > 0
+                ? ` · ${pluralize(room.total_location_count, "place")}`
+                : ""}
+              {propertyCount > 1 && room.property?.name ? ` · ${room.property.name}` : ""}
+            </p>
+          }
+        />
+        <div className="flex shrink-0 items-center gap-1">
+          {canWrite && items.length > 0 && <BulkSelectButton selection={selection} />}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="shrink-0" aria-label="Room options">
+                <MoreHorizontal />
               </Button>
-            )}
-            {canWrite && !room.parent_id && (propertiesQuery.data?.items.length ?? 0) > 1 && (
-              <Button variant="outline" onClick={() => setPropertyMoveOpen(true)}>
-                <Building2 />
-                Move to property
-              </Button>
-            )}
-            <Button variant="outline" onClick={() => setEvidenceOpen(true)}>
-              <Download />
-              Export evidence
-            </Button>
-            <AddItemsButton context={addItemsContext} />
-            {canWrite && <DropdownMenu>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canWrite && (
+                <>
+                  <DropdownMenuItem onSelect={() => openLocationDialog()}>
+                    <Plus />
+                    Add a place
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setRoomEditTarget("child")}>
+                    <Plus />
+                    Add a sub-room
+                  </DropdownMenuItem>
+                  {photosQuery.isSuccess && !hasPhotos && (
+                    <DropdownMenuItem onSelect={() => setPhotoAddOpen(true)}>
+                      <Camera />
+                      Add photo
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => setRoomEditTarget("edit")}>
+                    <Pencil />
+                    Edit room
+                  </DropdownMenuItem>
+                  {hasContents && (
+                    <DropdownMenuItem onSelect={moveRoomContents}>
+                      <MoveRight />
+                      Move contents
+                    </DropdownMenuItem>
+                  )}
+                  {!room.parent_id && propertyCount > 1 && (
+                    <DropdownMenuItem onSelect={() => setPropertyMoveOpen(true)}>
+                      <Building2 />
+                      Move to property
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem asChild>
+                <Link to={`/containers?room_id=${room.id}`}>
+                  <Boxes />
+                  Containers
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setEvidenceOpen(true)}>
+                <Download />
+                Export evidence
+              </DropdownMenuItem>
+              {canWrite && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem destructive onSelect={attemptRoomDelete}>
+                    <Trash2 />
+                    Delete room
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {stocktakeActive && (
+        <StocktakeEntry
+          roomId={room.id}
+          className="mb-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3 py-1"
+        />
+      )}
+
+      {!hasPhotos && photoAddOpen && <div className="mb-3">{photoManager}</div>}
+
+      {(flatLocations.length > 0 || childRooms.length > 0) && (
+        <PlaceChipRow label="Places in this room" className="mb-2">
+          <PlaceFilterChip
+            name="All"
+            count={room.total_item_count}
+            active={selectedLocationId === null}
+            onClick={() => selectLocation(null)}
+          />
+          {flatLocations.map(({ location: entry }) => (
+            <PlaceFilterChip
+              key={entry.id}
+              name={locationLabel(entry)}
+              count={entry.total_item_count}
+              icon={<LocationIcon kind={entry.kind} className="size-3.5 shrink-0 opacity-70" />}
+              active={selectedLocationId === entry.id}
+              onClick={() => selectLocation(selectedLocationId === entry.id ? null : entry.id)}
+            />
+          ))}
+          {childRooms.map((child) => {
+            const Icon = roomIcon(child.name);
+            return (
+              <PlaceLinkChip
+                key={child.id}
+                to={`/rooms/${child.id}`}
+                name={child.name}
+                count={child.total_item_count}
+                icon={<Icon className="size-3.5 shrink-0 opacity-70" strokeWidth={1.6} />}
+              />
+            );
+          })}
+        </PlaceChipRow>
+      )}
+
+      {selectedLocation && (
+        <div
+          className="mb-3 flex items-center gap-1 rounded-xl bg-secondary/55 py-0.5 pl-3 pr-1 text-xs"
+          data-testid="selected-place"
+        >
+          <p className="min-w-0 flex-1 truncate">
+            <span className="text-muted-foreground">Showing </span>
+            <span className="font-medium">{locationLabel(selectedLocation)}</span>
+          </p>
+          <Button variant="ghost" size="sm" asChild className="shrink-0">
+            <Link
+              to={`/containers/${selectedLocation.id}`}
+              aria-label={`Open ${selectedLocation.name} page`}
+            >
+              Open
+            </Link>
+          </Button>
+          {canWrite && (
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Room options">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0"
+                  aria-label={`Options for ${selectedLocation.name}`}
+                >
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel>{room.name}</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => setRoomEditTarget("edit")}>
-                  <Pencil />
-                  Edit room
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setRoomEditTarget("child")}>
-                  <Plus />
-                  Add a sub-room
-                </DropdownMenuItem>
-                {(room.total_item_count > 0 ||
-                  room.total_location_count > 0 ||
-                  childRooms.length > 0) && (
-                  <DropdownMenuItem onSelect={moveRoomContents}>
-                    <MoveRight />
-                    Move contents
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={attemptRoomDelete}>
-                  <Trash2 />
-                  Delete room
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>}
-          </>
-        ),
-      }}
-    >
-      <StocktakeEntry roomId={room.id} />
-
-      <BorrowedKeptHere roomId={room.id} />
-
-      <section className="surface mb-5 p-4 sm:p-5">
-        <EntityPhotoManager kind="room" entityId={room.id} name={room.name} />
-      </section>
-
-      <div className="grid items-start gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="space-y-5">
-          <section className="surface p-4">
-            <div className="flex items-center justify-between px-1 pb-3">
-              <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                Places in this room
-              </h2>
-              {canWrite && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingLocation(undefined);
-                    setLocationParentId(undefined);
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setEditingLocation(selectedLocation);
                     setLocationDialogOpen(true);
                   }}
-                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  aria-label="Add place"
                 >
-                  <Plus className="size-4" />
-                </button>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => selectLocation(null)}
-              className={cn(
-                "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition-colors",
-                selectedLocationId === null
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-              )}
-            >
-              <span>Everything in {room.name}</span>
-              <span className="text-2xs tabular-nums">{room.total_item_count}</span>
-            </button>
-
-            {flatLocations.length === 0 ? (
-              <p className="px-2.5 pb-2 pt-3 text-2xs leading-relaxed text-muted-foreground">
-                No storage places yet. Add a shelf, cabinet or drawer to be more exact.
-              </p>
-            ) : (
-              <div className="mt-1 space-y-0.5">
-                {flatLocations.map(({ location, depth }) => {
-                  const active = selectedLocationId === location.id;
-                  return (
-                    <div
-                      key={location.id}
-                      className={cn(
-                        "group flex items-center gap-0.5 rounded-lg pr-1 transition-colors",
-                        active ? "bg-secondary" : "hover:bg-secondary/60",
-                      )}
-                      style={{ marginLeft: `${depth * 18}px` }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => selectLocation(active ? null : location.id)}
-                        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left"
-                        aria-pressed={active}
-                      >
-                        <LocationIcon
-                          kind={location.kind}
-                          className={cn(
-                            "size-3.5 shrink-0",
-                            active ? "text-foreground" : "text-muted-foreground",
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 truncate text-xs",
-                            active ? "font-medium text-foreground" : "text-muted-foreground",
-                          )}
-                        >
-                          {location.identifier
-                            ? `${location.identifier} · ${location.name}`
-                            : location.name}
-                        </span>
-                        <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
-                          {location.total_item_count}
-                        </span>
-                      </button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-100 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                            aria-label={`Options for ${location.name}`}
-                          >
-                            <MoreHorizontal className="size-3.5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem asChild>
-                            <Link to={`/containers/${location.id}`}>
-                              <Boxes />
-                              Open container page
-                            </Link>
-                          </DropdownMenuItem>
-                          {canWrite && (
-                            <>
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  setEditingLocation(location);
-                                  setLocationDialogOpen(true);
-                                }}
-                              >
-                                <Pencil />
-                                Edit place
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  setEditingLocation(undefined);
-                                  setLocationParentId(location.id);
-                                  setLocationDialogOpen(true);
-                                }}
-                              >
-                                <Plus />
-                                Add nested place
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => moveLocationContents(location)}>
-                                <MoveRight />
-                                Move contents
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                destructive
-                                onSelect={() => attemptLocationDelete(location)}
-                              >
-                                <Trash2 />
-                                Delete place
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {childRooms.length > 0 && (
-            <section className="surface p-4">
-              <div className="flex items-center justify-between px-1 pb-3">
-                <h2 className="text-2xs font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-                  Inside this room
-                </h2>
-                {canWrite && (
-                  <button
-                    type="button"
-                    onClick={() => setRoomEditTarget("child")}
-                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                    aria-label="Add sub-room"
-                  >
-                    <Plus className="size-4" />
-                  </button>
-                )}
-              </div>
-              <div className="space-y-0.5">
-                {nestedRooms.map(({ room: child, depth }) => {
-                  const Icon = roomIcon(child.name);
-                  return (
-                    <Link
-                      key={child.id}
-                      to={`/rooms/${child.id}`}
-                      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
-                      style={{
-                        marginLeft: `${depth * 18}px`,
-                        paddingLeft: "10px",
-                      }}
-                    >
-                      <Icon className="size-3.5 shrink-0 opacity-70" />
-                      <span className="min-w-0 flex-1 truncate">{child.name}</span>
-                      <ChevronRight className="size-3 opacity-50" />
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
+                  <Pencil />
+                  Edit place
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openLocationDialog(selectedLocation.id)}>
+                  <Plus />
+                  Add nested place
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => moveLocationContents(selectedLocation)}>
+                  <MoveRight />
+                  Move contents
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  destructive
+                  onSelect={() => attemptLocationDelete(selectedLocation)}
+                >
+                  <Trash2 />
+                  Delete place
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-        </aside>
+        </div>
+      )}
 
-        <section className="min-w-0">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <h2 className="section-title">
-                {selectedLocation
-                  ? selectedLocation.identifier
-                    ? `${selectedLocation.identifier} · ${selectedLocation.name}`
-                    : selectedLocation.name
-                  : "Everything here"}
-              </h2>
-              {selectedLocation && (
-                <button
-                  type="button"
-                  onClick={() => selectLocation(null)}
-                  className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-2xs text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Clear
-                  <X className="size-3" />
-                </button>
-              )}
-            </div>
-            <p className="text-2xs text-muted-foreground">
-              {itemsQuery.data ? pluralize(totalItems, "item") : ""}
-            </p>
+      <section aria-label={`Items in ${selectedLocation?.name ?? room.name}`} className="min-w-0">
+        <PlaceListTools
+          sort={sort}
+          sortOptions={Object.entries(ROOM_ITEM_SORTS)}
+          sortLabel="Sort items in this room or place"
+          onSortChange={(value) => updateItemsParam("sort", value === "created_desc" ? "" : value)}
+          search={search}
+          searchLabel="Search in this room or place"
+          onSearchChange={(value) => {
+            setSearch(value);
+            selection.clearSelection("Selection cleared because the search changed.");
+          }}
+          scope={scope}
+          showScope={showScope}
+          onScopeChange={(value) => updateItemsParam("scope", value === "direct" ? "direct" : "")}
+          view={view}
+          showView={items.length > 0}
+          onViewChange={setView}
+        />
+
+        <BulkSelectionNotice selection={selection} />
+
+        {items.length > 0 && selection.selecting && (
+          <div className="mb-2">
+            <BulkSelectionControls selection={selection} showing={items.length} total={totalItems} />
           </div>
+        )}
 
-          <div className="surface mb-4 p-3.5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    selection.clearSelection(
-                      "Selection cleared because the search changed.",
-                    );
-                  }}
-                  placeholder="Search in this room or place"
-                  aria-label="Search in this room or place"
-                  className="pl-10"
-                />
-              </div>
-              <div
-                className="inline-flex rounded-full border border-border/70 bg-background/50 p-1"
-                role="group"
-                aria-label="Contents scope"
-              >
-                {(["nested", "direct"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={scope === value}
-                    onClick={() =>
-                      updateItemsParam("scope", value === "direct" ? "direct" : "")
-                    }
-                    className={
-                      scope === value
-                        ? "rounded-full bg-primary px-3 py-1.5 text-2xs font-medium text-primary-foreground"
-                        : "rounded-full px-3 py-1.5 text-2xs font-medium text-muted-foreground"
-                    }
-                  >
-                    {value === "nested" ? "Include nested" : "Direct only"}
-                  </button>
-                ))}
-              </div>
-              <Select
-                aria-label="Sort items in this room or place"
-                value={sort}
-                onChange={(event) =>
-                  updateItemsParam(
-                    "sort",
-                    event.target.value === "created_desc" ? "" : event.target.value,
-                  )
-                }
-                className="h-9 rounded-lg text-xs lg:max-w-44"
-              >
-                {Object.entries(ROOM_ITEM_SORTS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="mt-3 border-t border-border/60 pt-3">
-              <BulkSelectionControls
-                selection={selection}
-                showing={items.length}
-                total={totalItems}
-              />
-            </div>
+        {/* Clear, and finishing an action, also leave selection mode. */}
+        <BulkItemActionBar
+          items={selection.selectedItems}
+          onClear={selection.stopSelecting}
+          onNotice={selection.showNotice}
+        />
+
+        {itemsQuery.isPending ? (
+          <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-16 rounded-2xl" />
+            ))}
           </div>
-
-          <BulkSelectionNotice selection={selection} />
-          <BulkItemActionBar
-            items={selection.selectedItems}
-            onClear={() => selection.clearSelection()}
-            onNotice={selection.showNotice}
+        ) : itemsQuery.isError ? (
+          <ErrorState
+            message="We couldn't load the items in this room."
+            onRetry={() => void itemsQuery.refetch()}
           />
-
-          {itemsQuery.isPending ? (
-            <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <Skeleton key={index} className="h-60 rounded-2xl" />
-              ))}
-            </div>
-          ) : itemsQuery.isError ? (
-            <ErrorState
-              message="We couldn't load the items in this room."
-              onRetry={() => void itemsQuery.refetch()}
-            />
-          ) : items.length === 0 ? (
-            <EmptyState
-              title={
-                selectedLocation
+        ) : items.length === 0 ? (
+          <EmptyState
+            title={
+              qParam
+                ? "Nothing matches."
+                : selectedLocation
                   ? scope === "direct"
                     ? "No direct items here."
                     : "Nothing here yet."
                   : scope === "direct"
                     ? "No direct items in this room."
                     : "This room is waiting."
-              }
-              description={
-                selectedLocation
+            }
+            description={
+              qParam
+                ? "Try a different search."
+                : selectedLocation
                   ? scope === "direct"
                     ? "Nested places may still contain items. Switch to Include nested to see them."
                     : `No items are stored in ${selectedLocation.name}. Add something, or choose another place.`
                   : scope === "direct"
                     ? "Sub-rooms and nested places may still contain items. Switch to Include nested to see them."
                     : "Add the first item to this room and give it a precise place to live."
-              }
-              actionLabel="Add items"
-              onAction={() => openAddItems(addItemsContext)}
-              className="py-14"
-            />
-          ) : (
-            <>
-              <div className="stagger grid grid-cols-2 gap-3.5 sm:gap-4 lg:grid-cols-3">
+            }
+            actionLabel={qParam ? undefined : "Add items"}
+            onAction={qParam ? undefined : () => openAddItems(addItemsContext)}
+            className="py-10"
+          />
+        ) : (
+          <>
+            {view === "grid" ? (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3.5 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-4">
                 {items.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    origin={origin}
-                    selection={
-                      canWrite
-                        ? {
-                            selected: selection.selected.has(item.id),
-                            onToggle: () => selection.toggleItem(item.id),
-                            disabled: item.is_archived,
-                          }
-                        : undefined
-                    }
-                  />
+                  <ItemCard key={item.id} item={item} origin={origin} selection={selection.itemSelection(item)} />
                 ))}
               </div>
-              {itemsQuery.hasNextPage && (
-                <div className="mt-6 flex justify-center">
-                  <Button
-                    variant="outline"
-                    onClick={() => void itemsQuery.fetchNextPage()}
-                    disabled={itemsQuery.isFetchingNextPage}
-                  >
-                    {itemsQuery.isFetchingNextPage ? "Loading…" : "Load more items"}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      </div>
+            ) : (
+              <div className="surface divide-y divide-border/60 overflow-hidden p-1">
+                {items.map((item) => (
+                  <ItemRow key={item.id} item={item} origin={origin} selection={selection.itemSelection(item)} />
+                ))}
+              </div>
+            )}
+            {itemsQuery.hasNextPage && (
+              <div className="mt-6 flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => void itemsQuery.fetchNextPage()}
+                  disabled={itemsQuery.isFetchingNextPage}
+                >
+                  {itemsQuery.isFetchingNextPage ? "Loading…" : "Load more items"}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+        {/* Room for the selection bar, so it never hides the end of the list. */}
+        {selection.selectedItems.length > 0 && <div aria-hidden="true" className="h-24" />}
+      </section>
+
+      <section
+        aria-label={`About ${room.name}`}
+        className="mt-8 space-y-3 border-t border-border/60 pt-4"
+      >
+        {room.description && (
+          <p className="max-w-2xl whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+            {room.description}
+          </p>
+        )}
+        {hasPhotos && photoManager}
+        {!stocktakeActive && <StocktakeEntry roomId={room.id} />}
+        <BorrowedKeptHere roomId={room.id} />
+      </section>
 
       <RoomDialog
         open={roomEditTarget !== null}
@@ -875,6 +768,6 @@ export function RoomDetailPage() {
           }
         }}
       />
-    </PageLayout>
+    </div>
   );
 }

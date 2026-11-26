@@ -18,7 +18,7 @@ export function FormSection({
   className?: string;
 }) {
   return (
-    <section className={cn("surface p-5 sm:p-7", className)}>
+    <section className={cn("surface p-5", className)}>
       <div className="mb-6">
         <h2 className="font-display text-[1.35rem] font-normal tracking-[-0.02em]">{title}</h2>
         {description && (
@@ -46,10 +46,10 @@ export function OptionalFormSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="surface p-5 sm:p-6">
+    <section className="surface p-5">
       <button
         type="button"
-        className="flex w-full items-start justify-between gap-4 text-left"
+        className="flex min-h-11 w-full items-start justify-between gap-4 text-left"
         aria-expanded={open}
         aria-controls={id}
         onClick={onToggle}

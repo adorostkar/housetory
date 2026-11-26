@@ -98,6 +98,30 @@ test("an item page puts a removable This item context in the bar", async ({ page
   }
 });
 
+test("a wide screen opens an item in a panel beside the list it came from", async ({ page, request }) => {
+  const first = await createItem(request, `Panel one ${Date.now()}`);
+  const second = await createItem(request, `Panel two ${Date.now()}`);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/items");
+  const list = page.locator("main");
+  await list.getByRole("link", { name: new RegExp(first.item.name) }).first().click();
+  const panel = page.getByTestId("item-panel");
+  await expect(panel.getByRole("heading", { level: 1 })).toHaveText(first.item.name);
+  await expect(page).toHaveURL(new RegExp(`/items/${first.item.id}`));
+  // The list is still there, and another item replaces the one in the panel.
+  await list.getByRole("link", { name: new RegExp(second.item.name) }).first().click();
+  await expect(panel.getByRole("heading", { level: 1 })).toHaveText(second.item.name);
+  await panel.getByRole("link", { name: "Close" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page).toHaveURL(/\/items(\?|$)/);
+
+  // On a narrower screen the same item is a full page.
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto(`/items/${first.item.id}`);
+  await expect(page.getByTestId("item-panel")).toHaveCount(0);
+  await expect(page.locator("main").getByRole("heading", { level: 1 })).toHaveText(first.item.name);
+});
+
 const SCROLLED = 300;
 
 /** Opens a long page and scrolls it down. */
