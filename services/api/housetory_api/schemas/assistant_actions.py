@@ -147,6 +147,13 @@ class AssistantActionTarget(BaseModel):
     name: str
 
 
+class AssistantActionUndo(BaseModel):
+    """Whether an applied change can be undone, and whether it was."""
+
+    available: bool = False
+    undone: bool = False
+
+
 class AssistantActionProposalOut(BaseModel):
     id: uuid.UUID
     kind: str
@@ -156,6 +163,11 @@ class AssistantActionProposalOut(BaseModel):
     changes: dict
     before: dict = Field(default_factory=dict)
     destination: AssistantActionTarget | None = None
+    # True when the application applied the change itself, without a review.
+    applied_directly: bool = False
+    # What was applied or undone, once that has happened.
+    message: str | None = None
+    undo: AssistantActionUndo | None = None
 
 
 class ItemEditReviewRequest(BaseModel):
@@ -224,6 +236,12 @@ class AssistantActionApplyRequest(BaseModel):
 
 
 class AssistantActionApplyOut(BaseModel):
+    proposal_id: uuid.UUID
+    request_id: uuid.UUID
+    message: str
+
+
+class AssistantActionUndoOut(BaseModel):
     proposal_id: uuid.UUID
     request_id: uuid.UUID
     message: str

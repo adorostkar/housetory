@@ -20,6 +20,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { AnswerText } from "@/components/answer-text";
+import { AssistantActionResult } from "@/components/assistant-action-result";
 import { AssistantToolStatus } from "@/components/assistant-tool-status";
 import { InventoryReview } from "@/components/inventory-review";
 import { CONDITIONS } from "@/components/item-form-sections";
@@ -119,7 +120,7 @@ export function AssistantPage({
   const searchSession = useSearchSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const scopeSignature = `${selection.householdId}|${selection.propertyId}`;
-  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, openAction, pending, ask, reset, startFreshTopic, applyAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
+  const { messages, question, setQuestion, attachment, setAttachment, attachmentIntent, setAttachmentIntent, attachmentDocumentType, setAttachmentDocumentType, captureHouseholdId, setCaptureHouseholdId, capturePending, setCapturePending, captureError, setCaptureError, recordCapture, openAction, pending, ask, reset, startFreshTopic, steer, canSteer, applyAction, undoAction, cancelAction, refreshAction, editMove, selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft, saveLoan, editReturn, setReturnDraft, saveReturn } =
     useAssistantConversation(scopeSignature);
   const actionPending = messages.some((message) => message.action?.pending);
   const endRef = React.useRef<HTMLDivElement>(null);
@@ -239,10 +240,6 @@ export function AssistantPage({
       setCaptureError("Is this an inventory photo or a document/evidence image?");
       return;
     }
-    if (captureAttachment && (!isImage || attachmentIntent === "document") && !attachmentDocumentType) {
-      setCaptureError("Choose the document type before sending. Invoice and receipt reviews include purchase handling.");
-      return;
-    }
     if (!destinationHousehold) {
       setCaptureError("Choose the household that should receive this capture.");
       return;
@@ -282,16 +279,21 @@ export function AssistantPage({
         const form = new FormData();
         form.append("file", file);
         form.append("title", file.name.replace(/\.[^.]+$/, "").slice(0, 200));
-        form.append("document_type", attachmentDocumentType);
+        // The type is optional: a file is saved as "other" and can be changed afterwards.
+        const documentType = attachmentDocumentType || "other";
+        form.append("document_type", documentType);
         form.append("assistant_capture", "true");
         if (value) form.append("notes", value);
         const document = await api.postForm<DocumentRecord>("/documents", form);
-        selectDocument(document.id, true);
+        // A manual is saved and read; it does not open a purchase-style review.
+        if (documentType !== "manual") selectDocument(document.id, true);
         setPageReferences([{ kind: "document", id: document.id, name: document.title }]);
         recordCapture(
           value || `Attached ${file.name}`,
           attachmentMeta,
-          "Document attached. Progress, extracted details and review are shown below.",
+          documentType === "manual"
+            ? "Manual saved to the library. You can ask about it once it has been read."
+            : "Document saved. Its reading state and what was read are shown below.",
           {
             id: crypto.randomUUID(),
             kind: "document",
@@ -319,6 +321,12 @@ export function AssistantPage({
   }, [appliedManualProposal, pending]);
 
   const submitValue = (value: string, freshRequest = false) => {
+    // While a request runs, a typed message goes to it: "stop" ends it, anything else
+    // changes the rest of its work. Finished steps are kept.
+    if (pending && !freshRequest && !attachment && steer(value)) {
+      dictation.stop();
+      return;
+    }
     if (pending || tooManyReferences || capturePending) return;
     requestedCaptureRef.current = null;
     if (attachment && !freshRequest) {
@@ -718,7 +726,7 @@ export function AssistantPage({
                                   to={withHousehold(`/items/${message.action.proposal.targets[0].id}/edit`, selection.householdId || undefined)}
                                 >
                                   Open full item editor
-                                </Link>. This proposal is separate.
+                                </Link>.
                               </p>
                             )}
                           </>
@@ -801,7 +809,8 @@ export function AssistantPage({
                         )}
                       </div>
                       {message.action.result ? (
-                        <p role="status" className="text-sm">{message.action.result}</p>
+                        <AssistantActionResult action={message.action}
+                          onUndo={() => message.action && undoAction(message.action.proposal.id)} />
                       ) : (
                         <div className="flex flex-wrap gap-2">
                           {message.action.conflict && (
@@ -991,10 +1000,12 @@ export function AssistantPage({
                 </div>
               ),
             )}
-            {pending && (
-              <div className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
+            {/* A running assistant request shows its own real progress. This line is only
+                for the moment before one exists, and for a plain search. */}
+            {pending && !canSteer && (
+              <div role="status" className="surface flex items-center gap-3 p-5 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
-                Retrieving current records across your places…
+                Sending your request…
               </div>
             )}
             <div ref={endRef} />
@@ -1119,12 +1130,11 @@ export function AssistantPage({
                   value={attachmentDocumentType}
                   onChange={(event) => { setAttachmentDocumentType(event.target.value); setCaptureError(null); }}
                 >
-                  <option value="">Choose a document type…</option>
+                  <option value="">Other document (you can change this later)</option>
                   <option value="invoice">Invoice</option>
                   <option value="receipt">Receipt</option>
                   <option value="manual">Manual</option>
                   <option value="warranty_certificate">Warranty</option>
-                  <option value="other">Other evidence</option>
                 </select>
               </label>
             )}
@@ -1222,9 +1232,9 @@ export function AssistantPage({
                   size="icon"
                   aria-label="Send question"
                   className="size-11 shrink-0"
-                  disabled={pending || capturePending || tooManyReferences || (!attachment && question.trim().length < 2)}
+                  disabled={(pending && !canSteer) || capturePending || tooManyReferences || (!attachment && question.trim().length < 2)}
                 >
-                  {pending || capturePending ? (
+                  {(pending && !canSteer) || capturePending ? (
                     <Loader2 className="animate-spin" />
                   ) : (
                     <Send />
@@ -1480,11 +1490,11 @@ function AssistantAnswer({
         </div>
       )}
       {response && response.references.length > 0 && (
-        <div className="mt-4 border-t border-border/60 pt-3">
-          <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Sources
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+        <details className="mt-4 border-t border-border/60 pt-1" aria-label="Sources">
+          <summary className="flex min-h-11 cursor-pointer items-center text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Sources ({Math.min(response.references.length, 12)})
+          </summary>
+          <div className="mb-1 flex flex-wrap gap-1.5">
             {response.references.slice(0, 12).map((reference) => (
               <Link
                 key={`${reference.type}-${reference.id}`}
@@ -1496,7 +1506,7 @@ function AssistantAnswer({
               </Link>
             ))}
           </div>
-        </div>
+        </details>
       )}
       {link && (
         <div className="mt-3">

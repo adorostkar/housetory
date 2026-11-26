@@ -39,7 +39,15 @@ def _resolve_page_references(
     db: Session,
     scope: global_search.SearchScope,
     references: list[SearchPageReference],
+    *,
+    skip_unavailable: bool = False,
 ) -> list[SearchContextPageReference]:
+    """The page records a request came from, re-read in the caller's scope.
+
+    A record that is gone, archived or outside the scope is an error. With
+    ``skip_unavailable`` it is left out instead: the page is only the default subject
+    of a request, so a stale page must not stop a request about something else.
+    """
     household_ids = [household.id for household, _role in scope.households]
     property_id = scope.property.id if scope.property is not None else None
     resolved: list[SearchContextPageReference] = []
@@ -90,6 +98,8 @@ def _resolve_page_references(
             row = db.scalar(select(Document).where(*conditions))
             label = row.title if row else None
         if row is None or label is None:
+            if skip_unavailable:
+                continue
             raise ApiError(
                 404,
                 "page_context_unavailable",

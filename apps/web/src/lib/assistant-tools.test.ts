@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { actionMessage, assistantAnswerText, mergeToolRun, toolRunMessages, type AssistantToolRun } from "@/lib/assistant-tools";
+import {
+  actionMessage, assistantAnswerText, isStopRequest, mergeToolRun, toolRunMessages, type AssistantToolRun,
+} from "@/lib/assistant-tools";
 import { followUpSuggestions } from "@/lib/assistant-followups";
 
 describe("durable assistant observations", () => {
@@ -82,5 +84,53 @@ describe("durable assistant observations", () => {
     expect(messages.at(-1)?.text).toBe("Found your drill.");
     const retry = mergeToolRun(messages, { ...completed, generation: 2, state: "queued" });
     expect(retry.at(-1)?.toolRun?.state).toBe("queued");
+  });
+  it("treats only a whole stop word as a stop, and leaves every other message to the assistant", () => {
+    expect(["stop", " Stop. ", "CANCEL!", "avbryt", "stopp"].map(isStopRequest)).toEqual(
+      [true, true, true, true, true],
+    );
+    expect(["stop the loan to Sam", "don't stop", "cancel the proposal", "st"].map(isStopRequest))
+      .toEqual([false, false, false, false]);
+  });
+
+  it("shows what the user added while it ran, and follows the server for an applied change", () => {
+    const proposal = {
+      id: "p-direct", kind: "edit_item", state: "applied", scope_label: "Home",
+      targets: [{ id: "item-1", name: "Hammer drill" }], destination: null,
+      changes: { name: "Hammer drill" }, before: { name: "Drill" },
+      applied_directly: true, message: "Updated Hammer drill.",
+      undo: { available: true, undone: false },
+    };
+    const run: AssistantToolRun = {
+      id: "run-1", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Rename the drill", state: "completed", generation: 1, message: "Renamed.",
+      answer: "Renamed.", steers: [{ id: "s1", text: "Call it Hammer drill" }],
+      steps: [{
+        call: { name: "prepare_action", arguments: {} },
+        result: { summary: "Applied.", references: [], proposal },
+      }],
+      model_calls: 2, max_model_calls: 8, can_retry: false, worker_available: null,
+    };
+    const messages = toolRunMessages(run);
+    // The message sent while the request ran is shown as the user's, in the same request.
+    expect(messages.slice(0, 2).map(({ role, text }) => [role, text])).toEqual([
+      ["user", "Rename the drill"], ["user", "Call it Hammer drill"],
+    ]);
+    const card = messages.find((message) => message.action);
+    expect(card?.text).toBe("Done. This change was applied for you.");
+    expect(card?.action?.result).toBe("Updated Hammer drill.");
+    expect(card?.action?.proposal.undo?.available).toBe(true);
+
+    // It was undone elsewhere. The card that already showed a result follows the server.
+    const undone = {
+      ...proposal, state: "undone", message: "Undone. Drill is as it was before.",
+      undo: { available: false, undone: true },
+    };
+    const merged = mergeToolRun(messages, {
+      ...run, steps: [{ ...run.steps[0]!, result: { ...run.steps[0]!.result, proposal: undone } }],
+    });
+    const after = merged.find((message) => message.action)?.action;
+    expect(after?.result).toBe("Undone. Drill is as it was before.");
+    expect(after?.proposal.undo).toEqual({ available: false, undone: true });
   });
 });

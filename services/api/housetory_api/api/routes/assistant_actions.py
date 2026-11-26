@@ -7,7 +7,9 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from ...db import get_db
+from ...domain import ActivityAction
 from ...models import (
+    ActivityEvent,
     AssistantActionProposal,
     Household,
     HouseholdMember,
@@ -22,6 +24,8 @@ from ...schemas.assistant_actions import (
     AssistantActionProposalOut,
     AssistantActionStateOut,
     AssistantActionTarget,
+    AssistantActionUndo,
+    AssistantActionUndoOut,
     AssistantMoveDestination,
     AssistantMoveDestinationList,
     AssistantPendingActionList,
@@ -48,6 +52,7 @@ from ...schemas.lending import LoanCreate, LoanReturnCreate
 from ...services import borrowed, bulk, history, items, lending
 from ...services import manuals as manual_service
 from ...services.ai_tools.inventory_query import property_item_conditions
+from ...services.assistant_tools import policy
 from ...services.containers import household_hierarchy_lock
 from ..deps import AccountContext, AuthContext, require_account
 from ..errors import ApiError
@@ -563,8 +568,31 @@ def tool_proposal_preview(
             "state": proposal.state,
             "changes": proposal.changes,
             "destination": destination,
+            **_applied_fields(proposal),
         }
     )
+
+
+def _can_undo(proposal: AssistantActionProposal) -> bool:
+    """True for an applied change of a kind that Undo can put back."""
+    return (
+        proposal.state == "applied"
+        and proposal.kind in policy.UNDO_KINDS
+        and (proposal.kind != "move_items" or len(proposal.changes.get("item_ids", [])) == 1)
+    )
+
+
+def _applied_fields(proposal: AssistantActionProposal) -> dict:
+    """What happened to a proposal after it was prepared: applied by whom, and undone or not."""
+    if proposal.state not in {"applied", "undone"}:
+        return {"applied_directly": False, "message": None, "undo": None}
+    result = proposal.result or {}
+    undone = proposal.state == "undone"
+    return {
+        "applied_directly": proposal.request_id == policy.direct_apply_id(proposal.id),
+        "message": (result.get("undo") or {}).get("message") if undone else result.get("message"),
+        "undo": AssistantActionUndo(available=_can_undo(proposal), undone=undone),
+    }
 
 
 @router.patch("/proposals/{proposal_id}", response_model=AssistantActionProposalOut)
@@ -1070,6 +1098,176 @@ def apply_proposal(
     return result
 
 
+def _plain_value(value):
+    """A stored field value as the proposal recorded it: text trimmed, an enum as its value."""
+    value = getattr(value, "value", value)
+    return value.strip() if isinstance(value, str) else value
+
+
+def _undo_item_edit(
+    db: Session, auth: AuthContext, proposal: AssistantActionProposal, request_id: uuid.UUID
+) -> str:
+    """Put back the values an applied edit replaced. Refuses when any of them changed
+    again afterwards: Undo never overwrites newer work."""
+    item = db.scalar(
+        select(Item)
+        .where(Item.id == proposal.item_id, Item.household_id == auth.household.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if item is None or item.is_archived:
+        raise ApiError(
+            409, "undo_not_safe", "The item was archived or deleted. Nothing was changed."
+        )
+    _check_items_scope(db, auth, proposal.scope_property_id, [item.id])
+    before = proposal.snapshots.get("before") or {}
+    newer = [
+        field.replace("_", " ")
+        for field, applied in proposal.changes.items()
+        if _plain_value(getattr(item, field)) != _plain_value(applied)
+    ]
+    if newer:
+        raise ApiError(
+            409,
+            "undo_not_safe",
+            f"The {', '.join(newer)} of {item.name} changed again after this edit, so Undo "
+            "would overwrite the newer value. Nothing was changed.",
+        )
+    restore = {field: before.get(field) for field in proposal.changes}
+    try:
+        items.update_item_record(
+            db,
+            auth.household.id,
+            item,
+            ItemUpdate.model_validate(restore),
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+        )
+    except (ApiError, ValidationError) as exc:
+        db.rollback()
+        reason = exc.message if isinstance(exc, ApiError) else "The earlier value is not valid now."
+        raise ApiError(409, "undo_not_safe", f"{reason} Nothing was changed.") from exc
+    history.record_event(
+        db,
+        auth.household.id,
+        actor_user_id=auth.user.id,
+        actor_name=auth.user.name,
+        action="item.updated",
+        entity_type="item",
+        entity_id=item.id,
+        item_id=item.id,
+        summary=f"Undid an assistant change of {item.name}",
+        details={"fields": list(proposal.changes), "undone_proposal_id": str(proposal.id)},
+        request_id=request_id,
+    )
+    return f"Undone. {item.name} is as it was before."
+
+
+def _undo_item_move(
+    db: Session, auth: AuthContext, proposal: AssistantActionProposal, request_id: uuid.UUID
+) -> str:
+    """Undo an applied move of one item through the item's own history, with its checks."""
+    item_id = uuid.UUID(proposal.changes["item_ids"][0])
+    _check_items_scope(db, auth, proposal.scope_property_id, [item_id])
+    batch = history.find_request_event(db, auth.household.id, proposal.request_id)
+    moved = (
+        db.scalar(
+            select(ActivityEvent)
+            .where(
+                ActivityEvent.household_id == auth.household.id,
+                ActivityEvent.item_id == item_id,
+                ActivityEvent.action == ActivityAction.ITEM_MOVED.value,
+                ActivityEvent.details["batch"]["batch_id"].astext == batch.details.get("batch_id"),
+            )
+            .order_by(ActivityEvent.created_at.desc())
+        )
+        if batch is not None
+        else None
+    )
+    if moved is None:
+        raise ApiError(
+            409, "undo_not_safe", "The record of this move was not found. Nothing was changed."
+        )
+    try:
+        history.undo_event(
+            db,
+            auth.household.id,
+            moved.id,
+            actor_user_id=auth.user.id,
+            actor_name=auth.user.name,
+            request_id=request_id,
+        )
+    except ApiError as exc:
+        db.rollback()
+        if exc.code == "already_undone":
+            raise
+        raise ApiError(409, "undo_not_safe", f"{exc.message} Nothing was changed.") from exc
+    return "Undone. The item is back where it was."
+
+
+@router.post("/proposals/{proposal_id}/undo", response_model=AssistantActionUndoOut)
+def undo_proposal(
+    proposal_id: uuid.UUID,
+    payload: AssistantActionApplyRequest,
+    account: AccountContext = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> AssistantActionUndoOut:
+    """Undo an applied edit or single-item move, when that is still safe.
+
+    The earlier state is restored only while the record still holds what this change
+    put there. Otherwise the conflict is explained and nothing is changed.
+    """
+    proposal = db.scalar(
+        select(AssistantActionProposal)
+        .where(
+            AssistantActionProposal.id == proposal_id,
+            AssistantActionProposal.actor_user_id == account.user.id,
+        )
+        .with_for_update()
+    )
+    if proposal is None:
+        raise ApiError(404, "proposal_not_found", "Proposal not found.")
+    auth = _writer(db, account, proposal.household_id)
+    _check_property(db, auth, proposal.scope_property_id)
+    if proposal.state == "undone":
+        stored = (proposal.result or {}).get("undo") or {}
+        if stored.get("request_id") != str(payload.request_id):
+            raise ApiError(409, "already_undone", "This change was already undone.")
+        return AssistantActionUndoOut.model_validate(stored)
+    if not _can_undo(proposal):
+        raise ApiError(
+            409,
+            "undo_unavailable",
+            "Only an applied edit or a move of one item can be undone here."
+            if proposal.state == "applied"
+            else "This change was not applied, so there is nothing to undo.",
+        )
+    household_hierarchy_lock(db, auth.household.id)
+    try:
+        if proposal.kind == "move_items":
+            message = _undo_item_move(db, auth, proposal, payload.request_id)
+        else:
+            message = _undo_item_edit(db, auth, proposal, payload.request_id)
+    except ApiError as exc:
+        if exc.code != "already_undone":
+            raise
+        # The move was undone from the item's history. The card follows.
+        message = "This move was already undone from the item's history."
+    result = AssistantActionUndoOut(
+        proposal_id=proposal.id, request_id=payload.request_id, message=message
+    )
+    proposal = db.scalar(
+        select(AssistantActionProposal)
+        .where(AssistantActionProposal.id == proposal_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    proposal.state = "undone"
+    proposal.result = {**(proposal.result or {}), "undo": result.model_dump(mode="json")}
+    db.commit()
+    return result
+
+
 @router.post(
     "/proposals/{proposal_id}/refresh", response_model=AssistantActionProposalOut, status_code=201
 )
@@ -1171,7 +1369,7 @@ def cancel_proposal(
     if proposal is None:
         raise ApiError(404, "proposal_not_found", "Proposal not found.")
     _writer(db, account, proposal.household_id)
-    if proposal.state == "applied":
+    if proposal.state in {"applied", "undone"}:
         raise ApiError(
             409, "proposal_already_applied", "Cancellation cannot undo an applied action."
         )

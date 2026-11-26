@@ -103,6 +103,9 @@ def test_the_instructions_are_general_and_every_tool_named_anywhere_is_registere
         "Use an online service only through a tool",
         "Say when something comes from an online source",
         "A tool marked unavailable cannot be used now",
+        "It is the subject only when the request names nothing else",
+        "answer with kind general and say that it is general guidance",
+        "Never claim a change that the result does not report as applied",
     ):
         assert rule in general
 
@@ -170,7 +173,7 @@ def test_an_unavailable_tool_is_explained_in_the_catalogue_and_refused_when_call
         [call("find_manuals_online", item_id=item["id"]), ANSWER],
     )
     assert not any(offered(prompts[0]).values())
-    assert run["steps"][0]["result"]["proposal"]["kind"] == "confirm_manual_identity"
+    assert run["steps"][0]["result"]["proposal"]["kind"] == "save_manual"
     prepared = count(AssistantActionProposal)
 
     # A viewer: every tool that writes is marked, and none of them runs.
@@ -280,13 +283,13 @@ def test_registered_handlers_carry_out_lookup_edit_loan_and_manual_discovery(
     (history,) = results(client, monkeypatch, [call("get_loan_history", item_id=drill["id"])])
     assert "Mohsen" in json.dumps(history["facts"])
 
-    # Manual discovery: identity first, and the search only after the user confirmed it.
-    (unconfirmed,) = results(client, monkeypatch, [call("find_manuals_online", item_id=item["id"])])
-    assert unconfirmed["proposal"]["kind"] == "confirm_manual_identity" and searched == []
-    approve(unconfirmed["proposal"])
+    # Manual discovery: the recorded brand and model are searched, and the clear match
+    # waits for the user because nobody asked to save it.
     (candidates,) = results(client, monkeypatch, [call("find_manuals_online", item_id=item["id"])])
     assert len(searched) == 1 and candidates["facts"]["condition"] == "candidates"
+    assert candidates["facts"]["identity_source"] == "recorded_on_item"
     assert candidates["proposal"]["kind"] == "save_manual"
+    assert candidates["proposal"]["state"] == "ready"
     assert [source["url"] for source in candidates["web_sources"]] == [MANUAL["source_url"]]
 
     assert ran == [
@@ -294,6 +297,5 @@ def test_registered_handlers_carry_out_lookup_edit_loan_and_manual_discovery(
         "prepare_action",
         "prepare_action",
         "get_loan_history",
-        "find_manuals_online",
         "find_manuals_online",
     ]

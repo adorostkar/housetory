@@ -14,7 +14,10 @@ import { useInvalidateInventory, useSession } from "@/lib/queries";
 import type { SearchTurn } from "@/lib/search-session";
 import type { ReviewRun, SearchConversationContext, SearchQueryResponse } from "@/lib/types";
 import { localDateISO } from "@/lib/utils";
-import { actionMessage, createToolRun, mergeToolRun, type AssistantToolRun } from "@/lib/assistant-tools";
+import {
+  actionMessage, cancelToolRun, createToolRun, isStopRequest, mergeToolRun, steerToolRun, toolRunActive,
+  type AssistantToolRun,
+} from "@/lib/assistant-tools";
 import { queryKeys } from "@/lib/query-keys";
 
 export interface AssistantMessage {
@@ -54,15 +57,22 @@ export interface AssistantActionProposal {
   destination: { id: string; name: string } | null;
   changes: Record<string, unknown>;
   before: Record<string, unknown>;
+  /** True when the application applied the change itself, without a review. */
+  applied_directly?: boolean;
+  /** What was applied or undone, once that has happened. */
+  message?: string | null;
+  undo?: { available: boolean; undone: boolean } | null;
 }
 
-interface AssistantActionState {
+export interface AssistantActionState {
   proposal: AssistantActionProposal;
   originalRequest: string;
   requestId: string;
   pending: boolean;
   result?: string;
   conflict?: string;
+  /** Why Undo was refused. Nothing was changed. */
+  undoConflict?: string;
   editing?: boolean;
   destinations?: AssistantMoveDestination[];
   selectedDestination?: string;
@@ -159,7 +169,11 @@ interface AssistantConversationContextValue {
     freshTopic?: boolean,
     appliedProposalId?: string,
   ) => void;
+  /** Send a message to the request that is running: a stop word stops it, anything
+   * else changes the rest of its work. False when no request is running. */
+  steer: (scope: string, value: string) => boolean;
   applyAction: (scope: string, proposalId: string, onApplied?: () => void) => void;
+  undoAction: (scope: string, proposalId: string) => void;
   cancelAction: (scope: string, proposalId: string) => void;
   refreshAction: (scope: string, proposalId: string) => void;
   editMove: (scope: string, proposalId: string) => void;
@@ -206,6 +220,7 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
   const seenRuns = React.useRef(new Set<string>());
   const restoredScopes = React.useRef(new Set<string>());
   const toolRequests = React.useRef(new Map<string, string>());
+  const undoRequests = React.useRef(new Map<string, string>());
   const toolScope = selection ? `${selection.householdId}|${selection.propertyId}` : null;
   const waitingForTask = Boolean(toolScope && conversations[toolScope]?.messages.some(
     (message) => message.toolRun && ["queued", "running"].includes(message.toolRun.state),
@@ -518,6 +533,73 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
       toast.error(getApiErrorMessage(error));
     }).finally(() => controllers.current.delete(controller));
   }, [update, queryClient]);
+
+  const steer = React.useCallback((scope: string, value: string) => {
+    const current = conversationsRef.current[scope] ?? EMPTY;
+    const run = [...current.messages].reverse()
+      .find((message) => message.toolRun && toolRunActive(message.toolRun))?.toolRun;
+    if (!run) return false;
+    const text = value.trim();
+    if (text.length < 2) return true;
+    update(scope, (entry) => ({ ...entry, draft: entry.draft.trim() === text ? "" : entry.draft }));
+    const showRun = (next: AssistantToolRun) => {
+      update(scope, (entry) => {
+        const messages = mergeToolRun(entry.messages, next);
+        return {
+          ...entry, messages,
+          pending: messages.some((message) => message.toolRun && toolRunActive(message.toolRun)),
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
+    };
+    const request = isStopRequest(text)
+      ? cancelToolRun(run.id)
+      : steerToolRun(run.id, text, crypto.randomUUID());
+    void request.then(showRun).catch((error: unknown) => {
+      // The request ended a moment before the message arrived. The words are kept.
+      update(scope, (entry) => ({ ...entry, draft: entry.draft.trim() ? entry.draft : text }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
+      toast.error(error instanceof ApiError && error.code === "assistant_not_running"
+        ? "The assistant had just finished. Send your message again."
+        : getApiErrorMessage(error));
+    });
+    return true;
+  }, [update, queryClient]);
+
+  const undoAction = React.useCallback((scope: string, proposalId: string) => {
+    const action = (conversationsRef.current[scope] ?? EMPTY).messages.find(
+      (message) => message.action?.proposal.id === proposalId,
+    )?.action;
+    if (!action || action.pending || !action.proposal.undo?.available) return;
+    const change = (patch: Partial<AssistantActionState>) => update(scope, (conversation) => ({
+      ...conversation,
+      messages: conversation.messages.map((message) =>
+        message.action?.proposal.id === proposalId
+          ? { ...message, action: { ...message.action, ...patch } }
+          : message,
+      ),
+    }));
+    change({ pending: true, undoConflict: undefined });
+    // The same ID on a repeated press, so the server answers one undo once.
+    const requestId = undoRequests.current.get(proposalId) ?? crypto.randomUUID();
+    undoRequests.current.set(proposalId, requestId);
+    void api.post<{ message: string }>(
+      `/assistant/actions/proposals/${proposalId}/undo`, { request_id: requestId },
+    ).then((response) => {
+      change({
+        pending: false, result: response.message,
+        proposal: {
+          ...action.proposal, state: "undone", message: response.message,
+          undo: { available: false, undone: true },
+        },
+      });
+      invalidateInventory();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assistantRunsAll });
+    }).catch((error: unknown) => {
+      // Undo was refused, for example because the record changed again. Nothing changed.
+      change({ pending: false, undoConflict: getApiErrorMessage(error) });
+    });
+  }, [update, invalidateInventory, queryClient]);
 
   const applyAction = React.useCallback((scope: string, proposalId: string, onApplied?: () => void) => {
     const current = conversationsRef.current[scope] ?? EMPTY;
@@ -892,14 +974,14 @@ function ConversationStore({ children }: { children: React.ReactNode }) {
     () => ({
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
-      reset, startFreshTopic, ask, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, steer, applyAction, undoAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     }),
     [
       selection, setSelection, conversations, setDraft, setAttachment, setAttachmentIntent, setAttachmentDocumentType,
       setCaptureHouseholdId, setCapturePending, setCaptureError, recordCapture, openAction, updateCapture,
-      reset, startFreshTopic, ask, applyAction, cancelAction, refreshAction, editMove,
+      reset, startFreshTopic, ask, steer, applyAction, undoAction, cancelAction, refreshAction, editMove,
       selectDestination, saveMove, editName, setItemField, saveName, editLoan, setLoanDraft,
       saveLoan, editReturn, setReturnDraft, saveReturn,
     ],
@@ -951,6 +1033,10 @@ export function useAssistantConversation(scope: string) {
     reset: () => store.reset(scope),
     startFreshTopic: () => store.startFreshTopic(scope),
     applyAction: (proposalId: string, onApplied?: () => void) => store.applyAction(scope, proposalId, onApplied),
+    undoAction: (proposalId: string) => store.undoAction(scope, proposalId),
+    /** True while a request runs that a typed message can steer or stop. */
+    canSteer: conversation.messages.some((message) => message.toolRun && toolRunActive(message.toolRun)),
+    steer: (value: string) => store.steer(scope, value),
     cancelAction: (proposalId: string) => store.cancelAction(scope, proposalId),
     refreshAction: (proposalId: string) => store.refreshAction(scope, proposalId),
     editMove: (proposalId: string) => store.editMove(scope, proposalId),

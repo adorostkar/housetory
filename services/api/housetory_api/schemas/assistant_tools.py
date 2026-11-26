@@ -59,6 +59,15 @@ class RunRequest(BaseModel):
     applied_proposal_id: uuid.UUID | None = None
 
 
+class SteerRequest(BaseModel):
+    """Something the user says while a request is still being worked on."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: uuid.UUID
+    message: str = Field(min_length=2, max_length=2000)
+
+
 class ToolOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -140,7 +149,12 @@ class ManualSource(BaseModel):
 class AnswerStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["answer", "clarify", "unsupported"]
+    kind: Literal["answer", "general", "clarify", "unsupported"] = Field(
+        description=(
+            "answer: rests on tool results. general: general guidance that states no "
+            "household record and no fact of one specific product; needs no tool."
+        )
+    )
     sources: list[ManualSource] = Field(
         default_factory=list,
         description=(
@@ -192,7 +206,13 @@ class RunOut(BaseModel):
     generation: int
     message: str
     answer: str | None = None
+    # "general" when the answer is general guidance that rests on no household record.
+    answer_kind: str | None = None
     steps: list[dict[str, Any]]
+    # What the user said while the request ran, oldest first: {id, text}.
+    steers: list[dict[str, Any]] = Field(default_factory=list)
+    # While the request runs: a few words on what is being done now, from its real state.
+    progress: str | None = None
     # Manual pages the answer rests on. Each was read by a tool in this conversation.
     citations: list[ManualCitationOut] = Field(default_factory=list)
     model_calls: int

@@ -801,7 +801,7 @@ def test_a_follow_up_answered_from_memory_is_sent_back_to_read_the_pages(
     assert followed["state"] == "completed" and followed["model_calls"] == 3
     assert followed["answer"] == f"Turn the rotary switch to V ({TITLE}, page 9)."
     assert [(c["page"], c["excerpt"]) for c in followed["citations"]] == [(9, "")]
-    assert "from memory or general knowledge" in " ".join(prompts[0]["system"].split())
+    assert "never give them from memory" in " ".join(prompts[0]["system"].split())
     described = {tool["name"]: tool["description"] for tool in prompts[0]["tools"]}
     assert "for every new question read the pages it needs again" in described["read_manual"]
 

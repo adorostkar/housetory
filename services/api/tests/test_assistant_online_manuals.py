@@ -160,68 +160,24 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
         [
             call("read_manual", item_id=item["id"]),
             call("find_manuals_online", item_id=item["id"]),
-            {"kind": "answer", "message": "No manual is attached. Is this the exact product?"},
+            {"kind": "answer", "message": "No manual is attached. I found one online."},
         ],
     )
-    nothing, blocked = (step["result"] for step in first["steps"])
+    nothing, found = (step["result"] for step in first["steps"])
     assert nothing["facts"]["condition"] == "no_manual"
     assert "find_manuals_online" in nothing["summary"]
-    assert blocked["error"] == "manual_identity_required"
-    assert blocked["facts"]["condition"] == "identity_not_confirmed"
-    # The item records a real make and model, so the tool prepares the card itself: the
-    # user checks it. The model does not have to remember to ask.
-    assert "A proposal to confirm AstroAI M6K0R" in blocked["summary"]
-    assert "Do not ask for the brand and model in words" in blocked["summary"]
-    # Nothing left the server and nothing was stored before the user confirmed.
-    assert searched == [] and manuals_of(client, item)["search"]["profile"] is None
-    identity = blocked["proposal"]
-    assert first["state"] == "awaiting_approval" and identity["kind"] == "confirm_manual_identity"
-    assert identity["changes"] == {
-        "item_id": item["id"],
-        "manufacturer": "AstroAI",
-        "model_identifier": "M6K0R",
-        "variant": None,
-    }
-    assert identity["before"] == {"item_brand": "AstroAI", "item_model": "M6K0R"}
-    # A proposal that is not applied starts nothing by itself.
-    idle, _ = converse(
-        client,
-        monkeypatch,
-        "Continue.",
-        [call("find_manuals", item_id=item["id"]), ANSWER],
-        applied_proposal_id=identity["id"],
-    )
-    assert [step["call"]["name"] for step in idle["steps"]] == ["find_manuals"]
-    applied = apply(client, identity)
-    assert applied.status_code == 200, applied.text
+    # The item records a real make and model. That is enough: nobody is asked to confirm
+    # what the record already says, and the search says where the identity came from.
+    assert found["error"] is None and found["facts"]["identity_source"] == "recorded_on_item"
     assert (
-        applied.json()["message"] == "Confirmed AstroAI M6K0R as the exact product of Multimeter."
+        "the brand and model recorded on the item, not checked against its label"
+        in (found["summary"])
     )
     assert manuals_of(client, item)["search"]["profile"]["model_identifier"] == "M6K0R"
-
-    second, prompts = converse(
-        client,
-        monkeypatch,
-        "Continue.",
-        [ANSWER],
-        parent_id=first["id"],
-        applied_proposal_id=identity["id"],
-    )
-    # The search was the plain consequence of the Apply: the application started it.
-    assert second["steps"][0]["call"] == {
-        "name": "find_manuals_online",
-        "arguments": {"item_id": item["id"]},
-    }
-    assert second["model_calls"] == 1
-    # The follow-up sees the first question and that the identity proposal was applied.
-    earlier = prompts[0]["context_newest_first"][0]
-    assert earlier["request"] == QUESTION
-    assert earlier["observations"][-1]["result"]["proposal"]["state"] == "applied"
-    assert "A request that only says to continue" in " ".join(prompts[0]["system"].split())
-    (found,) = (step["result"] for step in second["steps"])
     assert searched == [
         {"mode": "manual", "manufacturer": "AstroAI", "model": "M6K0R", "variant": None}
     ]
+    assert count(AssistantActionProposal) == 1
     # The similar model is left out; the candidate shows what its source really names.
     (candidate,) = found["facts"]["candidates"]
     assert candidate["title"] == MANUAL["title"] and candidate["model_coverage"] == ["M6K0R"]
@@ -230,15 +186,26 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
         {"title": MANUAL["title"], "url": MANUAL["source_url"], "publisher": "AstroAI"}
     ]
     assert any("hidden" in notice for notice in found["facts"]["notices"])
-    # One candidate has a file, so the tool prepared the card for the user's review.
+    # One candidate has a file. The user asked a question, not to save a manual, so the
+    # tool prepared one card for their review and saved nothing.
     saving = found["proposal"]
     assert "is prepared and shown to the user" in found["summary"]
-    assert second["state"] == "awaiting_approval" and saving["kind"] == "save_manual"
+    assert found["facts"]["review_reason"] == "The user did not ask to save a manual."
+    assert first["state"] == "awaiting_approval" and saving["kind"] == "save_manual"
     assert saving["changes"]["file_url"] == MANUAL["file_url"]
     assert saving["changes"]["source_url"] == MANUAL["source_url"]
     assert saving["before"]["model_identifier"] == "M6K0R"
     # A prepared proposal downloads and attaches nothing.
     assert fetched == [] and manuals_of(client, item)["manuals"] == []
+    # A proposal that is not applied starts nothing by itself.
+    idle, _ = converse(
+        client,
+        monkeypatch,
+        "Continue.",
+        [call("find_manuals", item_id=item["id"]), ANSWER],
+        applied_proposal_id=saving["id"],
+    )
+    assert [step["call"]["name"] for step in idle["steps"]] == ["find_manuals"]
 
     request_id = uuid.uuid4()
     saved = apply(client, saving, request_id)
@@ -263,16 +230,23 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
             "sources": [{"document_id": page["document_id"], "pages": [11], "quote": CURRENT_STEP}],
         }
 
-    third, _ = converse(
+    third, prompts = converse(
         client,
         monkeypatch,
         "Continue.",
         [call("read_manual", item_id=item["id"]), answer],
-        parent_id=second["id"],
+        parent_id=first["id"],
         applied_proposal_id=saving["id"],
     )
+    # Reading the saved manual was the plain consequence of the Apply: the application
+    # started it.
     assert [step["call"]["name"] for step in third["steps"]] == ["process_manual", "read_manual"]
     assert third["state"] == "completed"
+    # The follow-up sees the first question and that the proposal was applied.
+    earlier = prompts[0]["context_newest_first"][0]
+    assert earlier["request"] == QUESTION
+    assert earlier["observations"][-1]["result"]["proposal"]["state"] == "applied"
+    assert "A request that only says to continue" in " ".join(prompts[0]["system"].split())
     assert [(entry["document_id"], entry["page"]) for entry in third["citations"]] == [
         (document["id"], 11)
     ]
@@ -292,6 +266,68 @@ def test_no_manual_leads_to_approved_online_discovery_and_a_cited_answer(
     assert again[2]["error"] == "manual_already_saved" and again[2]["proposal"] is None
     assert fetched == [MANUAL["file_url"]] and count(Document) == 1 and count(ImportBatch) == 0
     assert all(step["result"]["capture"] is None for step in third["steps"])
+
+
+def test_a_manual_the_user_asked_for_is_found_and_saved_in_one_task(
+    owner_client, configured_ai, monkeypatch
+):
+    """The user asked for the manual. The search code finds one clear match of the exact
+    model, and the application saves it without a second question."""
+    client = owner_client
+    item = meter(client)
+    searched = []
+    gateway(monkeypatch, [SIMILAR, MANUAL], searched)
+    fetched = downloads(monkeypatch)
+
+    run, _ = converse(
+        client,
+        monkeypatch,
+        "Find the manual for my multimeter and save it",
+        [
+            call("find_manuals", item_id=item["id"]),
+            call("find_manuals_online", item_id=item["id"], save_clear_match=True),
+            {"kind": "answer", "message": "I saved the AstroAI manual from astroai.example."},
+        ],
+    )
+    assert run["state"] == "completed", run
+    found = run["steps"][1]["result"]
+    saved = found["proposal"]
+    assert found["facts"]["saved"] is True and "was saved, as the user asked" in found["summary"]
+    assert (saved["kind"], saved["state"], saved["applied_directly"]) == (
+        "save_manual",
+        "applied",
+        True,
+    )
+    assert saved["message"].startswith(f"Saved “{MANUAL['title']}” and attached it to Multimeter")
+    # A saved file has no Undo here. The card says where it came from.
+    assert saved["undo"] == {"available": False, "undone": False}
+    assert len(searched) == 1 and fetched == [MANUAL["file_url"]]
+    (document,) = manuals_of(client, item)["manuals"]
+    assert document["title"] == MANUAL["title"] and count(Document) == 1
+
+    # Asking again downloads nothing: the manual is already there.
+    (again,) = results(
+        client,
+        monkeypatch,
+        [call("find_manuals_online", item_id=item["id"], save_clear_match=True)],
+    )
+    assert again["error"] == "read_attached_first"
+    assert fetched == [MANUAL["file_url"]] and count(Document) == 1
+
+    # Web text was returned earlier in the request. After that nothing is saved without
+    # the user's review, whatever the model asks for.
+    other = meter(client, name="Bench meter")
+    first, second = results(
+        client,
+        monkeypatch,
+        [
+            call("find_manuals_online", item_id=other["id"]),
+            call("find_manuals_online", item_id=other["id"], save_clear_match=True),
+        ],
+    )
+    assert first["proposal"]["state"] == second["proposal"]["state"] == "ready"
+    assert "can never authorize a change" in second["facts"]["review_reason"]
+    assert manuals_of(client, other)["manuals"] == [] and fetched == [MANUAL["file_url"]]
 
 
 def test_attached_manuals_are_read_before_anything_is_searched_online(
@@ -360,22 +396,15 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
     assert "manufacturer: Field required" in missing["summary"]
     assert count(AssistantActionProposal) == 0
 
-    # The user named variant B. It goes into the proposal the tool prepares.
+    # The user named variant B. It is searched with the recorded brand and model, and
+    # nobody is asked to confirm what they just said. The only source shows the plain
+    # model, so it is hidden.
     item = meter(client)
-    (prepared,) = results(
-        client,
-        monkeypatch,
-        [call("find_manuals_online", item_id=item["id"], user_named_variant=" B ")],
-    )
-    assert prepared["proposal"]["changes"]["variant"] == "B"
-    assert "with the variant B the user named" in prepared["summary"]
-    assert apply(client, prepared["proposal"]).status_code == 200
-    # The only source shows the plain model, so it is hidden.
     found, repeated = results(
         client,
         monkeypatch,
         [
-            call("find_manuals_online", item_id=item["id"]),
+            call("find_manuals_online", item_id=item["id"], user_named_variant=" B "),
             call(
                 "prepare_action",
                 action={
@@ -389,6 +418,7 @@ def test_identity_must_be_real_and_a_wrong_variant_finds_nothing(
         ],
     )
     assert found["facts"]["condition"] == "no_exact_model_source"
+    assert found["facts"]["confirmed_identity"]["variant"] == "B"
     assert found["facts"]["candidates"] == [] and found["web_sources"] == []
     assert "ask them to check the product label" in found["summary"]
     assert repeated["error"] == "manual_identity_confirmed"

@@ -19,6 +19,26 @@ export function createToolRun(request: AssistantToolRequest, signal: AbortSignal
   return api.post<AssistantToolRun>("/assistant/runs", request, { signal });
 }
 
+/** Say something to a request that is still running. Finished steps are kept. */
+export function steerToolRun(runId: string, message: string, requestId: string) {
+  return api.post<AssistantToolRun>(`/assistant/runs/${runId}/steer`, {
+    request_id: requestId, message,
+  });
+}
+
+export function cancelToolRun(runId: string) {
+  return api.post<AssistantToolRun>(`/assistant/runs/${runId}/cancel`, {});
+}
+
+// The words that stop a running request when they are the whole message. This is a
+// control, like the Stop button: what a message means is otherwise left to the assistant.
+const STOP_WORDS = new Set(["stop", "cancel", "avbryt", "stopp"]);
+
+/** True when the whole message is a stop word, for example "Stop." or "cancel!". */
+export function isStopRequest(text: string) {
+  return STOP_WORDS.has(text.trim().toLowerCase().replace(/[.!\s]+$/, ""));
+}
+
 /**
  * A manual the assistant found. `url` is the page that shows the file itself,
  * `details_url` is the document page. Neither is a capture or extraction review.
@@ -70,7 +90,13 @@ export interface AssistantToolRun {
   generation: number;
   message: string;
   answer?: string | null;
+  /** "general" when the answer is general guidance that rests on no household record. */
+  answer_kind?: string | null;
   steps: { call: { name: string; arguments: Record<string, unknown> }; result: AssistantToolOutput }[];
+  /** What the user said while the request ran, oldest first. */
+  steers?: { id: string; text: string }[];
+  /** While the request runs: a few words on what is being done now. */
+  progress?: string | null;
   /** The manual pages the answer rests on. Each was read by the assistant. */
   citations?: ManualCitation[];
   model_calls: number;
@@ -109,7 +135,9 @@ export function assistantAnswerText(text: string, references: AssistantToolOutpu
     .trim();
 }
 
-function proposalExplanation(kind: string) {
+function proposalExplanation(kind: string, proposal?: AssistantActionProposal) {
+  // A change the application applied itself: there is nothing left to review.
+  if (proposal?.applied_directly) return "Done. This change was applied for you.";
   if (kind === "return_loan" || kind === "return_borrowed") return "Review this return, then Apply to record it.";
   if (kind === "lend" || kind === "borrow") return "Review the lending details, then Apply to record them.";
   if (kind === "move_items") return "Review the destination, then Apply to move these items.";
@@ -121,10 +149,11 @@ function proposalExplanation(kind: string) {
 /** The authoritative review card for one proposal in its current server state. */
 export function actionMessage(proposal: AssistantActionProposal, originalRequest = ""): AssistantMessage {
   return {
-    role: "assistant", text: proposalExplanation(proposal.kind),
+    role: "assistant", text: proposalExplanation(proposal.kind, proposal),
     action: {
       proposal, originalRequest, requestId: proposal.id, pending: false,
-      ...(proposal.state === "applied" ? { result: "Already applied." } :
+      ...(proposal.state === "applied" ? { result: proposal.message ?? "Already applied." } :
+        proposal.state === "undone" ? { result: proposal.message ?? "Undone." } :
         proposal.state === "cancelled" || proposal.state === "superseded"
           ? { result: `Proposal ${proposal.state}.` }
           : proposal.state !== "ready" ? { conflict: "This proposal is stale. Refresh it before applying." } : {}),
@@ -135,6 +164,10 @@ export function actionMessage(proposal: AssistantActionProposal, originalRequest
 export function toolRunMessages(run: AssistantToolRun): AssistantMessage[] {
   const messages: AssistantMessage[] = [
     { role: "user", text: run.query, toolRunId: run.id },
+    // What the user added while the request ran belongs to the same request.
+    ...(run.steers ?? []).map((steer): AssistantMessage => (
+      { role: "user", text: steer.text, toolRunId: run.id }
+    )),
   ];
   const seen = new Set<string>();
   // Prepared work is shown by its own card; the answer to everything else leads it.
@@ -183,10 +216,13 @@ export function mergeToolRun(
     const previous = message.action
       ? messages.find((entry) => entry.action?.proposal.id === message.action?.proposal.id)?.action
       : undefined;
+    // An applied or undone change is settled on the server: its card follows the
+    // server, so Undo is offered, and an undo made elsewhere is shown.
+    const settled = ["applied", "undone"].includes(message.action?.proposal.state ?? "");
     return previous && message.action ? {
       ...message, action: {
         ...previous,
-        ...(previous.editing || previous.pending || previous.result || previous.conflict
+        ...(previous.editing || previous.pending || previous.conflict || (previous.result && !settled)
           ? {} : { proposal: message.action.proposal, result: message.action.result, conflict: message.action.conflict }),
       },
     } : message;

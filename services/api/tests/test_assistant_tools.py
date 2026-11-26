@@ -1126,7 +1126,8 @@ def test_category_requests_get_a_category_or_a_recorded_reason_and_stay_compact(
         parent = current["id"]
     # The instructions and the prompt together. What a tool is for is said in the
     # catalogue of the prompt, not in the instructions, so the two are counted as one.
-    assert len(assistant_tools.SYSTEM) + max(len(prompt) for prompt in plans) < 45_500
+    # (Raised from 45,500 for general guidance, direct changes and one-task manuals.)
+    assert len(assistant_tools.SYSTEM) + max(len(prompt) for prompt in plans) < 46_500
     last = json.loads(plans[-1])
     assert len(last["context_newest_first"]) == 4
     assert "scope_item_ids" not in plans[-1]
@@ -1703,3 +1704,474 @@ def test_an_attempt_that_runs_out_of_time_goes_on_by_itself_a_few_times(
     run = start(owner_client, "Where is the validation drill now?")
     work(run)
     assert read(owner_client, run)["state"] == "needs_attention"
+
+
+def scripted(client, monkeypatch, query, replies, **fields):
+    """Run one request with a scripted model. Returns the run and the prompts it was given."""
+    prompts = []
+    pending = iter(replies)
+
+    def complete(system, prompt, **kwargs):
+        prompts.append({**json.loads(prompt), "system": system})
+        reply = next(pending)
+        return reply(prompts[-1]) if callable(reply) else reply
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    run = start(client, query, **fields)
+    work(run)
+    return read(client, run), prompts
+
+
+def test_the_page_is_the_default_subject_and_a_named_other_thing_is_followed(
+    owner_client, configured_ai, monkeypatch
+):
+    """On the drill's page, "where is the tent?" is about the tent. The page is given to
+    the model as context: it never narrows what a tool may look up."""
+    room, drill = seed(owner_client)
+    tent = owner_client.post(
+        "/api/v1/items", json={"name": "Family tent", "room_id": room["id"]}
+    ).json()["item"]
+    page = [{"kind": "item", "id": drill["id"]}]
+
+    other, prompts = scripted(
+        owner_client,
+        monkeypatch,
+        "where is the tent?",
+        [call("locate_item", q="tent"), {"kind": "answer", "message": "In Tool Storage."}],
+        page_context=page,
+    )
+    assert other["state"] == "completed"
+    # The model is told which page the user is on, and that a named thing wins.
+    assert [ref["name"] for ref in prompts[0]["verified_page_references"]] == ["Validation drill"]
+    rule = " ".join(prompts[0]["system"].split())
+    assert "It is the subject only when the request names nothing else" in rule
+    assert "a request that names another thing is about that thing" in rule
+    # The lookup found the tent: the page did not filter it out or replace it.
+    found = [ref["id"] for ref in other["steps"][0]["result"]["references"]]
+    assert found == [tent["id"]]
+
+    # A request that names nothing is about the page.
+    same, _ = scripted(
+        owner_client,
+        monkeypatch,
+        "where is it?",
+        [
+            lambda prompt: call("locate_item", item_id=prompt["verified_page_references"][0]["id"]),
+            {"kind": "answer", "message": "In Tool Storage."},
+        ],
+        page_context=page,
+    )
+    assert [ref["id"] for ref in same["steps"][0]["result"]["references"]] == [drill["id"]]
+
+
+def test_a_page_that_is_gone_does_not_stop_a_request_about_something_else(
+    owner_client, configured_ai, monkeypatch
+):
+    room, drill = seed(owner_client)
+    tent = owner_client.post(
+        "/api/v1/items", json={"name": "Family tent", "room_id": room["id"]}
+    ).json()["item"]
+    archived = owner_client.patch(f"/api/v1/items/{drill['id']}", json={"is_archived": True})
+    assert archived.status_code == 200, archived.text
+
+    run, prompts = scripted(
+        owner_client,
+        monkeypatch,
+        "where is the tent?",
+        [call("locate_item", q="tent"), {"kind": "answer", "message": "In Tool Storage."}],
+        page_context=[
+            {"kind": "item", "id": drill["id"]},
+            {"kind": "item", "id": str(uuid.uuid4())},
+            {"kind": "room", "id": room["id"]},
+        ],
+    )
+    assert run["state"] == "completed" and run["answer"] == "In Tool Storage."
+    # Only the page record that still exists is passed on.
+    assert [ref["kind"] for ref in prompts[0]["verified_page_references"]] == ["room"]
+    assert [ref["id"] for ref in run["steps"][0]["result"]["references"]] == [tent["id"]]
+
+
+def test_a_general_question_is_answered_without_a_lookup(owner_client, configured_ai, monkeypatch):
+    """General guidance states no household record, so it needs no tool. An answer about
+    the household's records still does."""
+    room, _ = seed(owner_client)
+    general, prompts = scripted(
+        owner_client,
+        monkeypatch,
+        "How do I get limescale out of a kettle?",
+        [{"kind": "general", "message": "General guidance: boil water with citric acid."}],
+    )
+    assert general["state"] == "completed" and general["model_calls"] == 1
+    assert general["answer_kind"] == "general" and general["steps"] == []
+    assert general["answer"] == "General guidance: boil water with citric acid."
+    rule = " ".join(prompts[0]["system"].split())
+    assert "needs no lookup and no exact product" in rule
+    assert "need evidence from a tool: never give them from memory" in rule
+    assert "tell recorded details, facts from a source and estimates apart" in rule
+    assert "Do no other tidying that was not asked for" in rule
+
+    # The same reply as a plain answer claims evidence it does not have: it is sent back.
+    claimed, prompts = scripted(
+        owner_client,
+        monkeypatch,
+        "Where is the validation drill?",
+        [
+            {"kind": "answer", "message": "Probably in the garage."},
+            call("locate_item", q="Validation drill"),
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ],
+    )
+    assert claimed["answer"] == "It is in Tool Storage." and claimed["answer_kind"] == "answer"
+    assert "kind general" in prompts[1]["correction"]
+
+    # An item's details say where they come from.
+    drill = owner_client.post(
+        "/api/v1/items", json={"name": "Second drill", "room_id": room["id"]}
+    ).json()["item"]
+    details, _ = scripted(
+        owner_client,
+        monkeypatch,
+        "What do you know about the second drill?",
+        [call("get_item_details", item_id=drill["id"]), {"kind": "answer", "message": "Little."}],
+    )
+    provenance = details["steps"][0]["result"]["facts"]["provenance"]
+    assert provenance["fields"].startswith("entered by household members")
+
+
+def stored(client, item):
+    return client.get(f"/api/v1/items/{item['id']}").json()["item"]
+
+
+def item_name(client, item):
+    return stored(client, item)["name"]
+
+
+def edit_action(item, basis="user_stated", **changes):
+    return call(
+        "prepare_action",
+        action={"kind": "edit_item", "item_id": item["id"], "changes": changes},
+        basis=basis,
+    )
+
+
+def undo(client, proposal, request_id=None, **kwargs):
+    return client.post(
+        f"/api/v1/assistant/actions/proposals/{proposal['id']}/undo",
+        json={"request_id": request_id or str(uuid.uuid4())},
+        **kwargs,
+    )
+
+
+def test_a_stated_reversible_change_is_applied_once_and_can_be_undone(
+    owner_client, configured_ai, monkeypatch
+):
+    """A clear instruction with the new value in the user's words is applied at once.
+    The application decides that, applies it exactly once and can put it back."""
+    client = owner_client
+    _, drill = seed(client)
+    done, _ = scripted(
+        client,
+        monkeypatch,
+        "Rename the validation drill to Hammer drill",
+        [
+            call("search_items", q="Validation drill"),
+            edit_action(drill, name="Hammer drill"),
+            {"kind": "answer", "message": "Renamed it to Hammer drill."},
+        ],
+    )
+    # Nothing waits for approval: the request is complete and the record is changed.
+    assert done["state"] == "completed", done
+    step = done["steps"][1]["result"]
+    proposal = step["proposal"]
+    assert step["facts"] == {"applied": True} and step["summary"].startswith("Applied: Updated")
+    assert (proposal["state"], proposal["applied_directly"]) == ("applied", True)
+    assert proposal["undo"] == {"available": True, "undone": False}
+    assert proposal["before"]["name"] == "Validation drill"
+    assert item_name(client, drill) == "Hammer drill"
+    pending = client.get(
+        "/api/v1/assistant/actions/proposals/pending",
+        params={"household_id": done["household_id"]},
+    ).json()
+    assert pending["total"] == 0
+
+    # The same call again (a retry after a lost response) changes nothing a second time.
+    def events():
+        history = client.get(f"/api/v1/items/{drill['id']}/history").json()
+        return [event for event in history["items"] if event["action"] == "item.updated"]
+
+    assert len(events()) == 1
+    with SessionLocal() as db:
+        run = db.get(AssistantRun, uuid.UUID(done["id"]))
+        auth = assistant_tools.authorize(
+            db,
+            run.actor_user_id,
+            run.household_id,
+            run.property_id,
+            uuid.UUID(run.data["session_id"]),
+        )
+        again = assistant_tools.execute(
+            db,
+            auth,
+            run,
+            "prepare_action",
+            done["steps"][1]["call"]["arguments"],
+            uuid.UUID(proposal["id"]),
+        )
+    assert again.proposal.id == uuid.UUID(proposal["id"]) and again.proposal.applied_directly
+    assert len(events()) == 1
+
+    # Undo puts the earlier name back, once.
+    request_id = str(uuid.uuid4())
+    undone = undo(client, proposal, request_id)
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["message"] == "Undone. Validation drill is as it was before."
+    assert item_name(client, drill) == "Validation drill"
+    assert undo(client, proposal, request_id).json() == undone.json()
+    assert undo(client, proposal).json()["detail"]["code"] == "already_undone"
+    shown = read(client, done)["steps"][1]["result"]["proposal"]
+    assert shown["state"] == "undone" and shown["undo"] == {"available": False, "undone": True}
+    assert shown["message"] == "Undone. Validation drill is as it was before."
+
+    # After a newer edit by somebody else, Undo explains the conflict and changes nothing.
+    renamed, _ = scripted(
+        client,
+        monkeypatch,
+        "Call it Impact drill and say the brand is Bosch",
+        [edit_action(drill, name="Impact drill", brand="Bosch"), {"kind": "answer", "message": ""}],
+        page_context=[{"kind": "item", "id": drill["id"]}],
+    )
+    assert renamed["state"] == "completed" and renamed["message"] == "Done."
+    second = renamed["steps"][0]["result"]["proposal"]
+    assert second["applied_directly"] and item_name(client, drill) == "Impact drill"
+    newer = client.patch(f"/api/v1/items/{drill['id']}", json={"name": "Dad's drill"})
+    assert newer.status_code == 200, newer.text
+    refused = undo(client, second)
+    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "undo_not_safe"
+    assert (
+        "The name of Dad's drill changed again after this edit"
+        in refused.json()["detail"]["message"]
+    )
+    after = stored(client, drill)
+    assert (after["name"], after["brand"]) == ("Dad's drill", "Bosch")
+    assert read(client, renamed)["steps"][0]["result"]["proposal"]["state"] == "applied"
+
+
+def test_the_server_decides_what_is_applied_and_everything_else_is_one_proposal(
+    owner_client, configured_ai, monkeypatch
+):
+    """The model can claim that the user stated a change. The server checks it: anything
+    inferred, large, consequential or prepared after reading a document stays a proposal."""
+    client = owner_client
+    room, drill = seed(client)
+    saw = client.post("/api/v1/items", json={"name": "Jigsaw", "room_id": room["id"]}).json()[
+        "item"
+    ]
+    garage = client.post("/api/v1/rooms", json={"name": "Garage"}).json()
+
+    def prepared(query, *calls, **fields):
+        run, _ = scripted(
+            client,
+            monkeypatch,
+            query,
+            [*calls, {"kind": "answer", "message": "See the card."}],
+            **fields,
+        )
+        return run, run["steps"][-1]["result"]
+
+    # The value is not in the user's own words.
+    run, result = prepared(
+        "Give the validation drill a better name", edit_action(drill, name="Bosch GSB 18V")
+    )
+    assert run["state"] == "awaiting_approval" and result["proposal"]["state"] == "ready"
+    assert not result["proposal"]["applied_directly"] and result["proposal"]["undo"] is None
+    assert result["facts"]["review_reason"] == "The new name is not in the user's own words."
+    # The model says it worked the change out itself.
+    _, result = prepared(
+        "Rename the validation drill to Hammer drill",
+        edit_action(drill, basis="inferred", name="Hammer drill"),
+    )
+    assert "worked out by the assistant" in result["facts"]["review_reason"]
+    # Text of a document was read in the request: it can never authorize a change.
+    from tests.test_assistant_manuals import multimeter
+
+    meter, _ = multimeter(client, monkeypatch)
+    _, result = prepared(
+        "Rename the multimeter to Hammer drill",
+        call("search_manual", item_id=meter["id"], query="current"),
+        edit_action(meter, name="Hammer drill"),
+    )
+    assert "can never authorize a change" in result["facts"]["review_reason"]
+    assert "because: Text from a document or a web page" in result["summary"]
+    # A quantity of zero is consequential.
+    _, result = prepared("Set the validation drill to 0 pieces", edit_action(drill, quantity=0))
+    assert "zero or below what is on loan" in result["facts"]["review_reason"]
+    # Several items at once are a large change.
+    move = {"kind": "move_items", "room_id": garage["id"]}
+    _, result = prepared(
+        "Move the drill and the jigsaw to the Garage",
+        call(
+            "prepare_action",
+            action={**move, "item_ids": [drill["id"], saw["id"]]},
+            basis="user_stated",
+        ),
+    )
+    assert result["facts"]["review_reason"] == "Moving several items at once is reviewed first."
+    # Other kinds are always reviewed.
+    _, result = prepared(
+        "Lend the validation drill to Sam",
+        call(
+            "prepare_action",
+            action={
+                "kind": "lend",
+                "item_id": drill["id"],
+                "borrower_name": "Sam",
+                "quantity": 1,
+                "lent_on": "2026-01-10",
+            },
+            basis="user_stated",
+        ),
+    )
+    assert result["proposal"]["state"] == "ready"
+    assert "always reviewed" in result["facts"]["review_reason"]
+    assert item_name(client, drill) == "Validation drill"
+    assert stored(client, drill)["room"]["name"] == "Tool Storage"
+
+    # One item, with the destination in the user's words, is moved and can be moved back.
+    run, result = prepared(
+        "Put the jigsaw in the garage",
+        call("prepare_action", action={**move, "item_ids": [saw["id"]]}, basis="user_stated"),
+    )
+    assert run["state"] == "completed" and result["proposal"]["applied_directly"]
+    assert stored(client, saw)["room"]["name"] == "Garage"
+    moved_back = undo(client, result["proposal"])
+    assert moved_back.status_code == 200, moved_back.text
+    assert moved_back.json()["message"].startswith("Undone.")
+    assert stored(client, saw)["room"]["name"] == "Tool Storage"
+
+    # A viewer cannot change anything through the assistant, and cannot undo.
+    applied, result = prepared(
+        "Rename the jigsaw to Green jigsaw", edit_action(saw, name="Green jigsaw")
+    )
+    assert result["proposal"]["applied_directly"]
+    from tests.test_manuals import viewer_headers
+
+    viewer = viewer_headers(client)
+    replies = iter([edit_action(saw, name="Viewer jigsaw"), {"kind": "answer", "message": "No."}])
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: next(replies))
+    response = client.post(
+        "/api/v1/assistant/runs",
+        json={"request_id": str(uuid.uuid4()), "query": "Rename the jigsaw to Viewer jigsaw"},
+        headers=viewer,
+    )
+    assert response.status_code == 200, response.text
+    work(response.json())
+    refused = client.get(f"/api/v1/assistant/runs/{response.json()['id']}", headers=viewer).json()
+    assert refused["steps"][0]["result"]["error"] == "read_only_role"
+    assert undo(client, result["proposal"], headers=viewer).status_code == 404
+    assert item_name(client, saw) == "Green jigsaw"
+
+
+def test_the_user_can_steer_a_running_request_and_a_stop_says_what_was_done(
+    owner_client, configured_ai, monkeypatch
+):
+    """A message sent while a request runs changes the rest of the work and keeps what is
+    done. A stop ends it, and says what was finished and what had already been sent."""
+    client = owner_client
+    room, drill = seed(client)
+    tent = client.post("/api/v1/items", json={"name": "Family tent", "room_id": room["id"]}).json()[
+        "item"
+    ]
+    prompts = []
+    run = start(client, "Where is the validation drill?")
+
+    def steer(text, request_id=None):
+        return client.post(
+            f"/api/v1/assistant/runs/{run['id']}/steer",
+            json={"request_id": request_id or str(uuid.uuid4()), "message": text},
+        )
+
+    # Progress is the real state of the request: here it has not started.
+    assert read(client, run)["progress"] == "Waiting to start"
+    sent = str(uuid.uuid4())
+
+    def complete(system, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        if len(prompts) == 1:
+            return call("locate_item", q="Validation drill")
+        if len(prompts) == 2:
+            # The user writes while the model is busy. The reply below was decided
+            # without that message, so it is not used.
+            assert read(client, run)["progress"] == "Working out the answer"
+            assert steer("Actually, I mean the tent", sent).status_code == 200
+            assert steer("Actually, I mean the tent", sent).status_code == 200
+            return edit_action(drill, name="Tent")
+        if len(prompts) == 3:
+            return call("locate_item", q="tent")
+        return {"kind": "answer", "message": "The tent is in Tool Storage."}
+
+    monkeypatch.setattr(ai, "complete_json", complete)
+    work(run)
+    done = read(client, run)
+    assert done["state"] == "completed" and done["answer"] == "The tent is in Tool Storage."
+    assert done["progress"] is None
+    assert done["steers"] == [{"id": sent, "text": "Actually, I mean the tent"}]
+    # The finished lookup is kept, the step decided before the message never ran, and
+    # the model was shown the message as the user's own words.
+    assert [step["call"]["name"] for step in done["steps"]] == ["locate_item", "locate_item"]
+    assert [ref["id"] for ref in done["steps"][1]["result"]["references"]] == [tent["id"]]
+    assert "steering" not in prompts[1]
+    assert prompts[2]["steering"]["messages"] == ["Actually, I mean the tent"]
+    assert "follow them for the rest of the work" in prompts[2]["steering"]["note"]
+    assert len(prompts[2]["observations"]) == 1 and item_name(client, drill) == "Validation drill"
+    # A finished request takes no more messages: the client sends a new request.
+    late = steer("And the drill?")
+    assert late.status_code == 409 and late.json()["detail"]["code"] == "assistant_not_running"
+
+    # Stop: a search and a prepared proposal are finished and kept, and the model request
+    # that was under way is named as already sent.
+    run = start(client, "Give the tent a better name")
+
+    def stopped_while_thinking(system, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        if len(prompts) == 5:
+            return call("search_items", q="tent")
+        if len(prompts) == 6:
+            return edit_action(tent, name="Big family tent")
+        assert read(client, run)["progress"] == "Working out the answer"
+        stopped = client.post(f"/api/v1/assistant/runs/{run['id']}/cancel")
+        assert stopped.status_code == 200, stopped.text
+        return {"kind": "answer", "message": "Too late."}
+
+    monkeypatch.setattr(ai, "complete_json", stopped_while_thinking)
+    work(run)
+    stopped = read(client, run)
+    assert stopped["state"] == "cancelled" and stopped["answer"] is None
+    assert stopped["message"] == (
+        "Stopped. Nothing more will be done. Finished before the stop: 1 lookup, 1 proposal "
+        "kept for your review. Already sent, and not called back: a request to the AI model, "
+        "whose reply is ignored."
+    )
+    assert item_name(client, tent) == "Family tent"
+
+    # A stop that arrives while a change is being prepared wins: nothing is applied, and
+    # the prepared change is kept as a proposal.
+    from housetory_api.services.assistant_tools import policy
+
+    run = start(client, "Rename the tent to Camping tent")
+    allowed = policy.direct_denial
+
+    def stop_first(*args, **kwargs):
+        assert client.post(f"/api/v1/assistant/runs/{run['id']}/cancel").status_code == 200
+        return allowed(*args, **kwargs)
+
+    monkeypatch.setattr(policy, "direct_denial", stop_first)
+    monkeypatch.setattr(ai, "complete_json", lambda *a, **k: edit_action(tent, name="Camping tent"))
+    work(run)
+    stopped = read(client, run)
+    assert stopped["state"] == "cancelled" and item_name(client, tent) == "Family tent"
+    (kept,) = stopped["steps"]
+    assert kept["result"]["proposal"]["state"] == "ready"
+    assert kept["result"]["facts"]["review_reason"] == (
+        "The request was stopped before this change was applied."
+    )
+    assert "1 proposal kept for your review" in stopped["message"]

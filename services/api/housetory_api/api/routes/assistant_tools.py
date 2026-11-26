@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ...db import get_db
 from ...models import AssistantRun
-from ...schemas.assistant_tools import RunOut, RunRequest
+from ...schemas.assistant_tools import RunOut, RunRequest, SteerRequest
 from ...services import assistant_tools
 from ...services.assistant_tools.registry import catalogue
 from ..abuse import enforce_search_limit
@@ -95,6 +95,20 @@ def cancel_run(
 ):
     run = assistant_tools.owned(db, account, run_id, lock=True)
     assistant_tools.cancel(db, run)
+    return assistant_tools.snapshot(db, run)
+
+
+@router.post("/runs/{run_id}/steer", response_model=RunOut)
+def steer_run(
+    run_id: uuid.UUID,
+    payload: SteerRequest,
+    account: AccountContext = Depends(require_account),
+    db: Session = Depends(get_db),
+):
+    """Say something to a request that is still running. It changes the rest of the
+    work; what is already done is kept."""
+    run = assistant_tools.owned(db, account, run_id, lock=True)
+    assistant_tools.steer(db, run, payload)
     return assistant_tools.snapshot(db, run)
 
 

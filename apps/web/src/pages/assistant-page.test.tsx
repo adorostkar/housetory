@@ -548,6 +548,12 @@ describe("AssistantPage", () => {
     renderPage("/assistant", { id: "manual-question", text: "How do I check amperage?" });
     expect(await screen.findByText(answer)).toBeVisible();
 
+    // Everything the answer rests on is in one closed list: two manuals, one page read
+    // in an earlier turn and one record. Nothing is shown as a separate card.
+    const sources = screen.getByRole("group", { name: "Sources" });
+    expect(sources).not.toHaveAttribute("open");
+    await userEvent.click(within(sources).getByText("Sources (4)"));
+    expect(sources).toHaveAttribute("open");
     // Open is the page that shows the file. The document page is a separate link.
     const manuals = screen.getByRole("list", { name: "Manuals" });
     expect(within(manuals).getByRole("link", { name: "Open ASIM6K0R-EN-v2" }))
@@ -606,6 +612,107 @@ describe("AssistantPage", () => {
     expect(screen.getByText(/AI worker is unavailable/)).toBeVisible();
     expect(createToolRun).not.toHaveBeenCalled();
     expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("sends a typed message to the running request, and a typed stop ends it", async () => {
+    const user = userEvent.setup();
+    let run: Record<string, unknown> = {
+      id: "active-run", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Where is my camping gear?", state: "running", generation: 1, steps: [],
+      message: "Using search_items.", progress: "Searching your items",
+      model_calls: 1, max_model_calls: 8, can_retry: false, worker_available: true,
+    };
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      if (path.startsWith("/assistant/runs")) return [run];
+      if (path.startsWith("/search/scopes")) return { items: [] };
+      if (path.startsWith("/auth/session")) return sessionState;
+      return aiStatus;
+    });
+    vi.mocked(api.post).mockReset().mockImplementation(async (path, body) => {
+      run = path.endsWith("/steer")
+        ? { ...run, steers: [{ id: "steer-1", text: (body as { message: string }).message }] }
+        : {
+          ...run, state: "cancelled", generation: 2, can_retry: true, progress: null,
+          message: "Stopped. Nothing more will be done. Finished before the stop: 1 lookup.",
+        };
+      return run;
+    });
+    renderPage("/assistant");
+    // The progress line is the real state of the request, not a fixed sentence.
+    expect(await screen.findByText("Searching your items…")).toBeVisible();
+    expect(screen.queryByText("Sending your request…")).not.toBeInTheDocument();
+
+    const input = screen.getByRole("textbox", { name: "Ask the Housetory assistant" });
+    const send = screen.getByRole("button", { name: "Send question" });
+    await user.type(input, "Only the tent");
+    expect(send).toBeEnabled();
+    await user.click(send);
+    expect(api.post).toHaveBeenCalledWith(
+      "/assistant/runs/active-run/steer",
+      { request_id: expect.any(String), message: "Only the tent" },
+    );
+    // It joins the same request as the user's own words, and the draft is used up.
+    expect(await screen.findByText("Only the tent")).toBeVisible();
+    expect(input).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Stop assistant" })).toBeVisible();
+
+    await user.type(input, "Stop.");
+    await user.click(send);
+    expect(api.post).toHaveBeenLastCalledWith("/assistant/runs/active-run/cancel", {});
+    expect(await screen.findByText(/Finished before the stop: 1 lookup/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Stop assistant" })).not.toBeInTheDocument();
+    expect(createToolRun).not.toHaveBeenCalled();
+  });
+
+  it("shows a change the application applied with Undo, and says why an undo is refused", async () => {
+    const user = userEvent.setup();
+    const proposal = {
+      id: "proposal-direct", kind: "edit_item", state: "applied", scope_label: "Home",
+      targets: [{ id: "item-drill", name: "Hammer drill" }], destination: null,
+      changes: { name: "Hammer drill" }, before: { name: "Heavy drill" },
+      applied_directly: true, message: "Updated Hammer drill.",
+      undo: { available: true, undone: false },
+    };
+    vi.mocked(createToolRun).mockResolvedValue({
+      id: "run-direct", parent_id: null, household_id: "house-1", property_id: null,
+      query: "Rename the heavy drill to Hammer drill", state: "completed", generation: 1,
+      message: "Renamed it.", answer: "Renamed it.",
+      steps: [{
+        call: { name: "prepare_action", arguments: {} },
+        result: { summary: "Applied: Updated Hammer drill.", references: [], proposal },
+      }],
+      model_calls: 2, max_model_calls: 8, can_retry: false, worker_available: null,
+    });
+    vi.mocked(api.post).mockReset()
+      .mockRejectedValueOnce(new ApiError(
+        409, "undo_not_safe",
+        "The name of Dad's drill changed again after this edit, so Undo would overwrite the newer value. Nothing was changed.",
+      ))
+      .mockResolvedValueOnce({ message: "Undone. Heavy drill is as it was before." });
+    renderPage("/assistant", { id: "direct", text: "Rename the heavy drill to Hammer drill" });
+
+    const card = await screen.findByLabelText("Action review");
+    // Nothing is left to approve: the card says what was done and offers Undo.
+    expect(card).toHaveTextContent("Done. This change was applied for you.");
+    expect(within(card).getByRole("status")).toHaveTextContent("Updated Hammer drill.");
+    expect(within(card).queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+    const undo = within(card).getByRole("button", { name: "Undo this change" });
+
+    await user.click(undo);
+    expect(await within(card).findByRole("alert")).toHaveTextContent("changed again after this edit");
+    expect(within(card).getByRole("status")).toHaveTextContent("Updated Hammer drill.");
+    await user.click(within(card).getByRole("button", { name: "Undo this change" }));
+    await waitFor(() => expect(within(card).getByRole("status"))
+      .toHaveTextContent("Undone. Heavy drill is as it was before."));
+    expect(within(card).queryByRole("button", { name: "Undo this change" })).not.toBeInTheDocument();
+    expect(within(card).queryByRole("alert")).not.toBeInTheDocument();
+    const calls = vi.mocked(api.post).mock.calls;
+    expect(calls.map(([path]) => path)).toEqual([
+      "/assistant/actions/proposals/proposal-direct/undo",
+      "/assistant/actions/proposals/proposal-direct/undo",
+    ]);
+    // A repeated press is the same undo for the server.
+    expect(calls[0]?.[1]).toEqual(calls[1]?.[1]);
   });
 
   it("keeps polling a just-submitted task when initial history predates the submission", async () => {
@@ -921,6 +1028,35 @@ describe("AssistantPage", () => {
     await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/documents", expect.any(FormData)));
   });
 
+  it("saves an attached document without asking for its type, and a manual without a review", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.postForm).mockResolvedValue({ id: "doc-1", title: "notes" });
+    renderPage("/assistant");
+    await screen.findByRole("textbox", { name: "Ask the Housetory assistant" });
+    await user.upload(
+      document.querySelector('input[type="file"]')!,
+      new File(["notes"], "notes.pdf", { type: "application/pdf" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/documents", expect.any(FormData)));
+    expect((vi.mocked(api.postForm).mock.calls[0]![1] as FormData).get("document_type")).toBe("other");
+    expect(screen.queryByText(/Choose the document type/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Document saved/)).toBeVisible();
+
+    vi.mocked(api.postForm).mockClear();
+    vi.mocked(api.postForm).mockResolvedValue({ id: "doc-2", title: "drill" });
+    await user.upload(
+      document.querySelector('input[type="file"]')!,
+      new File(["manual"], "drill.pdf", { type: "application/pdf" }),
+    );
+    await user.selectOptions(screen.getByLabelText("Document type"), "manual");
+    await user.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledWith("/documents", expect.any(FormData)));
+    expect(await screen.findByText(/Manual saved to the library/)).toBeVisible();
+    // Only the first document opened its review; the manual did not.
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => String(path).startsWith("/documents/doc-2"))).toBe(false);
+  });
+
   it("explains the selection limit and allows clearing it without submitting a partial selection", async () => {
     function LargeSelection() {
       useRegisterAssistantPageContext(
@@ -1045,7 +1181,7 @@ describe("AssistantPage", () => {
     await user.type(input, "A new draft");
     await user.click(screen.getByRole("button", { name: "Toggle view" }));
     await user.click(screen.getByRole("button", { name: "Toggle view" }));
-    expect(screen.getByText(/Retrieving current records/)).toBeVisible();
+    expect(screen.getByText("Sending your request…")).toBeVisible();
     expect(screen.getByRole("button", { name: "Send question" })).toBeDisabled();
     await act(async () => resolveAnswer(firstAnswer));
     expect(await screen.findByText(/Alex has 1 of your 2 units/)).toBeVisible();
@@ -1298,6 +1434,8 @@ describe("AssistantPage", () => {
       screen.getByRole("button", { name: /Privacy & model/ }),
     ).toBeVisible();
     expect(screen.getByText("Direct lookup")).toBeVisible();
+    // The record the answer rests on is one press away, in a single closed list.
+    await userEvent.click(screen.getByText(/^Sources \(\d+\)$/));
     expect(screen.getByText("Heavy drill loan to Alex")).toBeVisible();
     expect(api.patch).not.toHaveBeenCalled();
     expect(api.delete).not.toHaveBeenCalled();

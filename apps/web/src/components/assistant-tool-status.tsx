@@ -51,6 +51,11 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
     const review = startedReview(step);
     return review ? [review] : [];
   }).map((review) => [review.id, review])).values()];
+  // One count for the whole answer: each document, online page and record once.
+  const sourceCount = new Set([
+    ...manuals.map((manual) => manual.document_id),
+    ...citations.map((citation) => citation.document_id),
+  ]).size + webSources.length + sourceReferences.length;
   const hasPreparedWork = run.steps.some((step) =>
     step.result.proposal || startedReview(step) || step.result.capture);
   const hasProposal = run.steps.some((step) => step.result.proposal);
@@ -71,7 +76,13 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
       aria-label="Assistant tool task" data-state={run.state}>
       {active ? (
         <div role="status" className="space-y-1 text-sm">
-          <p className="flex items-center gap-2"><Spinner className="shrink-0" />Working on your request…</p>
+          <p className="flex items-center gap-2">
+            <Spinner className="shrink-0" />
+            {run.progress ? `${run.progress}…` : "Working on your request…"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            You can send another message to change this request, or type stop to end it.
+          </p>
           {hasProposal && (
             <p className="text-xs text-muted-foreground">
               A proposal is prepared. It appears for your review when the assistant has finished.
@@ -83,8 +94,16 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
             </p>
           )}
         </div>
-      ) : (!hasPreparedWork || run.can_retry) &&
-          <AnswerText text={assistantAnswerText(run.message, references)} className="break-words" />}
+      ) : (!hasPreparedWork || run.can_retry) && (
+        <>
+          {run.answer_kind === "general" && (
+            <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              General guidance · not from your records
+            </p>
+          )}
+          <AnswerText text={assistantAnswerText(run.message, references)} className="break-words" />
+        </>
+      )}
       {active && run.worker_available === false && (
         <p className="text-xs text-brass">
           The AI worker is unavailable. Your request is saved; check the worker or use local/manual controls.
@@ -98,86 +117,97 @@ export function AssistantToolStatus({ run }: { run: AssistantToolRun }) {
         {run.can_retry && <Link className="inline-flex min-h-11 items-center px-3 text-xs underline"
           to={withHousehold("/items", run.household_id)}>Local inventory controls</Link>}
       </div>}
-      {manuals.length > 0 && (
-        <ul className="space-y-1" aria-label="Manuals">
-          {manuals.map((manual) => (
-            <li key={manual.document_id} className="flex flex-wrap items-center gap-x-3 text-xs">
-              <span className="min-w-0 break-words font-medium">{manual.title}</span>
-              <Link to={withHousehold(manual.url, run.household_id)}
-                className="inline-flex min-h-11 items-center underline"
-                aria-label={`Open ${manual.title}`}>Open</Link>
-              {sameHousehold && (
-                <a href={manual.download_url} className="inline-flex min-h-11 items-center underline"
-                  aria-label={`Download ${manual.title}`}>Download</a>
-              )}
-              {manual.details_url && (
-                <Link to={withHousehold(manual.details_url, run.household_id)}
-                  className="inline-flex min-h-11 items-center underline"
-                  aria-label={`Details of ${manual.title}`}>Details</Link>
-              )}
-              {MANUAL_STATES[manual.state] ? (
-                <span className="text-muted-foreground">{MANUAL_STATES[manual.state]}</span>
-              ) : manual.pages && (manual.pages_read ?? manual.pages) < manual.pages ? (
-                <span className="text-muted-foreground">
-                  {manual.pages_read} of {manual.pages} pages read
-                  {manual.pages_failed ? `, reading failed on ${manual.pages_failed}` : ""}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-      {citations.length > 0 && (
-        <ul className="space-y-2" aria-label="Manual citations">
-          {citations.map((citation, index) => {
-            const place = citation.page ? `page ${citation.page}`
-              : citation.section ?? `excerpt ${index + 1}`;
-            const label = `${citation.document_title}, ${place}`;
-            // A citation opens the file at its page, in the same viewer as Open.
-            const manual = manuals.find((entry) => entry.document_id === citation.document_id);
-            const viewer = citation.url.startsWith("/documents/") ? citation.url
-              : manual ? `${manual.url}${citation.page ? `?page=${citation.page}` : ""}` : null;
-            return (
-              <li key={index} className="rounded-md border px-3 py-2">
-                {viewer ? (
-                  <Link className="text-xs font-medium underline"
-                    to={withHousehold(viewer, run.household_id)}>{label}</Link>
-                ) : (
-                  <span className="text-xs font-medium">{label}</span>
-                )}
-                {citation.excerpt && (
-                  <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-2xs text-muted-foreground">
-                    “{citation.excerpt}”
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {webSources.length > 0 && (
-        <ul className="space-y-1" aria-label="Online sources">
-          {webSources.map((source) => (
-            <li key={source.url} className="text-xs">
-              <a href={source.url} target="_blank" rel="noreferrer"
-                className="inline-flex min-h-11 items-center break-all underline">
-                {source.title}
-              </a>
-              {source.publisher && <span className="text-muted-foreground"> · {source.publisher}</span>}
-              <span className="text-muted-foreground"> · online source</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {sourceReferences.length > 0 && (
-        <div className="flex flex-wrap gap-2" aria-label="Tool source records">
-          {sourceReferences.map((reference) => (
-            <Link key={reference.id} to={withHousehold(reference.url, run.household_id)}
-              className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs underline">
-              {reference.title}
-            </Link>
-          ))}
-        </div>
+      {sourceCount > 0 && (
+        // One closed list for everything the answer rests on, so links are not repeated
+        // as separate cards. The links work as before once it is opened.
+        <details className="rounded-md border border-border" aria-label="Sources">
+          <summary className="flex min-h-11 cursor-pointer items-center px-3 text-xs font-medium">
+            Sources ({sourceCount})
+          </summary>
+          <div className="space-y-2 border-t border-border px-3 py-2">
+          {manuals.length > 0 && (
+            <ul className="space-y-1" aria-label="Manuals">
+              {manuals.map((manual) => (
+                <li key={manual.document_id} className="flex flex-wrap items-center gap-x-3 text-xs">
+                  <span className="min-w-0 break-words font-medium">{manual.title}</span>
+                  <Link to={withHousehold(manual.url, run.household_id)}
+                    className="inline-flex min-h-11 items-center underline"
+                    aria-label={`Open ${manual.title}`}>Open</Link>
+                  {sameHousehold && (
+                    <a href={manual.download_url} className="inline-flex min-h-11 items-center underline"
+                      aria-label={`Download ${manual.title}`}>Download</a>
+                  )}
+                  {manual.details_url && (
+                    <Link to={withHousehold(manual.details_url, run.household_id)}
+                      className="inline-flex min-h-11 items-center underline"
+                      aria-label={`Details of ${manual.title}`}>Details</Link>
+                  )}
+                  {MANUAL_STATES[manual.state] ? (
+                    <span className="text-muted-foreground">{MANUAL_STATES[manual.state]}</span>
+                  ) : manual.pages && (manual.pages_read ?? manual.pages) < manual.pages ? (
+                    <span className="text-muted-foreground">
+                      {manual.pages_read} of {manual.pages} pages read
+                      {manual.pages_failed ? `, reading failed on ${manual.pages_failed}` : ""}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {citations.length > 0 && (
+            <ul className="space-y-1" aria-label="Manual citations">
+              {citations.map((citation, index) => {
+                const place = citation.page ? `page ${citation.page}`
+                  : citation.section ?? `excerpt ${index + 1}`;
+                const label = `${citation.document_title}, ${place}`;
+                // A citation opens the file at its page, in the same viewer as Open.
+                const manual = manuals.find((entry) => entry.document_id === citation.document_id);
+                const viewer = citation.url.startsWith("/documents/") ? citation.url
+                  : manual ? `${manual.url}${citation.page ? `?page=${citation.page}` : ""}` : null;
+                return (
+                  <li key={index}>
+                    {viewer ? (
+                      <Link className="inline-flex min-h-11 items-center text-xs font-medium underline"
+                        to={withHousehold(viewer, run.household_id)}>{label}</Link>
+                    ) : (
+                      <span className="text-xs font-medium">{label}</span>
+                    )}
+                    {citation.excerpt && (
+                      <p className="line-clamp-2 whitespace-pre-line break-words text-2xs text-muted-foreground">
+                        “{citation.excerpt}”
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {webSources.length > 0 && (
+            <ul className="space-y-1" aria-label="Online sources">
+              {webSources.map((source) => (
+                <li key={source.url} className="text-xs">
+                  <a href={source.url} target="_blank" rel="noreferrer"
+                    className="inline-flex min-h-11 items-center break-all underline">
+                    {source.title}
+                  </a>
+                  {source.publisher && <span className="text-muted-foreground"> · {source.publisher}</span>}
+                  <span className="text-muted-foreground"> · online source</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {sourceReferences.length > 0 && (
+            <div className="flex flex-wrap gap-2" aria-label="Tool source records">
+              {sourceReferences.map((reference) => (
+                <Link key={reference.id} to={withHousehold(reference.url, run.household_id)}
+                  className="inline-flex min-h-11 items-center rounded-md border px-3 text-xs underline">
+                  {reference.title}
+                </Link>
+              ))}
+            </div>
+          )}
+          </div>
+        </details>
       )}
       {reviews.map((review) => {
         return (

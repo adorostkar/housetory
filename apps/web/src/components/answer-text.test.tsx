@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { AnswerText } from "@/components/answer-text";
@@ -51,6 +51,45 @@ describe("AnswerText", () => {
     );
     expect(screen.getByTestId("answer-text")).toHaveAttribute("dir", "ltr");
     expect(screen.getByText(/is in the workshop/)).toBeVisible();
+  });
+
+  it("renders headings, numbered steps and a table that scrolls inside its own box", () => {
+    const { container } = render(
+      <AnswerText
+        text={[
+          "## Measuring current",
+          "1. Turn the dial to **A**.",
+          "2. Plug the red lead into the 10A socket.",
+          "",
+          "4) Read the display.",
+          "",
+          "| Range | Fuse |",
+          "|---|:---:|",
+          "| 600 mA | F600 mA |",
+          "| 10 A |",
+          "| not a table",
+        ].join("\n")}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 4, name: "Measuring current" })).toBeVisible();
+    const [steps, later] = Array.from(container.querySelectorAll("ol"));
+    expect(steps?.querySelectorAll("li")).toHaveLength(2);
+    expect(steps?.querySelector("strong")?.textContent).toBe("A");
+    // A list that goes on after a gap keeps its own number.
+    expect(later).toHaveAttribute("start", "4");
+    const region = screen.getByRole("region", { name: "Table" });
+    expect(region).toHaveClass("overflow-x-auto");
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(within(region).getAllByRole("columnheader").map((cell) => cell.textContent))
+      .toEqual(["Range", "Fuse"]);
+    // A short row is filled up, so every row has a cell under every heading.
+    expect(within(region).getAllByRole("row")).toHaveLength(3);
+    expect(within(region).getAllByRole("cell").map((cell) => cell.textContent))
+      .toEqual(["600 mA", "F600 mA", "10 A", ""]);
+    expect(container.textContent).not.toContain("##");
+    expect(container.textContent).not.toContain("---");
+    // Without its rule line a row of bars is ordinary text.
+    expect(screen.getByText("| not a table")).toBeVisible();
   });
 
   it("never interprets raw HTML or markdown links", () => {
