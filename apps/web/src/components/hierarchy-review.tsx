@@ -2,20 +2,18 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   CornerDownRight,
   FolderTree,
-  MapPin,
   Package,
   Plus,
   ShieldCheck,
-  X,
 } from "lucide-react";
 import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ReviewRow } from "@/components/review-row";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -24,7 +22,6 @@ import type {
   ImportEntry,
   ProposedItem,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 const ENTITY_LABELS: Record<ImportEntityType, string> = {
   room: "Room",
@@ -93,6 +90,12 @@ export function HierarchyReview({
   disabled,
   onEdit,
   onDecision,
+  onAdd,
+  onSkip,
+  onReject,
+  onRestore,
+  pendingIds,
+  nameErrors,
 }: {
   entries: ImportEntry[];
   edits: Record<string, ProposedItem>;
@@ -100,7 +103,15 @@ export function HierarchyReview({
   disabled: boolean;
   onEdit: (entryId: string, proposed: ProposedItem) => void;
   onDecision: (entryId: string, decision: ImportDecision) => void;
+  /** Add this one record now. Its parent must be added already, or be added first. */
+  onAdd?: (entryId: string) => void;
+  onSkip?: (entryId: string) => void;
+  onReject?: (entryId: string) => void;
+  onRestore?: (entryId: string) => void;
+  pendingIds?: ReadonlySet<string>;
+  nameErrors?: Record<string, string | undefined>;
 }) {
+  const actions: RowActions = { onAdd, onSkip, onReject, onRestore, pendingIds, nameErrors };
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const entriesById = React.useMemo(
     () => new Map(entries.map((entry) => [entry.id, entry])),
@@ -146,7 +157,7 @@ export function HierarchyReview({
     const inherited = include ? ancestorsOf(entry.id, entriesById, decisions) : [];
     for (const id of new Set([...ids, ...inherited])) {
       const target = entriesById.get(id);
-      if (!target || target.status !== "proposed") continue;
+      if (!target || !["proposed", "failed"].includes(target.status)) continue;
       const current = effectiveDecision(target, decisions);
       onDecision(id, {
         ...current,
@@ -164,11 +175,11 @@ export function HierarchyReview({
           dependency order.
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <CornerDownRight className="size-3.5 text-brass" /> Approve a branch to include its
+          <CornerDownRight className="size-3.5 text-brass" /> Selecting a branch selects its
           contents.
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <ShieldCheck className="size-3.5" /> Nothing is written until you approve.
+          <ShieldCheck className="size-3.5" /> Nothing is added until you add it.
         </span>
       </div>
       {roots.map((entry) => (
@@ -186,10 +197,20 @@ export function HierarchyReview({
           onEdit={onEdit}
           onDecision={onDecision}
           onIncludeBranch={includeBranch}
+          actions={actions}
         />
       ))}
     </div>
   );
+}
+
+interface RowActions {
+  onAdd?: (entryId: string) => void;
+  onSkip?: (entryId: string) => void;
+  onReject?: (entryId: string) => void;
+  onRestore?: (entryId: string) => void;
+  pendingIds?: ReadonlySet<string>;
+  nameErrors?: Record<string, string | undefined>;
 }
 
 function ancestorsOf(
@@ -232,6 +253,7 @@ function HierarchyRow({
   onEdit,
   onDecision,
   onIncludeBranch,
+  actions,
 }: {
   entry: ImportEntry;
   depth: number;
@@ -245,6 +267,7 @@ function HierarchyRow({
   onEdit: (entryId: string, proposed: ProposedItem) => void;
   onDecision: (entryId: string, decision: ImportDecision) => void;
   onIncludeBranch: (entry: ImportEntry, include: boolean) => void;
+  actions: RowActions;
 }) {
   const [editing, setEditing] = React.useState(false);
   const proposed = edits[entry.id] ?? entry.proposed;
@@ -253,9 +276,9 @@ function HierarchyRow({
   const parentId = effectiveParent(entry, decisions);
   const parent = parentId ? entriesById.get(parentId) : null;
   const nodeChildren = children.get(entry.id) ?? [];
-  const final = ["imported", "merged", "skipped", "rejected", "failed"].includes(
-    entry.status,
-  );
+  // A failed record stays open: it can be corrected and added again.
+  const final = ["imported", "merged", "skipped", "rejected"].includes(entry.status);
+  const skipped = entry.status === "skipped" || entry.status === "rejected";
   const highDuplicate = entry.duplicate_candidates.some(
     (candidate) => candidate.score >= 55,
   );
@@ -279,86 +302,68 @@ function HierarchyRow({
 
   return (
     <div>
-      <article
-        className={cn(
-          "surface overflow-hidden transition-colors",
-          decision.include && !final && "border-sage/40",
-          final && entry.status === "failed" && "border-destructive/30",
-          final && "opacity-80",
+      <ReviewRow
+        style={{ marginLeft: `${depth * 14}px` }}
+        className={final ? "opacity-80" : undefined}
+        title={proposed.name}
+        titleLabel={`Name of ${entry.proposed.name || "this record"}`}
+        onTitleChange={final ? undefined : (name) => update({ name })}
+        titleError={actions.nameErrors?.[entry.id]}
+        quantity={type === "item" || type === "container" ? proposed.quantity : null}
+        onQuantityChange={!final && type === "item"
+          ? (value) => update({ quantity: value === "" ? 0 : Number(value) })
+          : undefined}
+        disabled={disabled || final}
+        thumbnail={nodeChildren.length > 0 ? (
+          <button
+            type="button"
+            className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground lg:size-8"
+            onClick={() => onToggleCollapse(entry.id)}
+            aria-label={collapsedNow ? "Expand branch" : "Collapse branch"}
+            aria-expanded={!collapsedNow}
+          >
+            {collapsedNow ? (
+              <ChevronRight className="size-4" />
+            ) : (
+              <ChevronDown className="size-4" />
+            )}
+          </button>
+        ) : (
+          <span className="flex size-8 items-center justify-center text-muted-foreground">
+            {type === "item" ? <Package className="size-3.5" /> : <CornerDownRight className="size-3.5" />}
+          </span>
         )}
-      >
-        <div
-          className="flex items-start gap-2 p-3 sm:gap-3 sm:p-4"
-          style={{ paddingLeft: `${12 + depth * 18}px` }}
-        >
-          {nodeChildren.length > 0 ? (
-            <button
-              type="button"
-              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-              onClick={() => onToggleCollapse(entry.id)}
-              aria-label={collapsedNow ? "Expand branch" : "Collapse branch"}
-              aria-expanded={!collapsedNow}
-            >
-              {collapsedNow ? (
-                <ChevronRight className="size-4" />
-              ) : (
-                <ChevronDown className="size-4" />
-              )}
-            </button>
-          ) : (
-            <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-              {type === "item" ? <Package className="size-3.5" /> : <CornerDownRight className="size-3.5" />}
-            </span>
-          )}
-          {!final && (
-            <input
-              type="checkbox"
-              checked={decision.include}
-              disabled={disabled}
-              onChange={(event) => onIncludeBranch(entry, event.target.checked)}
-              aria-label={`Include ${proposed.name}${nodeChildren.length ? " and its contents" : ""}`}
-              className="mt-1 size-4 accent-primary"
-            />
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <h3 className="text-sm font-medium">{proposed.name}</h3>
-              <Badge variant={ENTITY_TONE[type]}>{ENTITY_LABELS[type]}</Badge>
-              {(type === "item" || type === "container") && proposed.quantity !== 1 && (
-                <Badge variant="secondary">×{proposed.quantity}</Badge>
-              )}
-              {entry.legacy_identifier && (
-                <Badge variant="outline">{entry.legacy_identifier}</Badge>
-              )}
-              {ambiguous && (
-                <Badge variant="brass">
-                  <AlertTriangle className="size-3" /> Needs review
-                </Badge>
-              )}
-              {highDuplicate && !final && (
-                <Badge variant="brass">
-                  <AlertTriangle className="size-3" /> Possible duplicate
-                </Badge>
-              )}
-              {entry.status !== "proposed" && (
-                <Badge variant="outline">
-                  {entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
-                </Badge>
-              )}
-            </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="size-3" />
-                {parent ? parent.proposed.name : "Top level"}
-              </span>
-              {entry.confidence != null && <span>{entry.confidence}% confidence</span>}
-              {entry.source_path && <span className="truncate">{entry.source_path}</span>}
-            </p>
-            {entry.error && (
-              <p className="mt-1.5 text-2xs text-destructive">{entry.error}</p>
+        selection={final || !actions.onAdd
+          ? undefined
+          : {
+              checked: decision.include,
+              onChange: (include) => onIncludeBranch(entry, include),
+              label: `Select ${proposed.name}${nodeChildren.length ? " and its contents" : ""}`,
+            }}
+        badges={
+          <>
+            <Badge variant={ENTITY_TONE[type]}>{ENTITY_LABELS[type]}</Badge>
+            {entry.legacy_identifier && (
+              <Badge variant="outline">{entry.legacy_identifier}</Badge>
             )}
             {highDuplicate && !final && (
-              <div className="mt-2 rounded-lg border border-brass/25 bg-brass-soft/40 px-2.5 py-2 text-2xs text-muted-foreground">
+              <Badge variant="brass">
+                <AlertTriangle className="size-3" /> Possible duplicate
+              </Badge>
+            )}
+          </>
+        }
+        values={[
+          { label: "In", value: parent ? parent.proposed.name : "Top level" },
+          ...(entry.confidence != null
+            ? [{ label: "Confidence", value: `${entry.confidence}%`, uncertain: ambiguous }]
+            : []),
+        ]}
+        error={entry.error}
+        extra={
+          <>
+            {highDuplicate && !final && (
+              <div className="rounded-lg border border-brass/25 bg-brass-soft/40 px-2.5 py-2 text-2xs text-muted-foreground">
                 <p className="font-medium text-foreground/80">Existing item may match</p>
                 {entry.duplicate_candidates
                   .filter((candidate) => candidate.score >= 55)
@@ -368,10 +373,10 @@ function HierarchyRow({
                       {candidate.score}%
                     </p>
                   ))}
-                <label className="mt-2 flex items-center gap-1.5">
+                <label className="mt-1 flex min-h-11 items-center gap-2 lg:min-h-8">
                   <input
                     type="checkbox"
-                    className="size-3.5 accent-primary"
+                    className="size-4 rounded-none accent-primary"
                     checked={Boolean(decision.allowDuplicate)}
                     disabled={disabled}
                     onChange={(event) => setDecision({ allowDuplicate: event.target.checked })}
@@ -380,7 +385,7 @@ function HierarchyRow({
                 </label>
               </div>
             )}
-            <details className="mt-1.5">
+            <details>
               <summary className="cursor-pointer text-2xs text-muted-foreground">
                 Source reference
               </summary>
@@ -388,62 +393,56 @@ function HierarchyRow({
                 {entry.source_excerpt || "No source excerpt available."}
               </p>
             </details>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            <div className="flex items-center gap-1">
-              {!final && (
-                <Select
-                  aria-label={`Action for ${proposed.name}`}
-                  value={decision.action}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    setDecision({ action: event.target.value as ImportDecision["action"] })
-                  }
-                  className="h-8 w-[108px] text-2xs"
-                >
-                  <option value="import">Import</option>
-                  <option value="skip">Skip</option>
-                  <option value="reject">Reject</option>
-                </Select>
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setEditing((current) => !current)}
-                aria-expanded={editing}
-              >
-                {editing ? <X /> : <CircleHelp />}
-                {editing ? "Close" : "Edit"}
+          </>
+        }
+        status={final ? (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {entry.status === "imported" ? "Added" : entry.status === "merged" ? "Updated"
+                : entry.status === "rejected" ? "Rejected" : "Skipped"}
+            </span>
+            {skipped && actions.onRestore && (
+              <Button type="button" size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                aria-label={`Restore ${proposed.name}`}
+                onClick={() => actions.onRestore?.(entry.id)}>
+                Restore
               </Button>
-            </div>
-            {nodeChildren.length > 0 && !final && (
-              <div className="flex gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => onIncludeBranch(entry, true)}
-                >
-                  <Plus /> Branch
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => onIncludeBranch(entry, false)}
-                >
-                  Clear
-                </Button>
-              </div>
             )}
-          </div>
-        </div>
+          </p>
+        ) : undefined}
+        primary={actions.onAdd ? {
+          label: `Add ${ENTITY_LABELS[type].toLowerCase()}`,
+          onClick: () => actions.onAdd?.(entry.id),
+          pending: actions.pendingIds?.has(entry.id),
+        } : undefined}
+        onSkip={actions.onSkip ? () => actions.onSkip?.(entry.id) : undefined}
+        actions={nodeChildren.length > 0 && !final && actions.onAdd ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 lg:min-h-9"
+              disabled={disabled}
+              onClick={() => onIncludeBranch(entry, true)}
+            >
+              <Plus /> Select branch
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-11 lg:min-h-9"
+              disabled={disabled}
+              onClick={() => onIncludeBranch(entry, false)}
+            >
+              Clear branch
+            </Button>
+          </>
+        ) : undefined}
+        expand={final ? undefined : { open: editing, onOpenChange: setEditing, label: "Edit" }}
+      >
 
-        {editing && (
-          <div className="space-y-3 border-t border-border/60 p-3 sm:p-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="text-2xs font-medium">
                 Name
@@ -563,9 +562,18 @@ function HierarchyRow({
               container reuses an existing record when its name, room, parent and legacy
               identifier already match.
             </p>
+        {actions.onReject && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
+            <p className="text-2xs text-muted-foreground">
+              Reject marks this record as wrong. It can be restored.
+            </p>
+            <Button type="button" size="sm" variant="ghost" className="min-h-11 lg:min-h-9"
+              disabled={disabled} onClick={() => actions.onReject?.(entry.id)}>
+              Reject entry
+            </Button>
           </div>
         )}
-      </article>
+      </ReviewRow>
       {!collapsedNow &&
         nodeChildren.map((child) => (
           <HierarchyRow
@@ -582,6 +590,7 @@ function HierarchyRow({
             onEdit={onEdit}
             onDecision={onDecision}
             onIncludeBranch={onIncludeBranch}
+            actions={actions}
           />
         ))}
     </div>

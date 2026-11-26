@@ -89,7 +89,11 @@ const entries = [
   }),
 ];
 
-function Harness({ onDecisionSpy }: { onDecisionSpy?: (id: string, decision: ImportDecision) => void }) {
+function Harness({ onDecisionSpy, onAddSpy = () => undefined, onSkipSpy = () => undefined }: {
+  onDecisionSpy?: (id: string, decision: ImportDecision) => void;
+  onAddSpy?: (id: string) => void;
+  onSkipSpy?: (id: string) => void;
+}) {
   const [edits, setEdits] = React.useState<Record<string, ProposedItem>>({});
   const [decisions, setDecisions] = React.useState<Record<string, ImportDecision>>(
     Object.fromEntries(
@@ -110,6 +114,8 @@ function Harness({ onDecisionSpy }: { onDecisionSpy?: (id: string, decision: Imp
         onDecisionSpy?.(id, value);
         setDecisions((current) => ({ ...current, [id]: value }));
       }}
+      onAdd={onAddSpy}
+      onSkip={onSkipSpy}
     />
   );
 }
@@ -118,23 +124,23 @@ describe("HierarchyReview", () => {
   it("renders a tree, collapses branches and approves a whole branch", async () => {
     const onDecision = vi.fn();
     render(<Harness onDecisionSpy={onDecision} />);
-    expect(screen.getByRole("heading", { name: "Storage" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "STO-03" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Keyboards" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "Storage" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "STO-03" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "Keyboards" })).toBeVisible();
 
-    const storage = screen.getByRole("heading", { name: "Storage" }).closest("article");
+    const storage = screen.getByRole("article", { name: "Storage" });
     expect(storage).not.toBeNull();
     await userEvent.click(
       within(storage as HTMLElement).getByRole("button", { name: "Collapse branch" }),
     );
-    expect(screen.queryByRole("heading", { name: "STO-03" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "STO-03" })).not.toBeInTheDocument();
 
     await userEvent.click(
       within(storage as HTMLElement).getByRole("button", { name: "Expand branch" }),
     );
-    const sto03 = screen.getByRole("heading", { name: "STO-03" }).closest("article");
+    const sto03 = screen.getByRole("article", { name: "STO-03" });
     expect(sto03).not.toBeNull();
-    await userEvent.click(within(sto03 as HTMLElement).getByRole("button", { name: /Branch/ }));
+    await userEvent.click(within(sto03 as HTMLElement).getByRole("button", { name: "Select branch" }));
     const changed = new Set(onDecision.mock.calls.map(([id]) => id));
     expect(changed).toEqual(
       new Set(["storage", "room", "sto03", "keyboards", "cables"]),
@@ -147,7 +153,7 @@ describe("HierarchyReview", () => {
     expect(screen.getByText("Possible duplicate")).toBeVisible();
     expect(screen.getByText("Existing item may match")).toBeVisible();
 
-    const sto03 = screen.getByRole("heading", { name: "STO-03" }).closest("article");
+    const sto03 = screen.getByRole("article", { name: "STO-03" });
     await userEvent.click(within(sto03 as HTMLElement).getByRole("button", { name: "Edit" }));
     await userEvent.selectOptions(
       within(sto03 as HTMLElement).getByLabelText("Entity type"),
@@ -164,5 +170,18 @@ describe("HierarchyReview", () => {
     });
     const reference = within(sto03 as HTMLElement).getByText("Source reference");
     expect(reference.closest("details")?.textContent).toContain("#### STO-03");
+  });
+
+  it("has no action dropdown: a record is added or skipped with its own buttons", async () => {
+    const onAdd = vi.fn();
+    const onSkip = vi.fn();
+    render(<Harness onAddSpy={onAdd} onSkipSpy={onSkip} />);
+    expect(screen.queryByRole("combobox", { name: /Action for/ })).not.toBeInTheDocument();
+    for (const box of screen.getAllByRole("checkbox", { name: /^Select / })) expect(box).not.toBeChecked();
+    const sto03 = screen.getByRole("article", { name: "STO-03" });
+    await userEvent.click(within(sto03).getByRole("button", { name: "Add container" }));
+    expect(onAdd).toHaveBeenCalledWith("sto03");
+    await userEvent.click(within(sto03).getByRole("button", { name: "Skip" }));
+    expect(onSkip).toHaveBeenCalledWith("sto03");
   });
 });

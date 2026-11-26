@@ -148,7 +148,17 @@ describe("DocumentDetailPage extraction review", () => {
     expect(screen.queryByRole("button", { name: "Clean up scan" })).not.toBeInTheDocument();
   });
 
-  it.each(["manual", "receipt", "invoice", "warranty_certificate", "specification", "other"] as const)(
+  it("keeps a manual out of the purchase-style review until someone asks for what was read", async () => {
+    renderPage("manual");
+    expect(screen.queryByRole("region", { name: "Extraction review" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Extraction review loaded for/)).not.toBeInTheDocument();
+    const summary = screen.getByText("Details read from this manual");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    await userEvent.click(summary);
+    expect(await screen.findByText(/^Extraction review loaded for/)).toBeVisible();
+  });
+
+  it.each(["receipt", "invoice", "warranty_certificate", "specification", "other"] as const)(
     "shares compact extraction review and defers related-item lookup for %s", async (kind) => {
     renderPage(kind);
     expect(screen.getByText(/^Extraction review loaded for/)).toBeVisible();

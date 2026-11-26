@@ -329,6 +329,7 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
         onOpenChange={setUploadOpen}
         defaultItemIds={[item.id]}
         defaultType="other"
+        itemName={item.name}
       />
       <DocumentUploadDialog
         open={manualUploadOpen}
@@ -336,12 +337,14 @@ export function ItemDocumentsAndManuals({ item }: { item: ItemDetail }) {
         defaultItemIds={[item.id]}
         defaultType="manual"
         manualMode
+        itemName={item.name}
       />
       <DocumentScanDialog
         open={scanOpen}
         onOpenChange={setScanOpen}
         defaultItemIds={[item.id]}
         defaultType="other"
+        itemName={item.name}
       />
       <DocumentLinkDialog
         item={item}

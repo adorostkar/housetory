@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
 
 from ..api.errors import ApiError
+from ..domain import DocumentType
 from ..models import AiRecognition, Document, ImportBatch
 from ..schemas.inventory_review import CaptureReviewOut
 
@@ -26,6 +27,17 @@ def store_capture_metadata(source: ImportBatch | Document | AiRecognition, metad
         source.extracted_metadata = metadata
     else:
         source.result = {**(source.result or {}), "_add_items": metadata}
+
+
+def _document_resolved(metadata: dict) -> bool:
+    """A document capture is finished when it was applied and no line is still waiting.
+
+    Lines can be applied in parts. While a line is neither applied nor skipped, the
+    review is not finished and stays with the pending captures.
+    """
+    from .document_extraction_apply import has_pending_lines
+
+    return bool(metadata.get("applied_at")) and not has_pending_lines(metadata)
 
 
 def reset_review_dismissal(source: ImportBatch | Document | AiRecognition) -> None:
@@ -98,12 +110,14 @@ def pending_captures(
         .where(
             Document.household_id == household_id,
             Document.extracted_metadata["assistant_capture"].as_boolean() == True,  # noqa: E712
+            # A manual is saved and read; it has no purchase-style review to finish.
+            Document.document_type != DocumentType.MANUAL.value,
         )
         .order_by(Document.created_at)
     )
     for document in documents:
         metadata = document.extracted_metadata or {}
-        if metadata.get("applied_at") or bool(metadata.get("review_dismissed")) != dismissed:
+        if _document_resolved(metadata) or bool(metadata.get("review_dismissed")) != dismissed:
             continue
         captures.append(_review(document))
     photos = db.scalars(
@@ -149,7 +163,7 @@ def change_capture_review(
     metadata = capture_metadata(source)
     if (
         (isinstance(source, ImportBatch) and source.status == "completed")
-        or (isinstance(source, Document) and metadata.get("applied_at"))
+        or (isinstance(source, Document) and _document_resolved(metadata))
         or (
             isinstance(source, AiRecognition)
             and (source.applied_at or metadata.get("import_batch_id"))

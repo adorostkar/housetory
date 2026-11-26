@@ -408,6 +408,52 @@ def dismiss_suggestion(
     return _decision(db, suggestion, "skipped", "Suggestion dismissed.")
 
 
+def _restore_dismissed(
+    db: Session,
+    household_id: uuid.UUID,
+    suggestion: InventoryReviewSuggestion,
+    *,
+    actor_user_id: uuid.UUID | None,
+    actor_name: str | None,
+) -> ReviewDecisionOut:
+    """Undo a dismissal: the suggestion is pending again and nothing else changes.
+
+    A dismissed finding does not come back by itself. This is the explicit way back.
+    Accepting it later still checks that the item did not change in the meantime.
+    """
+    twin = db.scalar(
+        select(InventoryReviewSuggestion.id).where(
+            InventoryReviewSuggestion.household_id == household_id,
+            InventoryReviewSuggestion.fingerprint == suggestion.fingerprint,
+            InventoryReviewSuggestion.status == "pending",
+            InventoryReviewSuggestion.id != suggestion.id,
+        )
+    )
+    if twin is not None:
+        return _decision(db, suggestion, "skipped", "The same suggestion is already pending again.")
+    suggestion.status = "pending"
+    suggestion.status_changed_at = datetime.now(UTC)
+    suggestion.dismissed_at = None
+    suggestion.dismissed_by_user_id = None
+    history.record_event(
+        db,
+        household_id,
+        actor_user_id=actor_user_id,
+        actor_name=actor_name,
+        action=ActivityAction.INVENTORY_REVIEW_DISMISSED.value,
+        entity_type="item" if suggestion.item_id else "batch",
+        entity_id=suggestion.item_id or suggestion.id,
+        item_id=suggestion.item_id,
+        summary=f"Restored dismissed review suggestion: {suggestion.title}",
+        details={
+            "suggestion_id": str(suggestion.id),
+            "suggestion_type": suggestion.type,
+            "restored": True,
+        },
+    )
+    return _decision(db, suggestion, "applied", "Suggestion restored. Nothing was changed.")
+
+
 def undo_suggestion(
     db: Session,
     household_id: uuid.UUID,
@@ -417,6 +463,10 @@ def undo_suggestion(
     actor_name: str | None,
 ) -> ReviewDecisionOut:
     suggestion = _load_suggestion(db, household_id, suggestion_id)
+    if suggestion.status == "dismissed":
+        return _restore_dismissed(
+            db, household_id, suggestion, actor_user_id=actor_user_id, actor_name=actor_name
+        )
     if suggestion.status != "accepted":
         return _decision(
             db,

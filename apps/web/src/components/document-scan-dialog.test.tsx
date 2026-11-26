@@ -175,7 +175,7 @@ describe("DocumentScanDialog", () => {
     expect(screen.queryByRole("button", { name: "Take photo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Remove page/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Title/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Attach to items")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Attach to an item/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cancel cleanup" }));
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith("/documents/scans/scan-1"));
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -290,8 +290,11 @@ describe("DocumentScanDialog", () => {
     );
     expect(await screen.findByAltText("Original page 1")).toBeVisible();
     expect(screen.getByAltText("Cleaned page 1")).toBeVisible();
-    expect(screen.getByText("Attach to items")).toBeVisible();
-    expect(screen.getByText("1 selected")).toBeVisible();
+    // The optional steps start closed. The item the scan started from is named.
+    expect(screen.getByText(/Attached to:/)).toBeVisible();
+    expect(screen.getByText("1 item attached")).toBeVisible();
+    expect(screen.queryByLabelText(/^Title/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Add details/ }));
 
     await userEvent.click(screen.getByRole("button", { name: "Rotate page right" }));
     await waitFor(() =>

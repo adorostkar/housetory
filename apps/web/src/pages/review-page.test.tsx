@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import type {
   ReviewSuggestion,
   ReviewSummary,
 } from "@/lib/types";
+import { InventoryReview } from "@/components/inventory-review";
 import { ReviewPage } from "@/pages/review-page";
 
 vi.mock("@/components/capture-review-queue", () => ({
@@ -502,7 +503,7 @@ describe("ReviewPage", () => {
     renderPage();
     const card = screen.getByText("Assign category “Tools”").closest("li");
     expect(card).not.toBeNull();
-    await userEvent.click(within(card!).getByRole("button", { name: "Accept" }));
+    await userEvent.click(within(card!).getByRole("button", { name: "Apply change" }));
     await waitFor(() =>
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/inventory-review/suggestions/suggestion-category/accept",
@@ -511,11 +512,82 @@ describe("ReviewPage", () => {
     );
   });
 
+  it("starts with nothing selected and names the bulk action exactly", async () => {
+    renderPage();
+    const bulk = screen.getByRole("button", { name: "Apply selected changes" });
+    expect(bulk).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Select Assign category “Tools”" })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Assign category “Tools”" }));
+    expect(screen.getByRole("button", { name: "Apply 1 selected change" })).toBeEnabled();
+  });
+
+  it("Skip offers Undo, and a skipped suggestion can be restored later", async () => {
+    renderPage();
+    const card = screen.getByText("Possible duplicate: Cordless drill").closest("li");
+    await userEvent.click(within(card!).getByRole("button", { name: "Skip" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-duplicate/dismiss",
+        {},
+      ),
+    );
+    const { toast } = await import("sonner");
+    const options = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as {
+      action: { label: string; onClick: () => void };
+    };
+    expect(options.action.label).toBe("Undo");
+    options.action.onClick();
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-duplicate/undo",
+        {},
+      ),
+    );
+
+    // After the message is gone, the dismissed row itself can be restored.
+    cleanup();
+    vi.mocked(api.post).mockClear();
+    suggestions = [{ ...duplicateSuggestion, status: "dismissed" }];
+    renderPage("/review?status=dismissed");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Restore Possible duplicate: Cordless drill" }),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-duplicate/undo",
+        {},
+      ),
+    );
+  });
+
+  it("shows one quiet line in a conversation and opens the suggestions on request", async () => {
+    const run = reviewRun();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    client.setQueryData(["inventory-review", "run", run.id], run);
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <InventoryReview initialRun={run} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const toggle = await screen.findByRole("button", { name: /2 possible corrections.*View suggestions/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // No row and no form is put into the conversation until it is asked for.
+    expect(screen.queryByText("Assign category “Tools”")).not.toBeVisible();
+    expect(screen.queryByRole("button", { name: "Apply change" })).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    expect(screen.getByText("Assign category “Tools”")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Apply change" })).toBeVisible();
+  });
+
   it("keeps duplicate findings advisory and opens a comparison", async () => {
     renderPage();
     const card = screen.getByText("Possible duplicate: Cordless drill").closest("li");
     expect(card).not.toBeNull();
-    expect(within(card!).queryByRole("button", { name: "Accept" })).toBeNull();
+    expect(within(card!).queryByRole("button", { name: "Apply change" })).toBeNull();
     await userEvent.click(within(card!).getByRole("button", { name: "Compare" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(/does not merge inventory/i)).toBeVisible();
@@ -717,7 +789,7 @@ describe("ReviewPage", () => {
     owner = false;
     renderPage();
     expect(screen.getByText("Assign category “Tools”")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply change" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Find suggestions" })).toBeDisabled();
     expect(
       screen.getByRole("checkbox", {
@@ -737,10 +809,15 @@ describe("ReviewPage", () => {
       .closest("li");
     expect(card).not.toBeNull();
     expect(within(card!).getByText("Organisation")).toBeVisible();
-    expect(within(card!).getByText("Category: Camping equipment (new)")).toBeVisible();
-    expect(within(card!).getByText("Tags: outdoors, camping, cooking")).toBeVisible();
+    // The row shows what the item has now and what it would get.
+    expect(within(card!).getByText("Camping equipment (new)").closest("li")).toHaveTextContent(
+      /^Category: .* changes to Camping equipment \(new\)$/,
+    );
+    expect(within(card!).getByText("outdoors, camping, cooking").closest("li")).toHaveTextContent(
+      "Tags: outdoors, camping, cooking",
+    );
     await userEvent.click(
-      within(card!).getByRole("button", { name: "Accept organisation" }),
+      within(card!).getByRole("button", { name: "Apply changes" }),
     );
     await waitFor(() =>
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(

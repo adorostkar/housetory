@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,7 +41,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    api: { ...actual.api, postForm: vi.fn() },
+    api: { ...actual.api, postForm: vi.fn(), get: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   };
 });
 
@@ -74,12 +75,14 @@ const uploadedDocument: DocumentRecord = {
 
 function renderDialog({
   defaultItemIds,
-  defaultType = "receipt",
+  defaultType,
   manualMode = false,
+  itemName,
 }: {
   defaultItemIds?: string[];
   defaultType?: DocumentType;
   manualMode?: boolean;
+  itemName?: string;
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -87,16 +90,19 @@ function renderDialog({
   const onOpenChange = vi.fn();
   const onUploaded = vi.fn();
   render(
-    <QueryClientProvider client={client}>
-      <DocumentUploadDialog
-        open
-        onOpenChange={onOpenChange}
-        defaultItemIds={defaultItemIds}
-        defaultType={defaultType}
-        manualMode={manualMode}
-        onUploaded={onUploaded}
-      />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <DocumentUploadDialog
+          open
+          onOpenChange={onOpenChange}
+          defaultItemIds={defaultItemIds}
+          defaultType={defaultType}
+          manualMode={manualMode}
+          itemName={itemName}
+          onUploaded={onUploaded}
+        />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
   return { onOpenChange, onUploaded };
 }
@@ -107,83 +113,148 @@ function uploadedFormData(): FormData {
   return call?.[1] as FormData;
 }
 
+const processing = {
+  correlation_id: "attempt-1", stage: "reading", started_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z", elapsed_ms: 1000, local_available: false,
+  can_cancel: true, can_retry: false, worker_available: true, reason: null,
+  timings: { local_queue_ms: null, local_processing_ms: null, ai_queue_ms: null, provider_ms: null, validation_ms: null },
+};
+
 beforeEach(() => {
   vi.mocked(api.postForm).mockReset();
   vi.mocked(api.postForm).mockResolvedValue(uploadedDocument);
+  vi.mocked(api.get).mockReset();
+  vi.mocked(api.get).mockImplementation(async (path: string) =>
+    (path.endsWith("/processing") ? processing : uploadedDocument) as never);
+  vi.mocked(api.patch).mockReset();
+  vi.mocked(api.patch).mockImplementation(async (_path, body) =>
+    ({ ...uploadedDocument, ...(body as object) }) as never);
+  vi.mocked(api.delete).mockReset();
+  vi.mocked(api.delete).mockResolvedValue(undefined as never);
 });
 
 describe("DocumentUploadDialog", () => {
-  it("rejects an unsupported replacement without discarding the selected document or title", async () => {
+  it("rejects an unsupported file without uploading it", async () => {
     renderDialog();
-    const file = new File(["%PDF"], "invoice.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/^File/), { target: { files: [file] } });
-    fireEvent.change(screen.getByLabelText(/^File/), {
+    fireEvent.change(screen.getByLabelText("File"), {
       target: { files: [new File(["zip"], "archive.zip", { type: "application/zip" })] },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Choose a PDF");
-    expect(screen.getByDisplayValue("invoice")).toBeVisible();
-    expect(screen.getByText("invoice.pdf")).toBeVisible();
     expect(api.postForm).not.toHaveBeenCalled();
   });
 
-  it("attaches an item-context manual automatically without asking for compatible items", async () => {
-    const { onOpenChange, onUploaded } = renderDialog({
-      defaultItemIds: ["item-1"],
-      defaultType: "manual",
-      manualMode: true,
-    });
+  it("saves the file as soon as it is chosen, with no metadata and no item", async () => {
+    const { onOpenChange, onUploaded } = renderDialog();
+    // No field has to be filled in before the file is saved.
+    expect(screen.queryByLabelText(/^Title/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Merchant/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add test item" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Take a photo")).toHaveAttribute("capture", "environment");
 
-    expect(screen.queryByText("Compatible items")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Find items")).not.toBeInTheDocument();
-    expect(screen.getByText(/attached to this item automatically/)).toBeVisible();
-    expect(screen.queryByLabelText(/Manufacturer/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/Model/i)).not.toBeInTheDocument();
-
-    const file = new File(["%PDF-1.4"], "drill.pdf", { type: "application/pdf" });
-    await userEvent.upload(screen.getByLabelText("Manual file"), file);
-    expect(screen.getByLabelText(/^Title/)).toHaveValue("drill");
-    await userEvent.clear(screen.getByLabelText(/^Title/));
-    await userEvent.type(screen.getByLabelText(/^Title/), "Drill manual");
-    await userEvent.type(screen.getByLabelText(/^Notes/), "Keep for torque settings.");
-    expect((screen.getByLabelText("Manual file") as HTMLInputElement).files).toHaveLength(1);
-    fireEvent.submit(screen.getByRole("button", { name: "Add manual" }).closest("form")!);
+    const file = new File(["receipt"], "receipt.txt", { type: "text/plain" });
+    await userEvent.upload(screen.getByLabelText("File"), file);
 
     await waitFor(() => expect(api.postForm).toHaveBeenCalledTimes(1));
     const payload = uploadedFormData();
     expect(payload.get("file")).toBe(file);
-    expect(payload.get("title")).toBe("Drill manual");
-    expect(payload.get("notes")).toBe("Keep for torque settings.");
-    expect(payload.get("document_type")).toBe("manual");
-    expect(payload.getAll("item_ids")).toEqual(["item-1"]);
+    expect(payload.get("document_type")).toBe("other");
+    expect(payload.get("title")).toBeNull();
+    expect(payload.get("merchant")).toBeNull();
+    expect(payload.getAll("item_ids")).toEqual([]);
+
+    // The truthful reading state is shown, and the optional steps start closed.
+    expect(await screen.findByText("Reading document")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Attach to an item/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Add details/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/details? found/)).not.toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onUploaded).toHaveBeenCalledWith(uploadedDocument);
   });
 
-  it("keeps item selection and purchase fields in the global document upload", async () => {
+  it("saves a dropped file", async () => {
     renderDialog();
+    const file = new File(["%PDF"], "invoice.pdf", { type: "application/pdf" });
+    fireEvent.drop(screen.getByText(/Drop a file here/).closest("div")!.parentElement!, {
+      dataTransfer: { files: [file], types: ["Files"] },
+    });
+    await waitFor(() => expect(api.postForm).toHaveBeenCalledTimes(1));
+    expect(uploadedFormData().get("file")).toBe(file);
+  });
 
-    expect(screen.getByText("Linked items")).toBeVisible();
-    expect(screen.getByLabelText("Type")).toBeVisible();
-    expect(screen.getByLabelText(/^Merchant/)).toBeVisible();
-    expect(screen.getByLabelText(/^Document date/)).toBeVisible();
+  it("Undo deletes the document that was just saved and closing then reports nothing", async () => {
+    const { onUploaded } = renderDialog();
+    await userEvent.upload(screen.getByLabelText("File"),
+      new File(["receipt"], "receipt.txt", { type: "text/plain" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith("/documents/document-1"));
+    expect(await screen.findByLabelText("File")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onUploaded).not.toHaveBeenCalled();
+  });
+
+  it("saves details and attached items after the file, on request", async () => {
+    renderDialog();
+    await userEvent.upload(screen.getByLabelText("File"),
+      new File(["receipt"], "receipt.txt", { type: "text/plain" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Add details/ }));
+    await userEvent.type(screen.getByLabelText(/^Merchant/), "Clas Ohlson");
+    await userEvent.selectOptions(screen.getByLabelText("Type"), "receipt");
+    await userEvent.click(screen.getByRole("button", { name: "Save details" }));
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/documents/document-1",
+      expect.objectContaining({ merchant: "Clas Ohlson", document_type: "receipt" })));
+
+    await userEvent.click(screen.getByRole("button", { name: /Attach to an item/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add test item" }));
-    await userEvent.upload(
-      screen.getByLabelText("File"),
-      new File(["receipt"], "receipt.txt", { type: "text/plain" }),
-    );
-    expect((screen.getByLabelText("File") as HTMLInputElement).files).toHaveLength(1);
-    fireEvent.submit(screen.getByRole("button", { name: "Add document" }).closest("form")!);
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/documents/document-1",
+      { item_ids: ["item-1", "item-1"] }));
+  });
+
+  it("names the item it was started from and attaches a manual without a selector or review", async () => {
+    renderDialog({
+      defaultItemIds: ["item-1"],
+      defaultType: "manual",
+      manualMode: true,
+      itemName: "Cordless drill",
+    });
+    const file = new File(["%PDF-1.4"], "drill.pdf", { type: "application/pdf" });
+    await userEvent.upload(screen.getByLabelText("Manual file"), file);
 
     await waitFor(() => expect(api.postForm).toHaveBeenCalledTimes(1));
     const payload = uploadedFormData();
-    expect(payload.get("document_type")).toBe("receipt");
+    expect(payload.get("document_type")).toBe("manual");
     expect(payload.getAll("item_ids")).toEqual(["item-1"]);
+    expect(await screen.findByText(/Attached to:/)).toHaveTextContent("Attached to: Cordless drill");
+    expect(screen.queryByRole("button", { name: /Attach to/ })).not.toBeInTheDocument();
+    // A manual never asks for a purchase-style review, and its extraction is not loaded.
+    expect(screen.queryByText(/Check what was read/)).not.toBeInTheDocument();
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => String(path).endsWith("/extraction"))).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: /Add details/ }));
+    expect(screen.queryByLabelText("Type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Merchant/)).not.toBeInTheDocument();
   });
 
-  it("keeps the linked-item selector for non-manual uploads launched from an item", () => {
-    renderDialog({ defaultItemIds: ["item-1"], defaultType: "other" });
-
-    expect(screen.getByText("Linked items")).toBeVisible();
-    expect(screen.getByText("1 selected")).toBeVisible();
+  it("shows a quiet line when details were read, and keeps the item selector closed from an item", async () => {
+    const read = { ...uploadedDocument, document_type: "receipt" as const, ocr_status: "succeeded" as const, extracted_text: "Total 10" };
+    vi.mocked(api.postForm).mockResolvedValue(read);
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.endsWith("/processing")) return { ...processing, stage: "ready", can_cancel: false } as never;
+      if (path.endsWith("/extraction")) {
+        return {
+          fields: { merchant: "Shop", total_cents: 1000, serial_numbers: [] },
+          lines: [{ kind: "product" }, { kind: "tax" }],
+        } as never;
+      }
+      return read as never;
+    });
+    renderDialog({ defaultItemIds: ["item-1"], defaultType: "receipt", itemName: "Cordless drill" });
+    await userEvent.upload(screen.getByLabelText("File"),
+      new File(["receipt"], "receipt.txt", { type: "text/plain" }));
+    expect(await screen.findByText(/3 details found/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "View" })).toHaveAttribute("href", "/documents/document-1");
+    expect(screen.getByText(/Attached to:/)).toHaveTextContent("Cordless drill");
+    expect(screen.getByRole("button", { name: /Attach to more items/ })).toHaveAttribute("aria-expanded", "false");
   });
 });

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { queryKeys, useCanWrite } from "@/lib/queries";
-import type { DocumentProcessing } from "@/lib/types";
+import type { DocumentProcessing, DocumentType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const activeStages = new Set<DocumentProcessing["stage"]>(["waiting", "reading", "interpreting"]);
@@ -21,11 +21,22 @@ const stageLabels: Record<DocumentProcessing["stage"], string> = {
   cancelled: "Processing cancelled",
 };
 
-export function DocumentProcessingStatus({ documentId, onManualReview, onTaskComplete, enabled = true }: {
+// A manual has no purchase review, so its finished states do not ask for one.
+const manualStageLabels: Partial<Record<DocumentProcessing["stage"], string>> = {
+  ready: "Saved and read",
+  needs_attention: "Saved. Some pages could not be read",
+};
+
+export function DocumentProcessingStatus({
+  documentId, onManualReview, onTaskComplete, enabled = true, compact = false, documentType,
+}: {
   documentId: string;
   onManualReview: () => void;
   onTaskComplete?: (snapshot: DocumentProcessing) => void;
   enabled?: boolean;
+  /** A short status line with Cancel and Retry only, for use inside another surface. */
+  compact?: boolean;
+  documentType?: DocumentType;
 }) {
   const canWrite = useCanWrite();
   const client = useQueryClient();
@@ -67,6 +78,16 @@ export function DocumentProcessingStatus({ documentId, onManualReview, onTaskCom
     onTaskComplete(snapshot);
   }, [onTaskComplete, snapshot?.correlation_id, snapshot?.stage]);
 
+  const manual = documentType === "manual";
+  if (!snapshot && compact) {
+    return (
+      <p role="status" className="text-xs text-muted-foreground" aria-label="Document processing">
+        {processing.isError
+          ? "The reading status cannot be loaded. Your original file is kept."
+          : "Checking the reading status…"}
+      </p>
+    );
+  }
   if (!snapshot) {
     return (
       <section className="surface p-4 text-xs text-muted-foreground" aria-label="Document processing">
@@ -83,13 +104,47 @@ export function DocumentProcessingStatus({ documentId, onManualReview, onTaskCom
   }
   const active = activeStages.has(snapshot.stage);
   const seconds = Math.floor(snapshot.elapsed_ms / 1000);
+  const label = snapshot.worker_available === false && active
+    ? "Processing worker unavailable"
+    : (manual ? manualStageLabels[snapshot.stage] : undefined) ?? stageLabels[snapshot.stage];
+  if (compact) {
+    return (
+      <div className="space-y-2" aria-label="Document processing">
+        <p role="status" aria-live="polite" aria-atomic="true"
+          className="flex flex-wrap items-center gap-2 text-xs">
+          {active && snapshot.worker_available !== false && <Spinner />}
+          <span className="font-medium">{label}</span>
+          <span className="text-muted-foreground">
+            {snapshot.stage === "failed" || snapshot.stage === "cancelled"
+              ? "Your original file is kept and can be opened."
+              : active && seconds >= 15
+                ? "This takes longer than usual. You can close this; reading goes on."
+                : active ? "You can close this; reading goes on." : "Your original file is kept."}
+          </span>
+        </p>
+        {action.error && <FormError message={getApiErrorMessage(action.error)} />}
+        {canWrite && (snapshot.can_cancel || snapshot.can_retry) && (
+          <div className="flex flex-wrap gap-2">
+            {snapshot.can_cancel && (
+              <Button size="sm" variant="outline" className="min-h-11" disabled={action.isPending}
+                onClick={() => action.mutate("cancel")}>Cancel processing</Button>
+            )}
+            {snapshot.can_retry && (
+              <Button size="sm" variant="outline" className="min-h-11" disabled={action.isPending}
+                onClick={() => action.mutate("retry")}>Retry processing</Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <section className={cn("surface space-y-3 p-4 sm:p-5",
       active && seconds >= 60 && "border-brass/40 bg-brass-soft/25")} aria-label="Document processing">
       <div role="status" aria-live="polite" aria-atomic="true" className="space-y-2">
         <h2 className="flex items-center gap-2 text-sm font-medium">
           {active && snapshot.worker_available !== false && <Spinner />}
-          {snapshot.worker_available === false && active ? "Processing worker unavailable" : stageLabels[snapshot.stage]}
+          {label}
         </h2>
         <p className={cn("text-xs text-muted-foreground", active && seconds >= 60 && "font-medium text-brass")}>
           {snapshot.worker_available === false && active
@@ -99,7 +154,8 @@ export function DocumentProcessingStatus({ documentId, onManualReview, onTaskCom
               : active && seconds >= 15
                 ? "This stage is taking longer than usual. No completion estimate is available."
                 : active ? "This page follows actual processing stages; no changes are saved automatically."
-                  : "Review before applying. Your original file is preserved."}
+                  : manual ? "Your original file is preserved. Nothing else needs to be done."
+                    : "Review before applying. Your original file is preserved."}
         </p>
         {snapshot.reason && <p className="break-words text-xs text-muted-foreground">Reason: {snapshot.reason.replaceAll("_", " ")}</p>}
       </div>
@@ -107,7 +163,7 @@ export function DocumentProcessingStatus({ documentId, onManualReview, onTaskCom
       {processing.isError && <p role="alert" className="text-xs text-brass">Status updates interrupted. The last known state is shown.</p>}
       {action.error && <FormError message={getApiErrorMessage(action.error)} />}
       <div className="flex flex-wrap gap-2">
-        {snapshot.local_available && (
+        {snapshot.local_available && !manual && (
           <Button size="sm" variant="outline" onClick={onManualReview}>Use local/manual review now</Button>
         )}
         {canWrite && snapshot.can_cancel && (
@@ -118,7 +174,7 @@ export function DocumentProcessingStatus({ documentId, onManualReview, onTaskCom
           <Button size="sm" variant="outline" disabled={action.isPending}
             onClick={() => action.mutate("retry")}>Retry processing</Button>
         )}
-        {canWrite && <Button size="sm" variant="ghost" asChild><Link to="/items/new">Enter items manually</Link></Button>}
+        {canWrite && !manual && <Button size="sm" variant="ghost" asChild><Link to="/items/new">Enter items manually</Link></Button>}
       </div>
       {active && <p className="text-2xs text-muted-foreground">Cancellation keeps the file and available local evidence. It does not undo saved changes or promise to stop provider charges.</p>}
     </section>

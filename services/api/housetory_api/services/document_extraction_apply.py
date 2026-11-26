@@ -3,6 +3,11 @@
 Apply is one transaction. Any invalid item, destination, purchase or warranty rolls
 the whole request back. A household-scoped request id makes retries return the
 stored result instead of creating another purchase or stock increment.
+
+A document can be applied in parts. Each apply records the lines it applied. A later
+apply of the same extraction version continues the work: lines that were applied are
+passed over, and a purchase that an earlier part recorded is extended, never made a
+second time. A deliberate full re-apply still needs ``allow_reapply``.
 """
 
 from __future__ import annotations
@@ -102,6 +107,174 @@ def _merge_update_fields(
         target["warranty"] = decision.warranty
 
 
+SKIPS_KEY = "extraction_line_skips"
+# The lines applied so far, kept with the document so that lists of documents can
+# tell an unfinished review from a finished one without reading every apply.
+APPLIED_LINES_KEY = "extraction_applied_lines"
+
+
+def has_pending_lines(metadata: dict[str, Any] | None) -> bool:
+    """True while a partly applied document has a product line that is neither applied nor skipped.
+
+    Only the extraction version that was applied counts. A document that was applied
+    before lines were recorded this way, or whose version is gone, is finished.
+    """
+    metadata = metadata or {}
+    marker = metadata.get(APPLIED_LINES_KEY)
+    if not isinstance(marker, dict):
+        return False
+    version = marker.get("version")
+    extraction = metadata.get("extraction")
+    if not isinstance(extraction, dict) or str(extraction.get("version")) != version:
+        refinements = metadata.get("extraction_refinements")
+        extraction = refinements.get(version) if isinstance(refinements, dict) else None
+    if not isinstance(extraction, dict):
+        return False
+    settled = {str(line_id) for line_id in marker.get("line_ids") or []}
+    skips = metadata.get(SKIPS_KEY)
+    if isinstance(skips, dict):
+        settled.update(skips)
+    return any(
+        line.get("kind") == "product" and str(line.get("id")) not in settled
+        for line in extraction.get("lines", [])
+    )
+
+
+def _document_applies(db: Session, document: Document) -> list[DocumentExtractionApply]:
+    applies = list(
+        db.scalars(
+            select(DocumentExtractionApply).where(
+                DocumentExtractionApply.household_id == document.household_id,
+                DocumentExtractionApply.document_id == document.id,
+            )
+        ).all()
+    )
+    return sorted(applies, key=lambda entry: str(entry.result.get("applied_at") or ""))
+
+
+def applied_version(applies: list[DocumentExtractionApply]) -> str | None:
+    """The one extraction version every earlier apply used, or None.
+
+    Line ids belong to one version. Only when all earlier applies used the version of
+    the new request can its lines be told apart from the lines that were applied.
+    """
+    versions = {entry.result.get("extraction_version") for entry in applies}
+    if len(versions) != 1:
+        return None
+    version = versions.pop()
+    return str(version) if version else None
+
+
+def _applied_line_records(applies: list[DocumentExtractionApply]) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for entry in applies:
+        for line in entry.result.get("applied_lines", []):
+            records[str(line.get("line_id"))] = {
+                **line,
+                "applied_at": entry.result.get("applied_at"),
+            }
+    return records
+
+
+def _known_line_ids(document: Document) -> set[str]:
+    metadata = document.extracted_metadata or {}
+    ids = {str(line.get("id")) for line in (metadata.get("extraction") or {}).get("lines", [])}
+    refinements = metadata.get("extraction_refinements")
+    if isinstance(refinements, dict):
+        for refinement in refinements.values():
+            if isinstance(refinement, dict):
+                ids.update(str(line.get("id")) for line in refinement.get("lines", []))
+    return ids
+
+
+def line_states(db: Session, document: Document) -> tuple[dict[str, dict[str, Any]], str | None]:
+    """What happened to each line so far: applied (with its item) or skipped.
+
+    A line that is in neither group is still pending.
+    """
+    applies = _document_applies(db, document)
+    records = _applied_line_records(applies)
+    item_ids = {uuid.UUID(str(record["item_id"])) for record in records.values()}
+    names = (
+        dict(
+            db.execute(
+                select(Item.id, Item.name).where(
+                    Item.household_id == document.household_id, Item.id.in_(item_ids)
+                )
+            ).all()
+        )
+        if item_ids
+        else {}
+    )
+    states: dict[str, dict[str, Any]] = {}
+    for line_id, record in records.items():
+        item_id = uuid.UUID(str(record["item_id"]))
+        states[line_id] = {
+            "status": "applied",
+            "action": record.get("action"),
+            "item": {"id": item_id, "name": names[item_id]} if item_id in names else None,
+            "at": record.get("applied_at"),
+        }
+    skips = (document.extracted_metadata or {}).get(SKIPS_KEY)
+    if isinstance(skips, dict):
+        for line_id, marker in skips.items():
+            if line_id in states or not isinstance(marker, dict):
+                continue
+            states[line_id] = {
+                "status": "skipped",
+                "at": marker.get("at"),
+                "description": marker.get("description"),
+                "quantity": marker.get("quantity"),
+                "line_total_cents": marker.get("line_total_cents"),
+            }
+    return states, applied_version(applies)
+
+
+def change_line_skip(
+    db: Session,
+    household_id: uuid.UUID,
+    document: Document,
+    line_id: str,
+    *,
+    actor_user_id: uuid.UUID | None,
+    restore: bool = False,
+    edits: dict[str, Any] | None = None,
+) -> Document:
+    """Remember that a line was skipped, or forget it again. Inventory is not touched."""
+    document = db.scalar(
+        select(Document)
+        .where(Document.id == document.id, Document.household_id == household_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if document is None:
+        raise ApiError(404, "document_not_found", "Document not found.")
+    metadata = dict(document.extracted_metadata or {})
+    skips = dict(metadata.get(SKIPS_KEY) or {})
+    if restore:
+        skips.pop(line_id, None)
+    else:
+        if line_id not in _known_line_ids(document):
+            raise ApiError(
+                422, "extraction_line_not_found", "An extracted line is no longer available."
+            )
+        if line_id in _applied_line_records(_document_applies(db, document)):
+            raise ApiError(
+                409,
+                "extraction_line_applied",
+                "This line was already applied. It cannot be skipped.",
+            )
+        skips[line_id] = {
+            **{key: value for key, value in (edits or {}).items() if value is not None},
+            "at": datetime.now(UTC).isoformat(),
+            "actor_user_id": str(actor_user_id) if actor_user_id else None,
+        }
+    metadata[SKIPS_KEY] = skips
+    document.extracted_metadata = metadata
+    db.commit()
+    return get_document(db, household_id, document.id)
+
+
 def _payload_fingerprint(payload: ExtractionApplyRequest) -> str:
     canonical = json.dumps(
         payload.model_dump(mode="json", exclude={"request_id"}),
@@ -123,10 +296,14 @@ def _stored_summary(
     warranty_item_ids: list[uuid.UUID],
     warnings: list[str],
     applied_lines: list[dict[str, Any]],
+    extraction_version: str,
+    already_applied_line_ids: list[str],
 ) -> dict[str, Any]:
     return {
         "request_id": str(request_id),
         "payload_fingerprint": payload_fingerprint,
+        "extraction_version": extraction_version,
+        "already_applied_line_ids": already_applied_line_ids,
         "created_item_ids": [str(value) for value in created_item_ids],
         "updated_item_ids": [str(value) for value in updated_item_ids],
         "linked_item_ids": [str(value) for value in linked_item_ids],
@@ -168,6 +345,7 @@ def _result_from_stored(
         updated_item_ids=[uuid.UUID(str(value)) for value in result.get("updated_item_ids", [])],
         linked_item_ids=[uuid.UUID(str(value)) for value in result.get("linked_item_ids", [])],
         skipped_line_ids=list(result.get("skipped_line_ids", [])),
+        already_applied_line_ids=list(result.get("already_applied_line_ids", [])),
         purchase_id=uuid.UUID(str(result["purchase_id"])) if result.get("purchase_id") else None,
         warranty_item_ids=[uuid.UUID(str(value)) for value in result.get("warranty_item_ids", [])],
         warnings=list(result.get("warnings", [])),
@@ -256,21 +434,34 @@ def apply_extraction(
             )
         extraction = refinement
 
-    previous_applies = list(
-        db.scalars(
-            select(DocumentExtractionApply).where(
-                DocumentExtractionApply.household_id == household_id,
-                DocumentExtractionApply.document_id == document.id,
-            )
-        ).all()
-    )
+    previous_applies = _document_applies(db, document)
+    # The document row is locked, so a second request waits and then sees these applies.
+    continuing = False
+    already_applied: list[str] = []
+    decisions = list(payload.lines)
     if previous_applies and not payload.allow_reapply:
-        raise ApiError(
-            409,
-            "already_applied",
-            "This extraction was already applied. Review the previous result or "
-            "explicitly allow a re-apply.",
+        applied_before = (
+            _applied_line_records(previous_applies)
+            if applied_version(previous_applies) == payload.extraction_version
+            else None
         )
+        if applied_before is not None:
+            already_applied = [
+                decision.line_id for decision in decisions if decision.line_id in applied_before
+            ]
+            decisions = [
+                decision for decision in decisions if decision.line_id not in applied_before
+            ]
+        # Continuing needs the same extraction version and at least one line that was
+        # not applied before. Anything else is a second apply and must be asked for.
+        if applied_before is None or not any(decision.action != "skip" for decision in decisions):
+            raise ApiError(
+                409,
+                "already_applied",
+                "This extraction was already applied. Review the previous result or "
+                "explicitly allow a re-apply.",
+            )
+        continuing = True
 
     lines = {str(line.get("id")): line for line in extraction.get("lines", [])}
     purchase_eligible = bool(base_extraction.get("purchase_eligible"))
@@ -292,7 +483,7 @@ def apply_extraction(
         raise ApiError(422, "purchase_required", "Choose the existing purchase to update.")
     if payload.purchase_action != "none":
         source_amounts = [(extraction.get("fields") or {}).get("total_cents")]
-        for decision in payload.lines:
+        for decision in decisions:
             line = lines.get(decision.line_id)
             if decision.action != "skip" and line is not None:
                 source_amounts.extend(
@@ -309,7 +500,7 @@ def apply_extraction(
 
     existing_decisions = [
         decision
-        for decision in payload.lines
+        for decision in decisions
         if decision.action in {"link", "update"} and decision.item_id is not None
     ]
     item_ids = {decision.item_id for decision in existing_decisions if decision.item_id}
@@ -320,7 +511,7 @@ def apply_extraction(
     linked_ids: list[uuid.UUID] = []
     warnings: list[str] = []
 
-    for decision in payload.lines:
+    for decision in decisions:
         line = lines.get(decision.line_id)
         if line is None:
             raise ApiError(
@@ -376,11 +567,44 @@ def apply_extraction(
     selected_count = len(created_drafts) + len(grouped)
     if payload.purchase_action != "none" and selected_count == 0:
         raise ApiError(422, "item_required", "Choose at least one item for the purchase.")
-    if payload.purchase_action == "none" and not payload.lines and payload.document_fields is None:
+    if payload.purchase_action == "none" and not decisions and payload.document_fields is None:
         raise ApiError(422, "no_changes", "Choose at least one change to apply.")
 
     purchase: Purchase | None = None
-    if payload.purchase_action == "existing":
+    # A later part of the same document extends the purchase that an earlier part
+    # recorded. It never records a second purchase for the same receipt.
+    earlier_purchase: Purchase | None = None
+    if continuing and payload.purchase_action == "create":
+        earlier_id = next(
+            (
+                entry.result.get("purchase_id")
+                for entry in reversed(previous_applies)
+                if entry.result.get("purchase_id")
+            ),
+            None,
+        )
+        if earlier_id and db.scalar(
+            select(Purchase.id).where(
+                Purchase.id == uuid.UUID(str(earlier_id)), Purchase.household_id == household_id
+            )
+        ):
+            earlier_purchase = get_purchase(db, household_id, uuid.UUID(str(earlier_id)))
+    if earlier_purchase is not None:
+        purchase_input = payload.purchase  # type: ignore[assignment]
+        if purchase_input.currency.upper() != earlier_purchase.currency.upper():
+            raise ApiError(
+                422,
+                "allocation_currency_mismatch",
+                f"The purchase for this document is recorded in {earlier_purchase.currency}. "
+                "Keep that currency for the remaining lines.",
+            )
+        purchase = earlier_purchase
+        apply_purchase_fields(
+            purchase,
+            purchase_input,
+            fields=set(purchase_input.model_fields_set) - {"receipt_document_id"},
+        )
+    elif payload.purchase_action == "existing":
         purchase = get_purchase(db, household_id, payload.purchase_id)  # type: ignore[arg-type]
         if payload.purchase is not None:
             apply_purchase_fields(
@@ -552,7 +776,23 @@ def apply_extraction(
                 "The receipt currency does not match the purchase currency. "
                 "Choose the matching currency before applying allocations.",
             )
-        allocated_total = sum(int(draft["allocated_cents"] or 0) for draft in allocation_drafts)
+        source_ids = [str(draft["source_line_id"]) for draft in allocation_drafts]
+        # Lines of this document that an earlier apply put on the same purchase count
+        # too, so the parts together can never go over the purchase total.
+        earlier_allocated = sum(
+            int(allocation.allocated_cents or 0)
+            for allocation in db.scalars(
+                select(PurchaseAllocation).where(
+                    PurchaseAllocation.household_id == household_id,
+                    PurchaseAllocation.purchase_id == purchase.id,
+                    PurchaseAllocation.document_id == document.id,
+                    PurchaseAllocation.source_line_id.notin_(source_ids),
+                )
+            ).all()
+        )
+        allocated_total = earlier_allocated + sum(
+            int(draft["allocated_cents"] or 0) for draft in allocation_drafts
+        )
         discount_cents = int((extraction.get("fields") or {}).get("discount_cents") or 0)
         if purchase.price_cents is not None:
             if allocated_total > purchase.price_cents + discount_cents + 1:
@@ -578,7 +818,6 @@ def apply_extraction(
                 "Some reviewed lines have no monetary amount. Their evidence is retained without "
                 "a monetary allocation."
             )
-        source_ids = [str(draft["source_line_id"]) for draft in allocation_drafts]
         existing_allocations = {
             allocation.source_line_id: allocation
             for allocation in db.scalars(
@@ -628,7 +867,11 @@ def apply_extraction(
                 allocation.request_id = payload.request_id
                 allocation.created_by_user_id = actor_user_id
     if purchase is not None:
-        sync_single_item_allocation(db, purchase, created=payload.purchase_action == "create")
+        sync_single_item_allocation(
+            db,
+            purchase,
+            created=payload.purchase_action == "create" and earlier_purchase is None,
+        )
     if payload.document_fields is not None:
         fields = payload.document_fields.model_fields_set
         if "merchant" in fields:
@@ -670,6 +913,8 @@ def apply_extraction(
         warranty_item_ids=sorted(set(warranty_item_ids)),
         warnings=warnings,
         applied_lines=applied_lines,
+        extraction_version=payload.extraction_version,
+        already_applied_line_ids=already_applied,
     )
     try:
         apply_record = DocumentExtractionApply(
@@ -685,7 +930,33 @@ def apply_extraction(
         metadata["applied_at"] = summary["applied_at"]
         metadata["applied_item_ids"] = sorted(
             {str(value) for value in [*created_ids, *updated_ids, *linked_ids]}
+            # A later part adds to the items of the earlier parts.
+            | (
+                {str(value) for value in metadata.get("applied_item_ids") or []}
+                if continuing
+                else set()
+            )
         )
+        # Parts of one version add up. Another version starts its own list.
+        earlier_lines = metadata.get(APPLIED_LINES_KEY)
+        if (
+            not isinstance(earlier_lines, dict)
+            or earlier_lines.get("version") != payload.extraction_version
+        ):
+            earlier_lines = {"line_ids": []}
+        metadata[APPLIED_LINES_KEY] = {
+            "version": payload.extraction_version,
+            "line_ids": sorted(
+                {str(line_id) for line_id in earlier_lines.get("line_ids") or []}
+                | {str(applied_line["line_id"]) for applied_line in applied_lines}
+            ),
+        }
+        # A line that is applied is no longer a skipped line.
+        skips = dict(metadata.get(SKIPS_KEY) or {})
+        if skips:
+            for applied_line in applied_lines:
+                skips.pop(str(applied_line["line_id"]), None)
+            metadata[SKIPS_KEY] = skips
         document.extracted_metadata = metadata
         db.commit()
     except IntegrityError as exc:

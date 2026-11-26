@@ -43,9 +43,13 @@ import type {
   ItemListEntry,
 } from "@/lib/types";
 import { cn, formatCurrency, formatDate, pluralize } from "@/lib/utils";
+import { MoreDetails, ReviewRow, SkippedRow, SkippedSection, type ReviewValue } from "@/components/review-row";
 import {
+  type ExtractionLineStates,
+  type ExtractionReviewWithStates,
   type LineDraft,
   buildApplyPayload,
+  lineDraftErrors,
   candidateFromItem,
   centsInput,
   fieldValue,
@@ -70,7 +74,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const queryClient = useQueryClient();
   const extractionQuery = useQuery({
     queryKey: [...queryKeys.document(document.id), "extraction"],
-    queryFn: () => api.get<ExtractionReview>(`/documents/${document.id}/extraction`),
+    queryFn: () => api.get<ExtractionReviewWithStates>(`/documents/${document.id}/extraction`),
     enabled: enabled && document.ocr_status === "succeeded" && Boolean(document.extracted_text),
     refetchInterval: (query) =>
       ["queued", "running"].includes(query.state.data?.enhancement?.status ?? "") ? 1000 : false,
@@ -108,7 +112,10 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const [allowReapply, setAllowReapply] = React.useState(false);
   const [aiStatus, setAiStatus] = React.useState<AiStatus | null>(null);
   const [aiWarnings, setAiWarnings] = React.useState<string[]>([]);
-  const [requestId, setRequestId] = React.useState(() => crypto.randomUUID());
+  // One request id for each set of lines, so that a retry of the same set is safe.
+  const requestIds = React.useRef(new Map<string, string>());
+  const [openLines, setOpenLines] = React.useState<ReadonlySet<string>>(new Set());
+  const [attempted, setAttempted] = React.useState<ReadonlySet<string>>(new Set());
   const [applyResult, setApplyResult] = React.useState<ExtractionApplyResponse | null>(null);
   const [activeVersion, setActiveVersion] = React.useState("");
   const [refinement, setRefinement] = React.useState<ExtractionRefinement | null>(null);
@@ -153,8 +160,19 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
           fields,
           productLines.length === 1,
         );
-        if (captureContext?.documentId !== document.id) return draft;
-        return { ...draft, newItem: { ...draft.newItem,
+        // A skipped line comes back with the values it had when it was skipped.
+        const saved = extractionQuery.data?.line_states?.[line.id];
+        const kept = saved?.status === "skipped"
+          ? {
+              ...draft,
+              description: saved.description ?? draft.description,
+              quantity: saved.quantity != null ? String(saved.quantity) : draft.quantity,
+              lineTotal: saved.line_total_cents != null ? centsInput(saved.line_total_cents) : draft.lineTotal,
+              newItem: { ...draft.newItem, name: saved.description ?? draft.newItem.name },
+            }
+          : draft;
+        if (captureContext?.documentId !== document.id) return kept;
+        return { ...kept, newItem: { ...kept.newItem,
           roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
       }),
     );
@@ -174,7 +192,12 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     setActiveVersion(version);
     setApplyResult(null);
     setManualLineId(null);
-    setRequestId(crypto.randomUUID());
+    requestIds.current.clear();
+    // A line that is still there stays open; nothing else is carried over.
+    setOpenLines((current) => new Set(
+      [...current].filter((id) => productLines.some((line) => line.id === id)),
+    ));
+    setAttempted(new Set());
   };
 
   React.useEffect(() => {
@@ -299,22 +322,78 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     queueAi.mutate(operation);
   };
 
+  const extractionKey = [...queryKeys.document(document.id), "extraction"];
+  // Applies the given lines only. The other lines stay pending. The server keeps the
+  // parts of one document on one purchase and never applies a line twice.
   const applyMutation = useMutation({
-    mutationFn: () =>
-      api.post<ExtractionApplyResponse>(
+    mutationFn: (lineIds: string[]) => {
+      const key = [...lineIds].sort().join(",");
+      const requestId = requestIds.current.get(key) ?? crypto.randomUUID();
+      requestIds.current.set(key, requestId);
+      return api.post<ExtractionApplyResponse>(
         `/documents/${document.id}/extraction/apply`,
-        buildApplyPayload({ extractionVersion: activeVersion, drafts, merchant, purchaseDate, documentDate, currency, total, orderNumber, purchaseAction, purchaseId, updatePurchaseFields, attachAsReceipt, linkDocument, allowReapply, requestId }),
-      ),
-    onSuccess: (result) => {
+        buildApplyPayload({
+          extractionVersion: activeVersion,
+          drafts: drafts.filter((draft) => lineIds.includes(draft.line.id)),
+          merchant, purchaseDate, documentDate, currency, total, orderNumber,
+          // A purchase needs at least one item. Without lines only the details are saved.
+          purchaseAction: lineIds.length ? purchaseAction : "none",
+          purchaseId, updatePurchaseFields, attachAsReceipt, linkDocument, allowReapply, requestId,
+        }),
+      );
+    },
+    onSuccess: (result, lineIds) => {
+      requestIds.current.delete([...lineIds].sort().join(","));
       setApplyResult(result);
-      setRequestId(crypto.randomUUID());
       setAllowReapply(false);
+      setDrafts((current) => current.map((draft) =>
+        lineIds.includes(draft.line.id) ? { ...draft, selected: false } : draft));
+      // The applied lines are finished at once, before the refreshed review arrives.
+      queryClient.setQueryData<ExtractionReviewWithStates>(extractionKey, (current) => current && ({
+        ...current,
+        applied_version: current.applied_version ?? activeVersion,
+        line_states: {
+          ...current.line_states,
+          ...Object.fromEntries(lineIds.map((id) => [id, {
+            status: "applied" as const,
+            action: drafts.find((draft) => draft.line.id === id)?.action as "create" | "update" | "link",
+          }])),
+        },
+      }));
       invalidate();
       void queryClient.invalidateQueries({
         queryKey: [...queryKeys.document(document.id), "extraction"],
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.document(document.id) });
       toast.success("Reviewed extraction applied");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  // Skip is remembered by the server, so a skipped line does not come back by itself.
+  const skipMutation = useMutation({
+    mutationFn: ({ draft, restore }: { draft: LineDraft; restore: boolean }) =>
+      api.post<ExtractionLineStates>(
+        `/documents/${document.id}/extraction/lines/${draft.line.id}/${restore ? "restore" : "skip"}`,
+        restore ? undefined : {
+          description: draft.description.trim().slice(0, 300) || null,
+          quantity: parseQuantity(draft.quantity),
+          line_total_cents: parseMoney(draft.lineTotal),
+        },
+      ),
+    onSuccess: (result, { draft, restore }) => {
+      queryClient.setQueryData<ExtractionReviewWithStates>(extractionKey, (current) =>
+        current && ({ ...current, ...result }));
+      setDrafts((current) => current.map((entry) =>
+        entry.line.id === draft.line.id ? { ...entry, selected: false } : entry));
+      if (restore) {
+        toast.success("Restored. The line is back in the list.");
+        return;
+      }
+      toast.success(`Skipped: ${draft.description || "line"}`, {
+        description: "Nothing was added. Its edits are kept.",
+        action: { label: "Undo", onClick: () => skipMutation.mutate({ draft, restore: true }) },
+      });
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -361,7 +440,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   const charges = data.lines.filter((line) => line.kind !== "product");
   const selectedPurchaseIds = new Map<string, CandidateItem["purchase"]>();
   for (const draft of drafts) {
-    if (draft.action === "skip" || !draft.itemId) continue;
+    if (draft.action === "create" || !draft.itemId) continue;
     const candidate = matches
       .find((match) => match.line_id === draft.line.id)
       ?.candidates.find((entry) => entry.id === draft.itemId);
@@ -374,45 +453,46 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     (purchase, index, all) => all.findIndex((entry) => entry.id === purchase.id) === index,
   );
 
-  const validationErrors: string[] = [];
+  const lineStates = data.line_states ?? {};
+  // A deliberate re-apply opens the applied lines again. Otherwise they are finished.
+  const stateOf = (draft: LineDraft): "applied" | "skipped" | "pending" => {
+    const state = lineStates[draft.line.id];
+    if (state?.status === "applied") return allowReapply ? "pending" : "applied";
+    return state?.status === "skipped" ? "skipped" : "pending";
+  };
+  const pendingDrafts = drafts.filter((draft) => stateOf(draft) === "pending");
+  const skippedDrafts = drafts.filter((draft) => stateOf(draft) === "skipped");
+  const appliedCount = drafts.filter((draft) => stateOf(draft) === "applied").length;
+  const selectedDrafts = pendingDrafts.filter((draft) => draft.selected);
+  // Lines can follow each other in parts only within one extraction version.
+  const continuable = data.applied.length > 0 && data.applied_version === activeVersion;
+  const reapplyBlocked = data.applied.length > 0 && !continuable && !allowReapply;
+
   const amountError = (value: string) => value.trim() !== "" && parseMoney(value) == null;
+  const purchaseErrors: string[] = [];
   if (purchaseAction !== "none" && amountError(total)) {
-    validationErrors.push("Purchase amounts must be non-negative with at most two decimal places. Credit notes remain evidence; no refund is recorded by this form.");
-  }
-  for (const draft of drafts) {
-    if (draft.action !== "skip" && (amountError(draft.unitPrice) || amountError(draft.lineTotal))) {
-      validationErrors.push("A selected line has a negative or invalid amount. Correct an editable line total or skip unsupported credit lines; source unit prices are evidence only.");
-    }
-    if (draft.action === "create") {
-      if (!draft.newItem.name.trim()) validationErrors.push("A new item needs a name.");
-      if (!draft.newItem.roomId) validationErrors.push("A new item needs a room.");
-    }
-    if (draft.action === "update") {
-      const hasField = Object.values(draft.updates).some((value) => value.trim());
-      if (!hasField) validationErrors.push("Choose at least one field to update on an existing item.");
-    }
-    if ((draft.action === "link" || draft.action === "update") && !draft.itemId) {
-      validationErrors.push("Choose an existing item or skip the line.");
-    }
-    if (draft.addQuantity && !parseQuantity(draft.quantity)) {
-      validationErrors.push("Added quantity must be a whole number of at least 1.");
-    }
-  }
-  if (purchaseAction !== "none" && drafts.every((draft) => draft.action === "skip")) {
-    validationErrors.push("Choose at least one item for the purchase.");
+    purchaseErrors.push("Purchase amounts must be non-negative with at most two decimal places. Credit notes remain evidence; no refund is recorded by this form.");
   }
   if (purchaseAction === "existing" && !purchaseId) {
-    validationErrors.push("Choose the existing purchase.");
+    purchaseErrors.push("Choose the existing purchase.");
   }
-  const reapplyBlocked = data.applied.length > 0 && !allowReapply;
+  // A line's messages are shown inside that line, beside what must be corrected.
+  const lineErrors: Record<string, string[]> = Object.fromEntries(
+    pendingDrafts.map((draft) => [draft.line.id, lineDraftErrors(draft)]),
+  );
+  const validationErrors = [
+    ...purchaseErrors,
+    ...new Set(selectedDrafts.flatMap((draft) => lineErrors[draft.line.id] ?? [])),
+  ];
   const editedDocumentFields =
     merchant !== fieldValue(data.fields.merchant ?? document.merchant) ||
     documentDate !== fieldValue(data.fields.document_date ?? document.document_date);
-  const selectedLineCount = drafts.filter((draft) => draft.action !== "skip").length;
-  const createCount = drafts.filter((draft) => draft.action === "create").length;
-  const updateCount = drafts.filter((draft) => draft.action === "update").length;
-  const linkCount = drafts.filter((draft) => draft.action === "link").length;
-  const skipCount = drafts.filter((draft) => draft.action === "skip").length;
+  const selectedLineCount = selectedDrafts.length;
+  const createCount = selectedDrafts.filter((draft) => draft.action === "create").length;
+  const updateCount = selectedDrafts.filter((draft) => draft.action === "update").length;
+  const linkCount = selectedDrafts.filter((draft) => draft.action === "link").length;
+  const allSelected = pendingDrafts.length > 0 && pendingDrafts.every((draft) => draft.selected);
+  const purchaseRecorded = continuable && data.applied.some((entry) => entry.purchase_id);
   const aiAvailable = Boolean(
     aiStatus?.configured &&
       (aiStatus.mode === "local" || aiStatus.cloud_consent),
@@ -532,14 +612,52 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       ].filter((entry): entry is [string, string] => Boolean(entry[1]))
     : [];
 
+  // The button says exactly what one Apply will do. All of it is saved together.
+  const detailsOnly = selectedLineCount === 0 && editedDocumentFields &&
+    (data.applied.length === 0 || allowReapply);
+  const applyParts = [
+    createCount ? `add ${pluralize(createCount, "item")}` : null,
+    updateCount ? `update ${pluralize(updateCount, "item")}` : null,
+    linkCount ? `link ${pluralize(linkCount, "item")}` : null,
+    selectedLineCount === 0 ? null
+      : purchaseAction === "create" ? (purchaseRecorded ? "add to the recorded purchase" : "record the purchase")
+      : purchaseAction === "existing" ? "use the existing purchase" : null,
+    detailsOnly ? "save the document details" : null,
+  ].filter(Boolean);
+  const applyLabel = applyParts.length ? `Apply: ${applyParts.join(", ")}` : "Apply: nothing selected";
+
   const applyDisabled =
     applyMutation.isPending ||
     newVersionAvailable ||
     reapplyBlocked ||
     validationErrors.length > 0 ||
-    (purchaseAction === "none" &&
-      drafts.every((draft) => draft.action === "skip") &&
-      !editedDocumentFields);
+    (selectedLineCount === 0 && !detailsOnly);
+
+  // Applies these lines now. A line that is not ready opens and says what is missing.
+  const applyLines = (lineIds: string[]) => {
+    if (applyMutation.isPending || newVersionAvailable || reapplyBlocked) return;
+    setAttempted((current) => new Set([...current, ...lineIds]));
+    const blocked = lineIds.filter((id) => (lineErrors[id]?.length ?? 0) > 0);
+    if (blocked.length) {
+      setOpenLines((current) => new Set([...current, ...blocked]));
+      return;
+    }
+    if (lineIds.length && purchaseErrors.length) {
+      toast.error(purchaseErrors[0]);
+      return;
+    }
+    applyMutation.mutate(lineIds);
+  };
+  const setLineOpen = (lineId: string, next: boolean) =>
+    setOpenLines((current) => {
+      const copy = new Set(current);
+      if (next) copy.add(lineId);
+      else copy.delete(lineId);
+      return copy;
+    });
+  const roomName = (roomId: string) => rooms.find((room) => room.id === roomId)?.name;
+  const strongQuality = (quality: string | undefined) =>
+    quality === "exact_identifier" || quality === "strong";
 
   return (
     <div className="mt-5 space-y-5" onChangeCapture={() => { editedRef.current = true; }}>
@@ -698,12 +816,17 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       {data.applied.length > 0 && (
         <div className="rounded-xl border border-brass/25 bg-brass-soft/50 p-3.5 text-2xs leading-relaxed">
           <p className="flex items-center gap-1.5 font-medium text-brass">
-            <AlertTriangle className="size-3.5" /> This extraction was already applied
+            <AlertTriangle className="size-3.5" />{" "}
+            {continuable && pendingDrafts.length + skippedDrafts.length > 0
+              ? "Part of this document is applied"
+              : "This extraction was already applied"}
           </p>
           <p className="mt-1 text-muted-foreground">
-            Last applied {formatDate(data.applied[0]?.applied_at ?? "")}. Retries with the
-            same request id return the previous result. To intentionally create another
-            purchase or stock increase, explicitly allow a re-apply.
+            {continuable
+              ? `${appliedCount} of ${drafts.length} lines are applied. The other lines can still be applied; an applied line is never applied twice. `
+              : `Last applied ${formatDate(data.applied[0]?.applied_at ?? "")}. Retries with the same request id return the previous result. `}
+            To intentionally create another purchase or stock increase, explicitly allow a
+            re-apply.
           </p>
           <label className="mt-2 flex items-center gap-2 text-2xs">
             <input
@@ -1023,13 +1146,26 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
           </div>
         )}
 
+        {pendingDrafts.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-card/70 p-2.5">
+            <Button type="button" size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+              disabled={applyMutation.isPending}
+              onClick={() => setDrafts((current) => current.map((draft) =>
+                stateOf(draft) === "pending" ? { ...draft, selected: !allSelected } : draft))}>
+              {allSelected ? "Clear selection" : "Select all"}
+            </Button>
+            <span role="status" className="text-xs text-muted-foreground">
+              {selectedLineCount} selected · lines that are not selected stay pending
+            </span>
+          </div>
+        )}
         {drafts.length === 0 ? (
           <div className="surface px-4 py-6 text-xs text-muted-foreground">
             No product lines were recognised. Review the source text and use manual search or
             create an item from the document fields if appropriate.
           </div>
         ) : (
-          drafts.map((draft) => {
+          drafts.filter((draft) => stateOf(draft) !== "skipped").map((draft) => {
             const lineMatch = matchFor(draft.line.id);
             const selected = candidateFor(draft);
             const edited =
@@ -1037,16 +1173,99 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
               draft.quantity !== (draft.line.quantity == null ? "" : String(draft.line.quantity)) ||
               draft.unitPrice !== centsInput(draft.line.unit_price_cents) ||
               draft.lineTotal !== centsInput(draft.line.line_total_cents);
+            const state = lineStates[draft.line.id];
+            if (stateOf(draft) === "applied") {
+              return (
+                <div key={draft.line.id} id={`extraction-source-${draft.line.id}`}>
+                  <ReviewRow
+                    title={draft.description}
+                    quantity={draft.quantity}
+                    className="opacity-80"
+                    values={state?.item ? [{
+                      label: state.action === "create" ? "Added as" : state.action === "update" ? "Updated" : "Linked to",
+                      value: state.item.name,
+                    }] : []}
+                    status={
+                      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span>
+                          {state?.action === "create" ? "Added" : state?.action === "update" ? "Updated" : "Linked"}
+                        </span>
+                        {state?.item && (
+                          <Link to={`/items/${state.item.id}`}
+                            className="inline-flex min-h-11 items-center font-medium text-foreground underline-offset-4 hover:underline lg:min-h-0">
+                            Open item
+                          </Link>
+                        )}
+                      </p>
+                    }
+                  />
+                </div>
+              );
+            }
+            const unsure = !strongQuality(lineMatch?.quality);
+            const updateValues: ReviewValue[] = selected ? ([
+              ["Name", selected.name, draft.updates.name],
+              ["Brand", selected.brand, draft.updates.brand],
+              ["Model", selected.model, draft.updates.model],
+              ["Serial", selected.serial_number, draft.updates.serialNumber],
+              ["Room", selected.room_name, draft.updates.roomId ? roomName(draft.updates.roomId) ?? "" : ""],
+            ] as Array<[string, string | null, string]>)
+              .filter(([, , next]) => next.trim())
+              .map(([label, before, next]) => ({ label, before: before || "empty", value: next.trim() })) : [];
+            // The row says what the line would do. For an existing item it shows old → new.
+            const values: ReviewValue[] = [
+              ...(draft.lineTotal.trim()
+                ? [{ label: "Line total", value: draft.lineTotal, uncertain: amountError(draft.lineTotal) }]
+                : []),
+              ...(draft.action === "create"
+                ? [
+                    { label: "Add as", value: draft.newItem.name.trim() || "no name", uncertain: !draft.newItem.name.trim() },
+                    {
+                      label: "Room",
+                      value: roomName(draft.newItem.roomId) ?? "not chosen",
+                      uncertain: !draft.newItem.roomId,
+                    },
+                  ]
+                : [{
+                    label: draft.action === "update" ? "Update" : "Link to",
+                    value: selected?.name ?? "no item chosen",
+                    uncertain: !selected || unsure,
+                  }]),
+              ...(draft.action === "update" ? updateValues : []),
+              ...(draft.addQuantity && draft.action !== "create"
+                ? [{ label: "Stock", value: `+${draft.quantity || "?"}` }]
+                : []),
+            ];
+            const shownErrors = draft.selected || attempted.has(draft.line.id)
+              ? lineErrors[draft.line.id] ?? [] : [];
+            const lineOpen = openLines.has(draft.line.id);
             return (
-              <article
-                key={draft.line.id}
-                id={`extraction-source-${draft.line.id}`}
-                className="surface space-y-3 p-4 sm:p-5"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
+              <div key={draft.line.id} id={`extraction-source-${draft.line.id}`}>
+              <ReviewRow
+                title={draft.description}
+                titleLabel={`Name of line ${draft.line.line_number}`}
+                onTitleChange={(description) =>
+                  updateDraft(draft.line.id, (current) => ({
+                    ...current,
+                    description,
+                    // The new item keeps following the line name until it gets its own.
+                    newItem: current.newItem.name === current.description
+                      ? { ...current.newItem, name: description } : current.newItem,
+                  }))}
+                quantity={draft.quantity}
+                onQuantityChange={(quantity) =>
+                  updateDraft(draft.line.id, (current) => ({ ...current, quantity }))}
+                values={values}
+                disabled={applyMutation.isPending || skipMutation.isPending}
+                selection={{
+                  checked: draft.selected,
+                  onChange: (next) => setDrafts((current) => current.map((entry) =>
+                    entry.line.id === draft.line.id ? { ...entry, selected: next } : entry)),
+                  label: `Select line ${draft.line.line_number}: ${draft.description}`,
+                }}
+                badges={
+                  <>
                     <Badge variant="outline">Line {draft.line.line_number}</Badge>
-                    <Badge variant="secondary">Product</Badge>
                     <Badge
                       variant={
                         lineMatch?.quality === "exact_identifier"
@@ -1060,12 +1279,22 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                     </Badge>
                     {refinementActive && <Badge variant="brass">AI-refined line</Badge>}
                     {edited && <Badge variant="brass">Edited</Badge>}
-                  </div>
-                  <span className="text-2xs text-muted-foreground">
-                    {draft.line.purchase_eligible ? "Inventory candidate" : "Review only"}
-                  </span>
-                </div>
-
+                    {draft.line.warnings.length > 0 && (
+                      <Badge variant="brass"><AlertTriangle className="mr-1 size-3" />Check</Badge>
+                    )}
+                  </>
+                }
+                error={shownErrors.length ? [...new Set(shownErrors)].join(" ") : null}
+                primary={{
+                  label: draft.action === "create" ? "Add item"
+                    : draft.action === "update" ? "Apply changes" : "Link to item",
+                  onClick: () => applyLines([draft.line.id]),
+                  disabled: newVersionAvailable || reapplyBlocked,
+                  pending: applyMutation.isPending && Boolean(applyMutation.variables?.includes(draft.line.id)),
+                }}
+                onSkip={() => skipMutation.mutate({ draft, restore: false })}
+                expand={{ open: lineOpen, onOpenChange: (next) => setLineOpen(draft.line.id, next), label: "Edit" }}
+              >
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_82px_112px_112px]">
                   <Field label="Description" htmlFor={`line-description-${draft.line.id}`}>
                     <Input
@@ -1233,20 +1462,6 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                   )}
 
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={draft.action === "skip" ? "default" : "outline"}
-                      onClick={() =>
-                        updateDraft(draft.line.id, (current) => ({
-                          ...current,
-                          action: "skip",
-                          itemId: "",
-                        }))
-                      }
-                    >
-                      Skip line
-                    </Button>
                     {selected && (
                       <>
                         <Button
@@ -1357,6 +1572,11 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                             ))}
                         </Select>
                       </Field>
+                      <div className="sm:col-span-2">
+                        <MoreDetails defaultOpen={Boolean(
+                          draft.newItem.brand || draft.newItem.model || draft.newItem.serialNumber,
+                        )}>
+                          <div className="grid gap-3 sm:grid-cols-2">
                       <Field label="Brand" htmlFor={`new-brand-${draft.line.id}`} optional>
                         <Input
                           id={`new-brand-${draft.line.id}`}
@@ -1396,6 +1616,9 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                           maxLength={200}
                         />
                       </Field>
+                          </div>
+                        </MoreDetails>
+                      </div>
                     </div>
                   )}
 
@@ -1624,9 +1847,24 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
                       </div>
                     )}
                 </div>
-              </article>
+              </ReviewRow>
+              </div>
             );
           })
+        )}
+        {skippedDrafts.length > 0 && (
+          <SkippedSection count={skippedDrafts.length}
+            hint="Nothing was added for these lines. Restore puts a line back in the list with its edits.">
+            {skippedDrafts.map((draft) => (
+              <SkippedRow
+                key={draft.line.id}
+                title={draft.description || `Line ${draft.line.line_number}`}
+                detail={`Line ${draft.line.line_number}`}
+                disabled={skipMutation.isPending}
+                onRestore={() => skipMutation.mutate({ draft, restore: true })}
+              />
+            ))}
+          </SkippedSection>
         )}
       </section>
 
@@ -1818,11 +2056,12 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
           <div>
             <h3 className="font-display text-[1.2rem] tracking-[-0.02em]">Change preview</h3>
             <p className="mt-0.5 text-2xs text-muted-foreground">
-              {createCount} create · {updateCount} update · {linkCount} link · {skipCount} skip
-              {purchaseAction !== "none" ? " · purchase review" : ""}
+              {createCount} create · {updateCount} update · {linkCount} link ·{" "}
+              {pendingDrafts.length - selectedLineCount} not selected (stay pending)
+              {purchaseAction !== "none" && selectedLineCount > 0 ? " · purchase review" : ""}
             </p>
           </div>
-          <Badge variant="outline">{selectedLineCount} reviewed lines</Badge>
+          <Badge variant="outline">{selectedLineCount} selected</Badge>
         </div>
         {validationErrors.length > 0 && (
           <ul className="mt-3 space-y-1 rounded-lg border border-brass/20 bg-brass-soft/40 p-3 text-2xs text-muted-foreground">
@@ -1834,16 +2073,17 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
         {applyMutation.error && <FormError message={getApiErrorMessage(applyMutation.error)} />}
         <div className="mt-4 flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-2xs text-muted-foreground">
-            Nothing is created, linked, purchased or overwritten until you confirm. Apply is
-            atomic; retries with the same request id are safe.
+            Nothing is created, linked, purchased or overwritten until you confirm. Everything
+            in one Apply is saved together or not at all. A line that is applied is never
+            applied twice, and all lines of this document share one purchase.
           </p>
           <Button
             type="button"
-            onClick={() => applyMutation.mutate()}
+            onClick={() => applyLines(selectedDrafts.map((draft) => draft.line.id))}
             disabled={applyDisabled}
           >
             {applyMutation.isPending ? <Spinner /> : <Check />}
-            Apply reviewed changes
+            {applyLabel}
           </Button>
         </div>
       </div>

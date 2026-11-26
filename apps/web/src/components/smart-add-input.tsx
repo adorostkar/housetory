@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 import { FormError } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
@@ -131,6 +132,8 @@ export function SmartAddInput({
   const [text, setText] = React.useState("");
   const [photo, setPhoto] = React.useState<File | null>(null);
   const [attachmentIntent, setAttachmentIntent] = React.useState<"photo" | "document">("photo");
+  // Optional. A document is saved as "other" unless the user says what it is.
+  const [documentType, setDocumentType] = React.useState("");
   const isImage = Boolean(photo && documentFileType(photo).startsWith("image/"));
   const isDocument = Boolean(photo && (!isImage || attachmentIntent === "document"));
   const photoUrl = useObjectUrl(isImage ? photo : null);
@@ -219,6 +222,24 @@ export function SmartAddInput({
       onFinish();
       navigate(`/documents/${document.id}`, {
         state: { documentCapture: { documentId: document.id, roomId, locationId } },
+      });
+      // The original is saved at once. Undo removes the document that was just saved.
+      toast.success("Document saved to the library", {
+        description: "Details and items are optional and can be added on this page.",
+        action: {
+          label: "Undo",
+          onClick: () => {
+            void api.delete<void>(`/documents/${document.id}`)
+              .then(() => {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.documents });
+                if (window.location.pathname === `/documents/${document.id}`) {
+                  navigate("/documents", { replace: true });
+                }
+                toast.success("Removed. Nothing was kept.");
+              })
+              .catch((caught: unknown) => toast.error(getApiErrorMessage(caught)));
+          },
+        },
       });
     },
     onError: (caught) => {
@@ -368,6 +389,7 @@ export function SmartAddInput({
     }
     setPhoto(documentUploadFile(file));
     setAttachmentIntent(documentFileType(file).startsWith("image/") ? "photo" : "document");
+    setDocumentType("");
     setError(null);
   };
 
@@ -376,7 +398,7 @@ export function SmartAddInput({
     setError(null);
     if (kind === "empty" || kind === "conflict") return;
     const trimmed = text.trim();
-    if (photo && isDocument) storeAsDocument.mutate({ file: photo, type: "invoice" });
+    if (photo && isDocument) storeAsDocument.mutate({ file: photo, type: documentType || "other" });
     else if (photo) createRecognition.mutate({ file: photo, note: trimmed });
     else if (kind === "link") createTextImport.mutate({ productUrl: trimmed });
     else createTextImport.mutate({ text: trimmed });
@@ -747,13 +769,30 @@ export function SmartAddInput({
                 <input type="radio" name={`${ids}-intent`} value="document"
                   className="size-4 accent-primary"
                   checked={attachmentIntent === "document"} onChange={() => setAttachmentIntent("document")} />
-                Invoice or evidence
+                Document
               </label>
             </fieldset>
           )}
+          {photo && isDocument && (
+            <label className="block text-sm lg:text-xs">
+              <span className="text-muted-foreground">Document type (optional)</span>
+              <Select
+                className="mt-1 h-11 w-full"
+                value={documentType}
+                disabled={inputLocked}
+                onChange={(event) => setDocumentType(event.target.value)}
+              >
+                <option value="">Other document</option>
+                <option value="invoice">Invoice</option>
+                <option value="receipt">Receipt</option>
+                <option value="manual">Manual</option>
+                <option value="warranty_certificate">Warranty</option>
+              </Select>
+            </label>
+          )}
           {storeAsDocument.isPending && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> Uploading original document…
+              <Spinner /> Saving the original…
             </p>
           )}
           <div aria-live="polite" className="empty:hidden">
@@ -802,7 +841,7 @@ export function SmartAddInput({
               aria-keyshortcuts="Control+Enter Meta+Enter"
             >
               {submitting ? <Spinner /> : kind === "link" ? <Link2 /> : <Sparkles />}
-              {storeAsDocument.isPending ? "Uploading…" : submitting ? "Interpreting…" : isDocument ? "Review document" : "Review items"}
+              {storeAsDocument.isPending ? "Saving…" : submitting ? "Interpreting…" : isDocument ? "Save document" : "Review items"}
             </Button>
           </div>
         </form>

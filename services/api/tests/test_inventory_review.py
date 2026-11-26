@@ -1241,6 +1241,20 @@ def test_offline_review_persists_scoped_suggestions_without_mutating_items(owner
     assert duplicate["id"] not in pending_ids
     assert third.json()["created_suggestion_count"] == 0
 
+    # Undo brings the dismissed suggestion back as the same pending row. It stays
+    # one row after another run, and dismissing it again is remembered again.
+    restored = client.post(f"/api/v1/inventory-review/suggestions/{duplicate['id']}/undo")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "applied"
+    assert restored.json()["suggestion"]["status"] == "pending"
+    fourth = run_review(client)
+    assert fourth.json()["created_suggestion_count"] == 0
+    assert [entry["id"] for entry in suggestions(client)["items"]].count(duplicate["id"]) == 1
+    again = client.post(f"/api/v1/inventory-review/suggestions/{duplicate['id']}/dismiss")
+    assert again.status_code == 200, again.text
+    assert run_review(client).json()["created_suggestion_count"] == 0
+    assert duplicate["id"] not in {entry["id"] for entry in suggestions(client)["items"]}
+
 
 def test_category_and_name_apply_undo_stale_and_bulk(owner_client):
     client = owner_client

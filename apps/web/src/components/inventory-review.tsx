@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CaptureReviewQueue } from "@/components/capture-review-queue";
+import { ReviewRow, type ReviewValue } from "@/components/review-row";
 import { EmptyState } from "@/components/empty-state";
 import { FormError } from "@/components/form-field";
 import { PageHeader } from "@/components/page-header";
@@ -418,9 +419,14 @@ export function InventoryReview({
         `/inventory-review/suggestions/${suggestion.id}/dismiss`,
         {},
       ),
-    onSuccess: (result) => {
+    onSuccess: (result, suggestion) => {
       refreshReview();
-      toast.success(result.message);
+      // Skip is remembered. Undo here, or Restore under Skipped, brings the row back.
+      toast.success(`Skipped: ${suggestion.title}`, {
+        description: "Nothing was changed. It will not come back by itself.",
+        action: { label: "Undo", onClick: () => undoMutation.mutate(suggestion) },
+      });
+      void result;
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
@@ -449,7 +455,11 @@ export function InventoryReview({
     onSuccess: (result) => {
       invalidateInventory();
       refreshReview();
-      setSelectedSuggestionIds(new Set());
+      // Only what was applied leaves the selection. The rest stays selected.
+      const applied = new Set(
+        result.results.filter((entry) => entry.status === "applied").map((entry) => entry.suggestion_id),
+      );
+      setSelectedSuggestionIds((current) => new Set([...current].filter((id) => !applied.has(id))));
       const summary = `${result.applied_count} applied, ${result.stale_count} stale, ${result.unsupported_count} advisory/skipped`;
       if (result.applied_count && !result.stale_count && !result.unsupported_count) {
         toast.success(`Bulk review applied: ${summary}.`);
@@ -628,6 +638,9 @@ export function InventoryReview({
     isOwner={isOwner} aiReady={aiReady} provider={aiProvider}
     onChange={setIncludeAi} background={embedded} detailsOnly={embedded} />;
   const waitingCount = suggestionsQuery.data?.total ?? 0;
+  // In a conversation the suggestions stay behind one quiet line until they are asked for.
+  const [embeddedOpen, setEmbeddedOpen] = React.useState(false);
+  const suggestionsId = React.useId();
   const analysisDone = Boolean(displayedRun && !displayedRun.background_active
     && !displayedRun.remaining_item_count && displayedRun.status === "completed");
   const workspaceParams = new URLSearchParams(localParams);
@@ -656,7 +669,7 @@ export function InventoryReview({
               {` of ${displayedRun.total_item_count}`} items.</p>
             {analysisDone && suggestionsQuery.data && <p className="text-xs">
               {waitingCount
-                ? `${pluralize(waitingCount, "suggestion")} waiting for your approval. Nothing has been changed yet.`
+                ? "Nothing has been changed yet."
                 : "No suggestions. Nothing has been changed."}
             </p>}
             <p className="text-xs text-muted-foreground">
@@ -708,6 +721,17 @@ export function InventoryReview({
             </p>}
           </div>}
         </>}
+        {waitingCount > 0 && (
+          <button type="button" aria-expanded={embeddedOpen} aria-controls={suggestionsId}
+            onClick={() => setEmbeddedOpen((open) => !open)}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-md text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+            <span>{pluralize(waitingCount, "possible correction")}</span>
+            <span aria-hidden="true">·</span>
+            <span className="font-medium underline underline-offset-4">
+              {embeddedOpen ? "Hide suggestions" : "View suggestions"}
+            </span>
+          </button>
+        )}
         {runError && <p role="alert" className="text-xs text-destructive">{runError}</p>}
         {!canWrite && <p className="text-xs text-muted-foreground">Read-only. Changes require member access.</p>}
       </section>}
@@ -976,7 +1000,8 @@ export function InventoryReview({
       )}
       </div>}
       </>}
-      <section id={embedded ? undefined : "review-suggestions"}
+      <section id={embedded ? suggestionsId : "review-suggestions"}
+        hidden={embedded && !embeddedOpen}
         className={embedded ? "min-w-0 space-y-3" : "surface scroll-mt-32 p-4 sm:p-5"}>
         {!embedded && scopeType === "items" && selectedItemIds.length > 0 && (
           <p className="mb-3 text-2xs text-muted-foreground">
@@ -1102,10 +1127,10 @@ export function InventoryReview({
           <>
             {!embedded && actionableSuggestions.length > 0 && canWrite && (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brass/25 bg-brass-soft/25 px-3.5 py-3 text-2xs">
-                <label className="flex items-center gap-2">
+                <label className="flex min-h-11 items-center gap-2">
                   <input
                     type="checkbox"
-                    className="size-4 accent-primary"
+                    className="size-5 rounded-none accent-primary"
                     checked={allActionableSelected}
                     onChange={() =>
                       setSelectedSuggestionIds(
@@ -1116,7 +1141,7 @@ export function InventoryReview({
                     }
                   />
                   <span>
-                    Select all actionable pending ({actionableSuggestions.length})
+                    Select all ({actionableSuggestions.length})
                   </span>
                 </label>
                 <Button
@@ -1132,7 +1157,9 @@ export function InventoryReview({
                   }
                 >
                   {bulkAcceptMutation.isPending ? <Spinner /> : <Check />}
-                  Accept selected ({selectedActionable.length})
+                  {selectedActionable.length === 0
+                    ? "Apply selected changes"
+                    : `Apply ${selectedActionable.length} selected ${selectedActionable.length === 1 ? "change" : "changes"}`}
                 </Button>
               </div>
             )}
@@ -1154,208 +1181,165 @@ export function InventoryReview({
                 const missingFields = stringList(evidence.missing_fields);
                 const mentionedRoom = stringField(evidence, "mentioned_room");
                 const assignedRoom = stringField(evidence, "assigned_room");
+                const beforeCategory = stringField(suggestion.before, "category_name");
+                // An existing record shows what it has now and what it would get.
+                const values: ReviewValue[] = [
+                  ...(suggestion.type === "name" && categoryName
+                    ? [{ label: "Name", before: beforeName ?? undefined, value: categoryName }]
+                    : []),
+                  ...(suggestion.type !== "name" && categoryName
+                    ? [{
+                        label: "Category",
+                        before: suggestion.action_kind === "advisory" ? undefined : beforeCategory ?? "none",
+                        value: `${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`,
+                      }]
+                    : []),
+                  ...(proposedTags.length > 0 ? [{ label: "Tags", value: proposedTags.join(", ") }] : []),
+                  ...(missingFields.length > 0
+                    ? [{ label: "Missing", value: missingFields.join(", ") }]
+                    : []),
+                  ...(mentionedRoom && assignedRoom
+                    ? [{ label: "Room", before: assignedRoom, value: `${mentionedRoom} is mentioned`, uncertain: true }]
+                    : []),
+                  ...(suggestion.type === "possible_duplicate"
+                    ? [{
+                        label: "Match",
+                        value: evidence.serial_match === true ? "Matching serial" : "Same name/brand/model",
+                        uncertain: evidence.serial_match !== true,
+                      }]
+                    : []),
+                ];
+                const applies = suggestion.status === "pending" && (
+                  suggestion.action_kind === "apply_category" ||
+                  suggestion.action_kind === "apply_name" ||
+                  suggestion.action_kind === "apply_organisation"
+                );
+                const editable = suggestion.status === "pending" && (
+                  suggestion.action_kind === "apply_category" || suggestion.action_kind === "apply_name"
+                );
                 return (
-                  <li
-                    key={suggestion.id}
-                    className={cn(
-                      "rounded-xl border border-border/60 bg-background/35 p-4",
-                      suggestion.status === "stale" && "border-destructive/25",
-                    )}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {!embedded && actionable && canWrite && (
-                            <input
-                              type="checkbox"
-                              className="size-4 accent-primary"
-                              checked={selectedSuggestionIds.has(suggestion.id)}
-                              onChange={() => toggleSuggestion(suggestion.id)}
-                              aria-label={`Select ${suggestion.title}`}
-                            />
+                  <li key={suggestion.id}>
+                    <ReviewRow
+                      title={suggestion.title}
+                      className={suggestion.status === "stale" ? "border-destructive/25" : undefined}
+                      values={values}
+                      selection={!embedded && actionable && canWrite
+                        ? {
+                            checked: selectedSuggestionIds.has(suggestion.id),
+                            onChange: () => toggleSuggestion(suggestion.id),
+                            label: `Select ${suggestion.title}`,
+                          }
+                        : undefined}
+                      badges={embedded ? (
+                        <span className="text-2xs text-muted-foreground">
+                          {suggestion.run_id === displayedRun?.id ? "New this review" : "Already pending"}
+                        </span>
+                      ) : <SuggestionStatusBadge suggestion={suggestion} />}
+                      extra={
+                        <>
+                          <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                            {suggestion.explanation}
+                          </p>
+                          {(suggestion.item || suggestion.secondary_item) && (
+                            <p className="flex flex-wrap items-center gap-2 text-xs">
+                              {suggestion.item && (
+                                <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
+                                  <ItemReference item={suggestion.item} origin={origin} />
+                                </span>
+                              )}
+                              {suggestion.secondary_item && (
+                                <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
+                                  Compare with{" "}
+                                  <ItemReference item={suggestion.secondary_item} origin={origin} />
+                                </span>
+                              )}
+                            </p>
                           )}
-                          {embedded ? <span className="text-2xs text-muted-foreground">
-                            {suggestion.run_id === displayedRun?.id ? "New this review" : "Already pending"}
-                          </span> : <SuggestionStatusBadge suggestion={suggestion} />}
-                        </div>
-                        <h3 className="mt-2 text-sm font-medium">
-                          {suggestion.title}
-                        </h3>
-                        <p className="mt-1 max-w-3xl text-2xs leading-relaxed text-muted-foreground">
-                          {suggestion.explanation}
-                        </p>
-                      </div>
-                      {!embedded && <span className="text-2xs text-muted-foreground">
-                        {timestamp(suggestion.created_at)}
-                      </span>}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs">
-                      {suggestion.item && (
-                        <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
-                          <ItemReference item={suggestion.item} origin={origin} />
-                        </span>
-                      )}
-                      {suggestion.secondary_item && (
-                        <span className="rounded-lg border border-border/60 bg-card/45 px-2.5 py-1.5">
-                          Compare with{" "}
-                          <ItemReference item={suggestion.secondary_item} origin={origin} />
-                        </span>
-                      )}
-                      {categoryName && (
-                        <Badge variant="outline">
-                          {suggestion.type === "organisation"
-                            ? `Category: ${categoryName}${suggestion.after.category_is_new === true ? " (new)" : ""}`
-                            : `Proposed: ${categoryName}`}
-                        </Badge>
-                      )}
-                      {proposedTags.length > 0 && (
-                        <Badge variant="outline">Tags: {proposedTags.join(", ")}</Badge>
-                      )}
-                      {suggestion.type === "name" && beforeName && (
-                        <Badge variant="secondary">
-                          “{beforeName}” → “{categoryName}”
-                        </Badge>
-                      )}
-                      {missingFields.length > 0 && (
-                        <Badge variant="outline">
-                          Missing: {missingFields.join(", ")}
-                        </Badge>
-                      )}
-                      {mentionedRoom && assignedRoom && (
-                        <Badge variant="outline">
-                          Mentions {mentionedRoom} · assigned {assignedRoom}
-                        </Badge>
-                      )}
-                      {suggestion.type === "possible_duplicate" && (
-                        <Badge variant="outline">
-                          {evidence.serial_match === true
-                            ? "Matching serial"
-                            : "Same name/brand/model"}
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {suggestion.status === "pending" &&
-                        suggestion.action_kind === "apply_category" && (
-                          <>
-                            <Button
-                              size="sm"
-                              disabled={!canWrite || applyMutation.isPending}
-                              onClick={() => applyMutation.mutate({ suggestion })}
-                            >
-                              Accept
+                          {suggestion.status === "accepted" &&
+                            !suggestion.can_undo &&
+                            suggestion.undo_blocked_reason && (
+                              <p className="text-xs text-muted-foreground">
+                                {suggestion.undo_blocked_reason}
+                              </p>
+                            )}
+                        </>
+                      }
+                      primary={applies ? {
+                        label: suggestion.action_kind === "apply_organisation" ? "Apply changes" : "Apply change",
+                        onClick: () => applyMutation.mutate({ suggestion }),
+                        disabled: !canWrite || applyMutation.isPending,
+                      } : undefined}
+                      onSkip={canWrite && (suggestion.status === "pending" || suggestion.status === "stale")
+                        ? () => dismissMutation.mutate(suggestion)
+                        : undefined}
+                      skipLabel={suggestion.status === "stale" ? "Skip stale" : "Skip"}
+                      actions={
+                        <>
+                          {editable && (
+                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                              disabled={!canWrite} onClick={() => openEdit(suggestion)}>
+                              Edit first
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!canWrite}
-                              onClick={() => openEdit(suggestion)}
-                            >
-                              Edit & accept
+                          )}
+                          {suggestion.status === "pending" &&
+                            suggestion.action_kind === "advisory" &&
+                            suggestion.type === "possible_duplicate" && (
+                              <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                                onClick={() => setCompareTarget(suggestion)}>
+                                <Eye />
+                                Compare
+                              </Button>
+                            )}
+                          {suggestion.item && (
+                            <Button size="sm" variant="ghost" className="min-h-11 lg:min-h-9" asChild>
+                              <Link
+                                to={appendOrigin(`/items/${suggestion.item.id}`, origin)}
+                                onClick={() => rememberListScroll(origin ?? null)}
+                              >
+                                Open item
+                                <ArrowRight />
+                              </Link>
                             </Button>
-                          </>
-                        )}
-                      {suggestion.status === "pending" &&
-                        suggestion.action_kind === "apply_name" && (
-                          <>
-                            <Button
-                              size="sm"
-                              disabled={!canWrite || applyMutation.isPending}
-                              onClick={() => applyMutation.mutate({ suggestion })}
-                            >
-                              Accept
+                          )}
+                          {suggestion.status === "accepted" && suggestion.can_undo && (
+                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                              disabled={!canWrite || undoMutation.isPending}
+                              onClick={() => undoMutation.mutate(suggestion)}>
+                              <Undo2 />
+                              Undo
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={!canWrite}
-                              onClick={() => openEdit(suggestion)}
-                            >
-                              Edit & accept
+                          )}
+                          {suggestion.status === "dismissed" && canWrite && (
+                            <Button size="sm" variant="outline" className="min-h-11 lg:min-h-9"
+                              aria-label={`Restore ${suggestion.title}`}
+                              disabled={undoMutation.isPending}
+                              onClick={() => undoMutation.mutate(suggestion)}>
+                              <Undo2 />
+                              Restore
                             </Button>
-                          </>
-                        )}
-                      {suggestion.status === "pending" &&
-                        suggestion.action_kind === "apply_organisation" && (
-                          <Button
-                            size="sm"
-                            disabled={!canWrite || applyMutation.isPending}
-                            onClick={() => applyMutation.mutate({ suggestion })}
-                          >
-                            Accept organisation
-                          </Button>
-                        )}
-                      {suggestion.status === "pending" &&
-                        suggestion.action_kind === "advisory" &&
-                        suggestion.type === "possible_duplicate" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setCompareTarget(suggestion)}
-                          >
-                            <Eye />
-                            Compare
-                          </Button>
-                        )}
-                      {suggestion.item && (
-                        <Button size="sm" variant="ghost" asChild>
-                          <Link
-                            to={appendOrigin(`/items/${suggestion.item.id}`, origin)}
-                            onClick={() => rememberListScroll(origin ?? null)}
-                          >
-                            Open item
-                            <ArrowRight />
-                          </Link>
-                        </Button>
-                      )}
-                      {suggestion.status === "pending" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={!canWrite || dismissMutation.isPending}
-                          onClick={() => dismissMutation.mutate(suggestion)}
-                        >
-                          Dismiss
-                        </Button>
-                      )}
-                      {suggestion.status === "stale" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={!canWrite || dismissMutation.isPending}
-                          onClick={() => dismissMutation.mutate(suggestion)}
-                        >
-                          Dismiss stale
-                        </Button>
-                      )}
-                      {suggestion.status === "accepted" && suggestion.can_undo && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!canWrite || undoMutation.isPending}
-                          onClick={() => undoMutation.mutate(suggestion)}
-                        >
-                          <Undo2 />
-                          Undo
-                        </Button>
-                      )}
-                      {suggestion.status === "accepted" &&
-                        !suggestion.can_undo &&
-                        suggestion.undo_blocked_reason && (
-                          <span className="text-2xs text-muted-foreground">
-                            {suggestion.undo_blocked_reason}
-                          </span>
-                        )}
-                      {suggestion.status === "reverted" && (
-                        <Badge variant="secondary">Undone</Badge>
-                      )}
-                    </div>
+                          )}
+                          {!embedded && (
+                            <span className="ml-auto text-2xs text-muted-foreground">
+                              {timestamp(suggestion.created_at)}
+                            </span>
+                          )}
+                        </>
+                      }
+                    />
                   </li>
                 );
               })}
             </ul>
+            {!embedded && statusFilter === "pending" && (summaryQuery.data?.status_counts.dismissed ?? 0) > 0 && (
+              // Skipped suggestions wait here after the Undo message is gone.
+              <div className="mt-3 flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 px-3.5 py-1.5 text-xs">
+                <span>Skipped ({summaryQuery.data?.status_counts.dismissed})</span>
+                <Button size="sm" variant="ghost" className="min-h-11 lg:min-h-9"
+                  onClick={() => updateQueueFilter("status", "dismissed")}>
+                  View and restore
+                </Button>
+              </div>
+            )}
             {(!embedded || (suggestionsQuery.data?.total ?? 0) > 50) &&
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-2xs text-muted-foreground">
               <span>{suggestionOffset + 1}–{suggestionOffset + suggestions.length} of {suggestionsQuery.data?.total ?? suggestions.length} suggestions</span>

@@ -39,7 +39,10 @@ export type LineDraft = {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  /** What this line would do: add an item, update one or link to one. Never a selection. */
   action: ExtractionLineAction;
+  /** Selected for the bulk Apply. Nothing is selected to begin with. */
+  selected: boolean;
   itemId: string;
   addQuantity: boolean;
   newItem: NewItemDraft;
@@ -82,7 +85,9 @@ export function lineDraft(
     quantity: line.quantity == null ? "" : String(line.quantity),
     unitPrice: centsInput(line.unit_price_cents),
     lineTotal: centsInput(line.line_total_cents),
-    action: strong ? "link" : "skip",
+    // A strong match is only the suggestion. It selects nothing by itself.
+    action: strong ? "link" : "create",
+    selected: false,
     itemId: strong && candidate ? candidate.id : "",
     addQuantity: false,
     newItem: {
@@ -257,4 +262,61 @@ export function buildApplyPayload({
     allow_reapply: allowReapply,
     lines,
   };
+}
+
+/** How many details the reading found: the fields that have a value, and the product lines. */
+export function countExtractedDetails(review: ExtractionReview): number {
+  const fields = review.fields;
+  const filled = [
+    fields.merchant,
+    fields.purchase_date ?? fields.document_date,
+    fields.total_cents,
+    fields.order_number,
+    fields.brand,
+    fields.model,
+    fields.serial_numbers.length > 0 ? fields.serial_numbers[0] : null,
+    fields.warranty_end ?? fields.warranty_months ?? fields.warranty_provider,
+  ].filter((value) => value != null && value !== "").length;
+  return filled + review.lines.filter((line) => line.kind === "product").length;
+}
+
+/** What the server remembers about one line. A line without a state is still pending. */
+export interface ExtractionLineState {
+  status: "applied" | "skipped";
+  action?: "create" | "update" | "link" | null;
+  item?: { id: string; name: string } | null;
+  at?: string | null;
+  description?: string | null;
+  quantity?: number | null;
+  line_total_cents?: number | null;
+}
+
+export interface ExtractionLineStates {
+  line_states: Record<string, ExtractionLineState>;
+  applied_version: string | null;
+}
+
+export type ExtractionReviewWithStates = ExtractionReview & Partial<ExtractionLineStates>;
+
+/** Why a line cannot be applied yet. An empty list means it is ready. */
+export function lineDraftErrors(draft: LineDraft): string[] {
+  const errors: string[] = [];
+  const invalid = (value: string) => value.trim() !== "" && parseMoney(value) == null;
+  if (invalid(draft.unitPrice) || invalid(draft.lineTotal)) {
+    errors.push("A selected line has a negative or invalid amount. Correct an editable line total or skip unsupported credit lines; source unit prices are evidence only.");
+  }
+  if (draft.action === "create") {
+    if (!draft.newItem.name.trim()) errors.push("A new item needs a name.");
+    if (!draft.newItem.roomId) errors.push("A new item needs a room.");
+  }
+  if (draft.action === "update" && !Object.values(draft.updates).some((value) => value.trim())) {
+    errors.push("Choose at least one field to update on an existing item.");
+  }
+  if ((draft.action === "link" || draft.action === "update") && !draft.itemId) {
+    errors.push("Choose an existing item, or add this line as a new item.");
+  }
+  if (draft.addQuantity && !parseQuantity(draft.quantity)) {
+    errors.push("Added quantity must be a whole number of at least 1.");
+  }
+  return errors;
 }

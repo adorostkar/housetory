@@ -1541,3 +1541,59 @@ def test_import_sources_are_preserved_in_private_import_volume(
     source = owner_client.get(f"/api/v1/imports/{batch['id']}/source")
     assert source.status_code == 200
     assert b"Camera in the attic" in source.content
+
+
+def test_skipped_row_keeps_its_edits_and_can_be_restored_then_added_once(owner_client):
+    create_room(owner_client, "Attic")
+    batch = upload_text_import(owner_client, "Ladder in the attic. Rope in the attic.")
+    detail = process_import(owner_client, batch["id"])
+    entries = {entry["proposed"]["name"]: entry for entry in detail["entries"]}
+    rope = entries["Rope"]
+    edited = {**rope["proposed"], "name": "Climbing rope", "quantity": 2}
+    apply_url = f"/api/v1/imports/{batch['id']}/apply"
+    restore_url = f"/api/v1/imports/{batch['id']}/entries/{rope['id']}/restore"
+
+    # Skip one row and add the other. The batch is then finished.
+    skipped = owner_client.post(
+        apply_url,
+        json={
+            "entries": [
+                {"id": rope["id"], "action": "skip", "proposed": edited},
+                {"id": entries["Ladder"]["id"], "action": "import"},
+            ]
+        },
+    )
+    assert skipped.status_code == 200, skipped.text
+    assert skipped.json()["batch"]["status"] == "completed"
+
+    # The skip is remembered after a reload, with the edits that were made.
+    reloaded = owner_client.get(f"/api/v1/imports/{batch['id']}").json()
+    saved = next(entry for entry in reloaded["entries"] if entry["id"] == rope["id"])
+    assert saved["status"] == "skipped"
+    assert saved["proposed"]["name"] == "Climbing rope"
+
+    restored = owner_client.post(restore_url)
+    assert restored.status_code == 200, restored.text
+    body = restored.json()
+    assert body["status"] == "review"
+    assert body["skipped_entries"] == 0
+    back = next(entry for entry in body["entries"] if entry["id"] == rope["id"])
+    assert back["status"] == "proposed"
+    assert back["proposed"]["name"] == "Climbing rope"
+    assert back["proposed"]["quantity"] == 2
+
+    # A row that is not skipped cannot be restored, and an added row is never reopened.
+    assert owner_client.post(restore_url).status_code == 409
+    ladder_restore = owner_client.post(
+        f"/api/v1/imports/{batch['id']}/entries/{entries['Ladder']['id']}/restore"
+    )
+    assert ladder_restore.status_code == 409
+
+    # Adding the restored row twice creates one item.
+    first = owner_client.post(apply_url, json={"entries": [{"id": rope["id"], "action": "import"}]})
+    again = owner_client.post(apply_url, json={"entries": [{"id": rope["id"], "action": "import"}]})
+    assert first.json()["created"] == 1
+    assert again.json()["created"] == 0
+    names = sorted(item["name"] for item in owner_client.get("/api/v1/items").json()["items"])
+    assert names == ["Climbing rope", "Ladder"]
+    assert owner_client.post(restore_url).status_code == 409

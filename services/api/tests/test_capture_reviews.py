@@ -332,3 +332,98 @@ def test_capture_dismissal_respects_household_scope_and_viewer_permissions(owner
         headers={"X-Household-Id": other["household"]["id"]},
     )
     assert denied.status_code == 404
+
+
+def test_manual_from_the_assistant_is_saved_without_a_pending_review(owner_client):
+    response = owner_client.post(
+        "/api/v1/documents",
+        data={"document_type": "manual", "assistant_capture": "true"},
+        files={"file": ("drill-manual.txt", b"Drill manual\nTorque settings", "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    manual_id = response.json()["id"]
+    invoice_id = create_capture(owner_client, "document")
+
+    # The manual is kept and can be opened, but it is not a review to finish.
+    assert capture(owner_client, manual_id) is None
+    assert capture(owner_client, invoice_id) is not None
+    assert owner_client.get(f"/api/v1/documents/{manual_id}/file").status_code == 200
+
+    # Saying later that it is an invoice makes it a review like any other.
+    changed = owner_client.patch(
+        f"/api/v1/documents/{manual_id}", json={"document_type": "invoice"}
+    )
+    assert changed.status_code == 200, changed.text
+    assert capture(owner_client, manual_id) is not None
+
+
+def test_partly_applied_document_stays_pending_until_every_line_is_applied_or_skipped(
+    owner_client,
+):
+    from housetory_api.services.ocr import ExtractedText
+
+    text = (
+        "CORNER HARDWARE\nDate: 02/14/2026\nInvoice: INV-9100\n"
+        "Ladder 1 x 100.00 100.00\nPaint Roller 2 x 25.00 50.00\n"
+        "Work Lamp 1 x 150.00 150.00\nTotal $300.00\n"
+    )
+    uploaded = owner_client.post(
+        "/api/v1/documents",
+        data={"document_type": "invoice", "assistant_capture": "true"},
+        files={"file": ("invoice.txt", text.encode(), "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    document_id = uploaded.json()["id"]
+    run_document_ocr(
+        document_id,
+        extractor=lambda *args: ExtractedText(text=text, source="text", confidence=100),
+    )
+    review_url = f"/api/v1/documents/{document_id}/extraction"
+    extraction = owner_client.get(review_url).json()
+    ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    room = owner_client.post("/api/v1/rooms", json={"name": "Garage"}).json()
+
+    def add(line, name):
+        response = owner_client.post(
+            f"{review_url}/apply",
+            json={
+                "request_id": str(uuid.uuid4()),
+                "extraction_version": extraction["version"],
+                "lines": [
+                    {
+                        "line_id": line["id"],
+                        "action": "create",
+                        "new_item": {"name": name, "quantity": 1, "room_id": room["id"]},
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    assert capture(owner_client, document_id) is not None
+
+    # One of three lines is applied: the review is not finished.
+    add(ladder, "Ladder")
+    assert capture(owner_client, document_id) is not None
+
+    # A skipped line no longer waits, but the third one still does. The unfinished
+    # review can still be dismissed and brought back.
+    assert owner_client.post(f"{review_url}/lines/{roller['id']}/skip").status_code == 200
+    assert capture(owner_client, document_id) is not None
+    dismissed = dismiss(owner_client, "document", document_id)
+    assert capture(owner_client, document_id) is None
+    assert undo(owner_client, dismissed).status_code == 200
+    assert capture(owner_client, document_id) is not None
+
+    # With the last waiting line applied, every line is applied or skipped: finished.
+    add(lamp, "Work lamp")
+    assert capture(owner_client, document_id) is None
+
+    # Restoring the skipped line makes the review wait again, until that line is applied.
+    assert owner_client.post(f"{review_url}/lines/{roller['id']}/restore").status_code == 200
+    assert capture(owner_client, document_id) is not None
+    add(roller, "Paint roller")
+    assert capture(owner_client, document_id) is None
+    assert capture(owner_client, document_id, dismissed=True) is None
+    names = sorted(item["name"] for item in owner_client.get("/api/v1/items").json()["items"])
+    assert names == ["Ladder", "Paint roller", "Work lamp"]

@@ -179,7 +179,9 @@ describe("AddItems smart input", () => {
     const file = new File(["%PDF-1.4"], "invoice.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByTestId("smart-add-library"), { target: { files: [file] } });
     expect(screen.getByText("invoice.pdf")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    // The type is optional. Here the user says that it is an invoice.
+    await userEvent.selectOptions(screen.getByLabelText("Document type (optional)"), "invoice");
+    await userEvent.click(screen.getByRole("button", { name: "Save document" }));
     await waitFor(() => expect(currentUrl().pathname).toBe("/documents/invoice-1"));
     expect(api.postForm).toHaveBeenCalledTimes(1);
     const [path, form] = vi.mocked(api.postForm).mock.calls[0]!;
@@ -198,10 +200,12 @@ describe("AddItems smart input", () => {
     vi.mocked(api.postForm).mockResolvedValue({ id: "receipt-1" });
     await open();
     attachPhoto("receipt.png");
-    await userEvent.click(screen.getByRole("radio", { name: "Invoice or evidence" }));
-    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Document" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save document" }));
     await waitFor(() => expect(currentUrl().pathname).toBe("/documents/receipt-1"));
     expect(api.postForm).toHaveBeenCalledExactlyOnceWith("/documents", expect.any(FormData));
+    // Nothing said it is an invoice, so it is not saved as one.
+    expect(vi.mocked(api.postForm).mock.calls[0]![1].get("document_type")).toBe("other");
   });
 
   it("accepts a PDF dropped without browser MIME metadata and supplies its upload MIME", async () => {
@@ -209,7 +213,7 @@ describe("AddItems smart input", () => {
     await open();
     const file = new File(["%PDF"], "invoice.PDF");
     fireEvent.drop(textbox().parentElement!, { dataTransfer: { files: [file] } });
-    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save document" }));
     await waitFor(() => expect(api.postForm).toHaveBeenCalled());
     const uploaded = vi.mocked(api.postForm).mock.calls[0]![1].get("file") as File;
     expect(uploaded.type).toBe("application/pdf");
@@ -238,12 +242,12 @@ describe("AddItems smart input", () => {
     await open();
     const file = new File(["%PDF"], "invoice.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByTestId("smart-add-library"), { target: { files: [file] } });
-    await userEvent.click(screen.getByRole("button", { name: "Review document" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Uploading original document");
+    await userEvent.click(screen.getByRole("button", { name: "Save document" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Saving the original");
     await act(async () => rejectUpload(new Error("Upload unavailable")));
     expect(await screen.findByRole("alert")).toHaveTextContent("Upload unavailable");
     expect(screen.getByText("invoice.pdf")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Review document" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save document" })).toBeEnabled();
   });
 
   it("waits for a tap to focus the mobile box and live-detects text, link and photo input", async () => {

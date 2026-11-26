@@ -142,6 +142,30 @@ class ExtractionApplySummary(BaseModel):
     purchase_id: uuid.UUID | None = None
 
 
+class ExtractionLineState(BaseModel):
+    """What happened to one extracted line. A line without a state is still pending."""
+
+    status: Literal["applied", "skipped"]
+    action: Literal["create", "update", "link"] | None = None
+    item: ItemReference | None = None
+    at: datetime | None = None
+    # The values a skipped line had when it was skipped, so that its edits are kept.
+    description: str | None = None
+    quantity: int | None = None
+    line_total_cents: int | None = None
+
+
+class ExtractionLineStatesOut(BaseModel):
+    line_states: dict[str, ExtractionLineState] = Field(default_factory=dict)
+    applied_version: str | None = None
+
+
+class ExtractionLineSkipRequest(BaseModel):
+    description: str | None = Field(default=None, max_length=300)
+    quantity: int | None = Field(default=None, ge=1, le=1_000_000)
+    line_total_cents: int | None = Field(default=None, ge=0, le=10**12)
+
+
 class ExtractionReviewOut(BaseModel):
     document_id: uuid.UUID
     version: str
@@ -156,6 +180,10 @@ class ExtractionReviewOut(BaseModel):
     matches: list[LineMatch] = Field(default_factory=list)
     duplicate_documents: list[DuplicateDocumentBrief] = Field(default_factory=list)
     applied: list[ExtractionApplySummary] = Field(default_factory=list)
+    # Per line: applied or skipped. With ``applied_version`` equal to the version under
+    # review, the lines that have no state can still be applied one by one.
+    line_states: dict[str, ExtractionLineState] = Field(default_factory=dict)
+    applied_version: str | None = None
     ai_status: AiStatus
     enhancement: EnhancementState | None = None
     suggested_refinement: "ExtractionRefinementOut | None" = None
@@ -275,6 +303,8 @@ class ExtractionApplyResult(BaseModel):
     updated_item_ids: list[uuid.UUID] = Field(default_factory=list)
     linked_item_ids: list[uuid.UUID] = Field(default_factory=list)
     skipped_line_ids: list[str] = Field(default_factory=list)
+    # Lines in the request that an earlier apply had applied. They were passed over.
+    already_applied_line_ids: list[str] = Field(default_factory=list)
     purchase_id: uuid.UUID | None = None
     warranty_item_ids: list[uuid.UUID] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

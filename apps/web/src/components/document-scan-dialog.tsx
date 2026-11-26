@@ -16,6 +16,7 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import { Field, FormError } from "@/components/form-field";
+import { AttachedItemChip, OptionalStep } from "@/components/document-add-steps";
 import { ItemMultiSelect } from "@/components/item-multi-select";
 import { Button } from "@/components/ui/button";
 import {
@@ -76,6 +77,7 @@ export function DocumentScanDialog({
   defaultItemIds = [],
   defaultType = "other",
   targetDocumentId,
+  itemName,
   onSaved,
 }: {
   open: boolean;
@@ -83,9 +85,12 @@ export function DocumentScanDialog({
   defaultItemIds?: string[];
   defaultType?: DocumentType;
   targetDocumentId?: string;
+  /** The name of the item the user started from. It is shown as "Attached to". */
+  itemName?: string;
   onSaved?: (document: DocumentRecord) => void;
 }) {
   const invalidate = useInvalidateInventory();
+  const fromItem = defaultItemIds.length > 0;
   const [scanId, setScanId] = React.useState<string | null>(null);
   const scanIdRef = React.useRef<string | null>(null);
   const committedRef = React.useRef(false);
@@ -926,7 +931,27 @@ export function DocumentScanDialog({
               this editor combines image pages.
             </p>
 
-            {!targetDocumentId && <div className="grid gap-4 sm:grid-cols-2">
+            {!targetDocumentId && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Nothing below is needed to save. Open a step only if you want it.
+                </p>
+                {fromItem && <AttachedItemChip names={itemName ? [itemName] : ["this item"]} />}
+                <OptionalStep
+                  title={fromItem ? "Attach to more items" : "Attach to an item"}
+                  summary={itemIds.length
+                    ? `${itemIds.length === 1 ? "1 item" : `${itemIds.length} items`} attached`
+                    : "Not attached. It stays in the library."}
+                >
+                  <ItemMultiSelect
+                    selected={itemIds}
+                    onChange={setItemIds}
+                    hint="Scanning does not create items or purchases."
+                    disabled={busy}
+                  />
+                </OptionalStep>
+                <OptionalStep title="Add details" summary="Type, title, merchant and date">
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Title" htmlFor="scan-title" optional>
                 <Input
                   id="scan-title"
@@ -970,15 +995,10 @@ export function DocumentScanDialog({
                   disabled={busy}
                 />
               </Field>
-            </div>}
-
-            {!targetDocumentId && <ItemMultiSelect
-              selected={itemIds}
-              onChange={setItemIds}
-              label="Attach to items"
-              hint="Review the selected items before saving. Scanning does not create items or purchases."
-              disabled={busy}
-            />}
+            </div>
+                </OptionalStep>
+              </div>
+            )}
 
           </>
         )}

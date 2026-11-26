@@ -19,6 +19,24 @@ export function AssistantDocumentReview({
     return <p role="alert" className="text-xs">Document review is unavailable. Check your access and try again.</p>;
   }
   if (!document) return <p role="status" className="text-xs">Loading document review…</p>;
+  // A manual is saved and read. It has no purchase-style review.
+  if (document.document_type === "manual") {
+    return (
+      <section className="space-y-3" aria-label="Assistant manual">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="min-w-0 break-words text-sm font-medium">Manual: {document.title}</h2>
+          <Link to={`/documents/${document.id}`} className="inline-flex min-h-11 items-center text-xs underline underline-offset-4">Open manual</Link>
+        </div>
+        <DocumentProcessingStatus
+          documentId={document.id}
+          enabled={enabled}
+          compact
+          documentType="manual"
+          onManualReview={() => undefined}
+        />
+      </section>
+    );
+  }
   return (
     <section className="space-y-3" aria-label="Assistant document review">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -28,6 +46,7 @@ export function AssistantDocumentReview({
       <DocumentProcessingStatus
         documentId={document.id}
         enabled={enabled}
+        documentType={document.document_type}
         onManualReview={() => setManualRequest((value) => value + 1)}
       />
       <div className="surface p-4">

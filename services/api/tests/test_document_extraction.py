@@ -1071,3 +1071,149 @@ def test_reapply_payload_mismatch_and_allocate_upsert_are_safe(owner_client):
     assert reapply.json()["purchase_id"] == purchase_id
     with SessionLocal() as db:
         assert int(db.scalar(select(func.count(PurchaseAllocation.id))) or 0) == 1
+
+
+THREE_LINE_RECEIPT = """CORNER HARDWARE
+Date: 02/14/2026
+Invoice: INV-9100
+Ladder 1 x 100.00 100.00
+Paint Roller 2 x 25.00 50.00
+Work Lamp 1 x 150.00 150.00
+Total $300.00
+"""
+
+
+def test_lines_can_be_applied_in_parts_without_a_second_purchase_or_item(owner_client):
+    room = create_room(owner_client)
+    document = upload_document(owner_client, THREE_LINE_RECEIPT)
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    assert extraction["line_states"] == {}
+    assert extraction["applied_version"] is None
+    apply_url = f"/api/v1/documents/{document['id']}/extraction/apply"
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+
+    def create(line, name, **extra):
+        return {
+            "line_id": line["id"],
+            "action": "create",
+            "new_item": {"name": name, "quantity": 1, "room_id": room["id"]},
+            **extra,
+        }
+
+    def request(lines, **extra):
+        return {
+            "request_id": str(uuid.uuid4()),
+            "extraction_version": extraction["version"],
+            "purchase_action": "create",
+            "purchase": {
+                "merchant": "Corner Hardware",
+                "purchase_date": "2026-02-14",
+                "price_cents": 30000,
+                "currency": "USD",
+            },
+            "lines": lines,
+            **extra,
+        }
+
+    def counts():
+        with SessionLocal() as db:
+            return {
+                "items": int(db.scalar(select(func.count(Item.id))) or 0),
+                "purchases": int(db.scalar(select(func.count(Purchase.id))) or 0),
+                "allocations": int(db.scalar(select(func.count(PurchaseAllocation.id))) or 0),
+            }
+
+    # Part one: one of three lines. The purchase is recorded with the invoice total.
+    first_payload = request([create(ladder, "Ladder")])
+    first = owner_client.post(apply_url, json=first_payload)
+    assert first.status_code == 200, first.text
+    purchase_id = first.json()["purchase_id"]
+    purchase = owner_client.get(f"/api/v1/purchases/{purchase_id}").json()
+    assert purchase["allocated_total_cents"] == 10000
+    assert purchase["unallocated_cents"] == 20000
+
+    # After a reload the applied line is known and the other two are still pending.
+    review = owner_client.get(review_url).json()
+    assert review["applied_version"] == extraction["version"]
+    assert set(review["line_states"]) == {ladder["id"]}
+    state = review["line_states"][ladder["id"]]
+    assert state["status"] == "applied"
+    assert state["action"] == "create"
+    assert state["item"]["name"] == "Ladder"
+
+    # A skipped line is remembered with its edits. An applied line cannot be skipped.
+    skip_url = f"{review_url}/lines/{lamp['id']}/skip"
+    skipped = owner_client.post(skip_url, json={"description": "Work lamp, LED", "quantity": 1})
+    assert skipped.status_code == 200, skipped.text
+    lamp_state = owner_client.get(review_url).json()["line_states"][lamp["id"]]
+    assert lamp_state["status"] == "skipped"
+    assert lamp_state["description"] == "Work lamp, LED"
+    assert owner_client.post(f"{review_url}/lines/{ladder['id']}/skip").status_code == 409
+    assert owner_client.post(f"{review_url}/lines/not-a-line/skip").status_code == 422
+
+    # Sending the first line again changes nothing: alone it is refused, and next to
+    # a new line it is passed over.
+    alone = owner_client.post(apply_url, json=request([create(ladder, "Ladder")]))
+    assert alone.status_code == 409
+    assert alone.json()["detail"]["code"] == "already_applied"
+    second = owner_client.post(
+        apply_url, json=request([create(ladder, "Ladder"), create(roller, "Paint roller")])
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["already_applied_line_ids"] == [ladder["id"]]
+    assert second.json()["purchase_id"] == purchase_id
+    assert len(second.json()["created_item_ids"]) == 1
+    assert counts() == {"items": 2, "purchases": 1, "allocations": 2}
+
+    # The parts together cannot go over the purchase total. A refused part saves nothing.
+    too_much = owner_client.post(
+        apply_url, json=request([create(lamp, "Work lamp", line_total_cents=20000)])
+    )
+    assert too_much.status_code == 422
+    assert too_much.json()["detail"]["code"] == "allocation_exceeds_purchase"
+    assert counts() == {"items": 2, "purchases": 1, "allocations": 2}
+    assert owner_client.get(review_url).json()["line_states"][lamp["id"]]["status"] == "skipped"
+
+    # Restore puts the line back as pending. Applying it finishes the purchase.
+    restored = owner_client.post(f"{review_url}/lines/{lamp['id']}/restore")
+    assert restored.status_code == 200, restored.text
+    assert lamp["id"] not in restored.json()["line_states"]
+    third_payload = request([create(lamp, "Work lamp")])
+    third = owner_client.post(apply_url, json=third_payload)
+    assert third.status_code == 200, third.text
+    assert third.json()["purchase_id"] == purchase_id
+    purchase = owner_client.get(f"/api/v1/purchases/{purchase_id}").json()
+    assert purchase["price_cents"] == 30000
+    assert purchase["allocated_total_cents"] == 30000
+    assert purchase["unallocated_cents"] == 0
+    assert len(purchase["allocations"]) == 3
+    assert len({entry["item_id"] for entry in purchase["allocations"]}) == 3
+    assert counts() == {"items": 3, "purchases": 1, "allocations": 3}
+    states = owner_client.get(review_url).json()["line_states"]
+    assert {line_id: entry["status"] for line_id, entry in states.items()} == {
+        ladder["id"]: "applied",
+        roller["id"]: "applied",
+        lamp["id"]: "applied",
+    }
+
+    # Request ids still replay the stored result, for the first part and the last.
+    for payload, response in ((first_payload, first), (third_payload, third)):
+        replay = owner_client.post(apply_url, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["created_item_ids"] == response.json()["created_item_ids"]
+    assert counts() == {"items": 3, "purchases": 1, "allocations": 3}
+    document_items = owner_client.get(f"/api/v1/documents/{document['id']}").json()["items"]
+    names = sorted(item["name"] for item in document_items)
+    assert names == ["Ladder", "Paint roller", "Work lamp"]
+
+    # Everything is applied now, so one more apply is refused. A deliberate re-apply
+    # keeps its meaning: it is a new apply with its own purchase.
+    done = owner_client.post(apply_url, json=request([create(lamp, "Work lamp")]))
+    assert done.status_code == 409
+    again = owner_client.post(
+        apply_url, json=request([create(lamp, "Second work lamp")], allow_reapply=True)
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["purchase_id"] != purchase_id
+    assert counts()["purchases"] == 2

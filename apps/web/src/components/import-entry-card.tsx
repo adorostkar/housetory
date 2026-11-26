@@ -4,7 +4,6 @@ import {
   CircleHelp,
   FileText,
   GitMerge,
-  MapPin,
   Plus,
   Sparkles,
 } from "lucide-react";
@@ -15,14 +14,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/form-field";
 import { Input } from "@/components/ui/input";
+import { MoreDetails, ReviewRow, type ReviewValue } from "@/components/review-row";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import type {
   Category,
+  DuplicateCandidate,
   ImportDecision,
   ImportEntry,
-  ImportEntryAction,
   ImportMergeField,
   LocationProposal,
   ProposedItem,
@@ -31,11 +31,7 @@ import type {
 } from "@/lib/types";
 import { CURRENCIES } from "@/lib/labels";
 import { useDefaultCurrency } from "@/lib/queries";
-import {
-  cn,
-  formatCurrency,
-  locationPath,
-} from "@/lib/utils";
+import { formatCurrency, locationPath } from "@/lib/utils";
 
 const MERGE_FIELDS: Array<{ value: ImportMergeField; label: string }> = [
   { value: "serial_number", label: "Serial number" },
@@ -67,6 +63,51 @@ function SourceBadge({ source }: { source: string | undefined }) {
   );
 }
 
+/** What must be right before a row can be accepted. Each message belongs to one field. */
+export interface ImportEntryErrors {
+  name?: string;
+  quantity?: string;
+  room?: string;
+  storage_location?: string;
+  merge?: string;
+}
+
+export function validateImportEntry(
+  proposed: ProposedItem,
+  decision: ImportDecision,
+): ImportEntryErrors {
+  const errors: ImportEntryErrors = {};
+  if (decision.action === "merge") {
+    if (!decision.mergeItemId) errors.merge = "Choose the existing item to update.";
+    else if (decision.mergeFields.length === 0) errors.merge = "Choose at least one field to update.";
+    return errors;
+  }
+  if (!proposed.name.trim()) errors.name = "Give this item a name.";
+  if (!Number.isInteger(proposed.quantity) || proposed.quantity < 0) {
+    errors.quantity = "Enter a whole number, 0 or more.";
+  }
+  if (proposed.room?.status === "ambiguous") {
+    errors.room = "More than one room matches. Choose the room.";
+  }
+  if (proposed.storage_location?.status === "ambiguous") {
+    errors.storage_location = "More than one place matches. Choose the place.";
+  }
+  return errors;
+}
+
+export function hasImportEntryErrors(errors: ImportEntryErrors | undefined): boolean {
+  return Boolean(errors && Object.values(errors).some(Boolean));
+}
+
+// The fields of an existing item that a possible duplicate tells us about.
+const CANDIDATE_VALUES: Partial<Record<ImportMergeField, (candidate: DuplicateCandidate) => string | null>> = {
+  brand: (candidate) => candidate.brand,
+  model: (candidate) => candidate.model,
+  serial_number: (candidate) => candidate.serial_number,
+  room: (candidate) => candidate.room_name,
+  storage_location: (candidate) => candidate.location_name,
+};
+
 export function ImportEntryCard({
   entry,
   proposed,
@@ -79,6 +120,11 @@ export function ImportEntryCard({
   onCreateRoom,
   onCreateLocation,
   disabled,
+  errors,
+  pending = false,
+  onAdd,
+  onSkip,
+  onReject,
 }: {
   entry: ImportEntry;
   proposed: ProposedItem;
@@ -96,9 +142,35 @@ export function ImportEntryCard({
     parentId: string | null,
   ) => Promise<StorageLocation | null>;
   disabled: boolean;
+  /** Messages from the last attempt to accept this row. Shown beside their fields. */
+  errors?: ImportEntryErrors;
+  /** This row is being saved right now. */
+  pending?: boolean;
+  /** Add this one row (or apply its update) without touching the others. */
+  onAdd?: () => void;
+  /** Skip removes the row from the list. Its edits are kept and it can be restored. */
+  onSkip?: () => void;
+  onReject?: () => void;
 }) {
   const defaultCurrency = useDefaultCurrency();
-  const [open, setOpen] = React.useState(() => !proposed.room?.matched_id);
+  // Rows start closed. Only a field that must be corrected opens the editor by itself.
+  const [open, setOpen] = React.useState(false);
+  const needsEditor = Boolean(errors?.room || errors?.storage_location);
+  React.useEffect(() => {
+    if (needsEditor) setOpen(true);
+  }, [needsEditor]);
+  // Decided once, so a field does not jump out of "More details" while it is typed in.
+  const [filled] = React.useState(() => ({
+    identity: Boolean(
+      proposed.brand || proposed.model || proposed.serial_number ||
+      proposed.tags.length || proposed.description,
+    ),
+    purchase: Boolean(
+      proposed.purchase && (proposed.purchase.merchant || proposed.purchase.purchase_date ||
+        proposed.purchase.price_cents != null || proposed.purchase.order_number),
+    ),
+    warranty: Boolean(proposed.warranty && (proposed.warranty.provider || proposed.warranty.end_date)),
+  }));
   const [creatingRoom, setCreatingRoom] = React.useState(false);
   const [creatingLocation, setCreatingLocation] = React.useState(false);
   const final = ["imported", "merged", "skipped", "rejected"].includes(entry.status);
@@ -206,197 +278,75 @@ export function ImportEntryCard({
       proposed.storage_location?.status === "ambiguous" ||
       !proposed.storage_location);
 
-  return (
-    <article
-      className={cn(
-        "surface overflow-hidden transition-colors",
-        decision.include && !final && "border-sage/40",
-        final && entry.status === "failed" && "border-destructive/30",
-      )}
-    >
-      <div className="flex items-start gap-3 p-4 sm:p-5">
-        {!final && (
-          <input
-            type="checkbox"
-            checked={decision.include}
-            disabled={disabled}
-            onChange={(event) => setDecision({ include: event.target.checked })}
-            aria-label={`Include ${proposed.name}`}
-            className="mt-1 size-4 accent-primary"
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium">{proposed.name}</h3>
-            {proposed.quantity !== 1 && (
-              <Badge variant="secondary">×{proposed.quantity}</Badge>
-            )}
-            <Badge variant="outline">
-              {entry.status === "proposed"
-                ? "Proposed"
-                : entry.status.charAt(0).toUpperCase() + entry.status.slice(1)}
-            </Badge>
-            {proposed.confidence != null && (
-              <Badge variant={proposed.confidence >= 80 ? "sage" : "brass"}>
-                {proposed.confidence}% confidence
-              </Badge>
-            )}
-            {highDuplicate && !final && (
-              <Badge variant="brass">
-                <AlertTriangle className="size-3" />
-                Possible duplicate
-              </Badge>
-            )}
-            {proposed.relationships?.ai_assisted ? (
-              <Badge variant="brass">
-                <Sparkles className="size-3" />
-                AI-assisted
-              </Badge>
-            ) : null}
-          </div>
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <MapPin className="size-3" />
-              {proposed.room?.name || "No room"}
-              {proposed.storage_location?.identifier ||
-              proposed.storage_location?.name
-                ? ` / ${
-                    proposed.storage_location?.identifier ??
-                    proposed.storage_location?.name
-                  }`
-                : ""}
-            </span>
-            {proposed.purchase?.price_cents != null && (
-              <span>
-                {formatCurrency(
-                  proposed.purchase.price_cents,
-                  proposed.purchase.currency ?? defaultCurrency,
-                )}
-              </span>
-            )}
-            {entry.source_path && <span className="truncate">{entry.source_path}</span>}
-          </p>
-          {entry.error && (
-            <p className="mt-2 text-2xs text-destructive">{entry.error}</p>
-          )}
-          {entry.imported_item_id && (
-            <Link
-              to={`/items/${entry.imported_item_id}`}
-              className="mt-2 inline-flex items-center gap-1 text-2xs font-medium underline-offset-4 hover:underline"
-            >
-              Open imported item <ArrowUpRight className="size-3" />
-            </Link>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {!final && (
-            <Select
-              aria-label={`Action for ${proposed.name}`}
-              value={decision.action}
-              disabled={disabled}
-              onChange={(event) =>
-                setDecision({ action: event.target.value as ImportEntryAction })
-              }
-              className="h-8 w-[120px] text-2xs"
-            >
-              <option value="import">Import new</option>
-              <option value="skip">Skip</option>
-              <option value="reject">Reject</option>
-              {entry.duplicate_candidates.length > 0 && (
-                <option value="merge">Merge</option>
-              )}
-            </Select>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setOpen((current) => !current)}
-            aria-expanded={open}
-          >
-            {open ? "Close" : "Review fields"}
-          </Button>
-        </div>
-      </div>
+  const mergeCandidate = decision.action === "merge"
+    ? entry.duplicate_candidates.find((candidate) => candidate.item_id === decision.mergeItemId)
+    : undefined;
+  const inferred = (field: string) => proposed.field_sources[field] === "inferred";
+  const unsettled = (proposal: LocationProposal | null) =>
+    proposal?.status === "missing" || proposal?.status === "ambiguous";
+  const placeName = (proposal: LocationProposal) =>
+    `${proposal.name ?? proposal.text}${proposal.status === "missing" ? " (new)" : ""}`;
+  const placeText = [
+    proposed.room ? placeName(proposed.room) : "No room",
+    proposed.storage_location ? placeName(proposed.storage_location) : null,
+  ].filter(Boolean).join(" / ");
+  const proposedValue: Partial<Record<ImportMergeField, string | null>> = {
+    brand: proposed.brand,
+    model: proposed.model,
+    serial_number: proposed.serial_number,
+    room: proposed.room?.name ?? null,
+    storage_location: proposed.storage_location?.name ?? null,
+    description: proposed.description,
+    quantity: String(proposed.quantity),
+    tags: proposed.tags.join(", ") || null,
+    purchase: proposed.purchase?.price_cents != null
+      ? formatCurrency(proposed.purchase.price_cents, proposed.purchase.currency ?? defaultCurrency)
+      : proposed.purchase?.merchant ?? null,
+    warranty: proposed.warranty?.end_date ?? proposed.warranty?.provider ?? null,
+  };
+  // A new record shows the values that were read. An update shows old → proposed.
+  const values: ReviewValue[] = mergeCandidate
+    ? [
+        { label: "Updates", value: mergeCandidate.name },
+        ...MERGE_FIELDS.filter((field) => decision.mergeFields.includes(field.value)).map((field) => {
+          const current = CANDIDATE_VALUES[field.value];
+          return {
+            label: field.label,
+            before: current ? current(mergeCandidate) ?? "empty" : undefined,
+            value: proposedValue[field.value] ?? "empty",
+          };
+        }),
+      ]
+    : [
+        {
+          label: "Place",
+          value: placeText,
+          uncertain: unsettled(proposed.room) || unsettled(proposed.storage_location) ||
+            inferred("room") || inferred("storage_location"),
+        },
+        ...(proposed.category?.name
+          ? [{ label: "Category", value: proposed.category.name, uncertain: inferred("category") }]
+          : []),
+        ...(proposed.brand || proposed.model
+          ? [{
+              label: "Make",
+              value: [proposed.brand, proposed.model].filter(Boolean).join(" "),
+              uncertain: inferred("brand") || inferred("model"),
+            }]
+          : []),
+        ...(proposed.serial_number
+          ? [{ label: "Serial", value: proposed.serial_number, uncertain: inferred("serial_number") }]
+          : []),
+        ...(proposed.purchase?.price_cents != null
+          ? [{
+              label: "Price",
+              value: formatCurrency(proposed.purchase.price_cents, proposed.purchase.currency ?? defaultCurrency),
+            }]
+          : []),
+      ];
 
-      {open && (
-        <div className="space-y-6 border-t border-border/60 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
-            <CircleHelp className="size-3.5" />
-            <span>Field confidence:</span>
-            {["name", "room", "storage_location", "serial_number", "brand", "model"].map(
-              (field) => (
-                <span key={field} className="inline-flex items-center gap-1">
-                  <span className="capitalize">{field.replace("_", " ")}</span>
-                  <SourceBadge source={proposed.field_sources[field]} />
-                </span>
-              ),
-            )}
-          </div>
-          {inferredFields.length > 0 && (
-            <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
-              Inferred by AI/heuristics: {inferredFields.join(", ")}. Verify before
-              importing.
-            </p>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Item name" htmlFor={`name-${entry.id}`}>
-              <Input
-                id={`name-${entry.id}`}
-                value={proposed.name}
-                maxLength={200}
-                disabled={disabled || final}
-                onChange={(event) => update({ name: event.target.value })}
-              />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Quantity" htmlFor={`quantity-${entry.id}`}>
-                <Input
-                  id={`quantity-${entry.id}`}
-                  type="number"
-                  min={0}
-                  max={1_000_000}
-                  value={proposed.quantity}
-                  disabled={disabled || final}
-                  onChange={(event) => update({ quantity: Number(event.target.value) })}
-                />
-              </Field>
-              <Field label="Category" htmlFor={`category-${entry.id}`}>
-                <Input
-                  id={`category-${entry.id}`}
-                  value={proposed.category?.name ?? ""}
-                  maxLength={80}
-                  disabled={disabled || final}
-                  placeholder="No category"
-                  onChange={(event) =>
-                    update({
-                      category: event.target.value.trim()
-                        ? {
-                            text: event.target.value,
-                            status: "missing",
-                            matched_id: null,
-                            name: event.target.value,
-                            candidates: categories
-                              .filter((category) =>
-                                category.name
-                                  .toLowerCase()
-                                  .includes(event.target.value.toLowerCase()),
-                              )
-                              .map((category) => ({
-                                id: category.id,
-                                name: category.name,
-                                kind: "category",
-                                room_id: null,
-                                parent_id: null,
-                                score: 0,
-                              })),
-                          }
-                        : null,
-                    })
-                  }
-                />
-              </Field>
-            </div>
+  const identityBlock = (
+    <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Brand" htmlFor={`brand-${entry.id}`} optional>
               <Input
                 id={`brand-${entry.id}`}
@@ -455,111 +405,10 @@ export function ImportEntryCard({
                 />
               </Field>
             </div>
-          </div>
-
-          <div className="rounded-xl border border-border/60 p-4">
-            <p className="text-xs font-medium">Location</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Room" htmlFor={`room-${entry.id}`}>
-                {showRoomSelect ? (
-                  <Select
-                    id={`room-${entry.id}`}
-                    value={proposed.room?.matched_id ?? ""}
-                    disabled={disabled || final}
-                    onChange={(event) => setRoom(event.target.value)}
-                  >
-                    <option value="">No room</option>
-                    {roomOptions.map((room) => (
-                      <option key={room.id} value={room.id}>
-                        {room.name}
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
-                    <p className="font-medium">{proposed.room?.name}</p>
-                    <p className="mt-0.5 text-2xs text-muted-foreground">
-                      Suggested new room
-                    </p>
-                  </div>
-                )}
-              </Field>
-              <Field label="Storage place" htmlFor={`location-${entry.id}`}>
-                {showLocationSelect ? (
-                  <Select
-                    id={`location-${entry.id}`}
-                    value={proposed.storage_location?.matched_id ?? ""}
-                    disabled={disabled || final || !proposed.room?.matched_id}
-                    onChange={(event) => setLocation(event.target.value)}
-                  >
-                    <option value="">Room only</option>
-                    {roomLocations.map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {locationPath(locations, location.id)
-                          .map((entryLocation) => entryLocation.name)
-                          .join(" / ")}
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
-                    <p className="font-medium">{proposed.storage_location?.name}</p>
-                    <p className="mt-0.5 text-2xs text-muted-foreground">
-                      Suggested new storage place
-                      {proposed.storage_location?.suggested_parent_id
-                        ? " under the selected parent"
-                        : ""}
-                    </p>
-                  </div>
-                )}
-              </Field>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {proposed.room?.status === "missing" && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || final || creatingRoom || !proposed.room.name}
-                  onClick={createRoom}
-                >
-                  {creatingRoom ? <Spinner /> : <Plus />}
-                  Create room “{proposed.room.name}”
-                </Button>
-              )}
-              {proposed.room?.status === "ambiguous" && proposed.room.candidates.length > 0 && (
-                <p className="text-2xs text-brass">
-                  Multiple rooms match. Choose the correct one before importing.
-                </p>
-              )}
-              {proposed.room?.matched_id &&
-                proposed.storage_location?.status === "missing" && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={
-                      disabled ||
-                      final ||
-                      creatingLocation ||
-                      !proposed.storage_location.name
-                    }
-                    onClick={createLocation}
-                  >
-                    {creatingLocation ? <Spinner /> : <Plus />}
-                    Create place “{proposed.storage_location.name}”
-                  </Button>
-                )}
-              {proposed.storage_location?.status === "ambiguous" &&
-                proposed.storage_location.candidates.length > 0 && (
-                  <p className="text-2xs text-brass">
-                    Multiple storage places match. Choose one before importing.
-                  </p>
-                )}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border/60 p-4">
+    </div>
+  );
+  const purchaseBlock = (
+    <div className="rounded-xl border border-border/60 p-4">
             <p className="text-xs font-medium">Purchase</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Merchant" htmlFor={`merchant-${entry.id}`} optional>
@@ -676,9 +525,10 @@ export function ImportEntryCard({
                 />
               </Field>
             </div>
-          </div>
-
-          <div className="rounded-xl border border-border/60 p-4">
+    </div>
+  );
+  const warrantyBlock = (
+    <div className="rounded-xl border border-border/60 p-4">
             <p className="text-xs font-medium">Warranty</p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Provider" htmlFor={`warranty-provider-${entry.id}`} optional>
@@ -720,103 +570,366 @@ export function ImportEntryCard({
                 />
               </Field>
             </div>
-          </div>
+    </div>
+  );
 
-          {entry.duplicate_candidates.length > 0 && (
-            <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-4">
-              <p className="flex items-center gap-1.5 text-xs font-medium text-brass">
-                <AlertTriangle className="size-3.5" /> Possible existing items
-              </p>
-              <div className="mt-3 space-y-2">
-                {entry.duplicate_candidates.map((candidate) => (
-                  <div
-                    key={candidate.item_id}
-                    className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <Link
-                        to={`/items/${candidate.item_id}`}
-                        className="text-xs font-medium underline-offset-4 hover:underline"
-                      >
-                        {candidate.name}
-                      </Link>
-                      <p className="text-2xs text-muted-foreground">
-                        {[candidate.brand, candidate.model, candidate.room_name]
-                          .filter(Boolean)
-                          .join(" · ")}
-                        {candidate.reasons.length > 0
-                          ? ` · ${candidate.reasons.join(", ")}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Badge variant="brass">{candidate.score}%</Badge>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={disabled || final}
-                        onClick={() =>
-                          setDecision({
-                            include: true,
-                            action: "merge",
-                            mergeItemId: candidate.item_id,
-                          })
-                        }
-                      >
-                        <GitMerge />
-                        Merge
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={disabled || final}
-                        onClick={() =>
-                          setDecision({ include: true, action: "skip" })
-                        }
-                      >
-                        Skip
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+  // Shown only when a duplicate was found. Otherwise a row has no merge choices at all.
+  const duplicates = entry.duplicate_candidates.length > 0 && !final && (
+    <div className="rounded-xl border border-brass/25 bg-brass-soft/40 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-brass">
+        <AlertTriangle className="size-3.5" /> You may already have this
+      </p>
+      <div className="mt-2 space-y-2">
+        {entry.duplicate_candidates.map((candidate) => {
+          const chosen = decision.action === "merge" && decision.mergeItemId === candidate.item_id;
+          return (
+            <div
+              key={candidate.item_id}
+              className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background/60 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <Link
+                  to={`/items/${candidate.item_id}`}
+                  className="text-xs font-medium underline-offset-4 hover:underline"
+                >
+                  {candidate.name}
+                </Link>
+                <p className="text-2xs text-muted-foreground">
+                  {[candidate.brand, candidate.model, candidate.room_name]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  {candidate.reasons.length > 0
+                    ? ` · ${candidate.reasons.join(", ")}`
+                    : ""}
+                </p>
               </div>
-              {decision.action === "merge" && (
-                <div className="mt-3 border-t border-border/60 pt-3">
-                  <p className="text-2xs font-medium">Merge fields</p>
-                  <p className="mt-0.5 text-2xs text-muted-foreground">
-                    Only checked fields are written into the existing item.
-                  </p>
-                  <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                    {MERGE_FIELDS.map((field) => (
-                      <label
-                        key={field.value}
-                        className="flex items-center gap-2 text-2xs"
-                      >
-                        <input
-                          type="checkbox"
-                          className="size-3.5 accent-primary"
-                          checked={decision.mergeFields.includes(field.value)}
-                          disabled={disabled || final}
-                          onChange={(event) =>
-                            setDecision({
-                              mergeFields: event.target.checked
-                                ? [...decision.mergeFields, field.value]
-                                : decision.mergeFields.filter(
-                                    (value) => value !== field.value,
-                                  ),
-                            })
-                          }
-                        />
-                        {field.label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                <Badge variant="brass">{candidate.score}%</Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={chosen ? "default" : "outline"}
+                  className="min-h-11 lg:min-h-9"
+                  aria-pressed={chosen}
+                  disabled={disabled}
+                  onClick={() =>
+                    setDecision(chosen
+                      ? { action: "import", mergeItemId: "" }
+                      : {
+                          action: "merge",
+                          mergeItemId: candidate.item_id,
+                          mergeFields: decision.mergeFields.length ? decision.mergeFields : ["serial_number"],
+                        })
+                  }
+                >
+                  <GitMerge />
+                  {chosen ? "Updating this one" : "Update this one"}
+                </Button>
+              </div>
             </div>
+          );
+        })}
+      </div>
+      {decision.action === "merge" ? (
+        <div className="mt-3 border-t border-border/60 pt-3">
+          <p className="text-xs font-medium">Fields to update</p>
+          <p className="mt-0.5 text-2xs text-muted-foreground">
+            Only checked fields are written into the existing item. No new item is added.
+          </p>
+          <div className="mt-2 grid gap-x-3 sm:grid-cols-2">
+            {MERGE_FIELDS.map((field) => (
+              <label
+                key={field.value}
+                className="flex min-h-11 items-center gap-2 text-xs lg:min-h-8"
+              >
+                <input
+                  type="checkbox"
+                  className="size-4 rounded-none accent-primary"
+                  checked={decision.mergeFields.includes(field.value)}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    setDecision({
+                      mergeFields: event.target.checked
+                        ? [...decision.mergeFields, field.value]
+                        : decision.mergeFields.filter(
+                            (value) => value !== field.value,
+                          ),
+                    })
+                  }
+                />
+                {field.label}
+              </label>
+            ))}
+          </div>
+          {errors?.merge && (
+            <p role="alert" className="mt-2 text-xs text-destructive">{errors.merge}</p>
           )}
+        </div>
+      ) : (
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Add it as a new item, update the one you have, or skip it to keep things as they are.
+        </p>
+      )}
+    </div>
+  );
+
+  const done = entry.status === "imported" || entry.status === "merged";
+  const doneItemId = entry.imported_item_id ?? entry.matched_item_id;
+  return (
+    <ReviewRow
+      title={proposed.name}
+      titleLabel={`Name of ${entry.proposed.name || "this item"}`}
+      onTitleChange={final ? undefined : (name) => update({ name })}
+      titleError={open ? null : errors?.name}
+      quantity={Number.isNaN(proposed.quantity) ? "" : proposed.quantity}
+      onQuantityChange={final
+        ? undefined
+        : (value) => update({ quantity: value === "" ? Number.NaN : Number(value) })}
+      quantityError={open ? null : errors?.quantity}
+      values={values}
+      disabled={disabled || final}
+      selection={final || !onAdd
+        ? undefined
+        : {
+            checked: decision.include,
+            onChange: (include) => setDecision({ include }),
+            label: `Select ${proposed.name || "this item"}`,
+          }}
+      badges={
+        <>
+          {proposed.confidence != null && proposed.confidence < 80 && (
+            <Badge variant="brass">{proposed.confidence}% sure</Badge>
+          )}
+          {highDuplicate && !final && (
+            <Badge variant="brass">
+              <AlertTriangle className="size-3" />
+              Possible duplicate
+            </Badge>
+          )}
+          {proposed.relationships?.ai_assisted ? (
+            <Badge variant="brass">
+              <Sparkles className="size-3" />
+              AI-assisted
+            </Badge>
+          ) : null}
+        </>
+      }
+      error={entry.error}
+      extra={highDuplicate || decision.action === "merge" ? duplicates : null}
+      status={done ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>{entry.status === "merged" ? "Updated" : "Added"}</span>
+          {doneItemId && (
+            <Link
+              to={`/items/${doneItemId}`}
+              className="inline-flex min-h-11 items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline lg:min-h-0"
+            >
+              Open item <ArrowUpRight className="size-3" />
+            </Link>
+          )}
+        </p>
+      ) : undefined}
+      primary={onAdd ? {
+        label: decision.action === "merge" ? "Apply changes" : "Add item",
+        onClick: onAdd,
+        pending,
+      } : undefined}
+      onSkip={onSkip}
+      expand={final ? undefined : { open, onOpenChange: setOpen, label: "Edit" }}
+    >
+      <div className="flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
+        <CircleHelp className="size-3.5" />
+        <span>Field confidence:</span>
+        {["name", "room", "storage_location", "serial_number", "brand", "model"].map(
+          (field) => (
+            <span key={field} className="inline-flex items-center gap-1">
+              <span className="capitalize">{field.replace("_", " ")}</span>
+              <SourceBadge source={proposed.field_sources[field]} />
+            </span>
+          ),
+        )}
+      </div>
+      {inferredFields.length > 0 && (
+        <p className="rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-2xs leading-relaxed text-muted-foreground">
+          Inferred by AI/heuristics: {inferredFields.join(", ")}. Verify before
+          importing.
+        </p>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Item name" htmlFor={`name-${entry.id}`} error={errors?.name}>
+              <Input
+                id={`name-${entry.id}`}
+                value={proposed.name}
+                maxLength={200}
+                disabled={disabled || final}
+                onChange={(event) => update({ name: event.target.value })}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quantity" htmlFor={`quantity-${entry.id}`} error={errors?.quantity}>
+                <Input
+                  id={`quantity-${entry.id}`}
+                  type="number"
+                  min={0}
+                  max={1_000_000}
+                  value={proposed.quantity}
+                  disabled={disabled || final}
+                  onChange={(event) => update({ quantity: Number(event.target.value) })}
+                />
+              </Field>
+              <Field label="Category" htmlFor={`category-${entry.id}`}>
+                <Input
+                  id={`category-${entry.id}`}
+                  value={proposed.category?.name ?? ""}
+                  maxLength={80}
+                  disabled={disabled || final}
+                  placeholder="No category"
+                  onChange={(event) =>
+                    update({
+                      category: event.target.value.trim()
+                        ? {
+                            text: event.target.value,
+                            status: "missing",
+                            matched_id: null,
+                            name: event.target.value,
+                            candidates: categories
+                              .filter((category) =>
+                                category.name
+                                  .toLowerCase()
+                                  .includes(event.target.value.toLowerCase()),
+                              )
+                              .map((category) => ({
+                                id: category.id,
+                                name: category.name,
+                                kind: "category",
+                                room_id: null,
+                                parent_id: null,
+                                score: 0,
+                              })),
+                          }
+                        : null,
+                    })
+                  }
+                />
+              </Field>
+            </div>
+      </div>
+
+      <div className="rounded-xl border border-border/60 p-4">
+            <p className="text-xs font-medium">Location</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Room" htmlFor={`room-${entry.id}`} error={errors?.room}>
+                {showRoomSelect ? (
+                  <Select
+                    id={`room-${entry.id}`}
+                    value={proposed.room?.matched_id ?? ""}
+                    disabled={disabled || final}
+                    onChange={(event) => setRoom(event.target.value)}
+                  >
+                    <option value="">No room</option>
+                    {roomOptions.map((room) => (
+                      <option key={room.id} value={room.id}>
+                        {room.name}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
+                    <p className="font-medium">{proposed.room?.name}</p>
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
+                      Suggested new room
+                    </p>
+                  </div>
+                )}
+              </Field>
+              <Field label="Storage place" htmlFor={`location-${entry.id}`} error={errors?.storage_location}>
+                {showLocationSelect ? (
+                  <Select
+                    id={`location-${entry.id}`}
+                    value={proposed.storage_location?.matched_id ?? ""}
+                    disabled={disabled || final || !proposed.room?.matched_id}
+                    onChange={(event) => setLocation(event.target.value)}
+                  >
+                    <option value="">Room only</option>
+                    {roomLocations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {locationPath(locations, location.id)
+                          .map((entryLocation) => entryLocation.name)
+                          .join(" / ")}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <div className="rounded-lg border border-brass/30 bg-brass-soft/50 px-3 py-2 text-2xs">
+                    <p className="font-medium">{proposed.storage_location?.name}</p>
+                    <p className="mt-0.5 text-2xs text-muted-foreground">
+                      Suggested new storage place
+                      {proposed.storage_location?.suggested_parent_id
+                        ? " under the selected parent"
+                        : ""}
+                    </p>
+                  </div>
+                )}
+              </Field>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {proposed.room?.status === "missing" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled || final || creatingRoom || !proposed.room.name}
+                  onClick={createRoom}
+                >
+                  {creatingRoom ? <Spinner /> : <Plus />}
+                  Create room “{proposed.room.name}”
+                </Button>
+              )}
+              {proposed.room?.status === "ambiguous" && proposed.room.candidates.length > 0 && (
+                <p className="text-2xs text-brass">
+                  Multiple rooms match. Choose the correct one before importing.
+                </p>
+              )}
+              {proposed.room?.matched_id &&
+                proposed.storage_location?.status === "missing" && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      disabled ||
+                      final ||
+                      creatingLocation ||
+                      !proposed.storage_location.name
+                    }
+                    onClick={createLocation}
+                  >
+                    {creatingLocation ? <Spinner /> : <Plus />}
+                    Create place “{proposed.storage_location.name}”
+                  </Button>
+                )}
+              {proposed.storage_location?.status === "ambiguous" &&
+                proposed.storage_location.candidates.length > 0 && (
+                  <p className="text-2xs text-brass">
+                    Multiple storage places match. Choose one before importing.
+                  </p>
+                )}
+            </div>
+      </div>
+
+      {filled.identity && identityBlock}
+      {filled.purchase && purchaseBlock}
+      {filled.warranty && warrantyBlock}
+      {!(filled.identity && filled.purchase && filled.warranty) && (
+        <MoreDetails>
+          {!filled.identity && identityBlock}
+          {!filled.purchase && purchaseBlock}
+          {!filled.warranty && warrantyBlock}
+        </MoreDetails>
+      )}
+
+      {!highDuplicate && decision.action !== "merge" && duplicates}
 
           {(entry.source_excerpt || entry.note_title) && (
             <div className="rounded-xl bg-secondary/35 p-4">
@@ -838,44 +951,23 @@ export function ImportEntryCard({
             </div>
           )}
 
-          {entry.duplicate_candidates.length > 0 &&
-            decision.action === "merge" &&
-            !decision.mergeItemId && (
-              <p className="text-2xs text-destructive">
-                Choose an existing item to merge into.
-              </p>
-            )}
-
-          {!final && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-              <p className="text-2xs text-muted-foreground">
-                {decision.include
-                  ? `Will ${decision.action === "import" ? "create a new item" : decision.action}.`
-                  : "Not selected for this approval."}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() =>
-                    setDecision({
-                      include: true,
-                      action: "reject",
-                    })
-                  }
-                >
-                  Reject entry
-                </Button>
-                {decision.action === "merge" && decision.mergeFields.length === 0 && (
-                  <Badge variant="outline">Choose merge fields</Badge>
-                )}
-              </div>
-            </div>
-          )}
+      {onReject && !final && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
+          <p className="text-2xs text-muted-foreground">
+            Reject marks this row as wrong. It moves to Skipped and can be restored.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="min-h-11 lg:min-h-9"
+            disabled={disabled}
+            onClick={onReject}
+          >
+            Reject entry
+          </Button>
         </div>
       )}
-    </article>
+    </ReviewRow>
   );
 }

@@ -774,3 +774,41 @@ def apply_import(
         failed=failed,
         failures=failures,
     )
+
+
+def restore_import_entry(db: Session, batch: ImportBatch, entry_id: uuid.UUID) -> ImportBatch:
+    """Put a skipped or rejected entry back into the review, with its saved edits.
+
+    Skip and Reject are remembered so that a row does not come back by itself. This is
+    the explicit way back. An imported or merged entry is never reopened.
+    """
+    entry = db.scalar(
+        select(ImportEntry)
+        .where(ImportEntry.id == entry_id, ImportEntry.batch_id == batch.id)
+        .with_for_update()
+    )
+    if entry is None:
+        raise ApiError(404, "import_entry_not_found", "Import entry not found.")
+    if entry.status not in {
+        ImportEntryStatus.SKIPPED.value,
+        ImportEntryStatus.REJECTED.value,
+    }:
+        raise ApiError(
+            409,
+            "import_entry_not_skipped",
+            "Only a skipped row can be restored. Refresh the review.",
+        )
+    entry.status = ImportEntryStatus.PROPOSED.value
+    entry.duplicate_resolution = None
+    entry.error = None
+    db.flush()
+    statuses = list(
+        db.scalars(select(ImportEntry.status).where(ImportEntry.batch_id == batch.id)).all()
+    )
+    batch.skipped_entries = statuses.count(ImportEntryStatus.SKIPPED.value)
+    # A finished batch has an open row again, so it is back in review.
+    if batch.status == ImportStatus.COMPLETED.value:
+        batch.status = ImportStatus.REVIEW.value
+        batch.completed_at = None
+    db.commit()
+    return batch

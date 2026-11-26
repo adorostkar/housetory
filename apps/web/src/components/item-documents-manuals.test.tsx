@@ -419,7 +419,10 @@ describe("ItemDocumentsAndManuals", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add manual" }));
 
     expect(screen.getByRole("heading", { name: "Add a manual" })).toBeVisible();
-    expect(screen.getByText(/attached to this item automatically/)).toBeVisible();
+    // The file is saved at once; nothing is asked before it.
+    expect(screen.getByText(/It is saved at once; no make or model is needed/)).toBeVisible();
+    expect(screen.getByLabelText("Manual file")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Title/)).not.toBeInTheDocument();
     expect(screen.queryByText("Compatible items")).not.toBeInTheDocument();
   });
 

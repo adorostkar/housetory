@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -232,7 +232,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 async function renderReview(client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-  }), open = true, captureContext?: DocumentCaptureContext, processing = false) {
+  }), open = true, captureContext?: DocumentCaptureContext, processing = false, openLine = true) {
   const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
@@ -242,7 +242,17 @@ async function renderReview(client = new QueryClient({
     </QueryClientProvider>,
   );
   if (open) await userEvent.click(await screen.findByRole("button", { name: "Review extraction" }));
+  // Rows are closed by default. Most cases here are about the editor of the first line.
+  if (open && openLine) {
+    const edit = screen.queryAllByRole("button", { name: "Edit" })[0];
+    if (edit) await userEvent.click(edit);
+  }
   return result;
+}
+
+// A checkbox only selects a line for the bulk Apply.
+async function selectLine(index = 0) {
+  await userEvent.click(screen.getAllByRole("checkbox", { name: /^Select line/ })[index]!);
 }
 
 beforeEach(() => {
@@ -432,11 +442,12 @@ describe("DocumentExtractionReview", () => {
     }));
     expect(await screen.findByText(/New document extraction is available/)).toBeVisible();
     expect(screen.getByDisplayValue("My correction")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeDisabled();
     expect(api.post).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Replace draft with refreshed extraction" }));
     expect(screen.getByDisplayValue("Fresh extraction")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeEnabled();
+    await selectLine();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeEnabled();
   });
 
   it("shows source financial checks and unknowns rather than fabricated zeroes", async () => {
@@ -466,7 +477,7 @@ describe("DocumentExtractionReview", () => {
     expect(screen.getByLabelText(/^Total/)).toHaveValue(-159.98);
     expect(screen.getByLabelText(/^Unit price/)).toHaveValue(-79.99);
     expect(screen.getByText(/Credit notes remain evidence/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeDisabled();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -475,7 +486,7 @@ describe("DocumentExtractionReview", () => {
     await userEvent.clear(screen.getByLabelText(/^Total/));
     await userEvent.type(screen.getByLabelText(/^Total/), "1.005");
     expect(screen.getByText(/at most two decimal places/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeDisabled();
   });
 
   it("keeps unit-price evidence distinct from the editable quantity and line total", async () => {
@@ -520,7 +531,8 @@ describe("DocumentExtractionReview", () => {
     expect(screen.queryByRole("button", { name: "Review AI suggestions" })).not.toBeInTheDocument();
     expect(screen.queryByText("AI refinement proposal")).not.toBeInTheDocument();
     expect(api.post).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Apply reviewed changes" }));
+    await selectLine();
+    await userEvent.click(screen.getByRole("button", { name: /^Apply: / }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       "/documents/document-1/extraction/apply",
       expect.objectContaining({ extraction_version: "suggested" }),
@@ -566,7 +578,7 @@ describe("DocumentExtractionReview", () => {
     expect(await screen.findByText(/Preparing one AI-assisted review/)).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Use local/manual review now" }));
     expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeVisible();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -631,7 +643,7 @@ describe("DocumentExtractionReview", () => {
     await renderReview();
     expect(await screen.findByText(label)).toBeVisible();
     expect(screen.getByDisplayValue("CORNER HARDWARE")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Apply reviewed changes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Apply: / })).toBeVisible();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -684,7 +696,8 @@ describe("DocumentExtractionReview", () => {
   it("shows line items, matches, charges and applies edited values and choices", async () => {
     await renderReview();
     expect(await screen.findByText("Product lines")).toBeVisible();
-    expect(screen.getByDisplayValue("Cordless Drill")).toBeVisible();
+    // The name is in the row and in its editor.
+    expect(screen.getAllByDisplayValue("Cordless Drill")).toHaveLength(2);
     expect(screen.getByText("Identifier verified")).toBeVisible();
     expect(screen.getByText(/serial number matches SN-123/)).toBeVisible();
     expect(screen.getByText(/Tax, discount and shipping/)).toBeVisible();
@@ -696,7 +709,8 @@ describe("DocumentExtractionReview", () => {
     const quantity = screen.getByLabelText(/^Qty/);
     await userEvent.clear(quantity);
     await userEvent.type(quantity, "3");
-    await userEvent.click(screen.getByRole("button", { name: "Apply reviewed changes" }));
+    await selectLine();
+    await userEvent.click(screen.getByRole("button", { name: "Apply: link 1 item, record the purchase" }));
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
@@ -726,13 +740,22 @@ describe("DocumentExtractionReview", () => {
     await renderReview();
     await screen.findByText("Product lines");
     await userEvent.click(screen.getByRole("button", { name: "Create new item" }));
+    // The row's own button now adds an item. What is missing is said in the row,
+    // and nothing is sent.
+    const row = screen.getByRole("article", { name: "Cordless Drill" });
+    await userEvent.click(within(row).getByRole("button", { name: "Add item" }));
+    expect(within(row).getByRole("alert")).toHaveTextContent("A new item needs a room.");
+    expect(api.post).not.toHaveBeenCalled();
+    await selectLine();
+    expect(screen.getByRole("button", { name: /^Apply: add 1 item/ })).toBeDisabled();
     await userEvent.selectOptions(screen.getByLabelText("Destination room"), "room-1");
+    expect(within(row).queryByRole("alert")).not.toBeInTheDocument();
     await userEvent.selectOptions(
       screen.getByLabelText("Optional container"),
       "location-1",
     );
     await userEvent.click(screen.getByRole("checkbox", { name: /Apply extracted warranty evidence/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Apply reviewed changes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply: add 1 item, record the purchase" }));
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
         "/documents/document-1/extraction/apply",
@@ -829,7 +852,8 @@ describe("DocumentExtractionReview", () => {
     expect(screen.getByText("AI-refined proposal")).toBeVisible();
     expect(screen.getByDisplayValue("Corner Hardware AI")).toBeVisible();
     expect(screen.getByDisplayValue("Cordless Drill XPH12")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Apply reviewed changes" }));
+    await selectLine();
+    await userEvent.click(screen.getByRole("button", { name: /^Apply: / }));
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
         "/documents/document-1/extraction/apply",
@@ -845,5 +869,126 @@ describe("DocumentExtractionReview", () => {
         }),
       ),
     );
+  });
+  const twoLines: ExtractionReview = {
+    ...review,
+    lines: [
+      review.lines[0]!,
+      { ...review.lines[0]!, id: "line-2", line_number: 3, description: "Drill Bit Set", quantity: 1,
+        unit_price_cents: 2450, line_total_cents: 2450 },
+      ...review.lines.slice(1),
+    ],
+  };
+  const applyCalls = () => vi.mocked(api.post).mock.calls.filter(([path]) => path.endsWith("/extraction/apply"));
+
+  it("starts with closed rows and nothing selected; a strong match is only the suggestion", async () => {
+    vi.mocked(api.get).mockResolvedValue(twoLines);
+    await renderReview(undefined, true, undefined, false, false);
+    const drill = screen.getByRole("article", { name: "Cordless Drill" });
+    const bits = screen.getByRole("article", { name: "Drill Bit Set" });
+    for (const box of screen.getAllByRole("checkbox", { name: /^Select line/ })) expect(box).not.toBeChecked();
+    // No editor is open, and the old Skip line choice is gone.
+    expect(screen.queryByLabelText(/^Unit price/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip line" })).not.toBeInTheDocument();
+    // Each row says what it would do, and its button does exactly that.
+    expect(within(drill).getByText("Cordless Drill", { selector: "span" }).closest("li")).toHaveTextContent("Link to: Cordless Drill");
+    expect(within(drill).getByRole("button", { name: "Link to item" })).toBeEnabled();
+    expect(within(bits).getByText("not chosen").closest("li")).toHaveTextContent(/Room: not chosen\s*· check/);
+    expect(within(bits).getByRole("button", { name: "Add item" })).toBeEnabled();
+
+    const apply = screen.getByRole("button", { name: "Apply: nothing selected" });
+    expect(apply).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Select all" }));
+    expect(screen.getByText(/^2 selected · lines that are not selected stay pending/)).toBeVisible();
+    // The new item still needs a room, so the bulk action waits and the row says why.
+    expect(screen.getByRole("button", { name: "Apply: add 1 item, link 1 item, record the purchase" })).toBeDisabled();
+    expect(within(bits).getByRole("alert")).toHaveTextContent("A new item needs a room.");
+    await userEvent.click(screen.getByRole("checkbox", { name: /^Select line 3/ }));
+    expect(screen.getByRole("button", { name: "Apply: link 1 item, record the purchase" })).toBeEnabled();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("applies one row alone, leaves the other pending, and an applied row cannot be applied again", async () => {
+    let extraction: ExtractionReview & { line_states?: object; applied_version?: string } = twoLines;
+    vi.mocked(api.get).mockImplementation(async () => extraction);
+    vi.mocked(api.post).mockImplementation(async (path) => {
+      if (path.endsWith("/extraction/apply")) {
+        extraction = {
+          ...twoLines,
+          applied: [{ request_id: "request-1", applied_at: "2026-01-02T00:00:00Z", created_item_ids: [],
+            updated_item_ids: [], linked_item_ids: ["item-1"], skipped_line_ids: [], purchase_id: "purchase-1" }],
+          applied_version: "version-1",
+          line_states: { "line-1": { status: "applied", action: "link", item: { id: "item-1", name: "Cordless Drill" } } },
+        };
+      }
+      return applied;
+    });
+    await renderReview(undefined, true, undefined, false, false);
+    await userEvent.click(
+      within(screen.getByRole("article", { name: "Cordless Drill" })).getByRole("button", { name: "Link to item" }),
+    );
+    await waitFor(() => expect(applyCalls()).toHaveLength(1));
+    // Only that line is sent. The other line is not sent as a skip.
+    expect(applyCalls()[0]![1]).toEqual(expect.objectContaining({
+      purchase_action: "create",
+      allow_reapply: false,
+      lines: [expect.objectContaining({ line_id: "line-1", action: "link", item_id: "item-1" })],
+    }));
+
+    const done = await screen.findByRole("article", { name: "Cordless Drill" });
+    await waitFor(() => expect(within(done).getByText("Linked")).toBeVisible());
+    expect(within(done).queryByRole("button", { name: "Link to item" })).not.toBeInTheDocument();
+    expect(within(done).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(done).getByRole("link", { name: "Open item" })).toHaveAttribute("href", "/items/item-1");
+    expect(screen.getByText("Part of this document is applied")).toBeVisible();
+
+    // The other line is still pending and joins the purchase that was recorded.
+    const bits = screen.getByRole("article", { name: "Drill Bit Set" });
+    expect(within(bits).getByRole("button", { name: "Add item" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Select all" }));
+    expect(screen.getByText(/^1 selected · lines that are not selected stay pending/)).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Apply: add 1 item, add to the recorded purchase/ })).toBeInTheDocument();
+    expect(applyCalls()).toHaveLength(1);
+  });
+
+  it("skips a line into Skipped with its edits and restores it after a reload", async () => {
+    let extraction: ExtractionReview & { line_states?: object } = twoLines;
+    vi.mocked(api.get).mockImplementation(async () => extraction);
+    vi.mocked(api.post).mockImplementation(async (path, body) => {
+      const skipped = path.endsWith("/lines/line-2/skip");
+      extraction = {
+        ...twoLines,
+        line_states: skipped ? { "line-2": { status: "skipped", ...(body as object) } } : {},
+      };
+      return { line_states: extraction.line_states, applied_version: null };
+    });
+    const view = await renderReview(undefined, true, undefined, false, false);
+    const name = screen.getByRole("textbox", { name: "Name of line 3" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Bit set, 20 pieces");
+    await userEvent.click(
+      within(screen.getByRole("article", { name: "Bit set, 20 pieces" })).getByRole("button", { name: "Skip" }),
+    );
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      "/documents/document-1/extraction/lines/line-2/skip",
+      { description: "Bit set, 20 pieces", quantity: 1, line_total_cents: 2450 },
+    ));
+    await waitFor(() => expect(screen.queryByRole("article", { name: "Bit set, 20 pieces" })).not.toBeInTheDocument());
+    expect(screen.getByText("Skipped (1)")).toBeVisible();
+    const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as { action: { label: string } };
+    expect(undo.action.label).toBe("Undo");
+
+    // A reload has only what the server kept: the skip, with the edited name.
+    view.unmount();
+    await renderReview(undefined, true, undefined, false, false);
+    expect(screen.queryByRole("article", { name: "Bit set, 20 pieces" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Skipped (1)"));
+    await userEvent.click(screen.getByRole("button", { name: "Restore Bit set, 20 pieces" }));
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith(
+      "/documents/document-1/extraction/lines/line-2/restore", undefined,
+    ));
+    const restored = await screen.findByRole("article", { name: "Bit set, 20 pieces" });
+    expect(within(restored).getByRole("checkbox")).not.toBeChecked();
+    expect(screen.queryByText(/^Skipped \(/)).not.toBeInTheDocument();
   });
 });

@@ -71,6 +71,7 @@ export function DocumentDetailPage() {
       : [],
   );
   const [extractionOpened, setExtractionOpened] = React.useState(false);
+  const [manualDetailsOpened, setManualDetailsOpened] = React.useState(false);
   const [manualReviewRequest, setManualReviewRequest] = React.useState({ documentId: "", revision: 0 });
   const relationsQuery = useDocumentRelations(
     documentQuery.data && extractionOpened ? documentId : undefined,
@@ -207,7 +208,7 @@ export function DocumentDetailPage() {
     >
       <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,1fr)]">
         <div className="space-y-6">
-          <DocumentProcessingStatus documentId={document.id} onManualReview={() => {
+          <DocumentProcessingStatus documentId={document.id} documentType={document.document_type} onManualReview={() => {
             setManualReviewRequest((request) => ({ documentId: document.id, revision: request.revision + 1 }));
             const review = window.document.getElementById("document-extraction-review");
             review?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -301,6 +302,24 @@ export function DocumentDetailPage() {
             </section>
           )}
 
+          {document.document_type === "manual" ? (
+            // A manual is saved and read. It has no purchase to review, so what was
+            // read stays closed and is loaded only when someone asks for it.
+            <details className="surface p-5 sm:p-6" onToggle={(event) => {
+              if (event.currentTarget.open) setManualDetailsOpened(true);
+            }}>
+              <summary className="cursor-pointer text-xs font-medium">
+                Details read from this manual
+                <span className="ml-2 text-2xs font-normal text-muted-foreground">
+                  Optional. A manual needs no review.
+                </span>
+              </summary>
+              {manualDetailsOpened && (
+                <DocumentExtractionReview key={`${document.id}:${cleanupRevision}`} document={document}
+                  onOpenChange={(open) => { if (open) setExtractionOpened(true); }} />
+              )}
+            </details>
+          ) : (
             <section id="document-extraction-review" tabIndex={-1}
               aria-labelledby="document-extraction-heading" className="surface p-5 sm:p-6">
               <div className="flex items-center gap-2">
@@ -319,6 +338,7 @@ export function DocumentDetailPage() {
                 manualReviewRequest={manualReviewRequest.documentId === document.id ? manualReviewRequest.revision : 0}
                 onOpenChange={(open) => { if (open) setExtractionOpened(true); }} />
             </section>
+          )}
 
           <DocumentText document={document} />
         </div>

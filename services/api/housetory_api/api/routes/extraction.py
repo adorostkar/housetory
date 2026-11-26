@@ -8,6 +8,9 @@ from ...domain import OcrStatus
 from ...schemas.extraction import (
     ExtractionApplyRequest,
     ExtractionApplyResult,
+    ExtractionLineSkipRequest,
+    ExtractionLineState,
+    ExtractionLineStatesOut,
     ExtractionMatchOut,
     ExtractionMatchRequest,
     ExtractionReviewOut,
@@ -47,6 +50,24 @@ def _review_document(db: Session, household_id: uuid.UUID, document_id: uuid.UUI
             "This document has no readable OCR text yet.",
         )
     return document
+
+
+def _line_states(db: Session, document) -> ExtractionLineStatesOut:
+    states, version = document_extraction_apply.line_states(db, document)
+    return ExtractionLineStatesOut(
+        line_states={
+            line_id: ExtractionLineState.model_validate(state) for line_id, state in states.items()
+        },
+        applied_version=version,
+    )
+
+
+def _review(db: Session, document) -> ExtractionReviewOut:
+    review = document_extraction.extraction_review(db, document)
+    states = _line_states(db, document)
+    review.line_states = states.line_states
+    review.applied_version = states.applied_version
+    return review
 
 
 def _line_inputs(document, request: ExtractionMatchRequest | None = None) -> list[LineMatchInput]:
@@ -92,7 +113,7 @@ def read_extraction(
     db: Session = Depends(get_db),
 ) -> ExtractionReviewOut:
     document = _review_document(db, auth.household.id, document_id)
-    return document_extraction.extraction_review(db, document)
+    return _review(db, document)
 
 
 @router.post("/{document_id}/extraction/enhancement/retry", response_model=ExtractionReviewOut)
@@ -105,7 +126,7 @@ def retry_document_enhancement(
 
     document = _review_document(db, auth.household.id, document_id)
     retry_enhancement(db, document)
-    return document_extraction.extraction_review(db, document)
+    return _review(db, document)
 
 
 @router.post("/{document_id}/extraction/enhancement/cancel", response_model=ExtractionReviewOut)
@@ -118,7 +139,7 @@ def cancel_document_enhancement(
 
     document = _review_document(db, auth.household.id, document_id)
     cancel_enhancement(db, document)
-    return document_extraction.extraction_review(db, document)
+    return _review(db, document)
 
 
 @router.post("/{document_id}/extraction/matches", response_model=ExtractionMatchOut)
@@ -164,3 +185,44 @@ def apply_extraction(
         actor_user_id=auth.user.id,
         actor_name=auth.user.name,
     )
+
+
+@router.post(
+    "/{document_id}/extraction/lines/{line_id}/skip", response_model=ExtractionLineStatesOut
+)
+def skip_extraction_line(
+    document_id: uuid.UUID,
+    line_id: str,
+    payload: ExtractionLineSkipRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionLineStatesOut:
+    """Skip one line. It stays out of the pending lines until it is restored."""
+    document = _review_document(db, auth.household.id, document_id)
+    document_extraction.ensure_extraction(db, document)
+    document = document_extraction_apply.change_line_skip(
+        db,
+        auth.household.id,
+        document,
+        line_id,
+        actor_user_id=auth.user.id,
+        edits=payload.model_dump() if payload else None,
+    )
+    return _line_states(db, document)
+
+
+@router.post(
+    "/{document_id}/extraction/lines/{line_id}/restore", response_model=ExtractionLineStatesOut
+)
+def restore_extraction_line(
+    document_id: uuid.UUID,
+    line_id: str,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ExtractionLineStatesOut:
+    """Undo Skip for one line. Nothing is applied."""
+    document = _review_document(db, auth.household.id, document_id)
+    document = document_extraction_apply.change_line_skip(
+        db, auth.household.id, document, line_id, actor_user_id=auth.user.id, restore=True
+    )
+    return _line_states(db, document)

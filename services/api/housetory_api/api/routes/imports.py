@@ -27,6 +27,7 @@ from ...services.import_pipeline import (
     apply_import,
     create_assistant_text_capture,
     enqueue_import,
+    restore_import_entry,
     serialize_batch,
 )
 from ...services.import_readers import SUPPORTED_EXTENSIONS
@@ -398,6 +399,19 @@ def apply_import_route(
         return apply_import(db, batch, payload.entries)
     except ValueError as exc:
         raise ApiError(422, "import_apply_failed", str(exc)) from None
+
+
+@router.post("/{batch_id}/entries/{entry_id}/restore", response_model=ImportBatchDetail)
+def restore_import_entry_route(
+    batch_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    auth: AuthContext = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> ImportBatchDetail:
+    """Undo Skip or Reject for one row. Its edits are kept; nothing is added."""
+    batch = _get_batch(db, auth.household.id, batch_id)
+    batch = restore_import_entry(db, batch, entry_id)
+    return serialize_batch(db, _get_batch(db, auth.household.id, batch.id))
 
 
 @router.post("/{batch_id}/enhancement/retry", response_model=ImportBatchDetail)

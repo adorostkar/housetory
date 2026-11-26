@@ -31,6 +31,7 @@ from ..import_readers import read_source_bundle
 from .apply import _apply_context_destination, _context_property
 from .apply import _item_create_from_proposal as _item_create_from_proposal
 from .apply import apply_import as apply_import
+from .apply import restore_import_entry as restore_import_entry
 from .serialization import _safe_error
 from .serialization import serialize_batch as serialize_batch
 

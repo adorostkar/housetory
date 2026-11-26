@@ -20,7 +20,13 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { HierarchyReview } from "@/components/hierarchy-review";
 import { ErrorState } from "@/components/error-state";
-import { ImportEntryCard } from "@/components/import-entry-card";
+import {
+  hasImportEntryErrors,
+  ImportEntryCard,
+  validateImportEntry,
+  type ImportEntryErrors,
+} from "@/components/import-entry-card";
+import { SkippedRow, SkippedSection } from "@/components/review-row";
 import { PageLayout, PageSkeleton } from "@/components/page-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,9 +80,13 @@ export function ImportDetailPage({
   const [initializedBatchId, setInitializedBatchId] = React.useState("");
   const initialized = initializedBatchId === batchId;
   const [summary, setSummary] = React.useState<ImportApplyResult | null>(null);
+  // Messages from the last attempt to accept a row. They sit beside their fields.
+  const [errors, setErrors] = React.useState<Record<string, ImportEntryErrors>>({});
+  const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(new Set());
 
   React.useEffect(() => {
     setSummary(null);
+    setErrors({});
   }, [batchId]);
 
   const batch = batchQuery.data;
@@ -94,28 +104,26 @@ export function ImportDetailPage({
       const highDuplicate = entry.duplicate_candidates.find(
         (candidate) => candidate.score >= duplicateThreshold,
       );
-      const final = [
-        "imported",
-        "merged",
-        "skipped",
-        "rejected",
-        "failed",
-      ].includes(entry.status);
+      const final = ["imported", "merged", "skipped", "rejected"].includes(entry.status);
       if (final) {
         nextDecisions[entry.id] = {
           include: false,
-          action: entry.status === "failed" ? "import" : "skip",
+          action: "import",
           mergeItemId: entry.matched_item_id ?? "",
           mergeFields: [],
         };
       } else if (!(entry.id in nextDecisions)) {
-        const needsReview = entry.proposed.relationships?.review === true;
+        // A review starts with nothing selected. A failed row keeps what it had, so
+        // it stays selected and can be corrected and tried again.
         nextDecisions[entry.id] = {
-          include: !highDuplicate && !needsReview,
-          action: highDuplicate ? "skip" : "import",
+          include: false,
+          action: "import",
           mergeItemId: highDuplicate?.item_id ?? "",
           mergeFields: highDuplicate ? ["serial_number"] : [],
         };
+      } else if (nextDecisions[entry.id]?.action === "skip" || nextDecisions[entry.id]?.action === "reject") {
+        // A restored row comes back open and not selected.
+        nextDecisions[entry.id] = { ...nextDecisions[entry.id]!, include: false, action: "import" };
       }
     }
     setEdits(nextEdits);
@@ -176,62 +184,145 @@ export function ImportDetailPage({
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
 
-  const apply = useMutation({
-    mutationFn: () => {
-      const hierarchy = batch?.metadata.hierarchy === true;
-      const entries = Object.entries(decisions)
-        .filter(([, decision]) => decision.include || decision.action === "reject")
-        .map(([id, decision]) => {
-          const entry = batch?.entries.find((candidate) => candidate.id === id);
-          if (decision.action === "merge") {
-            if (!decision.mergeItemId || decision.mergeFields.length === 0) {
-              throw new Error("Choose an existing item and at least one merge field.");
-            }
-            return {
-              id,
-              action: decision.action,
-              proposed: edits[id],
-              merge_item_id: decision.mergeItemId,
-              merge_fields: decision.mergeFields,
-            };
+  const payloadFor = (id: string, forced?: "skip" | "reject") => {
+    const hierarchy = batch?.metadata.hierarchy === true;
+    const decision = decisions[id];
+    const entry = batch?.entries.find((candidate) => candidate.id === id);
+    const action = forced ?? (decision?.action === "merge" ? "merge" : "import");
+    // A row can be skipped while its quantity field is empty. Its last real value is kept.
+    const edited = edits[id];
+    const proposed = edited && forced && !Number.isInteger(edited.quantity)
+      ? { ...edited, quantity: entry?.proposed.quantity ?? 1 }
+      : edited;
+    if (action === "merge" && decision) {
+      return {
+        id,
+        action,
+        proposed,
+        merge_item_id: decision.mergeItemId,
+        merge_fields: decision.mergeFields,
+      };
+    }
+    return {
+      id,
+      action,
+      proposed,
+      ...(hierarchy
+        ? {
+            entity_type:
+              decision?.entityType ??
+              (entry?.entity_type as ImportDecision["entityType"]) ??
+              "item",
+            parent_entry_id:
+              decision?.parentEntryId !== undefined
+                ? decision.parentEntryId
+                : (entry?.parent_entry_id ?? null),
+            legacy_identifier:
+              decision?.legacyIdentifier !== undefined
+                ? decision.legacyIdentifier
+                : (entry?.legacy_identifier ?? null),
+            allow_duplicate: Boolean(decision?.allowDuplicate),
           }
-          return {
-            id,
-            action: decision.action,
-            proposed: edits[id],
-            ...(hierarchy
-              ? {
-                  entity_type:
-                    decision.entityType ??
-                    (entry?.entity_type as typeof decision.entityType) ??
-                    "item",
-                  parent_entry_id:
-                    decision.parentEntryId !== undefined
-                      ? decision.parentEntryId
-                      : (entry?.parent_entry_id ?? null),
-                  legacy_identifier:
-                    decision.legacyIdentifier !== undefined
-                      ? decision.legacyIdentifier
-                      : (entry?.legacy_identifier ?? null),
-                  allow_duplicate: Boolean(decision.allowDuplicate),
-                }
-              : {}),
-          };
-        });
-      if (entries.length === 0) throw new Error("Select at least one entry to apply.");
-      return api.post<ImportApplyResult>(`/imports/${batchId}/apply`, { entries });
+        : {}),
+    };
+  };
+
+  // One request serves a single row, a selection, a skip and a reject. The server
+  // never adds a row twice: an added row is passed over when it is sent again.
+  const apply = useMutation({
+    mutationFn: ({ ids, forced }: { ids: string[]; forced?: "skip" | "reject" }) => {
+      if (ids.length === 0) throw new Error("Select at least one row.");
+      return api.post<ImportApplyResult>(`/imports/${batchId}/apply`, {
+        entries: ids.map((id) => payloadFor(id, forced)),
+      });
     },
-    onSuccess: (result) => {
-      setSummary(result);
+    onMutate: ({ ids }) => setPendingIds(new Set(ids)),
+    onSettled: () => setPendingIds(new Set()),
+    onSuccess: (result, { ids, forced }) => {
+      const failedIds = new Set(result.failures.map((failure) => failure.entry_id));
+      // Rows that were saved leave the selection. Rows that failed stay selected.
+      const next = { ...decisions };
+      for (const id of ids) {
+        if (!failedIds.has(id) && next[id]) next[id] = { ...next[id]!, include: false };
+      }
+      setDecisions(next);
+      // The review is set up again from this draft, so it must be saved first.
+      saveImportReviewDraft(batchId, { edits, decisions: next });
       setInitializedBatchId("");
       queryClient.setQueryData(queryKeys.importBatch(batchId), result.batch);
       invalidate();
-      toast.success(
-        `${result.created} imported · ${result.skipped} skipped · ${result.failed} failed`,
-      );
+      if (forced) {
+        const names = ids.map((id) => edits[id]?.name || "Row").join(", ");
+        toast.success(forced === "reject" ? `Rejected ${names}` : `Skipped ${names}`, {
+          description: "Nothing was added. Its edits are kept.",
+          action: ids.length === 1
+            ? { label: "Undo", onClick: () => restore.mutate(ids[0]!) }
+            : undefined,
+        });
+        return;
+      }
+      if (ids.length > 1 || result.failed) setSummary(result);
+      const parts = [
+        result.created ? `${pluralize(result.created, "item")} added` : null,
+        result.merged ? `${pluralize(result.merged, "item")} updated` : null,
+        result.failed ? `${result.failed} failed and stay selected` : null,
+      ].filter(Boolean);
+      if (result.failed) toast.warning(parts.join(" · "));
+      else toast.success(parts.join(" · ") || "Nothing new to add. These rows were already saved.");
     },
     onError: (error) => toast.error(getApiErrorMessage(error)),
   });
+
+  const restore = useMutation({
+    mutationFn: (entryId: string) =>
+      api.post<ImportBatchDetail>(`/imports/${batchId}/entries/${entryId}/restore`),
+    onSuccess: (restored) => {
+      setInitializedBatchId("");
+      queryClient.setQueryData(queryKeys.importBatch(batchId), restored);
+      invalidate();
+      toast.success("Restored. The row is back in the list.");
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error)),
+  });
+
+  // Checks the rows before anything is sent. A row with a problem is not sent; its
+  // message is shown beside the field, and the row stays selected.
+  const accept = (ids: string[]) => {
+    if (apply.isPending) return;
+    const hierarchy = batch?.metadata.hierarchy === true;
+    const found: Record<string, ImportEntryErrors> = {};
+    const valid: string[] = [];
+    for (const id of ids) {
+      const proposed = edits[id];
+      const decision = decisions[id];
+      if (!proposed || !decision) continue;
+      const entryErrors = hierarchy
+        ? (proposed.name.trim() ? {} : { name: "Give this record a name." })
+        : validateImportEntry(proposed, decision);
+      if (hasImportEntryErrors(entryErrors)) found[id] = entryErrors;
+      else valid.push(id);
+    }
+    setErrors((current) => {
+      const next = { ...current };
+      for (const id of ids) delete next[id];
+      return { ...next, ...found };
+    });
+    const blocked = Object.keys(found).length;
+    if (blocked) {
+      toast.error(
+        `${pluralize(blocked, "row")} ${blocked === 1 ? "needs" : "need"} a correction. Look for the marked field.`,
+      );
+    }
+    if (valid.length) apply.mutate({ ids: valid });
+  };
+
+  const clearErrors = (entryId: string) =>
+    setErrors((current) => {
+      if (!(entryId in current)) return current;
+      const next = { ...current };
+      delete next[entryId];
+      return next;
+    });
 
   const createRoom = async (_entryId: string, name: string) => {
     const context = batch?.metadata.context as { property_id?: string } | undefined;
@@ -301,24 +392,35 @@ export function ImportDetailPage({
   ]
     .filter(Boolean)
     .join(" · ");
-  const hasOpenEntries = batch.entries.some((entry) => entry.status === "proposed");
-  const selectedCount = Object.values(decisions).filter(
-    (decision) => decision.include || decision.action === "reject",
-  ).length;
+  const isOpen = (entry: ImportEntry) => entry.status === "proposed" || entry.status === "failed";
+  const openEntries = batch.entries.filter(isOpen);
+  const skippedEntries = batch.entries.filter(
+    (entry) => entry.status === "skipped" || entry.status === "rejected",
+  );
+  const hasOpenEntries = openEntries.length > 0;
+  // A checkbox only selects. Skip and Reject are their own actions, never a selection.
+  const selectedIds = openEntries
+    .filter((entry) => decisions[entry.id]?.include)
+    .map((entry) => entry.id);
+  const selectedCount = selectedIds.length;
+  const updateIds = selectedIds.filter((id) => decisions[id]?.action === "merge");
+  const addIds = selectedIds.filter((id) => decisions[id]?.action !== "merge");
+  // A possible duplicate is left for the user to decide; Select all does not take it.
+  const duplicateThreshold = hierarchyMode ? 55 : 70;
+  const undecidedDuplicate = (entry: ImportEntry) =>
+    !hierarchyMode &&
+    decisions[entry.id]?.action !== "merge" &&
+    entry.duplicate_candidates.some((candidate) => candidate.score >= duplicateThreshold);
+  const selectable = openEntries.filter((entry) => !undecidedDuplicate(entry));
+  const leftForYou = openEntries.length - selectable.length;
   const allSelected =
-    batch.entries.length > 0 &&
-    batch.entries.every(
-      (entry) =>
-        decisions[entry.id]?.include ||
-        entry.status !== "proposed" ||
-        decisions[entry.id]?.action === "reject",
-    );
+    selectable.length > 0 && selectable.every((entry) => decisions[entry.id]?.include);
+  const noun = hierarchyMode ? "record" : "item";
 
   const setAll = (include: boolean) => {
     setDecisions((current) => {
       const next = { ...current };
-      for (const entry of batch.entries) {
-        if (entry.status !== "proposed") continue;
+      for (const entry of include ? selectable : openEntries) {
         next[entry.id] = {
           ...(next[entry.id] ?? {
             action: "import",
@@ -331,6 +433,36 @@ export function ImportDetailPage({
       return next;
     });
   };
+
+  const bulkButtons = (size: "sm" | "lg") => (
+    <>
+      {(addIds.length > 0 || updateIds.length === 0) && (
+        <Button
+          size={size}
+          className={size === "lg" ? "min-h-11 shadow-lift" : "min-h-11 lg:min-h-9"}
+          disabled={apply.isPending || acceptEnhancement.isPending || addIds.length === 0}
+          onClick={() => accept(addIds)}
+        >
+          {apply.isPending ? <Spinner /> : <Check />}
+          {addIds.length === 0
+            ? `Add selected ${noun}s`
+            : `Add ${addIds.length} selected ${addIds.length === 1 ? noun : `${noun}s`}`}
+        </Button>
+      )}
+      {updateIds.length > 0 && (
+        <Button
+          size={size}
+          variant={addIds.length > 0 ? "outline" : "default"}
+          className={size === "lg" ? "min-h-11 shadow-lift" : "min-h-11 lg:min-h-9"}
+          disabled={apply.isPending || acceptEnhancement.isPending}
+          onClick={() => accept(updateIds)}
+        >
+          {apply.isPending ? <Spinner /> : <Check />}
+          {`Apply ${updateIds.length} selected ${updateIds.length === 1 ? "change" : "changes"}`}
+        </Button>
+      )}
+    </>
+  );
 
   return (
     <PageLayout
@@ -508,8 +640,8 @@ export function ImportDetailPage({
         ) : (
           <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
             {hierarchyMode
-              ? "Housetory detected a room and container hierarchy. Expand branches, edit names, quantities, types and parents, then approve the tree. Parents are created before their contents."
-              : "Review the proposed entries. Nothing is written until you approve the selected entries. Missing rooms and places can be created inline."}
+              ? "Housetory detected a room and container hierarchy. Expand branches, edit names, quantities, types and parents, then add the tree. Parents are created before their contents."
+              : "Check each row. Nothing is added until you add it. Correct a name or a number in the row; open Edit for more."}
           </p>
         )}
         {batch.error && batch.status !== "failed" && (
@@ -652,34 +784,31 @@ export function ImportDetailPage({
 
       {reviewable && batch.entries.length > 0 && (
         <>
+          {typeof batch.metadata.recognition_id === "string" && (
+            <img
+              src={`/api/v1/ai/recognitions/${batch.metadata.recognition_id}/image`}
+              alt="The photo these items were found in"
+              className="mt-4 max-h-56 w-full rounded-2xl border border-border/60 bg-secondary/30 object-contain"
+            />
+          )}
           {hasOpenEntries && (
-          <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11 lg:min-h-9"
                 onClick={() => setAll(!allSelected)}
-                disabled={apply.isPending}
+                disabled={apply.isPending || selectable.length === 0}
               >
-                {allSelected ? "Clear all" : "Select all"}
+                {allSelected ? "Clear selection" : "Select all"}
               </Button>
-              <span className="text-2xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground" role="status">
                 {selectedCount} selected
+                {leftForYou > 0 && ` · ${pluralize(leftForYou, "possible duplicate")} left for you to decide`}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <p className="hidden text-2xs text-muted-foreground sm:block">
-                Explicit approval creates only selected entries.
-              </p>
-              <Button
-                size="sm"
-                disabled={apply.isPending || acceptEnhancement.isPending || selectedCount === 0}
-                onClick={() => apply.mutate()}
-              >
-                {apply.isPending ? <Spinner /> : <Check />}
-                Approve selected
-              </Button>
-            </div>
+            <div className="flex flex-wrap items-center gap-2">{bulkButtons("sm")}</div>
           </div>
           )}
 
@@ -689,18 +818,28 @@ export function ImportDetailPage({
                 entries={batch.entries}
                 edits={edits}
                 decisions={decisions}
-                disabled={apply.isPending}
-                onEdit={(entryId, proposed) =>
-                  setEdits((current) => ({ ...current, [entryId]: proposed }))
-                }
+                disabled={apply.isPending || restore.isPending}
+                onEdit={(entryId, proposed) => {
+                  clearErrors(entryId);
+                  setEdits((current) => ({ ...current, [entryId]: proposed }));
+                }}
                 onDecision={(entryId, decision) =>
                   setDecisions((current) => ({ ...current, [entryId]: decision }))
                 }
+                onAdd={(entryId) => accept([entryId])}
+                onSkip={(entryId) => apply.mutate({ ids: [entryId], forced: "skip" })}
+                onReject={(entryId) => apply.mutate({ ids: [entryId], forced: "reject" })}
+                onRestore={(entryId) => restore.mutate(entryId)}
+                pendingIds={pendingIds}
+                nameErrors={Object.fromEntries(
+                  Object.entries(errors).map(([id, entryErrors]) => [id, entryErrors.name]),
+                )}
               />
             </div>
           ) : (
             <div className="mt-3 space-y-3">
-              {batch.entries.map((entry: ImportEntry) => (
+              {batch.entries.filter((entry) => entry.status !== "skipped" && entry.status !== "rejected")
+                .map((entry: ImportEntry) => (
                 <ImportEntryCard
                   key={entry.id}
                   entry={entry}
@@ -716,31 +855,49 @@ export function ImportDetailPage({
                   rooms={scopedRooms}
                   locations={locations}
                   categories={categories}
-                  disabled={apply.isPending}
-                  onProposedChange={(proposed) =>
-                    setEdits((current) => ({ ...current, [entry.id]: proposed }))
-                  }
-                  onDecisionChange={(decision) =>
-                    setDecisions((current) => ({ ...current, [entry.id]: decision }))
-                  }
+                  disabled={apply.isPending || restore.isPending}
+                  errors={errors[entry.id]}
+                  pending={pendingIds.has(entry.id)}
+                  onProposedChange={(proposed) => {
+                    clearErrors(entry.id);
+                    setEdits((current) => ({ ...current, [entry.id]: proposed }));
+                  }}
+                  onDecisionChange={(decision) => {
+                    clearErrors(entry.id);
+                    setDecisions((current) => ({ ...current, [entry.id]: decision }));
+                  }}
                   onCreateRoom={createRoom}
                   onCreateLocation={createLocation}
+                  onAdd={() => accept([entry.id])}
+                  onSkip={() => apply.mutate({ ids: [entry.id], forced: "skip" })}
+                  onReject={() => apply.mutate({ ids: [entry.id], forced: "reject" })}
                 />
               ))}
             </div>
           )}
 
-          {hasOpenEntries && (
-            <div className="sticky bottom-24 z-20 mt-4 flex justify-end lg:bottom-4">
-              <Button
-                size="lg"
-                className="shadow-lift"
-                disabled={apply.isPending || acceptEnhancement.isPending || selectedCount === 0}
-                onClick={() => apply.mutate()}
-              >
-                {apply.isPending ? <Spinner /> : <Check />}
-                Approve {selectedCount} {selectedCount === 1 ? "entry" : "entries"}
-              </Button>
+          {skippedEntries.length > 0 && (
+            <div className="mt-3">
+              <SkippedSection count={skippedEntries.length}>
+                {skippedEntries.map((entry) => (
+                  <SkippedRow
+                    key={entry.id}
+                    title={(edits[entry.id] ?? entry.proposed).name || "Unnamed"}
+                    detail={entry.status === "rejected" ? "Rejected" : undefined}
+                    disabled={restore.isPending || apply.isPending}
+                    onRestore={() => restore.mutate(entry.id)}
+                  />
+                ))}
+              </SkippedSection>
+            </div>
+          )}
+
+          {hasOpenEntries && selectedCount > 0 && (
+            <div
+              className="sticky z-20 mt-4 flex flex-wrap justify-end gap-2"
+              style={{ bottom: embedded ? "0.5rem" : "calc(var(--shell-bar-height, 0px) + var(--keyboard-inset, 0px) + 0.75rem)" }}
+            >
+              {bulkButtons("lg")}
             </div>
           )}
         </>
