@@ -8,6 +8,7 @@ import {
 
 import { api, buildQuery, setActiveHouseholdId } from "@/lib/api";
 import { captureInProgress, type CaptureReview } from "@/lib/assistant-task-events";
+import { setStoredPropertyId } from "@/lib/property-filter-store";
 import { localDateISO } from "@/lib/utils";
 import type {
   AiRecognition,
@@ -87,7 +88,7 @@ export function applyHouseholdSession(
   queryClient.clear();
   queryClient.setQueryData(queryKeys.session, state);
   try {
-    window.localStorage.removeItem("housetory-property-filter");
+    setStoredPropertyId("");
     const stored = window.localStorage.getItem("housetory-search-scope");
     if (stored) {
       const scope = JSON.parse(stored) as { householdId?: string; propertyId?: string };

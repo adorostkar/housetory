@@ -1,48 +1,19 @@
-import {
-  ClipboardCheck,
-  DoorOpen,
-  FileText,
-  HandCoins,
-  House,
-  MoreHorizontal,
-  Package,
-  Settings,
-  Plus,
-  Wallet,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { ClipboardCheck, Maximize2, Minimize2, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import {
-  Link,
-  NavLink,
-  Outlet,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { AccountMenu } from "@/components/account-menu";
-import {
-  AddItemsButton,
-  AddItemsProvider,
-  useAddItems,
-} from "@/components/add-items";
-import { isFinancialsPath } from "@/components/financials-layout";
-import { isPlacesPath } from "@/components/places-layout";
+import { AddItemsProvider, useAddItems } from "@/components/add-items";
 import { BrandMark } from "@/components/brand-mark";
 import { HouseholdSwitcher } from "@/components/household-switcher";
 import { PageFallback } from "@/components/page-fallback";
 import { QuickSearch } from "@/components/quick-search";
+import { BottomBar } from "@/components/shell/bottom-bar";
+import { RoomRail, SidebarNav, useRailModel } from "@/components/shell/room-rail";
+import { ShellProvider, useRememberedRail } from "@/components/shell/shell-context";
 import { toast } from "sonner";
-import { ThemeToggle } from "@/components/theme-toggle";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useCanWrite, usePendingActions, useReviewSummary } from "@/lib/queries";
@@ -55,90 +26,14 @@ import {
 } from "@/lib/assistant-task-events";
 import { cn } from "@/lib/utils";
 
-type NavItem = {
-  to: string;
-  label: string;
-  icon: LucideIcon;
-  end?: boolean;
-  match?: (pathname: string) => boolean;
-};
-
-const navGroups: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Home",
-    items: [
-      { to: "/", label: "Overview", icon: House, end: true },
-    ],
-  },
-  {
-    label: "Inventory",
-    items: [
-      { to: "/items", label: "Items", icon: Package },
-      { to: "/rooms", label: "Places", icon: DoorOpen, match: isPlacesPath },
-      { to: "/loans", label: "Loans", icon: HandCoins },
-    ],
-  },
-  {
-    label: "Records",
-    items: [
-      { to: "/documents", label: "Documents", icon: FileText },
-      {
-        to: "/purchases",
-        label: "Financials",
-        icon: Wallet,
-        match: isFinancialsPath,
-      },
-    ],
-  },
-  {
-    label: "Tools",
-    items: [{ to: "/review", label: "Review", icon: ClipboardCheck }],
-  },
-];
-
-const mobileLeftNav: NavItem[] = [
-  { to: "/", label: "Home", icon: House, end: true },
-  { to: "/items", label: "Items", icon: Package },
-];
-
-const mobileLoansNav: NavItem = {
-  to: "/loans",
-  label: "Loans",
-  icon: HandCoins,
-};
-
 const AssistantPage = lazy(() =>
   import("@/pages/assistant-page").then((module) => ({ default: module.AssistantPage })),
 );
 
-const mobileMoreNav: NavItem[] = [
-  { to: "/rooms", label: "Places", icon: DoorOpen, match: isPlacesPath },
-  { to: "/documents", label: "Documents", icon: FileText },
-  {
-    to: "/purchases",
-    label: "Financials",
-    icon: Wallet,
-    match: isFinancialsPath,
-  },
-  { to: "/review", label: "Review", icon: ClipboardCheck },
-  { to: "/settings", label: "Settings", icon: Settings },
-];
+// Bar height: 48 px field, 8 px above, and the safe area (at least 8 px) below.
+const BAR_HEIGHT = "calc(3.5rem + max(0.5rem, env(safe-area-inset-bottom, 0px)))";
 
 const notifiedTaskKeys = new Set<string>();
-
-function navItemActive(item: NavItem, pathname: string) {
-  if (item.match) return item.match(pathname);
-  return item.end
-    ? pathname === item.to
-    : pathname === item.to || pathname.startsWith(`${item.to}/`);
-}
-
-function mobileTabClass(active: boolean) {
-  return cn(
-    "relative flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-2xs font-medium tracking-[0.01em] transition-colors",
-    active ? "text-foreground" : "text-muted-foreground",
-  );
-}
 
 export function AppShell() {
   return (
@@ -177,6 +72,18 @@ function AppShellLayout() {
   const reviewCount = (reviewSummary.data?.pending_count ?? 0) + pendingReviews.length
     + (pendingActions.data?.total ?? 0);
   const desktop = useMediaQuery("(min-width: 1024px)");
+  const [railOpen, setRailOpen] = useRememberedRail();
+  const [assistantTall, setAssistantTall] = useState(false);
+  const rail = useRailModel();
+  useKeyboardInset();
+  useEffect(() => {
+    // Things fixed to the bottom of the screen (bulk bars, save bars) sit above the bar.
+    const root = document.documentElement;
+    root.style.setProperty("--shell-bar-height", BAR_HEIGHT);
+    return () => {
+      root.style.removeProperty("--shell-bar-height");
+    };
+  }, []);
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;
     setAssistantOpen(false);
@@ -211,10 +118,6 @@ function AppShellLayout() {
       });
     }
   }, [location.hash, location.pathname, location.search, navigate, selectDocument, selectImport, selectPhoto]);
-  const moreActive = mobileMoreNav.some((item) =>
-    navItemActive(item, location.pathname),
-  );
-
   useEffect(() => {
     if (location.hash !== "#assistant") return;
     const state: unknown = location.state;
@@ -249,7 +152,7 @@ function AppShellLayout() {
         if (input) {
           input.focus();
           input.select();
-        } else navigate("/");
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -356,111 +259,43 @@ function AppShellLayout() {
     }
   };
 
-  const renderMobileTab = (item: NavItem) => {
-    const active = navItemActive(item, location.pathname);
-    return (
-      <NavLink
-        key={item.to}
-        to={item.to}
-        end={item.end}
-        aria-current={active ? "page" : undefined}
-        className={mobileTabClass(active)}
-      >
-        <item.icon className="size-[1.25rem]" strokeWidth={active ? 2 : 1.7} />
-        {item.label}
-        <span
-          className={cn(
-            "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
-            active ? "opacity-100" : "opacity-0",
-          )}
-        />
-      </NavLink>
-    );
-  };
+  const compact = !desktop;
+  const showRail = compact && railOpen;
+  // The assistant has its own message field, so the bar steps aside for it on the phone.
+  const showBar = !(compact && assistantOpen);
 
   return (
+    <ShellProvider value={{ compact, railOpen, setRailOpen }}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[264px_minmax(0,1fr)]">
-      <aside data-always-on-screen className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
-        <div className="flex items-center justify-between px-2">
-          <Link to="/" aria-label="Housetory home">
+      <aside data-always-on-screen className="sticky top-0 hidden h-dvh flex-col border-r border-border/60 bg-background/35 px-4 py-6 lg:flex">
+        <div className="flex items-center px-2">
+          <Link to="/items" aria-label="Housetory, all items">
             <BrandMark />
           </Link>
-          <ThemeToggle className="-mr-2" />
         </div>
 
         <HouseholdSwitcher />
 
-        <AddItemsButton className="mt-4 h-11 min-h-11 w-full shrink-0 justify-start px-4 py-2" />
-        <nav className="mt-6 space-y-5" aria-label="Primary">
-          {navGroups.map((group) => (
-            <div key={group.label} className="space-y-1">
-              <p className="eyebrow mb-2 px-3">{group.label}</p>
-              {group.items.map((item) => {
-                const active = navItemActive(item, location.pathname);
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    aria-current={active ? "page" : undefined}
-                    className={cn("nav-link", active && "nav-link-active")}
-                  >
-                    <item.icon className="size-[1.05rem]" strokeWidth={1.8} />
-                    {item.label}
-                  </NavLink>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
+        <SidebarNav model={rail} />
 
-        <div className="mt-auto">
-          <div className="mb-4 rounded-2xl border border-border/60 bg-card/45 px-4 py-3.5">
-            <p className="font-display text-[1.05rem] leading-snug tracking-[-0.01em] text-foreground/90">
-              A calm record of everything you own.
-            </p>
-            <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">
-              Private, self-hosted, and yours.
-            </p>
-          </div>
+        <div className="mt-3 shrink-0">
           <AccountMenu />
         </div>
       </aside>
 
-      <div className={cn("min-w-0", assistantOpen && "lg:pr-[min(34rem,40vw)]")}>
-        <header data-always-on-screen className="glass safe-top sticky top-0 z-30 border-b border-border/60">
-          <div className="flex h-14 items-center justify-between px-5 lg:hidden">
-            <Link
-              to="/"
-              aria-label="Housetory home"
-              className="flex items-center"
-            >
-              <BrandMark compact />
-              <span className="ml-2.5 font-display text-[1.25rem] tracking-[-0.02em]">
-                Housetory
-              </span>
-            </Link>
-            <div className="flex items-center gap-0.5">
-              <ThemeToggle />
-              <AccountMenu compact />
-            </div>
-          </div>
-          <div className="mx-auto flex h-16 w-full max-w-[1320px] items-center justify-center px-3 sm:px-5 lg:px-12">
-            <QuickSearch
-              variant="top"
-              className="w-full max-w-2xl"
-              onAsk={(query, trigger) => openAssistant(query, trigger)}
-              onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
-              onOpenAssistant={openAssistantPanel}
-              reviewCount={reviewCount}
-            />
-          </div>
-        </header>
+      {showRail && (
+        <RoomRail
+          model={rail}
+          className="fixed left-0 top-0 z-30"
+          style={{ bottom: `calc(${showBar ? "var(--shell-bar-height, 0px)" : "0px"} + var(--keyboard-inset, 0px))` }}
+        />
+      )}
 
+      <div className={cn("flex min-h-dvh min-w-0 flex-col", showRail && "pl-[4.125rem]")}>
         <main
           className={cn(
-            "mx-auto w-full max-w-[1320px] px-5 sm:px-8 lg:px-12",
-            "min-h-[calc(100dvh-7.5rem)] pb-28 pt-5 sm:pt-7 lg:min-h-dvh lg:pb-20 lg:pt-8",
+            "mx-auto w-full max-w-[1320px] flex-1 px-4 sm:px-8 lg:px-12",
+            "pb-[calc(var(--shell-bar-height,0px)+1.5rem)] pt-[max(1rem,env(safe-area-inset-top))] lg:pb-10 lg:pt-8",
           )}
         >
           {!canWrite && (
@@ -481,91 +316,55 @@ function AppShellLayout() {
           </div>
         </main>
 
-        {!softwareKeyboardOpen && (
-          <nav
-            className="glass safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border/60 px-3 pt-2 lg:hidden"
-            aria-label="Primary"
-            data-testid="mobile-bottom-nav"
+        {/* Hidden, not removed, so focus can return to the button that opened the assistant. */}
+        <BottomBar
+            hidden={!showBar}
+            compact={compact}
+            railOpen={railOpen}
+            onToggleRail={() => setRailOpen(!railOpen)}
+            canAdd={canWrite}
+            onAdd={(trigger) => openAddItems(undefined, trigger)}
+            keyboardOpen={softwareKeyboardOpen}
           >
-            <div className="mx-auto grid max-w-md grid-cols-5 items-stretch">
-              {mobileLeftNav.map(renderMobileTab)}
-              <button
-                type="button"
-                aria-label="Add items"
-                onClick={
-                  canWrite
-                    ? (event) => openAddItems(undefined, event.currentTarget)
-                    : undefined
-                }
-                disabled={!canWrite}
-                className="relative -mt-4 flex w-full min-w-0 flex-col items-center justify-start gap-0.5 px-1 text-2xs font-medium text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lift">
-                  <Plus className="size-5" strokeWidth={2.2} />
-                </span>
-                Add
-              </button>
-              {renderMobileTab(mobileLoansNav)}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={mobileTabClass(moreActive)}
-                    aria-label="More destinations"
-                    data-active={moreActive}
-                  >
-                    <MoreHorizontal
-                      className="size-[1.25rem]"
-                      strokeWidth={1.8}
-                    />
-                    More
-                    <span
-                      className={cn(
-                        "absolute bottom-0.5 h-1 w-1 rounded-full bg-sage transition-opacity",
-                        moreActive ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="end"
-                  sideOffset={10}
-                  data-testid="mobile-more-menu"
-                  className="max-h-[min(70dvh,26rem)] w-60 overflow-y-auto"
-                >
-                  <DropdownMenuLabel className="normal-case tracking-normal">
-                    More destinations
-                  </DropdownMenuLabel>
-                  {mobileMoreNav.map((item) => (
-                    <DropdownMenuItem
-                      key={item.to}
-                      className="min-h-11 cursor-pointer gap-2.5 px-3 text-sm"
-                      onSelect={() => navigate(item.to)}
-                    >
-                      <item.icon className="size-4" />
-                      {item.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </nav>
-        )}
+            {({ onFocusChange }) => (
+              <QuickSearch
+                variant="top"
+                placement="bottom"
+                compact={compact}
+                onFocusChange={onFocusChange}
+                className="w-full"
+                onAsk={(query, trigger) => openAssistant(query, trigger)}
+                onAttach={canWrite ? (file, trigger, query) => openAssistant(query, trigger, file) : undefined}
+                onOpenAssistant={openAssistantPanel}
+                reviewCount={reviewCount}
+              />
+            )}
+        </BottomBar>
       </div>
       <DialogPrimitive.Root open={assistantOpen} modal={!desktop} onOpenChange={(open) => { if (!open) closeAssistant(); }}>
         <DialogPrimitive.Portal>
-          {!desktop && <DialogPrimitive.Overlay className="fixed inset-0 z-50" />}
+          {!desktop && (
+            <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[hsl(var(--shadow-color)/0.38)] data-[state=open]:animate-fade-in" />
+          )}
         <DialogPrimitive.Content
           aria-labelledby="assistant-panel-title"
           aria-describedby={undefined}
           data-testid="assistant-panel"
+          data-tall={assistantTall || softwareKeyboardOpen}
           onOpenAutoFocus={(event) => { event.preventDefault(); assistantHeading.current?.focus(); }}
           onCloseAutoFocus={(event) => { event.preventDefault(); }}
           onInteractOutside={(event) => { if (desktop) event.preventDefault(); }}
-          className="fixed inset-0 z-50 flex h-dvh min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none lg:inset-y-0 lg:left-auto lg:top-16 lg:h-[calc(100dvh-4rem)] lg:w-[min(34rem,40vw)] lg:border-l lg:border-border/80"
+          className={cn(
+            "fixed z-50 flex min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none",
+            // Phone: a sheet from the bottom that can go to full height. It stays above the keyboard.
+            "inset-x-0 bottom-[var(--keyboard-inset,0px)] rounded-t-3xl border-t border-border/80 max-lg:data-[state=open]:animate-sheet-up",
+            assistantTall || softwareKeyboardOpen ? "top-0 max-lg:rounded-t-none" : "top-[max(14dvh,env(safe-area-inset-top))]",
+            // Desktop: a box above the bar, in the main column.
+            "lg:inset-x-auto lg:bottom-4 lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
+            assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(100dvh-2rem))]",
+          )}
         >
-          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
             <DialogPrimitive.Title asChild><h2
               id="assistant-panel-title"
               ref={assistantHeading}
@@ -576,6 +375,16 @@ function AppShellLayout() {
             </h2></DialogPrimitive.Title>
             <div ref={setAssistantHeader} className="min-w-0 flex-1" />
             <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setAssistantTall((tall) => !tall)}
+                aria-pressed={assistantTall}
+                aria-label={assistantTall ? "Make the assistant smaller" : "Make the assistant full height"}
+                title={assistantTall ? "Smaller" : "Full height"}
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2"
+              >
+                {assistantTall ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+              </button>
               <Link to="/review" aria-label="Review queue" title="Review queue"
                 className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-secondary focus-visible:outline focus-visible:outline-2">
                 <ClipboardCheck className="size-4" />
@@ -606,5 +415,6 @@ function AppShellLayout() {
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
     </div>
+    </ShellProvider>
   );
 }

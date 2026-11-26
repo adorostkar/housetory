@@ -36,6 +36,17 @@ import {
 import type { QuickSearchKind, QuickSearchResult, VoiceNote } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import { DOCUMENT_FILE_ACCEPT, documentFileError } from "@/lib/document-files";
+import {
+  useOptionalAssistantPageContext,
+  type AssistantPageReference,
+} from "@/lib/assistant-page-context";
+
+const CONTEXT_LABELS: Record<AssistantPageReference["kind"], string> = {
+  item: "This item",
+  document: "This document",
+  room: "This room",
+  location: "This place",
+};
 
 const GROUPS: Array<{
   kind: QuickSearchKind;
@@ -95,6 +106,9 @@ export function QuickSearch({
   onAttach,
   onOpenAssistant,
   reviewCount = 0,
+  placement = "top",
+  compact = false,
+  onFocusChange,
 }: {
   variant?: "top" | "mobile";
   className?: string;
@@ -102,6 +116,11 @@ export function QuickSearch({
   onAttach?: (file: File, trigger: HTMLElement, query: string) => void;
   onOpenAssistant: (trigger: HTMLElement) => void;
   reviewCount?: number;
+  /** "bottom" when the field sits at the bottom of the screen: notices go above it. */
+  placement?: "top" | "bottom";
+  /** Little room: hide attach and voice while there is text. */
+  compact?: boolean;
+  onFocusChange?: (focused: boolean) => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -122,6 +141,18 @@ export function QuickSearch({
     ["/search", "/items"].includes(location.pathname) ? (searchParams.get("q") ?? "") : "",
   );
   const [focused, setFocused] = React.useState(false);
+  const [inputFocused, setInputFocused] = React.useState(false);
+  const pageContext = useOptionalAssistantPageContext();
+  const contextReferences = pageContext?.references ?? [];
+  const firstReference = contextReferences[0];
+  const context = firstReference
+    ? contextReferences.length === 1
+      ? { label: CONTEXT_LABELS[firstReference.kind], name: firstReference.name }
+      : { label: `${contextReferences.length} selected`, name: `${contextReferences.length} selected items` }
+    : null;
+  const hideExtras = compact && query.length > 0;
+  // With the context chip on a phone there is no room for voice until the field has focus.
+  const hideVoice = hideExtras || (compact && context !== null && !inputFocused);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [panelStyle, setPanelStyle] = React.useState<React.CSSProperties>({});
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
@@ -636,159 +667,198 @@ export function QuickSearch({
       : null;
 
   return (
-    <div ref={wrapperRef} className={cn("relative", className)}>
-      <button
-        ref={assistantButtonRef}
-        type="button"
-        aria-label={`Open assistant${reviewCount > 0 ? `, ${reviewCount} unresolved reviews` : ""}`}
-        title="Open assistant"
-        className="absolute left-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-        onClick={() => {
-          setFocused(false);
-          if (assistantButtonRef.current) onOpenAssistant(assistantButtonRef.current);
-        }}
+    <div
+      ref={wrapperRef}
+      className={cn("relative flex gap-2", placement === "bottom" ? "flex-col-reverse" : "flex-col", className)}
+    >
+      <div
+        className={cn(
+          "flex h-12 min-w-0 items-center border bg-card/75 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] transition-[border-color,box-shadow,background-color] focus-within:border-ring/50 focus-within:bg-card focus-within:ring-4 focus-within:ring-ring/10",
+          variant === "top" ? "rounded-2xl border-input/90" : "rounded-xl border-border/80 bg-card/80 shadow-soft",
+        )}
       >
-        <Bot className="size-[1.05rem]" />
-        {reviewCount > 0 && (
+        <button
+          ref={assistantButtonRef}
+          type="button"
+          aria-label={`Open assistant${reviewCount > 0 ? `, ${reviewCount} unresolved reviews` : ""}`}
+          title="Open assistant"
+          className="relative ml-0.5 flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          onClick={() => {
+            setFocused(false);
+            if (assistantButtonRef.current) onOpenAssistant(assistantButtonRef.current);
+          }}
+        >
+          <Bot className="size-[1.15rem]" />
+          {reviewCount > 0 && (
+            <span
+              aria-hidden="true"
+              className="absolute right-0.5 top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-brass px-1 text-[9px] font-semibold leading-none text-brass-foreground"
+            >
+              {reviewCount > 99 ? "99+" : reviewCount}
+            </span>
+          )}
+        </button>
+        {context && (
           <span
-            aria-hidden="true"
-            className="absolute right-0 top-0 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-brass px-1 text-[9px] font-semibold leading-none text-brass-foreground"
+            data-testid="quick-search-context"
+            title={context.name}
+            className="flex h-8 shrink-0 items-center rounded-full bg-accent pl-2.5 text-xs font-medium text-accent-foreground"
           >
-            {reviewCount > 99 ? "99+" : reviewCount}
+            <span className="max-w-[6.5rem] truncate">{context.label}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${context.label.toLowerCase()} from the question: ${context.name}`}
+              title="Ask about everything instead"
+              // The visible cross is small; the padding around it makes the target 44 px.
+              className="relative flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1.5 before:content-[''] hover:bg-background/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => {
+                pageContext?.setReferences([]);
+                inputRef.current?.focus();
+              }}
+            >
+              <X aria-hidden="true" className="size-3.5" />
+            </button>
           </span>
         )}
-      </button>
-      <input
-        ref={inputRef}
-        type="search"
-        data-quick-search-input="true"
-        data-quick-search-variant={variant}
-        value={query}
-        maxLength={2000}
-        autoComplete="off"
-        spellCheck={false}
-        dir="auto"
-        placeholder="Search or ask…"
-        aria-label="Search or ask about your inventory"
-        aria-keyshortcuts="Meta+K Control+K"
-        role="combobox"
-        aria-expanded={showPanel}
-        aria-controls={
-          showPanel && optionCount > 0 ? "quick-search-results" : undefined
-        }
-        aria-autocomplete="list"
-        aria-activedescendant={
-          activeIndex >= 0 ? `quick-search-option-${activeIndex}` : undefined
-        }
-        onFocus={() => setFocused(true)}
-        onChange={(event) => {
-          pendingEditRef.current = event.target.value;
-          pendingEditPathRef.current = window.location.pathname;
-          setQuery(event.target.value);
-          setVoiceNotice(null);
-          setFocused(true);
-          setActiveIndex(-1);
-        }}
-        onKeyDown={onKeyDown}
-        disabled={recorder.recording || voiceProcessing || pendingRecording}
-        aria-describedby={voiceNotice ? voiceNoticeId : undefined}
-        className={cn(
-          "quick-search-input w-full rounded-2xl border border-input/90 bg-card/75 pl-12 text-foreground shadow-[inset_0_1px_0_hsl(var(--card)/0.6)] outline-none transition-[border-color,box-shadow,background-color] placeholder:text-muted-foreground focus:border-ring/50 focus:bg-card focus:ring-4 focus:ring-ring/10",
-          variant === "top"
-            ? cn("h-12 text-[1rem] lg:text-[0.95rem]", onAttach ? "pr-36 sm:pr-44" : "pr-28 sm:pr-36")
-            : cn("h-12 rounded-xl border-border/80 bg-card/80 text-[1rem] shadow-soft", onAttach ? "pr-36 sm:pr-44" : "pr-28 sm:pr-36"),
-        )}
-      />
-      {onAttach && (
-        <>
-          <input
-            ref={attachInputRef}
-            type="file"
-            accept={DOCUMENT_FILE_ACCEPT}
-            data-testid="quick-search-attachment-input"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (!file) return;
-              const error = documentFileError(file);
-              if (error) {
-                setAttachmentError(error);
-                setFocused(true);
-                return;
-              }
-              setAttachmentError(null);
-              setFocused(false);
-              if (attachButtonRef.current) onAttach(file, attachButtonRef.current, query);
-            }}
-          />
-          <button
-            ref={attachButtonRef}
-            type="button"
-            aria-label="Attach a file"
-            title="Attach a PDF or image"
-            disabled={recorder.recording || voiceProcessing || pendingRecording}
-            className="absolute right-[5.5rem] top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
-            onClick={() => attachInputRef.current?.click()}
-          >
-            <Paperclip className="size-4" />
-          </button>
-        </>
-      )}
-      <kbd className={cn(
-        "pointer-events-none absolute top-1/2 hidden -translate-y-1/2 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground sm:block",
-        onAttach ? "right-[8.75rem]" : "right-24",
-      )}>
-        ⌘K
-      </kbd>
-      <button
-        ref={voiceButtonRef}
-        type="button"
-        aria-label={recorder.recording ? "Stop recording" : "Record voice search"}
-        title={
-          pendingRecording
-            ? "Checking voice transcription availability"
-            : recorder.recording
-              ? "Stop recording"
-              : "Record a voice search"
-        }
-        aria-pressed={recorder.recording}
-        aria-busy={pendingRecording}
-        aria-describedby={voiceNotice ? voiceNoticeId : undefined}
-        disabled={voiceProcessing}
-        className={cn(
-          "absolute right-11 top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
-          recorder.recording && "animate-pulse bg-primary text-primary-foreground hover:bg-primary",
-        )}
-        onClick={recorder.recording ? recorder.stop : startRecording}
-      >
-        {recorder.recording ? <Square className="size-4" /> : <Mic className="size-4" />}
-      </button>
-      {query ? (
-        <button
-          type="button"
-          disabled={recorder.recording || voiceProcessing || pendingRecording}
-          onClick={() => {
-            pendingEditRef.current = "";
-            pendingEditPathRef.current = window.location.pathname;
-            setQuery("");
-            setVoiceNotice(null);
-            setActiveIndex(-1);
-            inputRef.current?.focus();
+        <input
+          ref={inputRef}
+          type="search"
+          data-quick-search-input="true"
+          data-quick-search-variant={variant}
+          value={query}
+          maxLength={2000}
+          autoComplete="off"
+          spellCheck={false}
+          dir="auto"
+          placeholder={context ? "Ask…" : "Search or ask…"}
+          aria-label="Search or ask about your inventory"
+          aria-keyshortcuts="Meta+K Control+K"
+          role="combobox"
+          aria-expanded={showPanel}
+          aria-controls={
+            showPanel && optionCount > 0 ? "quick-search-results" : undefined
+          }
+          aria-autocomplete="list"
+          aria-activedescendant={
+            activeIndex >= 0 ? `quick-search-option-${activeIndex}` : undefined
+          }
+          onFocus={() => {
+            setFocused(true);
+            setInputFocused(true);
+            onFocusChange?.(true);
           }}
-          className="absolute right-0 top-1/2 flex size-11 shrink-0 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
-          aria-label="Clear search"
+          onBlur={() => {
+            setInputFocused(false);
+            onFocusChange?.(false);
+          }}
+          onChange={(event) => {
+            pendingEditRef.current = event.target.value;
+            pendingEditPathRef.current = window.location.pathname;
+            setQuery(event.target.value);
+            setVoiceNotice(null);
+            setFocused(true);
+            setActiveIndex(-1);
+          }}
+          onKeyDown={onKeyDown}
+          disabled={recorder.recording || voiceProcessing || pendingRecording}
+          aria-describedby={voiceNotice ? voiceNoticeId : undefined}
+          className="quick-search-input h-full min-w-0 flex-1 bg-transparent px-1.5 text-[1rem] text-foreground outline-none placeholder:text-muted-foreground lg:text-[0.95rem]"
+        />
+        {onAttach && (
+          <>
+            <input
+              ref={attachInputRef}
+              type="file"
+              accept={DOCUMENT_FILE_ACCEPT}
+              data-testid="quick-search-attachment-input"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                const error = documentFileError(file);
+                if (error) {
+                  setAttachmentError(error);
+                  setFocused(true);
+                  return;
+                }
+                setAttachmentError(null);
+                setFocused(false);
+                if (attachButtonRef.current) onAttach(file, attachButtonRef.current, query);
+              }}
+            />
+            <button
+              ref={attachButtonRef}
+              type="button"
+              aria-label="Attach a file"
+              title="Attach a PDF or image"
+              disabled={recorder.recording || voiceProcessing || pendingRecording}
+              className={cn(
+                "flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
+                hideExtras && "hidden",
+              )}
+              onClick={() => attachInputRef.current?.click()}
+            >
+              <Paperclip className="size-[1.05rem]" />
+            </button>
+          </>
+        )}
+        {!inputFocused && !query && (
+          <kbd className="pointer-events-none hidden shrink-0 rounded-md border border-border bg-secondary/70 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground lg:block">
+            ⌘K
+          </kbd>
+        )}
+        <button
+          ref={voiceButtonRef}
+          type="button"
+          aria-label={recorder.recording ? "Stop recording" : "Record voice search"}
+          title={
+            pendingRecording
+              ? "Checking voice transcription availability"
+              : recorder.recording
+                ? "Stop recording"
+                : "Record a voice search"
+          }
+          aria-pressed={recorder.recording}
+          aria-busy={pendingRecording}
+          aria-describedby={voiceNotice ? voiceNoticeId : undefined}
+          disabled={voiceProcessing}
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
+            recorder.recording && "animate-pulse bg-primary text-primary-foreground hover:bg-primary",
+            hideVoice && !recorder.recording && "hidden",
+          )}
+          onClick={recorder.recording ? recorder.stop : startRecording}
         >
-          <X className="size-4" />
+          {recorder.recording ? <Square className="size-4" /> : <Mic className="size-[1.05rem]" />}
         </button>
-      ) : null}
+        {query ? (
+          <button
+            type="button"
+            disabled={recorder.recording || voiceProcessing || pendingRecording}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              pendingEditRef.current = "";
+              pendingEditPathRef.current = window.location.pathname;
+              setQuery("");
+              setVoiceNotice(null);
+              setActiveIndex(-1);
+              inputRef.current?.focus();
+            }}
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45"
+            aria-label="Clear search"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
+      </div>
       {recorder.recording && (
         <div
           role="group"
           aria-label="Recording voice search"
-          className="mt-2 flex min-h-11 items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-1.5"
+          className="flex min-h-11 items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-1.5"
         >
           <span className="size-2.5 animate-pulse rounded-full bg-destructive" aria-hidden="true" />
           <p role="status" aria-live="polite" className="min-w-0 flex-1 text-xs tabular-nums">
@@ -809,14 +879,14 @@ export function QuickSearch({
         <p
           role="status"
           aria-live="polite"
-          className="mt-2 flex min-h-10 items-center gap-2 px-2 text-xs text-muted-foreground"
+          className="flex min-h-10 items-center gap-2 px-2 text-xs text-muted-foreground"
         >
           <Loader2 className="size-4 animate-spin" />
           Transcribing your recording…
         </p>
       )}
       {!recorder.recording && recorder.error && (
-        <p role="alert" className="mt-2 px-2 text-xs text-destructive">
+        <p role="alert" className="px-2 text-xs text-destructive">
           {recorder.error}
         </p>
       )}
@@ -826,7 +896,7 @@ export function QuickSearch({
           role={["unavailable", "error"].includes(voiceNotice.kind) ? "alert" : "status"}
           aria-live={["unavailable", "error"].includes(voiceNotice.kind) ? "assertive" : "polite"}
           className={cn(
-            "mt-2 px-2 text-xs",
+            "px-2 text-xs",
             ["unavailable", "error"].includes(voiceNotice.kind)
               ? "text-destructive"
               : "text-muted-foreground",
@@ -844,7 +914,7 @@ export function QuickSearch({
         </p>
       )}
       {attachmentError && (
-        <p role="alert" className="mt-1 px-2 text-2xs text-destructive">
+        <p role="alert" className="px-2 text-2xs text-destructive">
           {attachmentError}
         </p>
       )}

@@ -7,6 +7,10 @@
     document.documentElement.classList.toggle("dark", dark);
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    var palette = localStorage.getItem("housetory-palette");
+    if (palette === "design-d" || palette === "field-notes" || palette === "collected") {
+      document.documentElement.dataset.palette = palette;
+    }
   } catch (error) {
     document.documentElement.dataset.theme = "system";
   }

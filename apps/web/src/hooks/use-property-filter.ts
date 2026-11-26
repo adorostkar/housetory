@@ -1,35 +1,24 @@
 import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { setStoredPropertyId, useStoredPropertyId } from "@/lib/property-filter-store";
 import { useProperties } from "@/lib/queries";
 import type { Property } from "@/lib/types";
-
-const STORAGE_KEY = "housetory-property-filter";
-
-function storedPropertyId() {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
 
 export function usePropertyFilter() {
   const [searchParams, setSearchParams] = useSearchParams();
   const propertiesQuery = useProperties();
-  const [propertyId, setPropertyIdState] = React.useState(
-    () => searchParams.get("property_id") ?? storedPropertyId(),
-  );
+  // A property in the link wins over the remembered one when the page opens.
+  React.useState(() => {
+    const linked = searchParams.get("property_id");
+    if (linked) setStoredPropertyId(linked, false);
+    return null;
+  });
+  const propertyId = useStoredPropertyId();
 
   const setPropertyId = React.useCallback(
     (value: string) => {
-      setPropertyIdState(value);
-      try {
-        if (value) window.localStorage.setItem(STORAGE_KEY, value);
-        else window.localStorage.removeItem(STORAGE_KEY);
-      } catch {
-        // Remembering the filter is best effort.
-      }
+      setStoredPropertyId(value);
       setSearchParams(
         (previous) => {
           const next = new URLSearchParams(previous);

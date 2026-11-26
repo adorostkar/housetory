@@ -43,6 +43,11 @@ export function useAssistantPageContext() {
   return context;
 }
 
+/** Null outside the provider, for controls that also render on their own. */
+export function useOptionalAssistantPageContext() {
+  return React.useContext(PageContext);
+}
+
 export function useRegisterAssistantPageContext(references: AssistantPageReference[]) {
   const context = React.useContext(PageContext);
   const signature = JSON.stringify(references);

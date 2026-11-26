@@ -11,7 +11,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | Phase | What | State |
 | --- | --- | --- |
 | 0 | Three new UI designs in Figma | Done. **Design D approved on 26 Nov 2026.** |
-| 1 | Shared mobile behaviour, shell and navigation | In progress |
+| 1 | Shared mobile behaviour, shell and navigation | Done (see "Phase 1 record") |
 | 2 | Capture, documents and reviews | Not started |
 | 3 | Natural assistant behaviour | Not started |
 | 4 | Inventory-first navigation and everyday flows | Not started |
@@ -174,6 +174,67 @@ goes into the app.
    listed plainly.
 
 Each finished phase is committed and pushed. Nothing is merged or deployed.
+
+## Phase 1 record
+
+What was built:
+
+- **Shell.** The old top header and the five-tab bar are gone. On a phone there
+  is a rail of rooms on the left (All, each top-level room, On loan, More) and
+  one bar at the bottom: show/hide rooms, the search and ask field, Add. On
+  desktop the rooms are a sidebar with names and counts, and the bar sits at the
+  bottom of the main column.
+- **Start page.** `/` now goes to the item list (`/items`).
+- **More.** Its choices (Places, Documents, Purchases, Insurance, Review,
+  Settings) roll up over the rooms and roll down again. They stay up while one
+  of their pages is open.
+- **Rail.** It can be hidden. The choice is remembered on the device. The button
+  keeps its place in the bar. With the rail hidden, the page title opens it.
+- **Homes.** With more than one property, a home tile at the top of the rail
+  chooses which rooms are shown. The list pages follow the same choice.
+- **"This item" chip.** On an item, room, place or document page the field shows
+  a chip. Its × removes the page from the question. It works the same on the
+  phone and on desktop.
+- **Assistant.** It opens as a sheet from the bottom on a phone and as a box
+  above the bar on desktop. A button makes it full height. Its content is the
+  same assistant as before.
+- **Colour themes.** Current Housetory (default), Design D, Field notes and
+  Collected, each in light and dark. The choice is kept on the device. The
+  chooser is on the Appearance screen in Settings (Phase 5).
+- **Touch.** On touch screens buttons, menu rows and dialog Close buttons are at
+  least 44 px. The bar and rail targets are 44 to 54 px.
+- **Keyboard.** The bar and the assistant sheet follow the on-screen keyboard
+  (`--keyboard-inset`). Other bottom bars use `--shell-bar-height` to sit above
+  the bar.
+
+The Add-items Close problem:
+
+- Reproduced on a 390 px phone layout. The sheet header is sticky and lay over
+  the lower two thirds of the Close button. Taps there hit the header. Escape
+  still worked, because it does not need the button.
+- Fixed by putting the Close button above the header. An end-to-end check now
+  presses the lower part of the button.
+
+Decisions:
+
+- The item panel on desktop moves to Phase 4, with the new item page. The old
+  item page is too wide for a panel.
+- In the bar on a phone, the field takes the whole width while it has focus, and
+  attach and voice hide while there is text. Voice also hides when the chip is
+  shown and the field has no focus. This is the first answer to the small space.
+  It is checked again on a real iPhone at the end.
+- The theme toggle in the header was removed with the header.
+
+Checks:
+
+- Type check clean. Unit tests for the rail, the chip and the themes.
+- `e2e/navigation.spec.ts` was rewritten for the new shell and run against a
+  throwaway local stack: 9 of 9 pass (desktop and 390 px phone).
+- Contrast for the three new themes was computed from the colour values: text
+  11:1 or better, muted text 5:1 or better, input borders 3.3:1 or better.
+
+Not checked yet: a real iPhone, and the other end-to-end files. Many of them
+still name the old navigation. They are updated in Phase 6.
 
 ## Checks done in Phase 0
 

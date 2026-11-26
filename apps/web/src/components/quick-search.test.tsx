@@ -6,6 +6,11 @@ import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QuickSearch } from "@/components/quick-search";
+import {
+  AssistantPageContextProvider,
+  useAssistantPageContext,
+  useRegisterAssistantPageContext,
+} from "@/lib/assistant-page-context";
 import { api } from "@/lib/api";
 import type { QuickSearchResponse, QuickSearchResult } from "@/lib/types";
 
@@ -428,5 +433,37 @@ describe("QuickSearch", () => {
     for (const field of screen.getAllByRole("combobox", { hidden: true })) {
       expect(field).toHaveValue("Bookmarked");
     }
+  });
+
+  it("shows the page as a removable context and widens the scope when it is removed", async () => {
+    vi.mocked(api.get).mockResolvedValue(response("", []));
+    function ItemPage() {
+      useRegisterAssistantPageContext([{ kind: "item", id: "item-1", name: "Cordless drill" }]);
+      const { references } = useAssistantPageContext();
+      return <output data-testid="context">{references.map((entry) => entry.id).join(",")}</output>;
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/items/item-1"]}>
+          <AssistantPageContextProvider>
+            <ItemPage />
+            <QuickSearch onAsk={vi.fn()} onOpenAssistant={vi.fn()} />
+          </AssistantPageContextProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const chip = await screen.findByTestId("quick-search-context");
+    expect(chip).toHaveTextContent("This item");
+    expect(screen.getByTestId("context")).toHaveTextContent("item-1");
+
+    await userEvent.click(
+      within(chip).getByRole("button", { name: "Remove this item from the question: Cordless drill" }),
+    );
+
+    expect(screen.queryByTestId("quick-search-context")).not.toBeInTheDocument();
+    expect(screen.getByTestId("context")).toBeEmptyDOMElement();
+    expect(screen.getByRole("combobox", { name: "Search or ask about your inventory" })).toHaveFocus();
   });
 });

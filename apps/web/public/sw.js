@@ -2,7 +2,7 @@
  * Only same-origin shell assets are cached. Inventory and API responses are
  * deliberately never cached so private data is not persisted by the worker.
  */
-const CACHE_NAME = "housetory-shell-v1";
+const CACHE_NAME = "housetory-shell-v2";
 const PRECACHE = [
   "/",
   "/manifest.webmanifest",

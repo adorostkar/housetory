@@ -48,10 +48,12 @@ export default {
         sage: {
           DEFAULT: "hsl(var(--sage))",
           soft: "hsl(var(--sage-soft))",
+          foreground: "hsl(var(--background))",
         },
         brass: {
           DEFAULT: "hsl(var(--brass))",
           soft: "hsl(var(--brass-soft))",
+          foreground: "hsl(var(--background))",
         },
       },
       fontSize: {
@@ -107,6 +109,14 @@ export default {
           from: { transform: "translateY(100%)" },
           to: { transform: "translateY(0)" },
         },
+        "roll-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
+        "roll-down": {
+          from: { transform: "translateY(0)" },
+          to: { transform: "translateY(100%)" },
+        },
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
@@ -116,11 +126,16 @@ export default {
         "fade-in": "fade-in 250ms ease-out both",
         "scale-in": "scale-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both",
         "sheet-up": "sheet-up 280ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "roll-up": "roll-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both",
+        "roll-down": "roll-down 180ms ease-in both",
       },
       transitionTimingFunction: {
         smooth: "cubic-bezier(0.22, 1, 0.36, 1)",
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Touch screens: controls grow to a 44 px target without changing desktop density.
+    ({ addVariant }) => addVariant("coarse", "@media (pointer: coarse)"),
+  ],
 };

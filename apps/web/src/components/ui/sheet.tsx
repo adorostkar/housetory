@@ -32,7 +32,7 @@ const SheetContent = React.forwardRef<
       <div aria-hidden="true" className="mx-auto h-1.5 w-10 rounded-full bg-border" />
       {children}
       {!hideClose && (
-        <DialogPrimitive.Close className="absolute right-3 top-3 flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+        <DialogPrimitive.Close className="absolute right-3 top-3 z-20 flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
           <X className="size-4" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>

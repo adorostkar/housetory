@@ -1,29 +1,101 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-test("desktop sidebar lists each destination once", async ({ page }) => {
+const MORE = ["Places", "Documents", "Purchases", "Insurance", "Review", "Settings"];
+
+async function createItem(request: APIRequestContext, name: string) {
+  const response = await request.post("/api/v1/items", { data: { name } });
+  expect(response.ok()).toBeTruthy();
+  return (await response.json()) as { item: { id: string; name: string } };
+}
+
+test("desktop sidebar lists the rooms, On loan and More, and More rolls up the rest", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/items");
-  const nav = page.locator("aside nav a");
-  await expect(nav).toHaveText([
-    "Overview", "Items", "Places", "Loans", "Documents", "Financials", "Review",
-  ]);
-  await page.locator("aside").getByRole("link", { name: "Places", exact: true }).click();
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/items$/);
+  const nav = page.locator("aside").getByRole("navigation", { name: "Rooms" });
+  await expect(nav.getByRole("link", { name: "All items" })).toHaveAttribute("aria-current", "page");
+  await expect(nav.getByRole("link", { name: /^On loan/ })).toBeVisible();
+
+  const more = nav.getByRole("button", { name: "More", exact: true });
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await more.click();
+  await expect(nav.getByTestId("rail-more").getByRole("link")).toHaveText(MORE);
+  await nav.getByTestId("rail-more").getByRole("link", { name: "Places" }).click();
   await expect(page).toHaveURL(/\/rooms$/);
   await page.getByRole("navigation", { name: "Places" }).getByRole("link", { name: "Containers" }).click();
   await expect(page).toHaveURL(/\/containers$/);
-  await expect(page.locator("aside").getByRole("link", { name: "Places", exact: true }))
-    .toHaveClass(/nav-link-active/);
+  // The choices stay up on one of their pages, with the current one marked.
+  await expect(nav.getByTestId("rail-more").getByRole("link", { name: "Places" }))
+    .toHaveAttribute("aria-current", "page");
+  await nav.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(nav.getByTestId("rail-more")).toHaveCount(0);
+  await expect(nav.getByRole("button", { name: "More", exact: true })).toHaveClass(/nav-link-active/);
 });
 
-test("mobile bar has five slots and More reaches everything else", async ({ page }) => {
+test("phone has one bottom bar and a room rail that hides and stays hidden", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/items");
-  const bottom = page.getByTestId("mobile-bottom-nav");
-  await expect(bottom.locator("a")).toHaveText(["Home", "Items", "Loans"]);
-  await expect(bottom.getByRole("button", { name: "Add items" })).toBeVisible();
-  await bottom.getByRole("button", { name: "More destinations" }).click();
-  await expect(page.getByTestId("mobile-more-menu").getByRole("menuitem"))
-    .toHaveText(["Places", "Documents", "Financials", "Review", "Settings"]);
+  const bar = page.getByTestId("bottom-bar");
+  await expect(bar.getByRole("combobox", { name: "Search or ask about your inventory" })).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Add items" })).toBeVisible();
+  await expect(bar.locator('button[title="Open assistant"]')).toBeVisible();
+
+  const rail = page.getByTestId("room-rail");
+  await expect(rail.getByRole("link", { name: "All", exact: true })).toHaveAttribute("aria-current", "page");
+  await rail.getByRole("button", { name: "More", exact: true }).click();
+  await expect(rail.getByTestId("rail-more").getByRole("link")).toHaveCount(MORE.length);
+  await rail.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(rail.getByTestId("rail-more")).toHaveCount(0);
+
+  // The show and hide button keeps its place in the bar.
+  const hide = bar.getByRole("button", { name: "Hide rooms" });
+  const before = await hide.boundingBox();
+  await hide.click();
+  await expect(rail).toHaveCount(0);
+  const show = bar.getByRole("button", { name: "Show rooms" });
+  expect(await show.boundingBox()).toEqual(before);
+  await page.reload();
+  await expect(page.getByTestId("bottom-bar")).toBeVisible();
+  await expect(page.getByTestId("room-rail")).toHaveCount(0);
+
+  // With the rooms hidden, the page title brings them back.
+  await page.getByRole("heading", { level: 1 }).getByRole("button").click();
+  await expect(page.getByTestId("room-rail")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+});
+
+test("phone Add items sheet closes from every part of its Close button", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/items");
+  await page.getByTestId("bottom-bar").getByRole("button", { name: "Add items" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add items" });
+  await expect(dialog).toBeVisible();
+  const close = dialog.getByRole("button", { name: "Close" });
+  // The sticky sheet header used to lie over the lower part of the button.
+  const covered = await close.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    return [[0.2, 0.2], [0.8, 0.2], [0.5, 0.5], [0.2, 0.8], [0.8, 0.8]].filter(([x, y]) => {
+      const hit = document.elementFromPoint(box.left + box.width * x!, box.top + box.height * y!);
+      return !(hit && (hit === button || button.contains(hit)));
+    }).length;
+  });
+  expect(covered).toBe(0);
+  const box = (await close.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height * 0.8);
+  await expect(dialog).toBeHidden();
+});
+
+test("an item page puts a removable This item context in the bar", async ({ page, request }) => {
+  const { item } = await createItem(request, `Context chip ${Date.now()}`);
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 1000 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/items/${item.id}`);
+    const chip = page.getByTestId("quick-search-context");
+    await expect(chip).toHaveText("This item");
+    await chip.getByRole("button", { name: `Remove this item from the question: ${item.name}` }).click();
+    await expect(chip).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Search or ask about your inventory" })).toBeFocused();
+  }
 });
 
 const SCROLLED = 300;
@@ -31,7 +103,7 @@ const SCROLLED = 300;
 /** Opens a long page and scrolls it down. */
 async function openScrolledPage(page: Page, mobile: boolean) {
   await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
-  await page.goto("/settings");
+  await page.goto("/settings/ai");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect.poll(() => page.evaluate(() =>
     document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(600);
@@ -63,28 +135,28 @@ for (const mobile of [false, true]) {
     await page.getByRole("button", { name: "Close assistant", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeHidden();
 
-    // Focus goes back to the button in the header, and the page stays put.
+    // Focus goes back to the button in the bar, and the page stays put.
     await expect(trigger).toBeFocused();
     expect(await settledScroll(page)).toBe(SCROLLED);
   });
 
   test(`${mobile ? "mobile" : "desktop"} focus on the always-visible controls leaves a scrolled page where it was`, async ({ page }) => {
     await openScrolledPage(page, mobile);
-    const header = page.locator("header");
+    const bar = page.getByTestId("bottom-bar");
 
-    // The search shortcut puts focus in the header.
+    // The search shortcut puts focus in the bar.
     await page.keyboard.press("Control+k");
-    await expect(header.getByRole("combobox", { name: "Search or ask about your inventory" }))
+    await expect(bar.getByRole("combobox", { name: "Search or ask about your inventory" }))
       .toBeFocused();
     expect(await settledScroll(page)).toBe(SCROLLED);
 
-    // The Tab key moves through the header's other controls.
+    // The Tab key moves through the bar's other controls.
     await page.keyboard.press("Tab");
-    await expect(header.locator(":focus")).toHaveCount(1);
+    await expect(bar.locator(":focus")).toHaveCount(1);
     expect(await settledScroll(page)).toBe(SCROLLED);
     await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Shift+Tab");
-    await expect(header.locator('button[title="Open assistant"]')).toBeFocused();
+    await expect(bar.locator('button[title="Open assistant"]')).toBeFocused();
     expect(await settledScroll(page)).toBe(SCROLLED);
 
     if (mobile) return;
@@ -104,7 +176,7 @@ test("retired destinations redirect instead of breaking old links", async ({ pag
   await page.goto("/search?q=ladder");
   await expect(page).toHaveURL(/\/items\?q=ladder$/);
   await page.goto("/assistant");
-  await expect(page).toHaveURL(/#assistant$/);
+  await expect(page).toHaveURL(/\/items#assistant$/);
   await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await page.getByRole("button", { name: "Close assistant", exact: true }).click();
   for (const path of ["/scan", "/recognize", "/add-items"]) {

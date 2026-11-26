@@ -62,6 +62,11 @@ the 768px viewport.
 
 ## Mobile navigation
 
+> **Replaced.** The five-tab bar described here was replaced by the room rail and
+> the single bottom bar of Design D. See
+> [`MOBILE_FIRST_PROGRAMME.md`](MOBILE_FIRST_PROGRAMME.md). The focus-zoom and
+> overflow fixes in this file still apply.
+
 The previous eight-tab bar was reduced to five healthy targets:
 
 - Home

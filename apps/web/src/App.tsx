@@ -320,7 +320,8 @@ export default function App() {
         />
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
-            <Route index element={<OverviewPage />} />
+            <Route index element={<StartRedirect />} />
+            <Route path="overview" element={<OverviewPage />} />
             <Route element={<PlacesLayout />}>
               <Route path="rooms" element={<RoomsPage />} />
               <Route path="containers" element={<ContainersPage />} />
@@ -387,6 +388,18 @@ export default function App() {
       </Routes>
       <Toaster />
     </>
+  );
+}
+
+/** The app opens in the inventory. Search and hash (such as #assistant) are kept. */
+function StartRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      replace
+      to={{ pathname: "/items", search: location.search, hash: location.hash }}
+      state={location.state}
+    />
   );
 }
 

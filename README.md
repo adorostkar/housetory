@@ -17,10 +17,15 @@ Tailscale is optional.
 ## What is working
 
 - First-run owner setup, Argon2id passwords and session authentication.
-- A responsive React application with light/dark modes, designed for desktop and
-  iPhone. Mobile text controls stay at a Safari-safe 16px minimum, Settings has
-  no 320px overflow, and a five-tab bar plus More menu replaces the crowded
-  eight-tab navigation. See [`docs/RESPONSIVE_MOBILE.md`](docs/RESPONSIVE_MOBILE.md).
+- A responsive React application designed for the iPhone first, with a matching
+  desktop layout. The app opens in the item list. On a phone, a rail of rooms sits
+  on the left (it can be hidden) and one bar at the bottom holds search, the
+  assistant, attach, voice and Add. On desktop the rooms are a sidebar. Four
+  colour themes (Current Housetory, Design D, Field notes, Collected), each in
+  light and dark. Mobile text controls stay at a Safari-safe 16px minimum and
+  touch controls are at least 44px. See
+  [`docs/MOBILE_FIRST_PROGRAMME.md`](docs/MOBILE_FIRST_PROGRAMME.md) and
+  [`docs/RESPONSIVE_MOBILE.md`](docs/RESPONSIVE_MOBILE.md).
 - Rooms with optional nesting; shelves, cabinets, drawers and boxes with
   unlimited nesting.
 - Movable containers (boxes, plastic bins, crates, suitcases and bags) with
@@ -1350,8 +1355,9 @@ risks.
 The interface avoids admin-template conventions: warm stone backgrounds, an
 editorial serif display face, restrained sage/brass accents, spacious layouts,
 hairline borders, real photography, and motion that stays out of the way. Light
-and dark modes are designed independently, and the mobile experience uses a
-native-style tab bar with safe-area support.
+and dark modes are designed independently. The layout is organised by location:
+a room rail and one bottom bar on phones, a room sidebar on desktop, with
+safe-area and keyboard support. Colour themes change colours only.
 
 ## License
 
