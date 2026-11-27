@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .common import trimmed
+from .common import DraftRevision, DraftWriter, trimmed
 
 
 class CaptureReviewOut(BaseModel):
@@ -161,6 +161,9 @@ class ReviewSuggestionOut(BaseModel):
     before: dict[str, Any] = Field(default_factory=dict)
     after: dict[str, Any] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    # How often the kept "Edit first" edit changed, and the device that kept it.
+    draft_revision: int = 0
+    draft_writer: str | None = None
     fingerprint: str
     created_at: datetime
     updated_at: datetime
@@ -322,9 +325,15 @@ class ReviewDismissRequest(BaseModel):
 
 
 class ReviewDraftRequest(BaseModel):
-    """An "Edit first" edit of a suggestion that still waits. An empty draft forgets it."""
+    """An "Edit first" edit of a suggestion that still waits. An empty draft forgets it.
+
+    ``expected_revision`` is the revision the edit was made on, and ``writer`` is the
+    device that sends it.
+    """
 
     draft: ReviewDismissDraft
+    expected_revision: DraftRevision
+    writer: DraftWriter
 
 
 __all__ = [

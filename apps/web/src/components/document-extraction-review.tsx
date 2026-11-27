@@ -55,8 +55,6 @@ import {
   restoreLineDraft,
   savedCandidate,
   serializeLineDraft,
-  serverHeader,
-  serverLine,
   candidateFromItem,
   centsInput,
   fieldValue,
@@ -68,7 +66,7 @@ import {
 import { ItemSearchPicker } from "@/components/document-extraction-item-picker";
 import { enhancementLabel } from "@/lib/enrichment";
 import { stableJson } from "@/lib/review-draft-store";
-import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
+import { copyConflicts, DraftConflictNotice, DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 
 export function DocumentExtractionReview({ document, onOpenChange, manualReviewRequest = 0, captureContext, enabled = true }: {
   document: DocumentRecord;
@@ -149,12 +147,16 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
   // The fields at the top are kept the same way, as one draft with the key "header".
   const savedHeader = React.useRef("");
   const firstHeader = React.useRef("");
+  const eligibleRef = React.useRef(false);
   const headerStartedFrom = React.useRef(0);
-  // What the server keeps for each line and for the fields at the top, as far as this
-  // review knows: taken when one is first corrected here, and from the answer of the
-  // server to each save after that. It goes with the copy on this device.
-  const serverLines = React.useRef(new Map<string, unknown>());
-  const serverFields = React.useRef<unknown>(undefined);
+  // Lines, and "header" for the fields at the top, that were just set up again from
+  // the server after another device changed them. They are what the server has.
+  const adopted = React.useRef(new Set<string>());
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const sourceData = extractionQuery.data;
   const data = sourceData && activeRefinement
     ? { ...sourceData, fields: activeRefinement.fields, lines: activeRefinement.lines,
@@ -169,6 +171,63 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       setOpened(true);
     }
     onOpenChange?.(next);
+  };
+
+  // One row, from a line as it was read and what is kept for it.
+  const buildLine = (
+    line: ExtractionReview["lines"][number],
+    state: ExtractionLineState | undefined,
+    fields: ExtractionReview["fields"],
+    candidate: CandidateItem | undefined,
+    single: boolean,
+  ): LineDraft => {
+    const draft = lineDraft(line, candidate, fields, single);
+    // A line that was skipped comes back with the complete draft it had then:
+    // amounts, action and target, new item, updates, stock and warranty.
+    const kept = restoreLineDraft(draft, state);
+    if (captureContext?.documentId !== document.id) return kept;
+    // The place chosen at capture is only a start. A place that was changed on
+    // the row and kept with a skip wins over it.
+    const keptPlace = state && state.status !== "applied"
+      && Boolean((state.draft as { newItem?: unknown } | null | undefined)?.newItem);
+    if (keptPlace) return kept;
+    return { ...kept, newItem: { ...kept.newItem,
+      roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
+  };
+
+  // An item that was chosen by hand is not among the proposed matches after a
+  // reload. It was kept with the draft, so the row can still name its target.
+  const withSavedCandidate = (
+    all: ExtractionLineMatch[], lineId: string, state: ExtractionLineState | undefined,
+  ): ExtractionLineMatch[] => {
+    const candidate = savedCandidate(state);
+    if (!candidate) return all;
+    const existing = all.find((match) => match.line_id === lineId);
+    if (existing?.candidates.some((entry) => entry.id === candidate.id)) return all;
+    return existing
+      ? all.map((match) => match === existing
+        ? { ...match, candidates: [candidate, ...match.candidates] } : match)
+      : [...all, { line_id: lineId, candidates: [candidate], quality: "possible" as const, reasons: candidate.reasons ?? [] }];
+  };
+
+  // Fills the fields at the top: a kept correction on top of the first reading.
+  const fillHeader = (
+    kept: ExtractionHeaderDraft | null,
+    first: Required<ExtractionHeaderDraft>,
+    purchaseEligible: boolean,
+  ) => {
+    const text = (value: string | null | undefined, fallback: string | null) =>
+      typeof value === "string" ? value : fallback ?? "";
+    setMerchant(text(kept?.merchant, first.merchant));
+    setPurchaseDate(text(kept?.purchase_date, first.purchase_date));
+    setDocumentDate(text(kept?.document_date, first.document_date));
+    setCurrency(text(kept?.currency, first.currency));
+    setTotal(text(kept?.total, first.total));
+    setOrderNumber(text(kept?.order_number, first.order_number));
+    setPurchaseAction(
+      kept?.purchase_action === "none" || (kept?.purchase_action === "create" && purchaseEligible)
+        ? kept.purchase_action : first.purchase_action ?? "none",
+    );
   };
 
   const loadProposal = (
@@ -188,47 +247,33 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       const server = extractionQuery.data?.line_states?.[line.id];
       const local = autosave.recovered.get(line.id);
       states[line.id] = server;
+      // The revision of the line's draft that this row is built from.
+      autosave.track(line.id, server?.revision);
       if (!local) continue;
       autosave.recovered.delete(line.id);
       const body = local.body as Partial<ExtractionLineState> | null;
-      // The copy is used only when nobody else changed the line since: the server
-      // still has what it had when the correction was made, or it has a draft that
-      // this browser sent itself and never got an answer for. A line that was
-      // decided, or that the server has something else for (a newer correction from
-      // another device), keeps what the server has, and the copy is removed. What
-      // this page wrote into the loaded review itself, unconfirmed, is not from the
-      // server.
-      const now = stableJson(serverLine(server));
-      const unchanged = server?.unconfirmed === true || now === stableJson(local.base) ||
-        local.sent.some((sent) => stableJson(serverLine(sent as ExtractionLineState)) === now);
+      // A line that was decided keeps what the server has, and the copy is removed.
       if (server?.status === "applied" || server?.status === "skipped" ||
-          !body || typeof body !== "object" || !unchanged) {
+          !body || typeof body !== "object") {
         autosave.forget(line.id);
+        continue;
+      }
+      // The copy was made on one revision of the line's draft. When the server has
+      // a newer one that this browser did not write, another device changed the
+      // line: it shows what the server has, and the copy waits beside it for the
+      // person to choose. What this page wrote into the loaded review itself,
+      // unconfirmed, is not from another device. Otherwise the copy goes back into
+      // its line and is sent again; the server checks the revision once more.
+      if (local.conflict || (server?.unconfirmed !== true && copyConflicts(local, server ?? {}))) {
+        if (!local.conflict) autosave.markConflict(line.id);
         continue;
       }
       states[line.id] = { ...body, status: "pending" };
       resend.current.add(line.id);
     }
-    const loaded = productLines.map((line) => {
-      const draft = lineDraft(
-        line,
-        matchMap[line.id]?.candidates[0],
-        fields,
-        productLines.length === 1,
-      );
-      // A line that was skipped comes back with the complete draft it had then:
-      // amounts, action and target, new item, updates, stock and warranty.
-      const state = states[line.id];
-      const kept = restoreLineDraft(draft, state);
-      if (captureContext?.documentId !== document.id) return kept;
-      // The place chosen at capture is only a start. A place that was changed on
-      // the row and kept with a skip wins over it.
-      const keptPlace = state && state.status !== "applied"
-        && Boolean((state.draft as { newItem?: unknown } | null | undefined)?.newItem);
-      if (keptPlace) return kept;
-      return { ...kept, newItem: { ...kept.newItem,
-        roomId: captureContext.roomId, locationId: captureContext.roomId ? captureContext.locationId : "" } };
-    });
+    const loaded = productLines.map((line) => buildLine(
+      line, states[line.id], fields, matchMap[line.id]?.candidates[0], productLines.length === 1,
+    ));
     setLoadCount((count) => count + 1);
     setDrafts(loaded);
     // A line that came back with a kept correction counts as edited: suggestions that
@@ -237,18 +282,9 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       const state = states[line.id];
       return state?.status === "pending" && Boolean(state.draft);
     })) editedRef.current = true;
-    // An item that was chosen by hand is not among the proposed matches after a
-    // reload. It was kept with the draft, so the row can still name its target.
-    setMatches(productLines.reduce((all, line) => {
-      const candidate = savedCandidate(states[line.id]);
-      if (!candidate) return all;
-      const existing = all.find((match) => match.line_id === line.id);
-      if (existing?.candidates.some((entry) => entry.id === candidate.id)) return all;
-      return existing
-        ? all.map((match) => match === existing
-          ? { ...match, candidates: [candidate, ...match.candidates] } : match)
-        : [...all, { line_id: line.id, candidates: [candidate], quality: "possible" as const, reasons: candidate.reasons ?? [] }];
-    }, proposalMatches));
+    setMatches(productLines.reduce(
+      (all, line) => withSavedCandidate(all, line.id, states[line.id]), proposalMatches,
+    ));
     // The fields at the top start from the first reading. A kept correction of them,
     // for this same version, goes on top: from this device when the server never
     // confirmed it, else from the server. This only fills the fields. Nothing is applied.
@@ -264,39 +300,27 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     const localHeader = autosave.recovered.get("header");
     const localBody = localHeader?.body as
       { version?: string; draft?: ExtractionHeaderDraft | null } | null | undefined;
-    const keptHeader = extractionQuery.data?.header_draft;
+    const review = extractionQuery.data;
+    const keptHeader = review?.header_draft;
     let kept: ExtractionHeaderDraft | null = keptHeader?.version === version ? keptHeader.draft : null;
+    autosave.track("header", review?.header_revision);
     if (localHeader && localBody && typeof localBody === "object" && localBody.version === version) {
       autosave.recovered.delete("header");
-      // The same rule as for a line: the copy is used only when the server still has
-      // what it had when the fields were corrected, or what this browser sent itself
-      // without getting an answer. Otherwise the server wins.
-      const now = stableJson(serverHeader(keptHeader));
-      const sentHeader = (sent: unknown) => {
-        const body = sent as { version?: string; draft?: ExtractionHeaderDraft | null } | null;
-        return body?.draft && body.version ? serverHeader({ version: body.version, draft: body.draft }) : null;
-      };
-      if (extractionQuery.data?.header_unconfirmed === true || now === stableJson(localHeader.base) ||
-          localHeader.sent.some((sent) => stableJson(sentHeader(sent)) === now)) {
+      // The same rule as for a line. When another device changed the fields since
+      // the copy was made, they show what the server has, and the copy waits beside
+      // them for the person to choose.
+      if (localHeader.conflict || (review?.header_unconfirmed !== true && copyConflicts(
+        localHeader, { revision: review?.header_revision, writer: review?.header_writer },
+      ))) {
+        if (!localHeader.conflict) autosave.markConflict("header");
+      } else {
         kept = localBody.draft ?? {};
         resend.current.add("header");
-      } else {
-        autosave.forget("header");
       }
     }
-    const text = (value: string | null | undefined, fallback: string | null) =>
-      typeof value === "string" ? value : fallback ?? "";
-    setMerchant(text(kept?.merchant, first.merchant));
-    setPurchaseDate(text(kept?.purchase_date, first.purchase_date));
-    setDocumentDate(text(kept?.document_date, first.document_date));
-    setCurrency(text(kept?.currency, first.currency));
-    setTotal(text(kept?.total, first.total));
-    setOrderNumber(text(kept?.order_number, first.order_number));
-    setPurchaseAction(
-      kept?.purchase_action === "none" || (kept?.purchase_action === "create" && purchaseEligible)
-        ? kept.purchase_action : first.purchase_action ?? "none",
-    );
+    fillHeader(kept, first, purchaseEligible);
     firstHeader.current = JSON.stringify(first);
+    eligibleRef.current = purchaseEligible;
     if (kept) editedRef.current = true;
     setPurchaseId("");
     setUpdatePurchaseFields(false);
@@ -483,6 +507,11 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       invalidate();
       void queryClient.invalidateQueries({
         queryKey: [...queryKeys.document(document.id), "extraction"],
+      }).then(() => {
+        // Applying the last line ends the kept fields at the top, one revision on.
+        // If a skipped line is restored later, the fields on this page go on from there.
+        const fresh = queryClient.getQueryData<ExtractionReviewWithStates>(extractionKey);
+        if (fresh && fresh.header_writer == null) autosave.trackStep("header", fresh.header_revision);
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.document(document.id) });
       toast.success("Reviewed extraction applied");
@@ -532,8 +561,13 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       toast.error(getApiErrorMessage(error));
     },
     onSuccess: (result, { draft, restore }) => {
-      // The skip carried the draft, so the copy on this device is not needed.
-      if (!restore) autosave.forget(draft.line.id);
+      // The skip carried the draft, so the copy on this device is not needed. The
+      // server keeps the line as it is on this page, one revision on. Restore then
+      // brings back that same line.
+      if (!restore) {
+        autosave.forget(draft.line.id);
+        autosave.trackStep(draft.line.id, result.line_states?.[draft.line.id]?.revision);
+      }
       queryClient.setQueryData<ExtractionReviewWithStates>(extractionKey, (current) =>
         current && ({ ...current, ...result }));
       setDrafts((current) => current.map((entry) =>
@@ -549,6 +583,123 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     },
   });
 
+  // What the rows are built from, as it is now. A request can come back much later.
+  const latest = React.useRef({ data, drafts, matches, activeVersion });
+  latest.current = { data, drafts, matches, activeVersion };
+
+  // Puts what is kept for a line, or for the fields at the top, into the page.
+  const showKept = (key: string, state: ExtractionLineState | undefined, header: ExtractionHeaderDraft | null) => {
+    const now = latest.current;
+    if (key === "header") {
+      fillHeader(header, JSON.parse(firstHeader.current || "{}") as Required<ExtractionHeaderDraft>,
+        eligibleRef.current);
+      return;
+    }
+    const fields = now.data?.fields;
+    if (!fields) return;
+    setDrafts((current) => current.map((entry) => entry.line.id !== key ? entry : {
+      ...buildLine(entry.line, state, fields,
+        now.matches.find((match) => match.line_id === key)?.candidates[0], current.length === 1),
+      selected: entry.selected,
+    }));
+    setMatches((current) => withSavedCandidate(current, key, state));
+  };
+
+  // Another device changed a line, or the fields at the top, while a correction of
+  // it was on its way from here. The review is read again and that part is shown as
+  // the server has it now. The correction of this device stays beside it until the
+  // person chooses. Nothing is applied by this.
+  const forgetDraft = autosave.forget;
+  const trackRevision = autosave.track;
+  const adoptFromServer = React.useCallback(async (key: string) => {
+    const reviewKey = [...queryKeys.document(document.id), "extraction"];
+    // What this page wrote into the loaded review is not what the server has. A
+    // review that is not on screen any more is read again when it is opened.
+    queryClient.removeQueries({ queryKey: reviewKey, type: "inactive" });
+    await queryClient.invalidateQueries({ queryKey: reviewKey });
+    const fresh = queryClient.getQueryData<ExtractionReviewWithStates>(reviewKey);
+    if (!mounted.current || !fresh) return;
+    if (key === "header") {
+      const kept = fresh.header_draft?.version === latest.current.activeVersion
+        ? fresh.header_draft.draft : null;
+      trackRevision("header", fresh.header_revision);
+      adopted.current.add("header");
+      showKept("header", undefined, kept);
+      return;
+    }
+    const state = fresh.line_states?.[key];
+    if (state?.status === "applied" || state?.status === "skipped") {
+      // The line was decided somewhere else. There is nothing left to choose.
+      forgetDraft(key);
+      return;
+    }
+    trackRevision(key, state?.revision);
+    adopted.current.add(key);
+    showKept(key, state, null);
+    // `showKept` reads the newest rows through `latest`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [document.id, forgetDraft, queryClient, trackRevision]);
+
+  // The person chose their own correction of a part that another device changed. It
+  // goes back into the page and is saved like any correction, on top of what the
+  // server has now. Nothing is applied by this.
+  const conflicts = autosave.conflicts;
+  const chooseMine = (key: string) => {
+    const body = conflicts.get(key)?.body as
+      (Partial<ExtractionLineState> & { version?: string; draft?: unknown }) | null | undefined;
+    const usable = body && typeof body === "object" &&
+      (key !== "header" || body.version === activeVersion);
+    if (!usable) {
+      forgetDraft(key);
+      return;
+    }
+    adopted.current.delete(key);
+    resend.current.add(key);
+    autosave.takeMine(key);
+    editedRef.current = true;
+    if (key === "header") showKept("header", undefined, (body.draft ?? {}) as ExtractionHeaderDraft);
+    else showKept(key, { ...body, status: "pending" } as ExtractionLineState, null);
+  };
+
+  // A correction of this device in a few words, to choose it by.
+  const conflictNotice = (key: string) => {
+    const body = conflicts.get(key)?.body as
+      (Partial<ExtractionLineState> & { version?: string; draft?: unknown }) | null | undefined;
+    if (!body || typeof body !== "object") return null;
+    let yours: string;
+    if (key === "header") {
+      const mine = (body.draft ?? {}) as ExtractionHeaderDraft;
+      const shown: Array<[string, string | null | undefined, string]> = [
+        ["merchant", mine.merchant, merchant],
+        ["purchase date", mine.purchase_date, purchaseDate],
+        ["document date", mine.document_date, documentDate],
+        ["currency", mine.currency, currency],
+        ["total", mine.total, total],
+        ["order number", mine.order_number, orderNumber],
+      ];
+      const differing = shown.filter(([, value, now]) => (value ?? "") !== now);
+      yours = differing.length
+        ? differing.map(([name, value]) => `${name} «${value || "empty"}»`).join(", ")
+        : "the same details";
+    } else {
+      const mine = (body.draft ?? {}) as { description?: unknown; quantity?: unknown; lineTotal?: unknown };
+      const text = (value: unknown) => (typeof value === "string" || typeof value === "number" ? String(value) : "");
+      yours = `«${text(mine.description) || body.description || "no name"}»` +
+        `, quantity ${text(mine.quantity) || body.quantity || "empty"}` +
+        (text(mine.lineTotal) ? `, total ${text(mine.lineTotal)}` : "");
+    }
+    return (
+      <DraftConflictNotice
+        subject={key === "header" ? "fields" : "line"}
+        yours={yours}
+        className="mb-2 rounded-lg border border-brass/40 bg-brass-soft/40 px-3 py-2 text-xs leading-relaxed"
+        disabled={applyMutation.isPending || skipMutation.isPending}
+        onUseMine={() => chooseMine(key)}
+        onKeepOther={() => forgetDraft(key)}
+      />
+    );
+  };
+
   // Keeps the corrections of waiting lines on the server, a short moment after the
   // last change of a line. Only a line that differs from what the server has is sent,
   // with its whole draft. A line that is applied or skipped has no draft to keep, and
@@ -562,10 +713,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     // The rows of a review that was just loaded are the start for every line.
     const start = startedFrom.current !== loadCount;
     startedFrom.current = loadCount;
-    if (start) {
-      savedLines.current = new Map();
-      serverLines.current = new Map();
-    }
+    if (start) savedLines.current = new Map();
     const changed: Record<string, ExtractionLineState> = {};
     for (const draft of drafts) {
       const id = draft.line.id;
@@ -575,33 +723,41 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       const body = keptBody(draft);
       const text = keptText(body);
       // A line that was put back from this device is not on the server yet: it is sent.
-      if (start && !resend.current.delete(id)) {
+      const force = resend.current.delete(id);
+      // A line that was just loaded, or set up again from the server, is the start.
+      const fromServer = adopted.current.delete(id);
+      if ((start && !force) || fromServer) {
         savedLines.current.set(id, text);
         continue;
       }
-      if (savedLines.current.get(id) === text) continue;
+      if (!force && savedLines.current.get(id) === text) continue;
       savedLines.current.set(id, text);
-      if (!serverLines.current.has(id)) serverLines.current.set(id, serverLine(keptStates?.[id]));
+      const reviewKey = [...queryKeys.document(document.id), "extraction"];
       saveDraft(id, {
         path: `/documents/${document.id}/extraction/lines/${encodeURIComponent(id)}/draft`,
         body,
-        base: serverLines.current.get(id),
+        revisionOf: (answer) => (answer as Partial<ExtractionLineStates> | null)?.line_states?.[id]?.revision,
         // The answer has the line as the server keeps it now. The loaded review
-        // takes it in place of what this page wrote there, if that is still the same.
-        rebase: (answer) => {
+        // takes it in place of what this page wrote there. A newer correction that
+        // this page wrote there since only takes the revision.
+        onSaved: (answer) => {
           const state = (answer as Partial<ExtractionLineStates> | null)?.line_states?.[id];
-          const kept = serverLine(state);
-          serverLines.current.set(id, kept);
-          queryClient.setQueryData<ExtractionReviewWithStates>(
-            [...queryKeys.document(document.id), "extraction"],
-            (current) => current && state &&
-              stableJson(serverLine(current.line_states?.[id])) === stableJson(kept)
-              ? { ...current, line_states: { ...current.line_states, [id]: state } } : current,
-          );
-          return kept;
+          if (!state) return;
+          queryClient.setQueryData<ExtractionReviewWithStates>(reviewKey, (current) => {
+            const shown = current?.line_states?.[id];
+            if (!current || shown?.status === "applied" || shown?.status === "skipped") return current;
+            const newer = shown?.unconfirmed === true &&
+              stableJson(shown.draft ?? null) !== stableJson(state.draft ?? null);
+            return { ...current, line_states: { ...current.line_states,
+              [id]: newer ? { ...shown, revision: state.revision, writer: state.writer } : state } };
+          });
         },
+        // Another device changed the line: it is shown as the server has it now.
+        onConflict: () => void adoptFromServer(id),
       });
-      changed[id] = { status: "pending", ...body, unconfirmed: true };
+      const shown = keptStates?.[id];
+      changed[id] = { status: "pending", ...body, unconfirmed: true,
+        revision: shown?.revision, writer: shown?.writer };
     }
     // The loaded review remembers the draft at once, so that coming back to this
     // document shows the corrections without waiting for the server. The rows on
@@ -614,7 +770,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     }
     // `keptBody` and `keptText` read only the rows and the matches, which are both listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyingLines, canWrite, document.id, drafts, keptStates, loadCount, matches, queryClient, saveDraft, skippingLine]);
+  }, [adoptFromServer, applyingLines, canWrite, document.id, drafts, keptStates, loadCount, matches, queryClient, saveDraft, skippingLine]);
 
   // The fields at the top are kept like a line: the whole set, a short moment after
   // the last change, for the version that is on screen. When they are the first
@@ -623,7 +779,6 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
     if (!canWrite || !activeVersion) return;
     const start = headerStartedFrom.current !== loadCount;
     headerStartedFrom.current = loadCount;
-    if (start) serverFields.current = undefined;
     const draft: Required<ExtractionHeaderDraft> = {
       merchant: merchant.slice(0, 200),
       purchase_date: purchaseDate.slice(0, 40),
@@ -635,37 +790,40 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
       purchase_action: purchaseAction === "existing" ? null : purchaseAction,
     };
     const text = JSON.stringify(draft);
-    if (start && !resend.current.delete("header")) {
+    const force = resend.current.delete("header");
+    const fromServer = adopted.current.delete("header");
+    if ((start && !force) || fromServer) {
       savedHeader.current = text;
       return;
     }
-    if (savedHeader.current === text) return;
+    if (!force && savedHeader.current === text) return;
     savedHeader.current = text;
     const unchanged = text === firstHeader.current;
     const reviewKey = [...queryKeys.document(document.id), "extraction"];
-    if (serverFields.current === undefined) {
-      const loaded = queryClient.getQueryData<ExtractionReviewWithStates>(reviewKey);
-      serverFields.current = serverHeader(loaded?.header_draft);
-    }
     const optimistic = unchanged ? null : { version: activeVersion, draft };
     saveDraft("header", {
       path: `/documents/${document.id}/extraction/draft`,
       body: { version: activeVersion, draft: unchanged ? null : draft },
-      base: serverFields.current,
-      rebase: (answer) => {
-        const kept = serverHeader((answer as ExtractionReviewWithStates | null)?.header_draft);
-        serverFields.current = kept;
-        queryClient.setQueryData<ExtractionReviewWithStates>(reviewKey, (current) =>
-          current && stableJson(serverHeader(current.header_draft)) === stableJson(kept)
-            ? { ...current, header_unconfirmed: false } : current);
-        return kept;
+      revisionOf: (answer) => (answer as ExtractionReviewWithStates | null)?.header_revision,
+      // The loaded review takes the revision of the fields, so that a review that
+      // opens later starts from what was confirmed.
+      onSaved: (answer) => {
+        const kept = answer as ExtractionReviewWithStates | null;
+        if (typeof kept?.header_revision !== "number") return;
+        queryClient.setQueryData<ExtractionReviewWithStates>(reviewKey, (current) => current && ({
+          ...current, header_revision: kept.header_revision, header_writer: kept.header_writer,
+          ...(stableJson(current.header_draft ?? null) === stableJson(optimistic)
+            ? { header_unconfirmed: false } : {}),
+        }));
       },
+      // Another device changed the fields: they are shown as the server has them now.
+      onConflict: () => void adoptFromServer("header"),
     });
     queryClient.setQueryData<ExtractionReviewWithStates>(
       reviewKey,
       (current) => current && ({ ...current, header_draft: optimistic, header_unconfirmed: true }),
     );
-  }, [activeVersion, canWrite, currency, document.id, documentDate, loadCount, merchant,
+  }, [activeVersion, adoptFromServer, canWrite, currency, document.id, documentDate, loadCount, merchant,
     orderNumber, purchaseAction, purchaseDate, queryClient, saveDraft, total]);
 
   if (document.ocr_status === "queued" || document.ocr_status === "processing") {
@@ -1255,6 +1413,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
             {editedDocumentFields && <Badge variant="brass">Edited</Badge>}
           </div>
         </div>
+        {conflicts.has("header") && <div className="mt-3">{conflictNotice("header")}</div>}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <Field label="Merchant" htmlFor="extraction-merchant" optional>
             <Input
@@ -1541,6 +1700,7 @@ export function DocumentExtractionReview({ document, onOpenChange, manualReviewR
             const lineOpen = openLines.has(draft.line.id);
             return (
               <div key={draft.line.id} id={`extraction-source-${draft.line.id}`}>
+              {conflicts.has(draft.line.id) && conflictNotice(draft.line.id)}
               <ReviewRow
                 title={draft.description}
                 titleLabel={`Name of line ${draft.line.line_number}`}

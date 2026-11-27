@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, ApiError } from "@/lib/api";
+import { writerId } from "@/lib/review-draft-store";
 import type {
   ItemSummary,
   ReviewRun,
@@ -162,6 +163,8 @@ function reviewRun(overrides: Partial<ReviewRun> = {}): ReviewRun {
 
 let canWrite = true;
 let signedIn = false;
+// Who stores a draft from this browser: the device, and the person when one is signed in.
+const thisWriter = () => writerId(signedIn ? "user-1" : null);
 let owner = true;
 let suggestions = [categorySuggestion, duplicateSuggestion];
 
@@ -680,11 +683,22 @@ describe("ReviewPage", () => {
       fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Keep for later" }));
     };
     const drafts = () => vi.mocked(api.put).mock.calls.filter(([path]) => path === draftPath);
+    // An edit that the server keeps is revision 1 of it here, kept by this device
+    // unless the test says that another one kept it.
+    const withEdit = (kept?: string, writer: string = thisWriter()): ReviewSuggestion => ({
+      ...nameSuggestion,
+      evidence: kept ? { review_draft: { name: kept } } : {},
+      ...(kept ? { draft_revision: 1, draft_writer: writer } : {}),
+    });
     const load = (kept?: string) => {
-      suggestions = [{ ...nameSuggestion, evidence: kept ? { review_draft: { name: kept } } : {} }];
+      suggestions = [withEdit(kept)];
       renderPage();
       vi.useFakeTimers();
     };
+    /** An edit as it is sent: with the revision it was made on and the name of this device. */
+    const sent = (draft: object, revision = 0) => ({ draft, expected_revision: revision, writer: thisWriter() });
+    const notice = () => within(card()).getByRole("group", { name: "Two corrections" });
+    const conflict = () => new ApiError(409, "draft_conflict", "This row was also corrected on another device.");
 
     it("is kept on the server a short moment later, without Skip or Apply, and a reload shows it", async () => {
       load();
@@ -698,7 +712,7 @@ describe("ReviewPage", () => {
       await pass(599);
       expect(drafts()).toHaveLength(0);
       await pass(1);
-      expect(drafts()).toEqual([[draftPath, { draft: { name: "Cordless drill 18V" } }, undefined]]);
+      expect(drafts()).toEqual([[draftPath, sent({ name: "Cordless drill 18V" }), undefined]]);
       // Nothing was decided: no Skip and no Apply was sent, and the row is still there.
       expect(api.post).not.toHaveBeenCalled();
       expect(within(card()).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
@@ -727,7 +741,8 @@ describe("ReviewPage", () => {
       load("Cordless drill 18V");
       keep("Cordless drill");
       await pass(600);
-      expect(drafts()).toEqual([[draftPath, { draft: {} }, undefined]]);
+      // It is sent on the revision of the edit that the row showed.
+      expect(drafts()).toEqual([[draftPath, sent({}, 1), undefined]]);
       expect(within(card()).queryByText(/Your edit/)).toBeNull();
     });
 
@@ -735,11 +750,11 @@ describe("ReviewPage", () => {
       load();
       keep("Cordless drill 18V");
       window.dispatchEvent(new Event("pagehide"));
-      expect(drafts()).toEqual([[draftPath, { draft: { name: "Cordless drill 18V" } }, { keepalive: true }]]);
+      expect(drafts()).toEqual([[draftPath, sent({ name: "Cordless drill 18V" }), { keepalive: true }]]);
       keep("Cordless drill 20V");
       cleanup();
       expect(drafts()).toHaveLength(2);
-      expect(drafts()[1]).toEqual([draftPath, { draft: { name: "Cordless drill 20V" } }, { keepalive: true }]);
+      expect(drafts()[1]).toEqual([draftPath, sent({ name: "Cordless drill 20V" }), { keepalive: true }]);
     });
 
     it("says quietly when it could not be kept, tries again, and never blocks Apply or Skip", async () => {
@@ -758,7 +773,7 @@ describe("ReviewPage", () => {
 
     it("is shown again after a reload when its request was lost, is sent again, and applies nothing", async () => {
       signedIn = true;
-      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
+      const copy = "housetory:review-draft:v2:user-1:house-1:inventory:suggestions:suggestion-name";
       vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
       load();
       keep("Cordless drill 18V");
@@ -789,32 +804,99 @@ describe("ReviewPage", () => {
       expect(api.post).not.toHaveBeenCalled();
     });
 
-    it("is dropped when the server has a newer edit from another device, and nothing is sent", async () => {
+    it("waits beside a suggestion that another device edited, and the person chooses", async () => {
       signedIn = true;
-      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
-      vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
+      const copy = "housetory:review-draft:v2:user-1:house-1:inventory:suggestions:suggestion-name";
+      // No request of this visit reaches the server.
+      vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
       load();
       keep("Cordless drill 18V");
       await pass(600);
-      // The copy says what the server kept when the edit was made: nothing.
-      expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(expect.objectContaining({ base: null }));
+      // The copy says which revision of the kept edit it was made on: none yet.
+      expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(expect.objectContaining({ baseRevision: 0 }));
       cleanup();
       vi.useRealTimers();
-      vi.mocked(api.put).mockClear();
-      // Before this device is opened again, the suggestion gets another edit elsewhere.
-      suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Drill from the laptop" } } }];
+      vi.mocked(api.put).mockReset();
+      // Before this device is opened again, the suggestion gets another edit on a laptop.
+      suggestions = [withEdit("Drill from the laptop", "laptop-0123456789")];
       renderPage();
+      // The row shows what the server has. The edit of this device is not lost: it
+      // waits in one plain notice beside the row, and is not sent by itself.
       expect(within(card()).getByText("Drill from the laptop").closest("li")).toHaveTextContent("Your edit: Drill from the laptop");
-      expect(within(card()).queryByText("Cordless drill 18V")).toBeNull();
-      await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
+      expect(within(notice()).getByRole("status")).toHaveTextContent(
+        "This suggestion was also edited on another device. Yours: «Cordless drill 18V».",
+      );
       await new Promise((resolve) => setTimeout(resolve, 800));
       expect(drafts()).toHaveLength(0);
+      expect(localStorage.getItem(copy)).not.toBeNull();
+
+      // "Use mine": the edit goes back into the row and is saved on the revision the
+      // server has now. The suggestion still waits: nothing is applied or skipped.
+      vi.mocked(api.put).mockResolvedValueOnce({ ...withEdit("Cordless drill 18V"), draft_revision: 2 });
+      fireEvent.click(within(notice()).getByRole("button", { name: "Use mine" }));
+      expect(within(card()).getByText("Cordless drill 18V").closest("li")).toHaveTextContent("Your edit: Cordless drill 18V");
+      expect(within(card()).queryByRole("group", { name: "Two corrections" })).toBeNull();
+      await waitFor(() => expect(drafts()).toEqual(
+        [[draftPath, sent({ name: "Cordless drill 18V" }, 1), undefined]],
+      ), { timeout: 3000 });
+      await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
       expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("shows the other device's edit when a save meets a newer one, and drops this one when the person keeps the other", async () => {
+      signedIn = true;
+      const copy = "housetory:review-draft:v2:user-1:house-1:inventory:suggestions:suggestion-name";
+      load();
+      // Both devices have the review open. The laptop keeps its edit first.
+      vi.mocked(api.put).mockRejectedValueOnce(conflict());
+      keep("Cordless drill 18V");
+      suggestions = [withEdit("Drill from the laptop", "laptop-0123456789")];
+      await pass(600);
+      await pass(0);
+      expect(drafts()).toEqual([[draftPath, sent({ name: "Cordless drill 18V" }), undefined]]);
+      // The row shows the laptop's edit, with the edit of this device beside it.
+      expect(within(card()).getByText("Drill from the laptop")).toBeVisible();
+      expect(within(notice()).getByRole("status")).toHaveTextContent("Yours: «Cordless drill 18V».");
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+      // It is not sent again by itself.
+      await pass(60_000);
+      expect(drafts()).toHaveLength(1);
+      // Apply takes the row as it is shown. The edit that waits is not part of it.
+      // "Keep the other": the copy is removed and nothing is sent.
+      fireEvent.click(within(notice()).getByRole("button", { name: "Keep the other" }));
+      expect(within(card()).queryByRole("group", { name: "Two corrections" })).toBeNull();
+      expect(localStorage.getItem(copy)).toBeNull();
+      fireEvent.click(within(card()).getByRole("button", { name: "Apply change" }));
+      await pass(0);
+      expect(api.post).toHaveBeenCalledWith(
+        "/inventory-review/suggestions/suggestion-name/accept", { name: "Drill from the laptop" },
+      );
+      expect(drafts()).toHaveLength(1);
+    });
+
+    it("goes on from an edit that this page skipped, without a question", async () => {
+      load();
+      vi.mocked(api.put).mockResolvedValueOnce(withEdit("Cordless drill 18V"));
+      keep("Cordless drill 18V");
+      await pass(600);
+      expect(drafts()).toHaveLength(1);
+      // Skip keeps the edit with the suggestion, one revision on, from no device.
+      vi.mocked(api.post).mockResolvedValueOnce({
+        suggestion_id: "suggestion-name", status: "skipped", message: "Suggestion dismissed.",
+        suggestion: { ...withEdit("Cordless drill 18V"), status: "dismissed", draft_revision: 2, draft_writer: null },
+      });
+      fireEvent.click(within(card()).getByRole("button", { name: "Skip" }));
+      await pass(0);
+      // The suggestion waits again (Undo). The next edit is made on the revision
+      // the skip left, so the server keeps it and nothing is asked.
+      keep("Cordless drill 20V");
+      await pass(600);
+      expect(drafts().at(-1)).toEqual([draftPath, sent({ name: "Cordless drill 20V" }, 2), undefined]);
     });
 
     it("is kept when an older edit of this browser reached the server without an answer", async () => {
       signedIn = true;
-      const copy = "housetory:review-draft:v1:user-1:house-1:inventory:suggestions:suggestion-name";
+      const copy = "housetory:review-draft:v2:user-1:house-1:inventory:suggestions:suggestion-name";
       // A slow link: the request reaches the server, but its answer never reaches the page.
       vi.mocked(api.put).mockImplementationOnce(() => new Promise(() => undefined));
       load();
@@ -824,7 +906,7 @@ describe("ReviewPage", () => {
       // The person changes the edit again. The tab dies before that is sent.
       keep("Cordless drill 20V");
       expect(JSON.parse(localStorage.getItem(copy)!)).toEqual(expect.objectContaining({
-        body: { draft: { name: "Cordless drill 20V" } }, base: null, sent: [{ draft: { name: "Cordless drill 18V" } }],
+        body: { draft: { name: "Cordless drill 20V" } }, baseRevision: 0,
       }));
       vi.mocked(api.put).mockRejectedValueOnce(new ApiError(0, "network_error", "No connection."));
       cleanup();
@@ -832,11 +914,11 @@ describe("ReviewPage", () => {
       vi.mocked(api.put).mockClear();
       // The review is opened again. The server keeps the first edit, which this
       // browser sent itself, so the newer one is still good: it is shown and sent.
-      suggestions = [{ ...nameSuggestion, evidence: { review_draft: { name: "Cordless drill 18V" } } }];
+      suggestions = [withEdit("Cordless drill 18V")];
       renderPage();
       expect(within(card()).getByText("Cordless drill 20V").closest("li")).toHaveTextContent("Your edit: Cordless drill 20V");
       await waitFor(() => expect(drafts()).toEqual(
-        [[draftPath, expect.objectContaining({ draft: { name: "Cordless drill 20V" } }), undefined]],
+        [[draftPath, sent({ name: "Cordless drill 20V" }, 1), undefined]],
       ), { timeout: 3000 });
       await waitFor(() => expect(localStorage.getItem(copy)).toBeNull());
       expect(api.post).not.toHaveBeenCalled();

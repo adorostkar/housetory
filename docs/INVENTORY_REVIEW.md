@@ -94,10 +94,20 @@ forgets the edit. A suggestion that no longer waits answers 409 and keeps
 nothing. If a save fails, the page keeps the edit, shows one quiet line and
 tries again. The edit is also written to this device first and removed when
 the server has confirmed it, so a request that is lost while the page closes
-does not lose the edit: after a reload the row shows it again and it is sent
-again, if the server still keeps what it kept when the edit was made. If the
-server has a newer edit, the server wins. Nothing is applied by that. See
-[Assisted add items](ASSISTED_ADD_ITEMS.md) for the rules of that copy.
+does not lose the edit: after a reload the row shows it again and it is saved
+by itself.
+
+Two devices can edit the same suggestion. The kept edit has a revision and the
+device that stored it (`draft_revision`, `draft_writer`; they are kept beside
+the evidence and are not part of it). Every save says which revision it was
+made on, and the server keeps it only when no other device changed the edit
+since; otherwise it answers 409 `draft_conflict` and keeps nothing. Then the
+row shows the edit the server has, and the edit of this device waits in one
+plain notice under the row: *This suggestion was also edited on another
+device. Yours: «Cordless drill 18V».* **Use mine** saves it on the revision
+the server has now. **Keep the other** removes it. Nothing is applied or
+skipped by either, and Apply and Skip only take what is shown. See
+[Assisted add items](ASSISTED_ADD_ITEMS.md) for the full rule.
 Bulk accept applies only compatible pending category/name/organisation suggestions and
 reports applied/skipped/stale/unsupported outcomes. The `organisation` queue type and
 `apply_organisation` action are additive; existing category/name rows and actions remain

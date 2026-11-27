@@ -23,8 +23,10 @@ from ...schemas.inventory_review import (
     ReviewDecisionOut,
 )
 from .. import history, storage_items
+from ..draft_revisions import REVISION_KEY, WRITER_KEY, DraftConflict, decide, revision_of
 from .scope import _normalized
 from .suggestion_out import (
+    REVIEW_DRAFT_META_KEY,
     _clean_taxonomy_name,
     _organisation_undo_blocker,
     _owned_tags,
@@ -399,6 +401,13 @@ def dismiss_suggestion(
             for key, value in suggestion.evidence_json.items()
             if key != REVIEW_DRAFT_KEY
         }
+    if draft is not None:
+        # The skip changed what is kept for the suggestion, so its revision goes up.
+        meta = (suggestion.evidence_json or {}).get(REVIEW_DRAFT_META_KEY)
+        suggestion.evidence_json = {
+            **(suggestion.evidence_json or {}),
+            REVIEW_DRAFT_META_KEY: {REVISION_KEY: revision_of(meta) + 1, WRITER_KEY: None},
+        }
     suggestion.status = "dismissed"
     suggestion.status_changed_at = datetime.now(UTC)
     suggestion.dismissed_at = datetime.now(UTC)
@@ -427,11 +436,18 @@ def save_suggestion_draft(
     household_id: uuid.UUID,
     suggestion_id: uuid.UUID,
     draft: dict[str, Any],
+    *,
+    expected_revision: int,
+    writer: str,
 ) -> InventoryReviewSuggestion:
     """Keep an "Edit first" edit of a suggestion that still waits. Nothing is decided.
 
     The edit is stored where Skip stores it. The status, the fingerprint, the memory of
     dismissals and the history are not touched. An empty draft forgets the kept edit.
+
+    Two devices can edit the same suggestion. The request says which revision it was
+    made on, and ``decide`` says what happens while the suggestion is locked. A
+    conflict raises ``DraftConflict`` and stores nothing.
     """
     suggestion = _load_suggestion(db, household_id, suggestion_id)
     if suggestion.status != "pending":
@@ -440,14 +456,25 @@ def save_suggestion_draft(
             "review_suggestion_not_pending",
             f"This suggestion is {suggestion.status}. Its edit was not kept.",
         )
-    evidence = {
-        key: value
-        for key, value in (suggestion.evidence_json or {}).items()
-        if key != REVIEW_DRAFT_KEY
-    }
-    if draft:
-        evidence[REVIEW_DRAFT_KEY] = draft
-    suggestion.evidence_json = evidence
+    stored = suggestion.evidence_json or {}
+    meta = stored.get(REVIEW_DRAFT_META_KEY)
+    outcome = decide(
+        meta,
+        expected=expected_revision,
+        writer=writer,
+        same=(stored.get(REVIEW_DRAFT_KEY) or {}) == draft,
+    )
+    if outcome == "conflict":
+        raise DraftConflict(revision_of(meta))
+    if outcome == "store":
+        evidence = {key: value for key, value in stored.items() if key != REVIEW_DRAFT_KEY}
+        if draft:
+            evidence[REVIEW_DRAFT_KEY] = draft
+        evidence[REVIEW_DRAFT_META_KEY] = {
+            REVISION_KEY: revision_of(meta) + 1,
+            WRITER_KEY: writer,
+        }
+        suggestion.evidence_json = evidence
     db.flush()
     return suggestion
 

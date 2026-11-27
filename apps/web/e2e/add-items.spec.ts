@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 
 async function createRoom(request: APIRequestContext, name: string) {
   const response = await request.post("/api/v1/rooms", { data: { name } });
@@ -301,7 +301,7 @@ const setLosing = (page: Page, lose: boolean) =>
 
 const localCopies = (page: Page) =>
   page.evaluate(() =>
-    Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:v1:")),
+    Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:v2:")),
   );
 
 async function correctName(page: Page, from: string, to: string) {
@@ -360,20 +360,17 @@ test("a correction whose request was lost is back after a reload, and the row st
   expect(items.total).toBe(0);
 });
 
-test("a newer correction from another device wins over the copy on this device", async ({
-  page,
-  request,
-}) => {
+// Two devices on one import review. The first one corrects a row while its requests
+// are lost, so the correction is only on that device. The second one, a browser of
+// its own with its own storage, corrects the same row and that is saved. Then the
+// first one is reloaded.
+async function twoDevices(page: Page, browser: Browser, request: APIRequestContext, label: string) {
   const suffix = crypto.randomUUID().slice(0, 6);
-  const room = await createRoom(request, `Other device room ${suffix}`);
-  const read = `Other device widget ${suffix}`;
-  const here = `Corrected on the phone ${suffix}`;
-  const elsewhere = `Corrected on the laptop ${suffix}`;
+  const room = await createRoom(request, `${label} room ${suffix}`);
+  const read = `${label} widget ${suffix}`;
+  const here = `${label} from the phone ${suffix}`;
+  const elsewhere = `${label} from the laptop ${suffix}`;
   const { batchId, stored } = await oneRowImport(request, read, room.id);
-  const detail = (await (await request.get(`/api/v1/imports/${batchId}`)).json()) as {
-    entries: Array<{ id: string; proposed: Record<string, unknown> }>;
-  };
-  const entry = detail.entries[0]!;
 
   await loseDraftRequests(page);
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -381,25 +378,84 @@ test("a newer correction from another device wins over the copy on this device",
   await setLosing(page, true);
   await correctName(page, read, here);
   expect(await localCopies(page)).toHaveLength(1);
+  expect((await stored()).entries[0]!.proposed.name).toBe(read);
 
-  // The same row is corrected on another device before this one is opened again.
-  const other = await request.put(`/api/v1/imports/${batchId}/entries/${entry.id}/draft`, {
-    data: { proposed: { ...entry.proposed, name: elsewhere }, edited_fields: ["name"] },
+  const laptop = await browser.newContext({
+    baseURL: new URL(page.url()).origin, viewport: { width: 1440, height: 1000 },
   });
-  expect(other.ok(), await other.text()).toBeTruthy();
-  // The request of this device stays lost while the page reloads.
-  await page.reload();
+  const login = await laptop.request.post("/api/v1/auth/login", {
+    data: {
+      email: process.env.E2E_EMAIL ?? "phase5@example.com",
+      password: process.env.E2E_PASSWORD ?? "phase-five-password-2026",
+    },
+  });
+  expect(login.ok(), await login.text()).toBeTruthy();
+  const other = await laptop.newPage();
+  await other.goto(`/imports/${batchId}`);
+  await correctName(other, read, elsewhere);
+  await expect.poll(async () => (await stored()).entries[0]!.proposed.name, { timeout: 20_000 }).toBe(elsewhere);
+  await laptop.close();
 
-  // The server has something newer than this device knew, so it is shown and kept.
-  // The copy is removed and is not sent over it.
-  await expect(page.getByRole("article", { name: elsewhere, exact: true })).toBeVisible();
+  // The first device is opened again. Its own request is still lost.
+  await page.reload();
+  // The row shows what the server has. The correction of this device is not lost and
+  // is not sent over it: it waits in one plain notice beside the row.
+  const row = page.getByRole("article", { name: elsewhere, exact: true });
+  await expect(row).toBeVisible();
   await expect(page.getByRole("article", { name: here, exact: true })).toHaveCount(0);
-  await expect.poll(() => localCopies(page)).toEqual([]);
-  // Requests go through again now. Nothing is sent over the newer correction.
+  const notice = page.getByRole("group", { name: "Two corrections" });
+  await expect(notice.getByRole("status")).toHaveText(
+    `This row was also corrected on another device. Yours: «${here}», quantity 1.`,
+  );
+  // Requests go through again now. Nothing is sent by itself.
   await setLosing(page, false);
   await page.waitForTimeout(1500);
   expect((await stored()).entries[0]!.proposed.name).toBe(elsewhere);
+  expect(await localCopies(page)).toHaveLength(1);
   await expect(page.getByText("Your corrections are not saved yet. Trying again.")).toHaveCount(0);
+  return { here, elsewhere, stored, notice };
+}
+
+test("two devices correct one row: the older correction waits beside the row, and \"Use mine\" saves it", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const { here, stored, notice } = await twoDevices(page, browser, request, "Use mine");
+  await notice.getByRole("button", { name: "Use mine" }).click();
+  // The correction of this device is in the row and on the server. The row still
+  // waits: it was not selected and nothing was added.
+  const row = page.getByRole("article", { name: here, exact: true });
+  await expect(row).toBeVisible();
+  await expect
+    .poll(async () => {
+      const entry = (await stored()).entries[0]!;
+      return [entry.status, entry.proposed.name];
+    }, { timeout: 20_000 })
+    .toEqual(["proposed", here]);
+  await expect(notice).toHaveCount(0);
+  await expect.poll(() => localCopies(page)).toEqual([]);
+  await expect(row.getByRole("checkbox", { name: `Select ${here}` })).not.toBeChecked();
+  const items = await (await request.get(`/api/v1/items?q=${encodeURIComponent(here)}`)).json();
+  expect(items.total).toBe(0);
+});
+
+test("two devices correct one row: \"Keep the other\" drops the older correction and sends nothing", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const { elsewhere, stored, notice } = await twoDevices(page, browser, request, "Keep other");
+  await notice.getByRole("button", { name: "Keep the other" }).click();
+  await expect(notice).toHaveCount(0);
+  expect(await localCopies(page)).toEqual([]);
+  await page.waitForTimeout(1500);
+  const entry = (await stored()).entries[0]!;
+  expect([entry.status, entry.proposed.name]).toEqual(["proposed", elsewhere]);
+  // After another reload the row is still the other device's, with no notice.
+  await page.reload();
+  await expect(page.getByRole("article", { name: elsewhere, exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Two corrections" })).toHaveCount(0);
 });
 
 test("signing out removes the copies of corrections on this device", async ({ page, browser, request }) => {

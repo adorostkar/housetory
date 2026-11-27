@@ -37,8 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { api, ApiError, getApiErrorMessage } from "@/lib/api";
-import { stableJson } from "@/lib/review-draft-store";
-import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
+import { copyConflicts, DraftConflictNotice, DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
 import {
   appendOrigin,
   itemOrigin,
@@ -394,29 +393,28 @@ export function InventoryReview({
   // An edit that is kept for later is also kept on the server, without Skip or Apply.
   const autosave = useDraftAutosave({ kind: "inventory", id: "suggestions" });
   const [editDrafts, setEditDrafts] = React.useState<Record<string, { name?: string; categoryId?: string }>>({});
-  // What the server keeps as the edit of each suggestion, as far as this page knows:
-  // from the answer of the server to a save, else from the loaded list. It goes with
-  // the copy of an edit on this device.
-  const serverEdits = React.useRef(new Map<string, unknown>());
-  const serverEdit = (suggestion: Pick<ReviewSuggestion, "evidence">) => {
-    const kept = (suggestion.evidence ?? {}).review_draft as
-      { name?: string; category_id?: string } | undefined;
-    return kept && typeof kept === "object" && (kept.name || kept.category_id)
-      ? { name: kept.name ?? null, category_id: kept.category_id ?? null } : null;
-  };
-  const editRequest = (id: string, body: unknown, base: unknown) => ({
+  const editRequest = (id: string, body: unknown) => ({
     path: `/inventory-review/suggestions/${id}/draft`,
     body,
-    base,
     // The answer is the suggestion as the server has it now.
-    rebase: (answer: unknown) => {
-      const kept = serverEdit((answer ?? {}) as ReviewSuggestion);
-      serverEdits.current.set(id, kept);
-      return kept;
-    },
+    revisionOf: (answer: unknown) => (answer as ReviewSuggestion | null)?.draft_revision,
     // The list is read again, so that it has the kept edit when this review is
     // opened again. The edit on the page stays as it is.
     onSaved: () => void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll }),
+    // Another device edited the suggestion in the meantime. The row shows what the
+    // server has now, and the edit of this device waits beside it.
+    onConflict: () => {
+      setEditDrafts((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reviewSuggestionsAll });
+    },
+  });
+  const editOf = (kept: { name?: unknown; category_id?: unknown }) => ({
+    ...(typeof kept.name === "string" && kept.name ? { name: kept.name } : {}),
+    ...(typeof kept.category_id === "string" && kept.category_id ? { categoryId: kept.category_id } : {}),
   });
   const proposedEdit = (suggestion: ReviewSuggestion) => ({
     name: stringField(suggestion.after, "name") ?? "",
@@ -485,8 +483,11 @@ export function InventoryReview({
       ),
     onMutate: (suggestion) => autosave.cancel(suggestion.id),
     onSuccess: (result, suggestion) => {
-      // The skip carried the edit, so the copy on this device is not needed.
+      // The skip carried the edit, so the copy on this device is not needed. The
+      // server keeps the edit as it is on this page, one revision on. Restore then
+      // brings back that same edit.
       autosave.forget(suggestion.id);
+      autosave.trackStep(suggestion.id, result.suggestion?.draft_revision);
       refreshReview();
       // Skip is remembered. Undo here, or Restore under Skipped, brings the row back.
       toast.success(`Skipped: ${suggestion.title}`, {
@@ -553,14 +554,17 @@ export function InventoryReview({
 
   const suggestions = suggestionsQuery.data?.items ?? [];
   // An edit of an earlier visit can still be on this device: its request was lost, or
-  // it arrived but the page was gone before the answer. When its suggestion is in the
-  // loaded list, it is used only if the server still keeps what it kept when the edit
-  // was made. Then the row shows it again and it is sent again. When the server has
-  // something else (the edit itself, or a newer one from another device), the server
-  // wins and the copy is removed. Nothing is applied by this.
+  // it arrived but the page was gone before the answer. It was made on one revision
+  // of the kept edit. When its suggestion is in the loaded list and the server has
+  // no newer edit from another device, the row shows it again and it is sent again;
+  // the server checks the revision once more. When another device edited the
+  // suggestion since, the row shows what the server has, and the edit of this device
+  // waits beside it for the person to choose. Nothing is applied by this.
   const recoveredEdits = autosave.recovered;
   const saveEdit = autosave.save;
   const forgetEdit = autosave.forget;
+  const markConflict = autosave.markConflict;
+  const trackRevision = autosave.track;
   const loadedSuggestions = suggestionsQuery.data?.items;
   React.useEffect(() => {
     if (!loadedSuggestions || recoveredEdits.size === 0) return;
@@ -570,25 +574,49 @@ export function InventoryReview({
       if (!suggestion) continue;
       recoveredEdits.delete(id);
       const kept = (local.body as { draft?: { name?: string; category_id?: string } } | null)?.draft;
-      // The server still keeps what it kept when the edit was made, or it keeps an
-      // edit that this browser sent itself and never got an answer for.
-      const now = stableJson(serverEdit(suggestion));
-      const ours = now === stableJson(local.base) || local.sent.some((sent) =>
-        stableJson(serverEdit({ evidence: { review_draft: (sent as { draft?: unknown } | null)?.draft } })) === now);
-      if (suggestion.status !== "pending" || !kept || typeof kept !== "object" || !ours) {
+      if (suggestion.status !== "pending" || !kept || typeof kept !== "object") {
         forgetEdit(id);
         continue;
       }
-      setEditDrafts((current) => id in current ? current : { ...current, [id]: {
-        ...(typeof kept.name === "string" && kept.name ? { name: kept.name } : {}),
-        ...(typeof kept.category_id === "string" && kept.category_id ? { categoryId: kept.category_id } : {}),
-      } });
-      serverEdits.current.set(id, local.base);
-      saveEdit(id, editRequest(id, local.body, local.base));
+      if (copyConflicts(local, { revision: suggestion.draft_revision, writer: suggestion.draft_writer })) {
+        if (!local.conflict) markConflict(id);
+        continue;
+      }
+      setEditDrafts((current) => id in current ? current : { ...current, [id]: editOf(kept) });
+      trackRevision(id, suggestion.draft_revision);
+      saveEdit(id, editRequest(id, local.body));
     }
-    // `serverEdit` and `editRequest` read nothing that changes between renders.
+    // `editRequest` reads nothing that changes between renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forgetEdit, loadedSuggestions, recoveredEdits, saveEdit]);
+  }, [forgetEdit, loadedSuggestions, markConflict, recoveredEdits, saveEdit, trackRevision]);
+
+  // The person chose their own edit of a suggestion that another device edited. It
+  // goes back into the row and is saved, on top of what the server has now. The
+  // suggestion is not applied or skipped by this.
+  const conflictNotice = (suggestion: ReviewSuggestion) => {
+    const mine = autosave.conflicts.get(suggestion.id);
+    const kept = (mine?.body as { draft?: { name?: string; category_id?: string } } | null | undefined)?.draft;
+    if (!mine || suggestion.status !== "pending" || !kept || typeof kept !== "object") return null;
+    const category = kept.category_id
+      ? categories.find((entry) => entry.id === kept.category_id)?.name ?? "another category" : "";
+    const yours = kept.name ? `«${kept.name}»` : category ? `category «${category}»` : "the proposal as it was";
+    return (
+      <DraftConflictNotice
+        subject="suggestion"
+        yours={yours}
+        className="mt-2 rounded-lg border border-brass/40 bg-brass-soft/40 px-3 py-2 text-xs leading-relaxed"
+        disabled={applyMutation.isPending || dismissMutation.isPending}
+        onUseMine={() => {
+          setEditDrafts((current) => ({ ...current, [suggestion.id]: editOf(kept) }));
+          // The edit is sent on the revision of the suggestion as it is shown now.
+          trackRevision(suggestion.id, suggestion.draft_revision);
+          autosave.takeMine(suggestion.id);
+          saveEdit(suggestion.id, editRequest(suggestion.id, mine.body));
+        }}
+        onKeepOther={() => forgetEdit(suggestion.id)}
+      />
+    );
+  };
   // Remembered across loading states so paging or rescoping does not collapse the filters.
   const [hadSuggestions, setHadSuggestions] = React.useState(false);
   if (!suggestionsQuery.isPending && hadSuggestions !== suggestions.length > 0) {
@@ -673,6 +701,9 @@ export function InventoryReview({
   };
 
   const openEdit = (suggestion: ReviewSuggestion) => {
+    // The edit starts from the suggestion as it is shown. Without an edit of this
+    // visit that is what the server has now, with its revision.
+    trackRevision(suggestion.id, suggestion.draft_revision, !(suggestion.id in editDrafts));
     const draft = editDraftFor(suggestion);
     const proposed = proposedEdit(suggestion);
     setEditTarget(suggestion);
@@ -699,8 +730,7 @@ export function InventoryReview({
       const after = changed ?? {};
       if (canWrite && editTarget.status === "pending" && JSON.stringify(before) !== JSON.stringify(after)) {
         const id = editTarget.id;
-        if (!serverEdits.current.has(id)) serverEdits.current.set(id, serverEdit(editTarget));
-        autosave.save(id, editRequest(id, dismissBody(after), serverEdits.current.get(id)));
+        autosave.save(id, editRequest(id, dismissBody(after)));
       }
     }
     setEditTarget(null);
@@ -1481,6 +1511,7 @@ export function InventoryReview({
                         </>
                       }
                     />
+                    {conflictNotice(suggestion)}
                   </li>
                 );
               })}

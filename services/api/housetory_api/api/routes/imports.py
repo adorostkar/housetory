@@ -25,6 +25,7 @@ from ...schemas.imports import (
 )
 from ...services import properties as property_service
 from ...services import storage
+from ...services.draft_revisions import DraftConflict, conflict
 from ...services.import_pipeline import (
     apply_import,
     create_assistant_text_capture,
@@ -428,7 +429,14 @@ def save_import_entry_draft_route(
 ) -> ImportEntryOut:
     """Keep the corrections of one row that still waits. The row stays as it is."""
     batch = _get_batch(db, auth.household.id, batch_id)
-    return serialize_import_entry(save_import_entry_draft(db, batch, entry_id, payload))
+    try:
+        return serialize_import_entry(save_import_entry_draft(db, batch, entry_id, payload))
+    except DraftConflict as error:
+        # The page gets the row as the server keeps it, and its revision.
+        entry = db.get(ImportEntry, entry_id)
+        raise conflict(
+            error.revision, serialize_import_entry(entry).model_dump(mode="json")
+        ) from error
 
 
 @router.post("/{batch_id}/enhancement/retry", response_model=ImportBatchDetail)

@@ -130,6 +130,9 @@ export interface ImportEntry {
   source_region?: { x: number; y: number; width: number; height: number } | null;
   error: string | null;
   position: number;
+  /** How often the kept correction of this row changed, and the device that kept it. */
+  draft_revision?: number;
+  draft_writer?: string | null;
 }
 
 export interface ImportSourceFile {

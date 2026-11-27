@@ -17,7 +17,7 @@ from ...schemas.imports import (
     ImportSourceFileOut,
     ProposedItem,
 )
-from ..import_row_drafts import public_proposed
+from ..import_row_drafts import draft_revision, draft_writer, public_proposed
 from ..recognition_geometry import stored_region
 
 
@@ -83,6 +83,8 @@ def serialize_import_entry(
         position=entry.position,
         # Only a photo recognition has positions; every other entry has none.
         source_region=stored_region((source_regions or {}).get(str(entry.id))),
+        draft_revision=draft_revision(entry.proposed),
+        draft_writer=draft_writer(entry.proposed),
     )
 
 

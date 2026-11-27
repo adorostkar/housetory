@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ...db import get_db
+from ...models import InventoryReviewSuggestion
 from ...schemas.inventory_review import (
     CaptureReviewDismissRequest,
     CaptureReviewOut,
@@ -27,6 +28,7 @@ from ...schemas.inventory_review import (
 )
 from ...services import inventory_review, inventory_review_schedule
 from ...services.capture_reviews import change_capture_review, pending_captures
+from ...services.draft_revisions import DraftConflict, conflict
 from ..deps import AuthContext, require_auth, require_owner, require_writer
 from ..errors import ApiError
 
@@ -329,9 +331,18 @@ def save_review_suggestion_draft(
             auth.household.id,
             suggestion_id,
             payload.draft.model_dump(mode="json", exclude_none=True),
+            expected_revision=payload.expected_revision,
+            writer=payload.writer,
         )
         result = inventory_review.serialize_suggestion(db, suggestion)
         db.commit()
+    except DraftConflict as error:
+        # The page gets the suggestion as the server keeps it, and its revision.
+        current = inventory_review.serialize_suggestion(
+            db, db.get(InventoryReviewSuggestion, suggestion_id)
+        ).model_dump(mode="json")
+        db.rollback()
+        raise conflict(error.revision, current) from error
     except Exception:
         db.rollback()
         raise

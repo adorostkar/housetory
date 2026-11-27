@@ -15,6 +15,7 @@ from housetory_api.schemas.extraction import ExtractionApplyRequest
 from housetory_api.services import ai
 from housetory_api.services.document_extraction_apply import apply_extraction
 from housetory_api.services.enrichment import run_enhancement
+from tests.draft_conflict_cases import put_draft
 from tests.test_document_extraction import (
     _add_member,
     _headers,
@@ -528,15 +529,25 @@ def test_kept_draft_of_a_waiting_row_leaves_ready_suggestions_usable_and_accept_
     version = _source_version(detail["id"])
 
     # A draft that only changes the choices of the row is not a change of the source.
+    # Its revision and the device that kept it are not part of the source either.
     choices = {"action": "merge", "merge_item_id": existing["id"], "merge_fields": ["brand"]}
-    assert owner_client.put(draft_url, json=choices).status_code == 200
+    phone = {"expected_revision": 0, "writer": "phone-0123456789"}
+    assert put_draft(owner_client, draft_url, json={**choices, **phone}).status_code == 200
     assert _source_version(detail["id"]) == version
     # Neither is a correction of its values: the suggestions stay ready after a reload.
     edited = {**entry["proposed"], "name": "Film camera", "quantity": 2}
-    saved = owner_client.put(
-        draft_url, json={**choices, "proposed": edited, "edited_fields": ["name"]}
+    saved = put_draft(owner_client,
+        draft_url,
+        json={
+            **choices,
+            "proposed": edited,
+            "edited_fields": ["name"],
+            "expected_revision": 1,
+            "writer": "laptop-0123456789",
+        },
     )
     assert saved.status_code == 200, saved.text
+    assert saved.json()["draft_revision"] == 2
     assert _source_version(detail["id"]) == version
     current = owner_client.get(batch_url).json()
     assert current["enhancement"]["status"] == "ready"
@@ -557,8 +568,14 @@ def test_kept_draft_of_a_waiting_row_leaves_ready_suggestions_usable_and_accept_
         "allow_duplicate": False,
         "edited_fields": ["name", "quantity"],
     }
+    # Accepting changed the row, so a correction that another device made on the
+    # older row is not put on top without a question.
+    assert (row["draft_revision"], row["draft_writer"]) == (3, None)
+    older = put_draft(owner_client, draft_url, json={**choices, "proposed": edited, **phone})
+    assert older.status_code == 409
+    assert older.json()["detail"]["code"] == "draft_conflict"
     # An empty draft now goes back to the accepted suggestion, not to the old reading.
-    cleared = owner_client.put(draft_url, json={}).json()["proposed"]
+    cleared = put_draft(owner_client, draft_url, json={}).json()["proposed"]
     assert (cleared["name"], cleared["quantity"], cleared["brand"]) == ("Camera", 1, "Canon")
     assert "review_draft" not in cleared["relationships"]
 
@@ -590,7 +607,7 @@ def test_suggestions_made_after_a_draft_are_offered_and_a_skip_still_ends_them(
     # The person corrects the row while the suggestions are still on their way. The
     # brand is one of the corrections, so the suggested brand must not replace it.
     edited = {**entry["proposed"], "name": "Film camera", "brand": "Nikon"}
-    saved = owner_client.put(
+    saved = put_draft(owner_client,
         f"{batch_url}/entries/{entry['id']}/draft",
         json={"proposed": edited, "edited_fields": ["name", "brand"]},
     )
@@ -641,7 +658,7 @@ def test_ai_only_retry_still_works_after_a_draft_was_kept(
     assert detail["enhancement"]["status"] == "off"
     entry = detail["entries"][0]
     batch_url = f"/api/v1/imports/{detail['id']}"
-    saved = owner_client.put(
+    saved = put_draft(owner_client,
         f"{batch_url}/entries/{entry['id']}/draft",
         json={"proposed": {**entry["proposed"], "quantity": 3}, "edited_fields": ["quantity"]},
     )
@@ -686,7 +703,7 @@ def test_hierarchy_suggestions_keep_the_draft_of_a_place_row(
         (renamed, {"proposed": {**renamed["proposed"], "name": "My own name"}}),
         (moved, choices),
     ):
-        saved = owner_client.put(f"{batch_url}/entries/{entry['id']}/draft", json=body)
+        saved = put_draft(owner_client, f"{batch_url}/entries/{entry['id']}/draft", json=body)
         assert saved.status_code == 200, saved.text
 
     monkeypatch.setattr(
@@ -802,11 +819,11 @@ def test_kept_document_corrections_do_not_make_suggestions_out_of_date(
     line = next(entry for entry in review["lines"] if entry["kind"] == "product")
     # The person corrects the top fields and a line while the suggestions are on their way.
     header = {"merchant": "My own shop", "total": "12.50"}
-    saved = owner_client.put(
+    saved = put_draft(owner_client,
         f"{review_url}/draft", json={"version": review["version"], "draft": header}
     )
     assert saved.status_code == 200, saved.text
-    kept = owner_client.put(
+    kept = put_draft(owner_client,
         f"{review_url}/lines/{line['id']}/draft", json={"draft": {"quantity": "3"}}
     )
     assert kept.status_code == 200, kept.text
@@ -820,7 +837,7 @@ def test_kept_document_corrections_do_not_make_suggestions_out_of_date(
     assert after["header_draft"]["version"] == review["version"]
     assert {k: v for k, v in after["header_draft"]["draft"].items() if v is not None} == header
     # A correction after the suggestions are ready leaves them ready too.
-    again = owner_client.put(
+    again = put_draft(owner_client,
         f"{review_url}/draft",
         json={"version": review["version"], "draft": {**header, "currency": "SEK"}},
     )

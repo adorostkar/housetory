@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..schemas.common import Description, ORMModel, trimmed
+from ..schemas.common import Description, DraftRevision, DraftWriter, ORMModel, trimmed
 from .enrichment import EnhancementState
 
 
@@ -163,6 +163,9 @@ class ImportEntryOut(ORMModel):
     error: str | None
     position: int
     source_region: SourceRegion | None = None
+    # How often the kept correction of this row changed, and the device that kept it.
+    draft_revision: int = 0
+    draft_writer: str | None = None
 
 
 class ImportBatchOut(ORMModel):
@@ -280,9 +283,13 @@ MAX_ROW_DRAFT_CHARS = 60_000
 class ImportEntryDraftRequest(BaseModel):
     """The corrections of a row that still waits: the edited proposal and the choices.
 
-    Nothing is decided by it. An empty body forgets the choices that were kept.
+    Nothing is decided by it. A body with no row field forgets the choices that were
+    kept. ``expected_revision`` is the revision the correction was made on, and
+    ``writer`` is the device that sends it.
     """
 
+    expected_revision: DraftRevision
+    writer: DraftWriter
     action: Literal["import", "merge"] = "import"
     entity_type: Literal["item", "room", "container", "location"] | None = None
     parent_entry_id: uuid.UUID | None = None

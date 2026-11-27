@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { DocumentExtractionReview } from "@/components/document-extraction-review";
 import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { DocumentProcessingStatus } from "@/components/document-processing-status";
+import { writerId } from "@/lib/review-draft-store";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/queries";
 import type {
@@ -210,6 +211,8 @@ const readyProcessing: DocumentProcessing = {
 
 // Without a signed-in user there is no copy of a correction on this device.
 let signedIn = false;
+// Who stores a draft from this browser: the device, and the person when one is signed in.
+const thisWriter = () => writerId(signedIn ? "user-1" : null);
 const localCopies = () => Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:"));
 
 vi.mock("@/lib/queries", async (importOriginal) => {
@@ -1092,18 +1095,57 @@ describe("DocumentExtractionReview", () => {
     const pass = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
     const line = (name: string) => screen.getByRole("article", { name });
     const note = "Your corrections are not saved yet. Trying again.";
-    let extraction: ExtractionReview & { line_states?: Record<string, object>; applied_version?: string | null };
-    // Like the server: the draft of a waiting line is kept with the line, which stays pending.
+    type KeptLine = {
+      status: string; draft?: unknown; revision?: number; writer?: string | null;
+      line_total_cents?: number; [key: string]: unknown;
+    };
+    let extraction: ExtractionReview & {
+      line_states?: Record<string, KeptLine>; applied_version?: string | null;
+      header_draft?: { version: string; draft: object } | null;
+      header_revision?: number; header_writer?: string | null;
+    };
+    const headerPath = `/documents/${document.id}/extraction/draft`;
+    // Like the server: the draft of a waiting line is kept with the line, which stays
+    // pending, and the fields at the top are kept with their version. Each has a
+    // revision. A draft is kept when it was made on that revision, or when the kept
+    // one is from the same device. The same draft again changes nothing. Anything
+    // else is a conflict, and nothing is kept.
+    const keep = async (path: string, body: unknown) => {
+      const { expected_revision: expected, writer, ...sent } =
+        body as { expected_revision?: number; writer?: string; version?: string; draft?: object | null };
+      const refuse = (revision: number, by: string | null | undefined, same: boolean) => {
+        if (!same && expected !== revision && writer !== by) {
+          throw new ApiError(409, "draft_conflict", "This row was also corrected on another device.");
+        }
+        return !same;
+      };
+      if (path === headerPath) {
+        const revision = extraction.header_revision ?? 0;
+        const same = JSON.stringify(sent.draft ?? null) === JSON.stringify(extraction.header_draft?.draft ?? null);
+        if (refuse(revision, extraction.header_writer, same)) {
+          extraction = { ...extraction, header_revision: revision + 1, header_writer: writer ?? null,
+            header_draft: sent.draft ? { version: sent.version!, draft: sent.draft } : null };
+        }
+        return { header_draft: extraction.header_draft, header_revision: extraction.header_revision,
+          header_writer: extraction.header_writer };
+      }
+      const id = path.split("/").at(-2)!;
+      const state = extraction.line_states?.[id];
+      const revision = state?.revision ?? 0;
+      if (refuse(revision, state?.writer, JSON.stringify(sent.draft ?? null) === JSON.stringify(state?.draft ?? null))) {
+        extraction = { ...extraction, line_states: { ...extraction.line_states,
+          [id]: { status: "pending", ...sent, revision: revision + 1, writer: writer ?? null } } };
+      }
+      return { line_states: extraction.line_states, applied_version: null };
+    };
+    // Another device corrects a line or the fields at the top.
+    const correctElsewhere = (change: Partial<typeof extraction>) => {
+      extraction = { ...extraction, ...change } as typeof extraction;
+    };
     beforeEach(() => {
       extraction = twoLines;
       vi.mocked(api.get).mockImplementation(async () => extraction);
-      vi.mocked(api.put).mockImplementation(async (path, body) => {
-        const id = path.split("/").at(-2)!;
-        extraction = { ...extraction, line_states: {
-          ...extraction.line_states, [id]: { status: "pending", ...(body as object) },
-        } };
-        return { line_states: extraction.line_states, applied_version: null };
-      });
+      vi.mocked(api.put).mockImplementation(keep);
     });
     // The review is loaded with real time; the clock is held only for the corrections.
     const load = async () => {
@@ -1135,6 +1177,8 @@ describe("DocumentExtractionReview", () => {
           action: "create", lineTotal: "19.90",
           newItem: expect.objectContaining({ name: "Drill Bit Set", roomId: "room-1", brand: "Bosch" }),
         }),
+        // The revision of the line's draft that the row was built from, and this device.
+        expected_revision: 0, writer: thisWriter(),
       }, undefined]);
       // The line still waits, is not selected, its editor is still open, and nothing was applied.
       expect(within(line("Drill Bit Set")).getByLabelText("Destination room")).toHaveValue("room-1");
@@ -1217,19 +1261,10 @@ describe("DocumentExtractionReview", () => {
       expect(within(bits).getByText("Office")).toBeVisible();
     });
 
-    const headerPath = `/documents/${document.id}/extraction/draft`;
     const headerCalls = () => vi.mocked(api.put).mock.calls.filter(([path]) => path === headerPath);
     const field = (label: RegExp) => screen.getByLabelText(label);
 
     it("keeps the fields at the top like a line, and a reload fills them again without applying anything", async () => {
-      // Like the server: the fields are kept with their version. Nothing else changes.
-      vi.mocked(api.put).mockImplementation(async (path, body) => {
-        if (path === headerPath) {
-          const sent = body as { version: string; draft: object | null };
-          extraction = { ...extraction, header_draft: sent.draft ? { version: sent.version, draft: sent.draft } : null } as typeof extraction;
-        }
-        return {};
-      });
       const view = await load();
       await pass(2000);
       expect(api.put).not.toHaveBeenCalled();
@@ -1246,7 +1281,7 @@ describe("DocumentExtractionReview", () => {
       expect(vi.mocked(api.put).mock.calls).toEqual([[headerPath, { version: "version-1", draft: {
         merchant: "Corner Hardware AB", purchase_date: "2026-02-15", document_date: "2026-02-14",
         currency: "USD", total: "190.5", order_number: "ORD-7", purchase_action: "none",
-      } }, undefined]]);
+      }, expected_revision: 0, writer: thisWriter() }, undefined]]);
       expect(api.post).not.toHaveBeenCalled();
 
       // A reload has only what the server kept. The fields are filled; nothing is applied.
@@ -1274,7 +1309,9 @@ describe("DocumentExtractionReview", () => {
       fireEvent.change(field(/^Order or invoice number/), { target: { value: "INV-9001" } });
       fireEvent.click(screen.getByRole("button", { name: "Create purchase" }));
       await pass(600);
-      expect(headerCalls()).toEqual([[headerPath, { version: "version-1", draft: null }, undefined]]);
+      expect(headerCalls()).toEqual([[headerPath, {
+        version: "version-1", draft: null, expected_revision: 1, writer: thisWriter(),
+      }, undefined]]);
     });
 
     it("does not use fields that were kept for another version of the reading", async () => {
@@ -1293,8 +1330,8 @@ describe("DocumentExtractionReview", () => {
       // The copies are on this device before anything is sent.
       expect(api.put).not.toHaveBeenCalled();
       expect(localCopies().sort()).toEqual([
-        "housetory:review-draft:v1:user-1:house-1:document:document-1:header",
-        "housetory:review-draft:v1:user-1:house-1:document:document-1:line-2",
+        "housetory:review-draft:v2:user-1:house-1:document:document-1:header",
+        "housetory:review-draft:v2:user-1:house-1:document:document-1:line-2",
       ]);
       view.unmount();
 
@@ -1319,12 +1356,14 @@ describe("DocumentExtractionReview", () => {
       await waitFor(() => expect(sent.map(([path]) => path).sort()).toEqual([headerPath, draftPath("line-2")]), { timeout: 3000 });
       expect(sent.find(([path]) => path === headerPath)![1]).toEqual({ version: "version-1", draft: expect.objectContaining({
         merchant: "Corner Hardware AB", total: "190.5",
-      }) });
+      }), expected_revision: 0, writer: thisWriter() });
       await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
       expect(api.post).not.toHaveBeenCalled();
     });
 
-    it("lets the server win over a copy when a line or the fields were corrected somewhere else", async () => {
+    const notice = (inside: HTMLElement) => within(inside).getByRole("group", { name: "Two corrections" });
+
+    it("keeps corrections of this device beside a line and the fields that another device corrected, and lets the person choose", async () => {
       signedIn = true;
       vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
       const view = await load();
@@ -1337,27 +1376,131 @@ describe("DocumentExtractionReview", () => {
       view.unmount();
       vi.useRealTimers();
       cleanupRender();
-      const sent: string[] = [];
       vi.mocked(api.put).mockReset();
-      vi.mocked(api.put).mockImplementation(async (path) => { sent.push(path); return {}; });
+      vi.mocked(api.put).mockImplementation(keep);
       // Before this device is opened again, the bit set and the fields at the top are
-      // corrected on another device. The drill line is as it was.
-      extraction = { ...twoLines,
+      // corrected on a laptop. The drill line is as it was.
+      correctElsewhere({
         header_draft: { version: "version-1", draft: { merchant: "Shop from the laptop" } },
+        header_revision: 1, header_writer: "laptop-0123456789",
         line_states: { "line-2": { status: "pending", description: "Drill Bit Set", quantity: 1, line_total_cents: 3000,
-          draft: { lineTotal: "30.00" } } },
-      } as typeof extraction;
+          draft: { lineTotal: "30.00" }, revision: 1, writer: "laptop-0123456789" } },
+      } as Partial<typeof extraction>);
       await renderReview(undefined, true, undefined, false, false);
-      // The newer corrections are shown, not the copies of this device.
+      // The page shows what the server has. The corrections of this device are not
+      // lost: each waits in one plain notice beside its part.
       expect(field(/^Merchant/)).toHaveValue("Shop from the laptop");
+      const bits = () => line("Drill Bit Set").parentElement!;
       expect(within(line("Drill Bit Set")).getByText("30.00")).toBeVisible();
       expect(within(line("Drill Bit Set")).queryByText("19.90")).not.toBeInTheDocument();
-      // The drill line is as the server had it when it was corrected here: its copy is used.
+      expect(within(notice(bits())).getByRole("status")).toHaveTextContent(
+        "This line was also corrected on another device. Yours: «Drill Bit Set», quantity 1, total 19.90.",
+      );
+      const fields = () => screen.getByRole("heading", { name: "Document fields" }).closest("section")!;
+      expect(within(notice(fields())).getByRole("status")).toHaveTextContent(
+        "These details were also corrected on another device. Yours: merchant «Corner Hardware AB».",
+      );
+      // The drill line was not touched anywhere else: its copy is used by itself.
       expect(within(line("Cordless Drill")).getByText("140.5")).toBeVisible();
-      await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
-      // Only the drill line was sent. Nothing went over what the server had for the rest.
-      expect(sent).toEqual([draftPath("line-1")]);
+      await waitFor(() => expect(localCopies()).toHaveLength(2), { timeout: 3000 });
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      // Only the drill line was sent. Nothing went over what the laptop saved.
+      expect(vi.mocked(api.put).mock.calls.map((call) => call[0])).toEqual([draftPath("line-1")]);
+      expect(extraction.header_draft!.draft).toEqual({ merchant: "Shop from the laptop" });
+      expect(extraction.line_states!["line-2"]!.draft).toEqual({ lineTotal: "30.00" });
+
+      // "Use mine" on the line: it goes back into the row and is saved on the
+      // revision the server has now. The line still waits; nothing is applied.
+      vi.mocked(api.put).mockClear();
+      fireEvent.click(within(notice(bits())).getByRole("button", { name: "Use mine" }));
+      expect(within(line("Drill Bit Set")).getByText("19.90")).toBeVisible();
+      await waitFor(() => expect(extraction.line_states!["line-2"]).toEqual(
+        expect.objectContaining({ line_total_cents: 1990, revision: 2, writer: thisWriter() }),
+      ), { timeout: 3000 });
+      expect(vi.mocked(api.put).mock.calls).toEqual([[draftPath("line-2"), expect.objectContaining({
+        expected_revision: 1, line_total_cents: 1990,
+      }), undefined]]);
+      await waitFor(() => expect(localCopies()).toHaveLength(1), { timeout: 3000 });
+      expect(within(bits()).queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+      expect(within(line("Drill Bit Set")).getByRole("checkbox", { name: /^Select line/ })).not.toBeChecked();
+
+      // "Keep the other" for the fields: the copy is removed and nothing is sent.
+      vi.mocked(api.put).mockClear();
+      fireEvent.click(within(notice(fields())).getByRole("button", { name: "Keep the other" }));
+      expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+      expect(localCopies()).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(api.put).not.toHaveBeenCalled();
+      expect(field(/^Merchant/)).toHaveValue("Shop from the laptop");
       expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("shows the other device's fields when a save meets a newer one, and applies only what is shown", async () => {
+      signedIn = true;
+      await load();
+      // Both devices have the review open. The laptop saves the fields first.
+      fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
+      correctElsewhere({
+        header_draft: { version: "version-1", draft: { merchant: "Shop from the laptop" } },
+        header_revision: 1, header_writer: "laptop-0123456789",
+      } as Partial<typeof extraction>);
+      await pass(600);
+      await pass(0);
+      // The server kept nothing of this save. The fields show the laptop's value,
+      // with the correction of this device beside them. It is not sent again.
+      expect(headerCalls()).toHaveLength(1);
+      expect(field(/^Merchant/)).toHaveValue("Shop from the laptop");
+      const fields = screen.getByRole("heading", { name: "Document fields" }).closest("section")!;
+      expect(within(notice(fields)).getByRole("status")).toHaveTextContent("Yours: merchant «Corner Hardware AB».");
+      expect(screen.queryByText(note)).not.toBeInTheDocument();
+      await pass(60_000);
+      expect(headerCalls()).toHaveLength(1);
+      expect(extraction.header_draft!.draft).toEqual({ merchant: "Shop from the laptop" });
+
+      // "Use mine": saved on the revision the server has now.
+      fireEvent.click(within(notice(fields)).getByRole("button", { name: "Use mine" }));
+      expect(field(/^Merchant/)).toHaveValue("Corner Hardware AB");
+      await pass(600);
+      expect(headerCalls().at(-1)![1]).toEqual(expect.objectContaining({
+        expected_revision: 1, draft: expect.objectContaining({ merchant: "Corner Hardware AB" }),
+      }));
+      expect(extraction.header_draft!.draft).toEqual(expect.objectContaining({ merchant: "Corner Hardware AB" }));
+      expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+      expect(localCopies()).toEqual([]);
+      expect(api.post).not.toHaveBeenCalled();
+    });
+
+    it("goes on from a line that this page skipped and restored, without a question", async () => {
+      // Like the server: a skip keeps the line as it was sent, one revision on, from no device.
+      vi.mocked(api.post).mockImplementation(async (path, body) => {
+        const id = path.split("/").at(-2)!;
+        const state = extraction.line_states?.[id];
+        extraction = { ...extraction, line_states: { ...extraction.line_states, [id]: path.endsWith("/skip")
+          ? { ...(body as object), status: "skipped", revision: (state?.revision ?? 0) + 1, writer: null }
+          : { ...state!, status: "pending" } } };
+        return { line_states: extraction.line_states, applied_version: null };
+      });
+      await load();
+      correctBits();
+      await pass(600);
+      expect(extraction.line_states!["line-2"]!.revision).toBe(1);
+      fireEvent.click(within(line("Drill Bit Set")).getByRole("button", { name: "Skip" }));
+      await pass(0);
+      expect(extraction.line_states!["line-2"]).toEqual(expect.objectContaining({ status: "skipped", revision: 2 }));
+      const undo = vi.mocked(toast.success).mock.calls.at(-1)![1] as unknown as { action: { onClick: () => void } };
+      act(() => undo.action.onClick());
+      await pass(0);
+      // The line is back as it was skipped here. The next correction is made on the
+      // revision the skip left, so the server keeps it and nothing is asked.
+      const bits = line("Drill Bit Set");
+      if (!within(bits).queryByLabelText(/^Line total/)) fireEvent.click(within(bits).getByRole("button", { name: "Edit" }));
+      fireEvent.change(within(line("Drill Bit Set")).getByLabelText(/^Line total/), { target: { value: "21" } });
+      await pass(600);
+      expect(vi.mocked(api.put).mock.calls.at(-1)![1]).toEqual(expect.objectContaining({
+        expected_revision: 2, line_total_cents: 2100,
+      }));
+      expect(extraction.line_states!["line-2"]).toEqual(expect.objectContaining({ line_total_cents: 2100, revision: 3 }));
+      expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
     });
 
     it("keeps newer corrections when older ones of this browser reached the server without an answer", async () => {
@@ -1365,19 +1508,14 @@ describe("DocumentExtractionReview", () => {
       // A slow link: each request reaches the server, but its answer never reaches the page.
       const reach = vi.mocked(api.put).getMockImplementation()!;
       vi.mocked(api.put).mockImplementation(async (path, body) => {
-        if (path === headerPath) {
-          const sent = body as { version: string; draft: object | null };
-          extraction = { ...extraction, header_draft: sent.draft ? { version: sent.version, draft: sent.draft } : null } as typeof extraction;
-        } else {
-          await reach(path, body);
-        }
+        await reach(path, body);
         return new Promise(() => undefined);
       });
       const view = await load();
       fireEvent.change(field(/^Merchant/), { target: { value: "Corner" } });
       correctBits();
       await pass(600);
-      expect((extraction.line_states as Record<string, { line_total_cents: number }>)["line-2"]!.line_total_cents).toBe(1990);
+      expect(extraction.line_states!["line-2"]!.line_total_cents).toBe(1990);
       // The person types more. The tab dies before any of that is sent.
       fireEvent.change(field(/^Merchant/), { target: { value: "Corner Hardware AB" } });
       fireEvent.change(within(line("Drill Bit Set")).getByLabelText(/^Line total/), { target: { value: "21" } });

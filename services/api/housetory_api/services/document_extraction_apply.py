@@ -35,6 +35,14 @@ from ..schemas.items import ItemCreate, ItemUpdate
 from ..schemas.purchases import PurchaseIn
 from ..schemas.warranties import WarrantyIn
 from .documents import get_document
+from .draft_revisions import (
+    REVISION_KEY,
+    WRITER_KEY,
+    DraftConflict,
+    decide,
+    revision_of,
+    writer_of,
+)
 from .items import create_item_record, update_item_record
 from .purchases import apply_purchase_fields, get_purchase, sync_single_item_allocation
 from .serializers import document_out
@@ -115,6 +123,8 @@ APPLIED_LINES_KEY = "extraction_applied_lines"
 # currency, total, order number). It is not part of the extraction itself, so it
 # does not change the extraction version and does not make AI suggestions stale.
 HEADER_DRAFT_KEY = "extraction_header_draft"
+# What a kept line draft says. The rest of its marker is about who kept it and when.
+_LINE_DRAFT_KEYS = ("description", "quantity", "line_total_cents", "draft")
 
 
 def _marker_waits(marker: dict[str, Any]) -> bool:
@@ -246,6 +256,8 @@ def line_states(db: Session, document: Document) -> tuple[dict[str, dict[str, An
                 "quantity": marker.get("quantity"),
                 "line_total_cents": marker.get("line_total_cents"),
                 "draft": marker.get("draft"),
+                "revision": revision_of(marker),
+                "writer": writer_of(marker),
             }
     return states, applied_version(applies)
 
@@ -292,6 +304,8 @@ def change_line_skip(
             **{key: value for key, value in (edits or {}).items() if value is not None},
             "at": datetime.now(UTC).isoformat(),
             "actor_user_id": str(actor_user_id) if actor_user_id else None,
+            # A skip changes what is kept for the line, so its revision goes up.
+            REVISION_KEY: revision_of(skips.get(line_id)) + 1,
         }
     metadata[SKIPS_KEY] = skips
     document.extracted_metadata = metadata
@@ -307,11 +321,17 @@ def save_line_draft(
     *,
     actor_user_id: uuid.UUID | None,
     edits: dict[str, Any] | None,
+    expected_revision: int,
+    writer: str,
 ) -> Document:
     """Keep the corrections of a line that still waits. Nothing is applied or skipped.
 
     The draft is stored in the marker that Skip uses, with a note that the line waits.
-    Without a draft the marker is removed. The last write wins.
+    Without a draft only the revision stays in the marker.
+
+    Two devices can correct the same line. The request says which revision it was
+    made on, and ``decide`` says what happens while the document is locked. A
+    conflict raises ``DraftConflict`` and stores nothing.
     """
     document = db.scalar(
         select(Document)
@@ -340,19 +360,53 @@ def save_line_draft(
             "This line is skipped. Restore it to change it.",
         )
     values = {key: value for key, value in (edits or {}).items() if value is not None}
-    if values.get("draft"):
+    marker = skips.get(line_id) if isinstance(skips.get(line_id), dict) else None
+    kept = {key: marker[key] for key in _LINE_DRAFT_KEYS if key in marker} if marker else {}
+    if not values.get("draft"):
+        values = {}
+    outcome = decide(marker, expected=expected_revision, writer=writer, same=values == kept)
+    if outcome == "conflict":
+        raise DraftConflict(revision_of(marker))
+    if outcome == "store":
         skips[line_id] = {
             **values,
             "at": datetime.now(UTC).isoformat(),
             "actor_user_id": str(actor_user_id) if actor_user_id else None,
             "pending": True,
+            REVISION_KEY: revision_of(marker) + 1,
+            WRITER_KEY: writer,
         }
-    else:
-        skips.pop(line_id, None)
-    metadata[SKIPS_KEY] = skips
-    document.extracted_metadata = metadata
+        metadata[SKIPS_KEY] = skips
+        document.extracted_metadata = metadata
     db.commit()
     return get_document(db, household_id, document.id)
+
+
+def draft_revisions_after_new_source(metadata: dict[str, Any]) -> dict[str, Any]:
+    """What stays of the kept drafts when the pages of a document are replaced.
+
+    The drafts themselves belong to the old reading and go. Their revisions stay,
+    one step further, so that a correction another device still holds for the old
+    reading is seen as older and is never stored over a newer draft.
+    """
+    kept: dict[str, Any] = {}
+    header = metadata.get(HEADER_DRAFT_KEY)
+    if isinstance(header, dict):
+        kept[HEADER_DRAFT_KEY] = {REVISION_KEY: revision_of(header) + 1, WRITER_KEY: None}
+    skips = metadata.get(SKIPS_KEY)
+    if isinstance(skips, dict) and skips:
+        kept[SKIPS_KEY] = {
+            line_id: {"pending": True, REVISION_KEY: revision_of(marker) + 1, WRITER_KEY: None}
+            for line_id, marker in skips.items()
+            if isinstance(marker, dict)
+        }
+    return kept
+
+
+def header_revision(document: Document) -> tuple[int, str | None]:
+    """How often the kept fields at the top changed, and the device that kept them."""
+    stored = (document.extracted_metadata or {}).get(HEADER_DRAFT_KEY)
+    return revision_of(stored), writer_of(stored)
 
 
 def _review_finished(metadata: dict[str, Any]) -> bool:
@@ -387,12 +441,18 @@ def save_header_draft(
     version: str,
     draft: dict[str, Any] | None,
     actor_user_id: uuid.UUID | None,
+    expected_revision: int,
+    writer: str,
 ) -> Document:
     """Keep the corrected fields at the top of a review that still waits.
 
     Nothing is applied: no purchase is recorded and the document itself is not
     changed. Without a draft the kept one is removed, so the first reading is shown
-    again. The last write wins.
+    again. Its revision stays.
+
+    Two devices can correct the same fields. The request says which revision it was
+    made on, and ``decide`` says what happens while the document is locked. A
+    conflict raises ``DraftConflict`` and stores nothing.
     """
     document = db.scalar(
         select(Document)
@@ -410,16 +470,27 @@ def save_header_draft(
             "This document was already applied. Its corrections were not kept.",
         )
     values = {key: value for key, value in (draft or {}).items() if value is not None}
-    if values:
+    stored = metadata.get(HEADER_DRAFT_KEY)
+    stored = stored if isinstance(stored, dict) else None
+    kept = stored.get("draft") if stored and isinstance(stored.get("draft"), dict) else None
+    same = (
+        kept == values and stored is not None and stored.get("version") == version
+        if values
+        else kept is None
+    )
+    outcome = decide(stored, expected=expected_revision, writer=writer, same=same)
+    if outcome == "conflict":
+        raise DraftConflict(revision_of(stored))
+    if outcome == "store":
         metadata[HEADER_DRAFT_KEY] = {
             "version": version,
-            "draft": values,
+            **({"draft": values} if values else {}),
             "at": datetime.now(UTC).isoformat(),
             "actor_user_id": str(actor_user_id) if actor_user_id else None,
+            REVISION_KEY: revision_of(stored) + 1,
+            WRITER_KEY: writer,
         }
-    else:
-        metadata.pop(HEADER_DRAFT_KEY, None)
-    document.extracted_metadata = metadata
+        document.extracted_metadata = metadata
     db.commit()
     return get_document(db, household_id, document.id)
 
@@ -1108,8 +1179,13 @@ def apply_extraction(
             metadata[SKIPS_KEY] = skips
         # The corrected fields stay while a line still waits, so that the rest of
         # the review is applied with the same details. A finished review needs none.
-        if _review_finished(metadata):
-            metadata.pop(HEADER_DRAFT_KEY, None)
+        if _review_finished(metadata) and isinstance(metadata.get(HEADER_DRAFT_KEY), dict):
+            # Only the revision stays, so that an older correction from another
+            # device is still seen as older if the review ever waits again.
+            metadata[HEADER_DRAFT_KEY] = {
+                REVISION_KEY: revision_of(metadata[HEADER_DRAFT_KEY]) + 1,
+                WRITER_KEY: None,
+            }
         document.extracted_metadata = metadata
         db.commit()
     except IntegrityError as exc:

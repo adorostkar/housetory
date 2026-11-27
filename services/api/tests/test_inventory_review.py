@@ -20,6 +20,7 @@ from housetory_api.models import (
 from housetory_api.security import hash_password
 from housetory_api.services import inventory_review
 from housetory_api.services.auth import create_session
+from tests.draft_conflict_cases import named, put_draft
 
 
 def seed_review_items(client, count):
@@ -1101,7 +1102,7 @@ def configure_review_assistant(client):
         },
     )
     assert provider.status_code == 201, provider.text
-    task = client.put(
+    task = put_draft(client,
         "/api/v1/ai/tasks/assistant",
         json={
             "provider_id": provider.json()["id"],
@@ -1541,7 +1542,7 @@ def test_ai_organisation_output_is_validated_and_offline_runs_never_call_ai(
         },
     )
     assert provider.status_code == 201, provider.text
-    task = client.put(
+    task = put_draft(client,
         "/api/v1/ai/tasks/assistant",
         json={
             "provider_id": provider.json()["id"],
@@ -2205,10 +2206,11 @@ def test_edit_of_a_waiting_suggestion_is_kept_without_skip_or_apply(owner_client
 
     history_before = events()
     summary_before = client.get("/api/v1/inventory-review/summary").json()
-    assert client.put(f"{url}/draft", json={"draft": {"name": "First try"}}).status_code == 200
+    first = put_draft(client, f"{url}/draft", json={"draft": {"name": "First try"}})
+    assert first.status_code == 200
     draft = {"name": "Camp lamp, LED"}
     for _attempt in range(2):
-        saved = client.put(f"{url}/draft", json={"draft": draft})
+        saved = put_draft(client, f"{url}/draft", json={"draft": draft})
         assert saved.status_code == 200, saved.text
 
     # A reload: the suggestion still waits, with the edit. Nothing else moved: not its
@@ -2216,8 +2218,16 @@ def test_edit_of_a_waiting_suggestion_is_kept_without_skip_or_apply(owner_client
     kept = stored()
     assert kept["evidence"]["review_draft"] == draft
     assert kept["status"] == "pending"
-    # Only the edit and the time of the row's last write differ.
-    same = {**kept, "evidence": editable["evidence"], "updated_at": editable["updated_at"]}
+    # Only the edit, its revision and the time of the row's last write differ. The
+    # same edit twice is one revision.
+    assert kept["draft_revision"] == 2
+    same = {
+        **kept,
+        "evidence": editable["evidence"],
+        "updated_at": editable["updated_at"],
+        "draft_revision": 0,
+        "draft_writer": None,
+    }
     assert same == editable
     assert client.get("/api/v1/inventory-review/summary").json() == summary_before
     assert events() == history_before
@@ -2229,28 +2239,28 @@ def test_edit_of_a_waiting_suggestion_is_kept_without_skip_or_apply(owner_client
     # Who may not write, and what is not accepted. None of it changes what is stored.
     viewer = add_member(client, "viewer", email="draft-viewer@example.com")
     body = {"draft": {"name": "Changed by someone else"}}
-    assert client.put(f"{url}/draft", headers=viewer, json=body).status_code == 403
+    assert put_draft(client, f"{url}/draft", headers=viewer, json=body).status_code == 403
     for bad in ({"draft": {"name": "x" * 201}}, {"draft": {"category_id": "nope"}}, {}):
-        assert client.put(f"{url}/draft", json=bad).status_code == 422, bad
+        assert put_draft(client, f"{url}/draft", json=bad).status_code == 422, bad
     first_household = client.get("/api/v1/auth/session").json()["household"]["id"]
     second = client.post(
         "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
     )
     assert second.status_code == 201, second.text
     other = {"X-Household-Id": second.json()["household"]["id"]}
-    assert client.put(f"{url}/draft", headers=other, json=body).status_code == 404
+    assert put_draft(client, f"{url}/draft", headers=other, json=body).status_code == 404
     assert client.post(f"/api/v1/households/{first_household}/select").status_code == 200
     client.headers["X-Household-Id"] = first_household
     assert stored()["evidence"]["review_draft"] == draft
 
     # An empty draft forgets the edit.
-    assert client.put(f"{url}/draft", json={"draft": {}}).status_code == 200
+    assert put_draft(client, f"{url}/draft", json={"draft": {}}).status_code == 200
     assert "review_draft" not in stored()["evidence"]
-    assert client.put(f"{url}/draft", json={"draft": draft}).status_code == 200
+    assert put_draft(client, f"{url}/draft", json={"draft": draft}).status_code == 200
 
     # A skipped suggestion does not take a draft: 409, and what Skip kept is as it was.
     assert client.post(f"{url}/dismiss").status_code == 200
-    late = client.put(f"{url}/draft", json=body)
+    late = put_draft(client, f"{url}/draft", json=body)
     assert late.status_code == 409
     assert late.json()["detail"]["code"] == "review_suggestion_not_pending"
     dismissed = next(
@@ -2275,4 +2285,64 @@ def test_edit_of_a_waiting_suggestion_is_kept_without_skip_or_apply(owner_client
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["applied_count"] == 1
     assert item_state(client, editable["item_id"])["name"] == "Camp lamp, LED"
-    assert client.put(f"{url}/draft", json=body).status_code == 409
+    assert put_draft(client, f"{url}/draft", json=body).status_code == 409
+
+
+def test_suggestion_edit_from_two_devices_is_checked_by_revision(owner_client):
+    from tests.draft_conflict_cases import DEVICE_A, DEVICE_B, check_draft_revision_rule
+
+    client = owner_client
+    room = create_room(client)
+    lighting = create_category(client, "Lighting")
+    create_item(client, "Camp lamp", room["id"], category_id=lighting["id"])
+    create_item(client, "camp lamp", room["id"])
+    assert run_review(client).status_code == 200
+    editable = next(
+        entry for entry in suggestions(client)["items"] if entry["action_kind"] == "apply_name"
+    )
+    url = f"/api/v1/inventory-review/suggestions/{editable['id']}"
+    assert (editable["draft_revision"], editable["draft_writer"]) == (0, None)
+
+    def stored():
+        return next(e for e in suggestions(client)["items"] if e["id"] == editable["id"])
+
+    def put(text, expected, writer):
+        return client.put(
+            f"{url}/draft",
+            json={
+                "draft": {"name": text} if text is not None else {},
+                **named(expected, writer),
+            },
+        )
+
+    def read():
+        current = stored()
+        # The revision and the writer are told beside the evidence, never inside it.
+        assert "review_draft_meta" not in current["evidence"]
+        return current["draft_revision"], current["evidence"].get("review_draft", {}).get("name")
+
+    check_draft_revision_rule(put, read)
+    revision = read()[0]
+    kept = put("Camp lamp, LED", revision, DEVICE_B)
+    assert kept.status_code == 200, kept.text
+    assert (kept.json()["draft_revision"], kept.json()["draft_writer"]) == (revision + 1, DEVICE_B)
+    refused = put("Lamp", 0, DEVICE_A).json()["detail"]
+    assert refused["current"]["evidence"]["review_draft"] == {"name": "Camp lamp, LED"}
+    assert refused["current"]["draft_revision"] == revision + 1
+
+    # The suggestion itself did not move: same proposal, same fingerprint, it waits.
+    current = stored()
+    assert (current["status"], current["fingerprint"], current["after"]) == (
+        "pending",
+        editable["fingerprint"],
+        editable["after"],
+    )
+    # Applying it copies nothing of this to the item.
+    accepted = client.post(f"{url}/accept", json={"name": "Camp lamp, LED"})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "applied", accepted.json()
+    item = client.get(f"/api/v1/items/{editable['item_id']}")
+    assert DEVICE_A not in item.text and DEVICE_B not in item.text
+    late = put("Late", revision + 1, DEVICE_A)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "review_suggestion_not_pending"

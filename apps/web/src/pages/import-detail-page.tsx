@@ -56,8 +56,9 @@ import type {
   Room,
   StorageLocation,
 } from "@/lib/types";
-import { plainForm, stableJson } from "@/lib/review-draft-store";
-import { DraftSaveNotice, useDraftAutosave } from "@/lib/review-drafts";
+import {
+  changedElsewhere, copyConflicts, DraftConflictNotice, DraftSaveNotice, useDraftAutosave,
+} from "@/lib/review-drafts";
 import { formatDate, pluralize } from "@/lib/utils";
 import { enhancementLabel, keepManualEdits, proposalValue } from "@/lib/enrichment";
 
@@ -133,17 +134,58 @@ function importDraftBody(
   };
 }
 
-/**
- * What the server has for a row. It is kept with the copy of a correction on this
- * device. When the review opens again, the copy is only used if the server still
- * has exactly this: then nobody corrected the row somewhere else in the meantime.
- */
-function serverRow(entry: ImportEntry) {
+type ImportDraftBody = ReturnType<typeof importDraftBody>;
+
+/** True for a kept draft that can be put back into a row. */
+function usableDraft(body: unknown): body is ImportDraftBody {
+  const draft = body as Partial<ImportDraftBody> | null;
+  return Boolean(draft && typeof draft === "object" && draft.proposed &&
+    typeof draft.proposed.name === "string" && typeof draft.proposed.quantity === "number");
+}
+
+/** The choices of a row in a kept draft. The row is not selected by it. */
+function decisionOfDraft(body: ImportDraftBody): ImportDecision {
   return {
-    proposed: entry.proposed,
-    entity_type: entry.entity_type ?? null,
-    parent_entry_id: entry.parent_entry_id ?? null,
-    legacy_identifier: entry.legacy_identifier ?? null,
+    include: false,
+    action: body.action === "merge" ? "merge" : "import",
+    mergeItemId: body.merge_item_id ?? "",
+    mergeFields: Array.isArray(body.merge_fields) ? body.merge_fields : [],
+    ...(body.entity_type ? { entityType: body.entity_type } : {}),
+    ...("parent_entry_id" in body ? { parentEntryId: body.parent_entry_id ?? null } : {}),
+    ...("legacy_identifier" in body ? { legacyIdentifier: body.legacy_identifier ?? null } : {}),
+    ...("allow_duplicate" in body ? { allowDuplicate: Boolean(body.allow_duplicate) } : {}),
+  };
+}
+
+const FIELD_NAMES: Partial<Record<EditableField, string>> = {
+  description: "description", category: "category", brand: "brand", model: "model",
+  serial_number: "serial number", room: "room", storage_location: "storage place",
+  purchase: "purchase", warranty: "warranty", tags: "tags", notes: "notes",
+};
+
+/** A correction of this device in a few words, to choose it by. */
+function yoursText(body: ImportDraftBody, entry: ImportEntry): string {
+  const server = withoutReviewDraft(entry.proposed);
+  const others = EDITABLE_FIELDS.flatMap((field) => {
+    const name = FIELD_NAMES[field];
+    return name && JSON.stringify(body.proposed[field] ?? null) !== JSON.stringify(server[field] ?? null)
+      ? [name] : [];
+  });
+  return `«${body.proposed.name}», quantity ${body.proposed.quantity}` +
+    (others.length ? `, with another ${others.join(", ")}` : "");
+}
+
+/** The choices a waiting row starts with: what the server kept, else the usual start. */
+function startDecision(entry: ImportEntry, hierarchy: boolean): ImportDecision {
+  const highDuplicate = entry.duplicate_candidates.find(
+    (candidate) => candidate.score >= (hierarchy ? 55 : 70),
+  );
+  return {
+    include: false,
+    action: "import",
+    mergeItemId: highDuplicate?.item_id ?? "",
+    mergeFields: highDuplicate ? ["serial_number"] : [],
+    ...reviewDraftOf(entry),
   };
 }
 
@@ -208,9 +250,12 @@ export function ImportDetailPage({
   const loadedDrafts = React.useRef(
     new Map<string, { proposed: ProposedItem; edited: EditableField[] }>(),
   );
-  // What the server has for each row, as far as this page knows: taken when a row is
-  // first corrected here, and from the answer of the server to each save after that.
-  const serverRows = React.useRef(new Map<string, unknown>());
+  // Rows that were just set up again from the server, or from a correction the person
+  // chose. The next comparison takes the first as saved and sends the second.
+  const adoptedRows = React.useRef(new Set<string>());
+  // Rows that are read again from the server right now, after another device changed them.
+  const [adoptingIds, setAdoptingIds] = React.useState<ReadonlySet<string>>(new Set());
+  const adoptingRows = React.useRef(new Set<string>());
   // Rows whose decision is on its way, and rows that were decided here. Neither has a
   // draft to keep: the decision carried it.
   const decidingRows = React.useRef(new Set<string>());
@@ -224,6 +269,9 @@ export function ImportDetailPage({
   const batch = batchQuery.data;
   const recovered = autosave.recovered;
   const forgetDraft = autosave.forget;
+  const markConflict = autosave.markConflict;
+  const trackRevision = autosave.track;
+  const knownRevision = autosave.tracked;
   React.useEffect(() => {
     if (!batch || batch.id !== batchId || initialized) return;
     if (batch.status !== "review" && batch.status !== "completed") return;
@@ -234,62 +282,47 @@ export function ImportDetailPage({
     }
     const nextDecisions = { ...(savedDraft?.decisions ?? {}) };
     const hierarchy = batch.metadata.hierarchy === true;
-    const duplicateThreshold = hierarchy ? 55 : 70;
     comparedDrafts.current = new Map();
     for (const entry of batch.entries) {
-      const highDuplicate = entry.duplicate_candidates.find(
-        (candidate) => candidate.score >= duplicateThreshold,
-      );
       const done = entry.status === "imported" || entry.status === "merged";
       const skippedNow = entry.status === "skipped" || entry.status === "rejected";
       // The choices that were kept with the row: what to do, and with which target.
       // They come back for a skipped row and for a row that still waits.
       const kept = reviewDraftOf(entry);
       const keptFields = keptEditedFields(entry);
+      const start = startDecision(entry, hierarchy);
       // The proposal as this page saw it first. What is changed by hand is told from it.
       if (!loadedDrafts.current.has(entry.id)) {
         loadedDrafts.current.set(entry.id, { proposed: entry.proposed, edited: keptFields });
       }
       // The draft this page would send for the row as the server has it.
-      const serverBody = importDraftBody(entry, entry.proposed, {
-        include: false,
-        action: "import",
-        mergeItemId: highDuplicate?.item_id ?? "",
-        mergeFields: highDuplicate ? ["serial_number"] : [],
-        ...kept,
-      }, hierarchy, keptFields);
+      const serverBody = importDraftBody(entry, entry.proposed, start, hierarchy, keptFields);
+      // The row on screen comes from this visit when it was set up before.
+      const fromVisit = Boolean(savedDraft?.edits && entry.id in savedDraft.edits);
+      const server = { revision: entry.draft_revision, writer: entry.draft_writer };
+      // True when the row must show what the server has, whatever this visit had.
+      let takeServer = false;
       // A correction of an earlier visit can still be on this device: its request was
-      // lost, or it arrived but the page was gone before the answer. It is used only
-      // when nobody else changed the row since: the server still has the row as it
-      // was when the correction was made, or it has a draft that this browser sent
-      // itself and never got an answer for. Then the copy is shown in its row again
-      // and sent again below, as any correction made here. When the server has
-      // something else (a newer correction from another device), the server wins
-      // and the copy is removed. Nothing is decided by it. A draft of this visit
-      // wins over it.
+      // lost, or it arrived but the page was gone before the answer. It was made on
+      // one revision of the row's draft. When the server still has that revision, or
+      // a newer one that this same browser wrote, the copy is shown in its row again
+      // and sent again below, as any correction made here. The server checks the
+      // revision once more when it is saved. When another device changed the row
+      // since, the row shows what the server has, and the copy waits beside it for
+      // the person to choose. Nothing is decided by any of this. A draft of this
+      // visit wins over a copy that is no conflict.
       const local = recovered.get(entry.id);
       if (local) {
         recovered.delete(entry.id);
-        const body = local.body as Partial<ReturnType<typeof importDraftBody>> | null;
-        const fromServer = stableJson(plainForm(serverBody));
-        const ours = stableJson(serverRow(entry)) === stableJson(local.base) ||
-          local.sent.some((sent) => stableJson(plainForm(sent)) === fromServer);
-        const usable = waits(entry) && body && typeof body === "object" && body.proposed &&
-          typeof body.proposed.name === "string" && typeof body.proposed.quantity === "number" && ours;
-        if (!usable) {
+        const body = local.body;
+        if (!waits(entry) || !usableDraft(body)) {
           forgetDraft(entry.id);
+        } else if (copyConflicts(local, server)) {
+          if (!local.conflict) markConflict(entry.id);
+          takeServer = true;
         } else if (!savedDraft) {
           nextEdits[entry.id] = body.proposed as ProposedItem;
-          nextDecisions[entry.id] = {
-            include: false,
-            action: body.action === "merge" ? "merge" : "import",
-            mergeItemId: body.merge_item_id ?? "",
-            mergeFields: Array.isArray(body.merge_fields) ? body.merge_fields : [],
-            ...(body.entity_type ? { entityType: body.entity_type } : {}),
-            ...("parent_entry_id" in body ? { parentEntryId: body.parent_entry_id ?? null } : {}),
-            ...("legacy_identifier" in body ? { legacyIdentifier: body.legacy_identifier ?? null } : {}),
-            ...("allow_duplicate" in body ? { allowDuplicate: Boolean(body.allow_duplicate) } : {}),
-          };
+          nextDecisions[entry.id] = decisionOfDraft(body);
           const named = Array.isArray(body.edited_fields) ? body.edited_fields : [];
           loadedDrafts.current.set(entry.id, {
             proposed: entry.proposed,
@@ -299,12 +332,26 @@ export function ImportDetailPage({
           // the answer of the server removes the copy from this device.
           savedDrafts.current.set(entry.id, "");
         }
+      } else if (waits(entry) && fromVisit && changedElsewhere(server, knownRevision(entry.id))) {
+        // Nothing of this row waits to be saved here, and what the server keeps for
+        // it was changed by someone else since this visit built the row: a draft of
+        // another device, a skip that was restored, or loaded suggestions. The row
+        // of this visit is older than that.
+        takeServer = true;
       }
+      if (takeServer) {
+        nextEdits[entry.id] = entry.proposed;
+        nextDecisions[entry.id] = { ...start, include: Boolean(nextDecisions[entry.id]?.include) };
+        loadedDrafts.current.set(entry.id, { proposed: entry.proposed, edited: keptFields });
+        savedDrafts.current.set(entry.id, JSON.stringify(serverBody));
+      }
+      // The revision the row on screen was built from. A row of this visit keeps the
+      // one it has: it was not built again.
+      trackRevision(entry.id, entry.draft_revision, takeServer || !fromVisit);
       if (waits(entry) && !savedDrafts.current.has(entry.id)) {
         // What the server holds for this row, the first time this page sees it. A
         // draft of this page that says something else (it was made here) is sent.
-        // Later, only a row that was changed here since its last save is sent, so
-        // that a row another tab corrected in the meantime is not overwritten.
+        // Later, only a row that was changed here since its last save is sent.
         savedDrafts.current.set(entry.id, JSON.stringify(serverBody));
       }
       if (done) {
@@ -327,13 +374,7 @@ export function ImportDetailPage({
       } else if (!(entry.id in nextDecisions)) {
         // A review starts with nothing selected. A failed row keeps what it had, so
         // it stays selected and can be corrected and tried again.
-        nextDecisions[entry.id] = {
-          include: false,
-          action: "import",
-          mergeItemId: highDuplicate?.item_id ?? "",
-          mergeFields: highDuplicate ? ["serial_number"] : [],
-          ...kept,
-        };
+        nextDecisions[entry.id] = start;
       } else if (nextDecisions[entry.id]?.action === "skip" || nextDecisions[entry.id]?.action === "reject") {
         // A restored row comes back open and not selected.
         nextDecisions[entry.id] = { ...nextDecisions[entry.id]!, include: false, action: "import" };
@@ -345,12 +386,87 @@ export function ImportDetailPage({
     setEdits(nextEdits);
     setDecisions(nextDecisions);
     setInitializedBatchId(batchId);
-  }, [batch, batchId, forgetDraft, getImportReviewDraft, initialized, recovered]);
+  }, [batch, batchId, forgetDraft, getImportReviewDraft, initialized, knownRevision, markConflict,
+    recovered, trackRevision]);
 
   React.useEffect(() => {
     if (!initialized || !batch || batch.id !== batchId) return;
     saveImportReviewDraft(batchId, { edits, decisions });
   }, [batch, batchId, decisions, edits, initialized, saveImportReviewDraft]);
+
+  // Another device changed a row while a correction of it was on its way from here.
+  // The row is read again and shown as the server has it now. The correction of this
+  // device stays beside it until the person chooses. Nothing is decided by this.
+  const refetchBatch = batchQuery.refetch;
+  const adoptServerRow = React.useCallback(async (id: string) => {
+    adoptingRows.current.add(id);
+    setAdoptingIds(new Set(adoptingRows.current));
+    try {
+      const fresh = (await refetchBatch()).data;
+      const entry = fresh?.entries.find((item) => item.id === id);
+      if (!fresh || !entry) return;
+      if (!waits(entry)) {
+        // The row was decided somewhere else. There is nothing left to choose.
+        forgetDraft(id);
+        setInitializedBatchId("");
+        return;
+      }
+      const start = startDecision(entry, fresh.metadata.hierarchy === true);
+      loadedDrafts.current.set(id, { proposed: entry.proposed, edited: keptEditedFields(entry) });
+      comparedDrafts.current.delete(id);
+      adoptedRows.current.add(id);
+      trackRevision(id, entry.draft_revision);
+      setEdits((current) => ({ ...current, [id]: entry.proposed }));
+      setDecisions((current) => ({
+        ...current, [id]: { ...start, include: Boolean(current[id]?.include) },
+      }));
+    } finally {
+      adoptingRows.current.delete(id);
+      setAdoptingIds(new Set(adoptingRows.current));
+    }
+  }, [forgetDraft, refetchBatch, trackRevision]);
+
+  // The person chose their own correction of a row that another device changed. It
+  // goes into the row and is saved like any correction, on top of what the server
+  // has now. The row is not added, skipped or selected by this.
+  const takeMine = autosave.takeMine;
+  const conflicts = autosave.conflicts;
+  const chooseMine = (entry: ImportEntry) => {
+    const body = conflicts.get(entry.id)?.body;
+    if (!usableDraft(body)) {
+      forgetDraft(entry.id);
+      return;
+    }
+    const named = Array.isArray(body.edited_fields) ? body.edited_fields : [];
+    const keptFields = keptEditedFields(entry);
+    loadedDrafts.current.set(entry.id, {
+      proposed: entry.proposed,
+      edited: EDITABLE_FIELDS.filter((field) => keptFields.includes(field) || named.includes(field)),
+    });
+    comparedDrafts.current.delete(entry.id);
+    adoptedRows.current.delete(entry.id);
+    savedDrafts.current.set(entry.id, "");
+    takeMine(entry.id);
+    clearErrors(entry.id);
+    setEdits((current) => ({ ...current, [entry.id]: body.proposed as ProposedItem }));
+    setDecisions((current) => ({
+      ...current, [entry.id]: { ...decisionOfDraft(body), include: Boolean(current[entry.id]?.include) },
+    }));
+  };
+  const conflictNotice = (entry: ImportEntry, label?: string) => {
+    const body = waits(entry) ? conflicts.get(entry.id)?.body : undefined;
+    if (!usableDraft(body)) return null;
+    return (
+      <DraftConflictNotice
+        key={`conflict-${entry.id}`}
+        label={label}
+        yours={yoursText(body, entry)}
+        disabled={apply.isPending || restore.isPending || adoptingIds.has(entry.id)}
+        onUseMine={() => chooseMine(entry)}
+        onKeepOther={() => forgetDraft(entry.id)}
+      />
+    );
+  };
 
   // Keeps the corrections of waiting rows on the server, a short moment after the
   // last change of a row. Only a row whose draft differs from what the server has is
@@ -361,7 +477,7 @@ export function ImportDetailPage({
     if (!initialized || !batch || batch.id !== batchId || batch.status !== "review") return;
     const hierarchy = batch.metadata.hierarchy === true;
     for (const entry of batch.entries) {
-      if (!waits(entry) || pendingIds.has(entry.id)) continue;
+      if (!waits(entry) || pendingIds.has(entry.id) || adoptingIds.has(entry.id)) continue;
       if (decidingRows.current.has(entry.id) || decidedRows.current.has(entry.id)) continue;
       const proposed = edits[entry.id];
       const decision = decisions[entry.id];
@@ -373,29 +489,32 @@ export function ImportDetailPage({
       const body = importDraftBody(entry, proposed, decision, hierarchy,
         editedFields(loaded?.proposed ?? entry.proposed, loaded?.edited ?? [], proposed));
       const text = JSON.stringify(body);
+      // A row that was just set up again from the server is what the server has.
+      if (adoptedRows.current.delete(entry.id)) {
+        savedDrafts.current.set(entry.id, text);
+        continue;
+      }
       if (savedDrafts.current.get(entry.id) === text) continue;
       savedDrafts.current.set(entry.id, text);
-      if (!serverRows.current.has(entry.id)) serverRows.current.set(entry.id, serverRow(entry));
       saveDraft(entry.id, {
         path: `/imports/${batchId}/entries/${entry.id}/draft`,
         body,
-        base: serverRows.current.get(entry.id),
+        revisionOf: (answer) => (answer as ImportEntry | null)?.draft_revision,
         // The answer is the row as the server has it now. The loaded import takes
         // it too, so that a review that opens later starts from what was confirmed
         // and not from an older row. The rows on screen are not set up again by it.
-        rebase: (answer) => {
-          const saved = answer as ImportEntry;
-          const row = serverRow(saved);
-          serverRows.current.set(entry.id, row);
+        onSaved: (answer) => {
+          const saved = answer as ImportEntry | null;
           queryClient.setQueryData<ImportBatchDetail>(queryKeys.importBatch(batchId), (current) =>
             current && saved?.id === entry.id && current.entries.some((item) => item.id === saved.id && waits(item))
               ? { ...current, entries: current.entries.map((item) => item.id === saved.id ? saved : item) }
               : current);
-          return row;
         },
+        // Another device changed the row: it is shown as the server has it now.
+        onConflict: () => void adoptServerRow(entry.id),
       });
     }
-  }, [batch, batchId, decisions, edits, initialized, pendingIds, queryClient, saveDraft]);
+  }, [adoptServerRow, adoptingIds, batch, batchId, decisions, edits, initialized, pendingIds, queryClient, saveDraft]);
 
   const retry = useMutation({
     mutationFn: () => api.post(`/imports/${batchId}/retry`),
@@ -453,7 +572,17 @@ export function ImportDetailPage({
       // that the manual edits that were kept here are kept there too.
       savedDrafts.current = new Map();
       loadedDrafts.current = new Map();
-      serverRows.current = new Map(after.entries.map((entry) => [entry.id, serverRow(entry)]));
+      // Loading the suggestions moved each row that had one exactly one revision on.
+      // The answer names those rows. A row that is further on than that, or a row
+      // without a suggestion that has another revision now, was changed by another
+      // device: it is then shown as the server has it.
+      const answered = after.enhancement?.proposals ?? [];
+      const suggested = new Set(
+        (answered.length ? answered : before?.enhancement?.proposals ?? []).map((proposal) => proposal.entry_id),
+      );
+      for (const entry of after.entries) {
+        if (suggested.has(entry.id)) autosave.trackStep(entry.id, entry.draft_revision);
+      }
       queryClient.setQueryData(queryKeys.importBatch(batchId), after);
       setInitializedBatchId("");
       toast.success("Suggestions loaded into review. Manual edits were kept; apply is still separate.");
@@ -515,6 +644,10 @@ export function ImportDetailPage({
   const apply = useMutation({
     mutationFn: ({ ids, forced }: { ids: string[]; forced?: "skip" | "reject" }) => {
       if (ids.length === 0) throw new Error("Select at least one row.");
+      // A row that is read again from the server right now is not decided as it was.
+      if (ids.some((id) => adoptingRows.current.has(id))) {
+        throw new Error("A row was changed on another device. Look at it and try again.");
+      }
       return api.post<ImportApplyResult>(`/imports/${batchId}/apply`, {
         entries: ids.map((id) => payloadFor(id, forced)),
       });
@@ -544,6 +677,9 @@ export function ImportDetailPage({
       const next = { ...decisions };
       for (const id of ids) {
         if (!failedIds.has(id)) {
+          // A skip keeps the row as it is on this page, one revision on. Restore
+          // then brings back that same row.
+          autosave.trackStep(id, result.batch.entries.find((entry) => entry.id === id)?.draft_revision);
           decidedRows.current.add(id);
           // The decision went through, so the copy on this device is not needed.
           autosave.forget(id);
@@ -584,8 +720,6 @@ export function ImportDetailPage({
     onSuccess: (restored, entryId) => {
       // The row waits again, so its corrections are kept again from now on.
       decidedRows.current.delete(entryId);
-      const row = restored.entries.find((entry) => entry.id === entryId);
-      if (row) serverRows.current.set(entryId, serverRow(row));
       setInitializedBatchId("");
       queryClient.setQueryData(queryKeys.importBatch(batchId), restored);
       invalidate();
@@ -625,6 +759,10 @@ export function ImportDetailPage({
     if (valid.length) apply.mutate({ ids: valid });
   };
 
+  const busyIds = React.useMemo(
+    () => (adoptingIds.size ? new Set([...pendingIds, ...adoptingIds]) : pendingIds),
+    [adoptingIds, pendingIds],
+  );
   const clearErrors = (entryId: string) =>
     setErrors((current) => {
       if (!(entryId in current)) return current;
@@ -1148,6 +1286,12 @@ export function ImportDetailPage({
 
           {hierarchyMode ? (
             <div className="mt-3">
+              {/* The tree has no place beside a row, so these name their row. */}
+              {batch.entries.some((entry) => waits(entry) && conflicts.has(entry.id)) && (
+                <div className="mb-3 space-y-2">
+                  {batch.entries.map((entry) => conflictNotice(entry, entry.proposed.name))}
+                </div>
+              )}
               <HierarchyReview
                 entries={batch.entries}
                 edits={edits}
@@ -1164,7 +1308,7 @@ export function ImportDetailPage({
                 onSkip={(entryId) => apply.mutate({ ids: [entryId], forced: "skip" })}
                 onReject={(entryId) => apply.mutate({ ids: [entryId], forced: "reject" })}
                 onRestore={(entryId) => restore.mutate(entryId)}
-                pendingIds={pendingIds}
+                pendingIds={busyIds}
                 nameErrors={Object.fromEntries(
                   Object.entries(errors).map(([id, entryErrors]) => [id, entryErrors.name]),
                 )}
@@ -1173,8 +1317,9 @@ export function ImportDetailPage({
           ) : (
             <div className="mt-3 space-y-3">
               {shownEntries.map((entry: ImportEntry) => (
+                <div key={entry.id} className="space-y-2">
+                {conflictNotice(entry)}
                 <ImportEntryCard
-                  key={entry.id}
                   entry={entry}
                   {...(photoReview ? {
                     rowId: findingRowId(entry.id),
@@ -1196,7 +1341,7 @@ export function ImportDetailPage({
                   categories={categories}
                   disabled={apply.isPending || restore.isPending}
                   errors={errors[entry.id]}
-                  pending={pendingIds.has(entry.id)}
+                  pending={busyIds.has(entry.id)}
                   onProposedChange={(proposed) => {
                     clearErrors(entry.id);
                     setEdits((current) => ({ ...current, [entry.id]: proposed }));
@@ -1211,6 +1356,7 @@ export function ImportDetailPage({
                   onSkip={() => apply.mutate({ ids: [entry.id], forced: "skip" })}
                   onReject={() => apply.mutate({ ids: [entry.id], forced: "reject" })}
                 />
+                </div>
               ))}
             </div>
           )}

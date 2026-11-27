@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..schemas.ai import AiStatus
-from ..schemas.common import Description, ItemReference, trimmed
+from ..schemas.common import Description, DraftRevision, DraftWriter, ItemReference, trimmed
 from ..schemas.documents import DocumentBrief, DocumentOut
 from ..schemas.purchases import PurchaseIn
 from .enrichment import EnhancementState
@@ -157,6 +157,9 @@ class ExtractionLineState(BaseModel):
     line_total_cents: int | None = None
     # The complete row draft as the review saved it with the skip.
     draft: dict[str, Any] | None = None
+    # How often the kept correction of this line changed, and the device that kept it.
+    revision: int = 0
+    writer: str | None = None
 
 
 class ExtractionLineStatesOut(BaseModel):
@@ -179,6 +182,13 @@ class ExtractionLineSkipRequest(BaseModel):
         if value is not None and len(json.dumps(value)) > 20_000:
             raise ValueError("The row draft is too large to keep.")
         return value
+
+
+class ExtractionLineDraftRequest(ExtractionLineSkipRequest):
+    """A correction of a line that still waits, and the revision it was made on."""
+
+    expected_revision: DraftRevision
+    writer: DraftWriter
 
 
 class ExtractionHeaderDraft(BaseModel):
@@ -204,6 +214,9 @@ class ExtractionHeaderDraftRequest(BaseModel):
     version: str = Field(min_length=1, max_length=200)
     # Without a draft, the kept one is forgotten: the first reading is shown again.
     draft: ExtractionHeaderDraft | None = None
+    # The revision the fields were corrected on, and the device that sends them.
+    expected_revision: DraftRevision
+    writer: DraftWriter
 
 
 class ExtractionHeaderDraftOut(BaseModel):
@@ -213,6 +226,9 @@ class ExtractionHeaderDraftOut(BaseModel):
 
 class ExtractionHeaderDraftState(BaseModel):
     header_draft: ExtractionHeaderDraftOut | None = None
+    # How often the kept fields changed, and the device that kept them.
+    header_revision: int = 0
+    header_writer: str | None = None
 
 
 class ExtractionReviewOut(BaseModel):
@@ -235,6 +251,8 @@ class ExtractionReviewOut(BaseModel):
     applied_version: str | None = None
     # The corrected fields at the top of the review, kept while the review waits.
     header_draft: ExtractionHeaderDraftOut | None = None
+    header_revision: int = 0
+    header_writer: str | None = None
     ai_status: AiStatus
     enhancement: EnhancementState | None = None
     suggested_refinement: "ExtractionRefinementOut | None" = None

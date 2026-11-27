@@ -19,7 +19,12 @@ from ...schemas.inventory_review import (
     ReviewSuggestionOut,
 )
 from .. import lending
+from ..draft_revisions import revision_of, writer_of
 from ..serializers import item_load_options, item_summary
+
+# The revision of the kept edit and the device that kept it. They are kept beside the
+# evidence and are given to the review as ``draft_revision`` and ``draft_writer``.
+REVIEW_DRAFT_META_KEY = "review_draft_meta"
 
 
 def _serialize_item(db: Session, item_id: uuid.UUID | None) -> dict[str, Any] | None:
@@ -144,7 +149,13 @@ def serialize_suggestion(db: Session, suggestion: InventoryReviewSuggestion) -> 
         category_id=suggestion.category_id,
         before=suggestion.before_json or {},
         after=suggestion.after_json or {},
-        evidence=suggestion.evidence_json or {},
+        evidence={
+            key: value
+            for key, value in (suggestion.evidence_json or {}).items()
+            if key != REVIEW_DRAFT_META_KEY
+        },
+        draft_revision=revision_of((suggestion.evidence_json or {}).get(REVIEW_DRAFT_META_KEY)),
+        draft_writer=writer_of((suggestion.evidence_json or {}).get(REVIEW_DRAFT_META_KEY)),
         fingerprint=suggestion.fingerprint,
         created_at=suggestion.created_at,
         updated_at=suggestion.updated_at,

@@ -112,6 +112,9 @@ export interface ReviewSuggestion {
   before: Record<string, unknown>;
   after: Record<string, unknown>;
   evidence: Record<string, unknown>;
+  /** How often the kept "Edit first" edit changed, and the device that kept it. */
+  draft_revision?: number;
+  draft_writer?: string | null;
   fingerprint: string;
   created_at: string;
   updated_at: string;

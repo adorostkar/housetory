@@ -5,6 +5,13 @@ import pytest
 from PIL import Image
 
 from housetory_api.services.import_pipeline import process_import_batch
+from tests.draft_conflict_cases import (
+    DEVICE_A,
+    DEVICE_B,
+    check_draft_revision_rule,
+    named,
+    put_draft,
+)
 
 
 def create_room(client, name, parent_id=None):
@@ -1903,14 +1910,14 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
         return actual == expected
 
     before, _ = fetch()
-    first = owner_client.put(
+    first = put_draft(owner_client,
         draft_url(ladder),
         json={"proposed": {**edited_ladder, "name": "Ladder, first try"}},
     )
     assert first.status_code == 200, first.text
     # The last write wins, and sending the same draft twice changes nothing.
     for _attempt in range(2):
-        saved = owner_client.put(
+        saved = put_draft(owner_client,
             draft_url(ladder),
             json={
                 "action": "import",
@@ -1921,7 +1928,7 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
         )
         assert saved.status_code == 200, saved.text
         assert saved.json()["status"] == "proposed"
-    saved = owner_client.put(draft_url(rope), json={**rope_choice, "proposed": edited_rope})
+    saved = put_draft(owner_client, draft_url(rope), json={**rope_choice, "proposed": edited_rope})
     assert saved.status_code == 200, saved.text
 
     # A reload: both rows still wait, with the whole draft. Nothing was decided: the
@@ -1949,7 +1956,7 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
     # Who may not write, and what is not accepted. None of it changes what is stored.
     viewer = _member_headers(owner_client, "viewer", "import-draft-viewer@example.com")
     body = {"proposed": {**edited_ladder, "name": "Changed by someone else"}}
-    assert owner_client.put(draft_url(ladder), headers=viewer, json=body).status_code == 403
+    assert put_draft(owner_client, draft_url(ladder), headers=viewer, json=body).status_code == 403
     for bad in (
         {"proposed": {**edited_ladder, "quantity": -1}},
         {"proposed": {**edited_ladder, "name": ""}},
@@ -1958,17 +1965,17 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
         {"proposed": edited_ladder, "edited_fields": ["status"]},
         {"proposed": edited_ladder, "parent_entry_id": ladder["id"]},
     ):
-        refused = owner_client.put(draft_url(ladder), json=bad)
+        refused = put_draft(owner_client, draft_url(ladder), json=bad)
         assert refused.status_code == 422, (bad.keys(), refused.text)
     unknown = f"{batch_url}/entries/00000000-0000-4000-8000-000000000000/draft"
-    assert owner_client.put(unknown, json=body).status_code == 404
+    assert put_draft(owner_client, unknown, json=body).status_code == 404
     first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
     second = owner_client.post(
         "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
     )
     assert second.status_code == 201, second.text
     other = {"X-Household-Id": second.json()["household"]["id"]}
-    assert owner_client.put(draft_url(ladder), headers=other, json=body).status_code == 404
+    assert put_draft(owner_client, draft_url(ladder), headers=other, json=body).status_code == 404
     assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
     # An account with two households names the household with every change.
     owner_client.headers["X-Household-Id"] = first_household
@@ -1980,7 +1987,7 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
     )
     assert skipped.status_code == 200, skipped.text
     lamp_before = fetch()[1][lamp["id"]]
-    late = owner_client.put(
+    late = put_draft(owner_client,
         draft_url(lamp), json={"proposed": {**lamp["proposed"], "name": "Late lamp"}}
     )
     assert late.status_code == 409
@@ -1988,11 +1995,11 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
     assert fetch()[1][lamp["id"]] == lamp_before
 
     # An empty draft puts the row back as it was read: values and choices.
-    cleared = owner_client.put(draft_url(rope), json={})
+    cleared = put_draft(owner_client, draft_url(rope), json={})
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["proposed"] == rope["proposed"]
-    assert owner_client.put(draft_url(rope), json={}).json()["proposed"] == rope["proposed"]
-    saved = owner_client.put(draft_url(rope), json={**rope_choice, "proposed": edited_rope})
+    assert put_draft(owner_client, draft_url(rope), json={}).json()["proposed"] == rope["proposed"]
+    saved = put_draft(owner_client, draft_url(rope), json={**rope_choice, "proposed": edited_rope})
     assert saved.status_code == 200, saved.text
 
     # A later apply uses the kept draft: nothing is sent again but the choices.
@@ -2009,7 +2016,7 @@ def test_draft_of_a_waiting_row_is_kept_without_skip_or_apply_and_apply_uses_it(
     assert (applied.json()["created"], applied.json()["merged"]) == (1, 1), applied.json()
     final = fetch()[1]
     assert "review_draft" not in final[ladder["id"]]["proposed"]["relationships"]
-    done = owner_client.put(draft_url(ladder), json=body)
+    done = put_draft(owner_client, draft_url(ladder), json=body)
     assert done.status_code == 409
     assert fetch()[1][ladder["id"]] == final[ladder["id"]]
 
@@ -2054,10 +2061,87 @@ def test_draft_is_refused_while_rows_of_the_import_are_being_added(owner_client)
 
     # The answer is not the same as for a row that is decided: this one can be sent again.
     set_status("applying")
-    busy = owner_client.put(url, json=body)
+    busy = put_draft(owner_client, url, json=body)
     assert busy.status_code == 409
     assert busy.json()["detail"]["code"] == "import_busy"
     set_status("review")
-    assert owner_client.put(url, json=body).status_code == 200
+    assert put_draft(owner_client, url, json=body).status_code == 200
     stored = owner_client.get(f"/api/v1/imports/{batch['id']}").json()["entries"][0]
     assert stored["proposed"]["name"] == "Step ladder"
+
+
+def test_import_row_draft_from_two_devices_is_checked_by_revision(owner_client):
+    create_room(owner_client, "Attic")
+    batch = upload_text_import(owner_client, "Ladder in the attic.")
+    entry = process_import(owner_client, batch["id"])["entries"][0]
+    batch_url = f"/api/v1/imports/{batch['id']}"
+    url = f"{batch_url}/entries/{entry['id']}/draft"
+    assert (entry["draft_revision"], entry["draft_writer"]) == (0, None)
+
+    def row():
+        return owner_client.get(batch_url).json()["entries"][0]
+
+    def put(text, expected, writer):
+        body = {"proposed": {**entry["proposed"], "name": text}} if text is not None else {}
+        return owner_client.put(url, json={**body, **named(expected, writer)})
+
+    def read():
+        current = row()
+        # The revision and the writer are told beside the row, never inside it.
+        draft = current["proposed"]["relationships"].get("review_draft", {})
+        assert not {"revision", "writer", "base", "stub"} & draft.keys()
+        name = current["proposed"]["name"]
+        return current["draft_revision"], None if name == entry["proposed"]["name"] else name
+
+    check_draft_revision_rule(put, read)
+    # A draft that was taken back leaves the row as it was read.
+    assert row()["proposed"] == entry["proposed"]
+    assert row()["status"] == "proposed"
+
+    # The answer to a conflict gives the row as the server keeps it.
+    kept = put("Step ladder", read()[0], DEVICE_B)
+    assert kept.status_code == 200, kept.text
+    assert (kept.json()["draft_revision"], kept.json()["draft_writer"]) == (read()[0], DEVICE_B)
+    refused = put("Tall ladder", 0, DEVICE_A)
+    assert refused.json()["detail"]["current"]["proposed"]["name"] == "Step ladder"
+    assert refused.json()["detail"]["current"]["id"] == entry["id"]
+
+    # Skip keeps the row for Restore and counts as a change of it: a correction that
+    # another device made before the skip does not go over the restored row silently.
+    before = read()[0]
+    skipped = owner_client.post(
+        f"{batch_url}/apply",
+        json={
+            "entries": [
+                {
+                    "id": entry["id"],
+                    "action": "skip",
+                    "proposed": {**entry["proposed"], "name": "Skipped ladder"},
+                }
+            ]
+        },
+    )
+    assert skipped.status_code == 200, skipped.text
+    restored = owner_client.post(f"{batch_url}/entries/{entry['id']}/restore")
+    assert restored.status_code == 200, restored.text
+    assert read() == (before + 1, "Skipped ladder")
+    assert put("Tall ladder", before, DEVICE_A).status_code == 409
+    assert read() == (before + 1, "Skipped ladder")
+
+    # Nothing of this is copied to the item that the row becomes.
+    mine = put("Tall ladder", before + 1, DEVICE_A)
+    assert mine.status_code == 200, mine.text
+    applied = owner_client.post(
+        f"{batch_url}/apply", json={"entries": [{"id": entry["id"], "action": "import"}]}
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["created"] == 1, applied.json()
+    final = row()
+    assert final["proposed"]["relationships"].get("review_draft") is None
+    item = owner_client.get(f"/api/v1/items/{final['imported_item_id']}")
+    assert item.json()["item"]["name"] == "Tall ladder"
+    assert DEVICE_A not in item.text and DEVICE_B not in item.text
+    # A decided row takes no draft, with or without a revision.
+    late = put("Late", before + 2, DEVICE_A)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "import_entry_not_pending"

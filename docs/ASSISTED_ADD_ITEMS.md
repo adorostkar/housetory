@@ -69,44 +69,102 @@ reload shows the row as it was corrected, with its action and target. This
 is the same for item rows and for room, place and container rows. If a save
 fails, the page keeps what was typed, shows one quiet line and tries again.
 Add and Skip always send the row as it is on the page, so they never wait
-for a save. Two tabs or two people: the last save wins. Within one visit the
-page keeps showing what was typed there; after a reload the server's draft is
-shown. A row that was added, skipped or rejected answers 409 and keeps nothing.
-An empty request puts the row back as it was read.
+for a save. Within one visit the page keeps showing what was typed there; after
+a reload the server's draft is shown. A row that was added, skipped or rejected
+answers 409 and keeps nothing. A request with no row field puts the row back as
+it was read.
 
 A browser can lose a request that is sent while a page closes or reloads.
 Safari does this more often than others. So each correction is first written
 to this device (`localStorage`), at once, before it is sent. The key is
-`housetory:review-draft:v1:<user>:<household>:<kind>:<review id>:<row>`. The
-copy is removed when the server has confirmed that same correction, when the
-row was added or skipped, when the server says the row is gone or decided, on
-sign-out, and after fourteen days (for every account on the device).
+`housetory:review-draft:v2:<user>:<household>:<kind>:<review id>:<row>` and the
+value is `{ path, body, at, baseRevision }`. The copy is removed when the
+server has confirmed that same correction, when the row was added or skipped,
+when the server says the row is gone or decided, on sign-out, and after
+fourteen days (for every account on the device). Copies in the older `v1` form
+are removed.
 
-A copy can also stay behind when the request did arrive but the page was gone
-before the answer. So the copy also says what the server had for the row when
-the correction was made. When a review opens, it compares each copy with the
-row on the server:
+**Two devices.** The same row can be corrected on a phone and on a laptop. An
+older correction must never go over a newer one from another device without a
+question. The server makes sure of that, for all four kinds of kept draft
+(import row, document line, document fields, review suggestion):
 
-- The server still has what it had then, or it has a correction that this
-  browser sent itself and never got an answer for: nobody else changed the
-  row. The copy is shown in its row and sent again. The row still waits:
-  nothing is added. (The copy remembers the last few corrections it sent
-  without an answer, and what the server confirmed last.)
-- The server has something else, a newer correction from another device:
-  **the server wins**. Its value is shown and the copy is removed. Nothing
-  is sent.
+- The kept draft of a row has a **revision**, a number that goes up by one
+  each time the stored draft changes. A row without a draft is at 0. The server
+  also keeps the **writer**: who stored it. A writer is one person on one
+  browser: a random id that the browser makes once (`housetory:device-id`,
+  which stays after sign-out so that a lost answer is still recognised),
+  joined with the id of the person who is signed in. So a draft that another
+  person kept on the same browser is never taken for one's own. The server
+  only compares writers; it reads nothing from them. The review gets both
+  with each row (`draft_revision`, `draft_writer`).
+- Every save must say which revision the correction was made on
+  (`expected_revision`) and who sends it (`writer`). A request without them
+  answers 422 and stores nothing. The server decides while it holds the lock
+  of the row:
+  1. The draft says what is stored already: nothing changes, and the answer
+     is 200 with the revision as it is. A request that is sent twice ends here.
+  2. It was made on the stored revision: it is stored, and the revision goes
+     up by one.
+  3. The stored draft is from the same writer: that person saved it from this
+     browser and never got the answer. Their newer draft is stored, and the
+     revision goes up.
+  4. Anything else: another device changed the row in the meantime. The answer
+     is **409 `draft_conflict`**, with the server's row and its revision.
+     Nothing is stored.
+- Taking a draft back follows the same rule. The revision is kept afterwards.
+  Skip, and loading AI suggestions into the review, also move the revision on,
+  because they change what the server keeps for the row.
+- The revision and the writer are kept beside the draft. They are not part of
+  what AI suggestions are made for, so they never make suggestions out of
+  date, and they are never copied to an item.
 
-Without the review on screen there is no row to compare with. Then only a copy
-of the **last ten minutes** is sent again by itself (a reload, a quick
-navigation), when the app starts and when the connection returns. An older copy
-waits until its review is opened and is checked there. A copy is read again
-just before it is sent, so an older request that still waits cannot go over a
-newer correction that was saved since. A copy is never sent while another
-household is selected, and it stays when the server says so. While a save
-fails the page keeps the correction, shows one quiet line and tries again. If
-the session ended, the copy stays for the same person. A copy the server can
-never keep is removed, and the app says so once. The copy is on this device
-only: another browser does not have it, and clearing site data removes it.
+**After a reload.** A copy on this device says which revision it was made on.
+
+- No conflict: the server still has that revision, or a newer one that this
+  same browser wrote. The copy is shown in its row and saved by itself, as
+  before, and then removed. The row still waits: nothing is added.
+- Conflict: another device changed the row since. The row shows **what the
+  server has**. The copy is kept and marked, and it is never sent again by
+  itself. One plain notice sits beside the row: *This row was also corrected
+  on another device. Yours: «Step ladder», quantity 2.* with two buttons.
+  **Use mine** puts the correction into the row and saves it on the revision
+  the server has now. If the server changed again in the meantime, the notice
+  stays, with the newer row. **Keep the other** removes the copy.
+- The same happens while both devices have the review open: a save that meets
+  a newer revision is answered with a conflict, the row is read again and
+  shows the other device's value, and the notice appears.
+- Neither button adds, skips or applies anything. Add and Skip send the row as
+  it is shown, so a correction that waits for a choice is never part of them.
+  When the row is decided, its copy is removed.
+- While a choice waits, the row can still be corrected. That correction is
+  saved, but it is not written over the copy that waits.
+
+A copy is also sent again when the app starts and when the connection returns,
+whichever page is open and however old the copy is. It is sent with its
+revision, so the server decides in the same way. A conflict found like this is
+shown when its review is opened. A copy is read again just before it is sent,
+so an older request that still waits cannot go over a newer correction that
+was saved since. A copy is never sent while another household is selected, and
+it stays when the server says so. While a save fails the page keeps the
+correction, shows one quiet line and tries again. If the session ended, the
+copy stays for the same person. A copy the server can never keep is removed,
+and the app says so once.
+
+A review page can also hold rows in memory while the person is on another
+page of the app. When the review is opened again, a row of that visit is shown
+as the server has it if someone else changed what the server keeps for it
+since (a draft of another writer, a skip that was restored, or loaded
+suggestions) and nothing of the row waits to be saved here. When this page
+itself skips a row or loads suggestions, the row goes exactly one revision on
+and the page goes on from there. If the server is further on than that,
+another device was in between, and the next save is asked about.
+
+Limits. The copy is on this device only: another browser does not have it, and
+clearing site data removes it. Two tabs of one browser, with the same person
+signed in, are the same writer, so between them the newer save still wins
+without a question. Add, Skip and Apply are not checked by revision: they act
+on the row as it is shown.
 
 The server keeps the first reading of a corrected row beside the correction.
 Optional AI suggestions are made for that first reading, so a kept correction

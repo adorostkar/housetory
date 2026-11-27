@@ -6,28 +6,65 @@
  * is first written here, on this device, and removed when the server has confirmed
  * it. After a reload the copy is sent again and shown in its row.
  *
- * A copy also says what the server had for the row when the correction was made
- * (`base`). A copy can stay behind when the request did arrive but the page was gone
- * before the answer. So a review that opens compares the row on the server with that
- * base: when the server still has it, the copy is shown and sent again; when the
- * server has something else, the server wins and the copy is removed.
+ * Two devices can correct the same row. The server keeps a revision for the draft of
+ * each row, and a copy says which revision its correction was made on
+ * (`baseRevision`). The copy is sent with that number, and the server decides: it
+ * keeps the copy, or it says that another device changed the row in the meantime.
+ * Then the copy stays here, marked as a conflict, until the person chooses between
+ * it and what the server has. It is never sent again by itself.
  *
  * Limitation: this is kept on this device only (localStorage), for one user in one
  * household. It is removed on sign-out, when the account changes, and after fourteen
- * days. Without a review on screen there is no row to compare with, so only a copy
- * of the last ten minutes is sent again blindly; an older one waits for its review.
+ * days.
  */
 
-const STORE_PREFIX = "housetory:review-draft:v1:";
+const STORE_PREFIX = "housetory:review-draft:v2:";
+// Copies of an older form. They cannot be checked by the server, so they are removed.
+const OLD_PREFIXES = ["housetory:review-draft:v1:"];
+const DEVICE_KEY = "housetory:device-id";
 
 export const REVIEW_DRAFT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
+let deviceInMemory: string | null = null;
+
 /**
- * How old a copy may be to be sent again without looking at the row on the server.
- * That is the reload or quick navigation case. Another device cannot realistically
- * have corrected the same row in that time.
+ * A name for this browser, made once. It is not about a person: it stays after
+ * sign-out. It is one half of the writer of a draft (see `writerId`).
  */
-export const REVIEW_DRAFT_BLIND_REPLAY_MS = 10 * 60 * 1000;
+export function deviceId(): string {
+  const valid = (value: string | null): value is string =>
+    typeof value === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+  try {
+    const kept = localStorage.getItem(DEVICE_KEY);
+    if (valid(kept)) return kept;
+  } catch {
+    // Storage is optional. The name then lasts as long as the page.
+  }
+  if (!deviceInMemory) {
+    const bytes = new Uint8Array(16);
+    if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+    else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+    deviceInMemory = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  try {
+    localStorage.setItem(DEVICE_KEY, deviceInMemory);
+  } catch {
+    // Storage is optional.
+  }
+  return deviceInMemory;
+}
+
+/**
+ * Who stores a draft: this browser and the person who is signed in. The server sees
+ * that a draft it keeps came from the same writer, which is so when the answer to
+ * a save was lost. The person is part of it, so that a draft another person kept
+ * on this same browser is never taken for one's own. It says nothing else about
+ * the person or the device.
+ */
+export function writerId(userId: string | null | undefined): string {
+  const person = (userId ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 36);
+  return person ? `${deviceId().slice(0, 24)}-${person}` : deviceId().slice(0, 24);
+}
 
 export interface ReviewDraftScope {
   userId: string;
@@ -47,21 +84,14 @@ export interface LocalReviewDraft {
   body: unknown;
   /** When this copy was written. It also tells one copy of a row from the next. */
   at: number;
+  /** The revision of the row's draft on the server that this correction was made on. */
+  baseRevision: number;
   /**
-   * What the server had for the row, as far as this browser knew, when the
-   * correction was made. Each review has its own form for it.
+   * Another device changed the row in the meantime. The copy waits for the person to
+   * choose between it and what the server has.
    */
-  base: unknown;
-  /**
-   * The drafts of the row that this browser sent and has no answer for, oldest first.
-   * One of them may have reached the server. A row that says the same as one of
-   * these was not corrected somewhere else: this browser put it there.
-   */
-  sent: unknown[];
+  conflict: boolean;
 }
-
-/** How many sent drafts without an answer are remembered for one row. */
-export const REVIEW_DRAFT_SENT_LIMIT = 6;
 
 export interface StoredReviewDraft extends LocalReviewDraft {
   review: ReviewRef;
@@ -78,7 +108,7 @@ function scopePrefix(scope: ReviewDraftScope): string {
   return `${STORE_PREFIX}${[scope.userId, scope.householdId].map(encodeURIComponent).join(":")}:`;
 }
 
-/** `housetory:review-draft:v1:<user>:<household>:<kind>:<review id>:<row key>` */
+/** `housetory:review-draft:v2:<user>:<household>:<kind>:<review id>:<row key>` */
 export function reviewDraftKey(scope: ReviewDraftScope, review: ReviewRef, row: string): string {
   return `${scopePrefix(scope)}${[review.kind, review.id, row].map(encodeURIComponent).join(":")}`;
 }
@@ -95,7 +125,9 @@ function parse(key: string, raw: string | null, now: number): StoredReviewDraft 
       !record || typeof record !== "object" ||
       typeof record.path !== "string" || !DRAFT_PATH.test(record.path) ||
       typeof record.at !== "number" || !Number.isFinite(record.at) ||
-      record.body === undefined || !("base" in record) ||
+      record.body === undefined ||
+      typeof record.baseRevision !== "number" || !Number.isInteger(record.baseRevision) ||
+      record.baseRevision < 0 ||
       now - record.at > REVIEW_DRAFT_MAX_AGE_MS || record.at - now > 60_000
     ) {
       return null;
@@ -106,8 +138,8 @@ function parse(key: string, raw: string | null, now: number): StoredReviewDraft 
       path: record.path,
       body: record.body,
       at: record.at,
-      base: record.base ?? null,
-      sent: Array.isArray(record.sent) ? record.sent.slice(-REVIEW_DRAFT_SENT_LIMIT) : [],
+      baseRevision: record.baseRevision,
+      conflict: record.conflict === true,
     };
   } catch {
     return null;
@@ -138,6 +170,9 @@ export function stableJson(value: unknown): string {
  */
 export function pruneLocalReviewDrafts(now: number = Date.now()): void {
   try {
+    for (const prefix of OLD_PREFIXES) {
+      for (const key of keysWith(prefix)) localStorage.removeItem(key);
+    }
     for (const key of keysWith(STORE_PREFIX)) {
       if (!parse(key, localStorage.getItem(key), now)) localStorage.removeItem(key);
     }
@@ -189,17 +224,26 @@ export function readLocalReviewDraft(
   }
 }
 
+function store(key: string, draft: LocalReviewDraft) {
+  localStorage.setItem(key, JSON.stringify({
+    path: draft.path, body: draft.body, at: draft.at, baseRevision: draft.baseRevision,
+    ...(draft.conflict ? { conflict: true } : {}),
+  }));
+}
+
+function changed() {
+  window.dispatchEvent(new Event(REVIEW_DRAFTS_CHANGED_EVENT));
+}
+
 /**
  * Writes the copy of a row and gives back its time, or null when storage is not
- * available or full. A later copy of the same row always has a later time. While a
- * copy of the row is still there, its base and its sent drafts are kept: the server
- * has not confirmed anything newer for the row.
+ * available or full. A later copy of the same row always has a later time.
  */
 export function writeLocalReviewDraft(
   scope: ReviewDraftScope | null,
   review: ReviewRef,
   row: string,
-  draft: { path: string; body: unknown; base?: unknown },
+  draft: { path: string; body: unknown; baseRevision: number },
   now: number = Date.now(),
 ): number | null {
   if (!scope) return null;
@@ -207,10 +251,7 @@ export function writeLocalReviewDraft(
     const key = reviewDraftKey(scope, review, row);
     const earlier = parse(key, localStorage.getItem(key), now);
     const at = Math.max(now, (earlier?.at ?? 0) + 1);
-    const base = earlier ? earlier.base : draft.base ?? null;
-    localStorage.setItem(key, JSON.stringify({
-      path: draft.path, body: draft.body, at, base, sent: earlier?.sent ?? [],
-    }));
+    store(key, { path: draft.path, body: draft.body, at, baseRevision: draft.baseRevision, conflict: false });
     return at;
   } catch {
     return null;
@@ -218,76 +259,49 @@ export function writeLocalReviewDraft(
 }
 
 /**
- * A draft of the row is sent now. It is remembered with the copy until its answer
- * comes: the request can reach the server although the answer never reaches the page.
+ * The server kept an older draft of a row while a newer copy waits. The copy was
+ * made on top of that draft, so it now starts from the revision the server gave.
  */
-export function noteLocalReviewDraftSent(
+export function moveLocalReviewDraftBase(
   scope: ReviewDraftScope | null,
   review: ReviewRef,
   row: string,
-  body: unknown,
+  baseRevision: number,
 ): void {
   if (!scope) return;
   try {
     const key = reviewDraftKey(scope, review, row);
     const current = parse(key, localStorage.getItem(key), Date.now());
-    if (!current) return;
-    const text = stableJson(body);
-    const sent = [...current.sent.filter((earlier) => stableJson(earlier) !== text), body]
-      .slice(-REVIEW_DRAFT_SENT_LIMIT);
-    localStorage.setItem(key, JSON.stringify({
-      path: current.path, body: current.body, at: current.at, base: current.base, sent,
-    }));
+    if (!current || current.conflict) return;
+    store(key, { ...current, baseRevision });
   } catch {
     // Storage is optional.
   }
 }
 
 /**
- * The server confirmed an older draft of a row while a newer copy waits. The copy
- * now starts from what the server has after that. The confirmed draft, and the ones
- * sent before it, are no longer open questions.
+ * Marks the copy of a row as a conflict, or takes the mark away again. With a mark
+ * the copy is never sent by itself. Gives back the copy, or null when there is none.
  */
-export function rebaseLocalReviewDraft(
+export function markLocalReviewDraftConflict(
   scope: ReviewDraftScope | null,
   review: ReviewRef,
   row: string,
-  base: unknown,
-  confirmed?: unknown,
-): void {
-  if (!scope) return;
+  conflict: boolean,
+  baseRevision?: number,
+): StoredReviewDraft | null {
+  if (!scope) return null;
   try {
     const key = reviewDraftKey(scope, review, row);
     const current = parse(key, localStorage.getItem(key), Date.now());
-    if (!current) return;
-    const text = stableJson(confirmed);
-    const index = current.sent.findIndex((earlier) => stableJson(earlier) === text);
-    localStorage.setItem(key, JSON.stringify({
-      path: current.path, body: current.body, at: current.at, base: base ?? null,
-      sent: current.sent.slice(index + 1),
-    }));
+    if (!current) return null;
+    const next = { ...current, conflict, baseRevision: baseRevision ?? current.baseRevision };
+    store(key, next);
+    changed();
+    return next;
   } catch {
-    // Storage is optional.
+    return null;
   }
-}
-
-/**
- * A value in one plain form, to compare what was sent with what the server gives
- * back: text without spaces around it, and nothing for empty values.
- */
-export function plainForm(value: unknown): unknown {
-  if (typeof value === "string") return value.trim() === "" ? undefined : value.trim();
-  if (Array.isArray(value)) {
-    const items = value.map(plainForm).filter((item) => item !== undefined);
-    return items.length ? items : undefined;
-  }
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value)
-      .map(([key, part]) => [key, plainForm(part)] as const)
-      .filter(([, part]) => part !== undefined);
-    return entries.length ? Object.fromEntries(entries) : undefined;
-  }
-  return value ?? undefined;
 }
 
 /**
@@ -311,9 +325,12 @@ export function removeLocalReviewDraft(
   } catch {
     // Nothing to remove when storage is unavailable.
   }
+  changed();
 }
 
 export const REVIEW_DRAFTS_CLEARED_EVENT = "housetory:review-drafts-cleared";
+/** A copy was removed, or its conflict mark changed. Open reviews read their copies again. */
+export const REVIEW_DRAFTS_CHANGED_EVENT = "housetory:review-drafts-changed";
 
 /** Removes every copy on this device, for every account. Used on sign-out. */
 export function clearAllReviewDrafts(): void {
@@ -323,4 +340,5 @@ export function clearAllReviewDrafts(): void {
     // Nothing to clear when storage is unavailable.
   }
   window.dispatchEvent(new Event(REVIEW_DRAFTS_CLEARED_EVENT));
+  changed();
 }

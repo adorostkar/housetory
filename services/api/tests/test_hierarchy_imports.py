@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from housetory_api.services.import_pipeline import process_import_batch
+from tests.draft_conflict_cases import put_draft
 
 FIXTURE = Path(__file__).parent / "fixtures" / "home_inventory.md"
 
@@ -399,13 +400,13 @@ def test_hierarchy_draft_of_a_waiting_row_keeps_edits_kinds_parent_and_duplicate
     }
     # A parent that is not a row of this import is refused, and nothing is stored.
     stranger = "00000000-0000-4000-8000-000000000000"
-    refused = owner_client.put(
+    refused = put_draft(owner_client,
         draft_url(ethernet), json={**choice, "parent_entry_id": stranger, "proposed": edited}
     )
     assert refused.status_code == 422, refused.text
     assert fetch(ethernet)[1] == ethernet
 
-    saved = owner_client.put(draft_url(ethernet), json={**choice, "proposed": edited})
+    saved = put_draft(owner_client, draft_url(ethernet), json={**choice, "proposed": edited})
     assert saved.status_code == 200, saved.text
     # The kind of a container is part of its proposal; the kind of record is a choice.
     container = {
@@ -413,7 +414,7 @@ def test_hierarchy_draft_of_a_waiting_row_keeps_edits_kinds_parent_and_duplicate
         "name": "Storage box two",
         "relationships": {**sto02["proposed"]["relationships"], "container_type": "crate"},
     }
-    saved = owner_client.put(
+    saved = put_draft(owner_client,
         draft_url(sto02), json={"entity_type": "location", "proposed": container}
     )
     assert saved.status_code == 200, saved.text
@@ -439,8 +440,9 @@ def test_hierarchy_draft_of_a_waiting_row_keeps_edits_kinds_parent_and_duplicate
     assert sto02["entity_type"] == "container"
     # An empty draft puts the row back as it was read. The last draft that is kept
     # says it is a container again, with the corrected name and kind.
-    assert owner_client.put(draft_url(sto02), json={}).json()["proposed"] == sto02["proposed"]
-    saved = owner_client.put(
+    cleared = put_draft(owner_client, draft_url(sto02), json={})
+    assert cleared.json()["proposed"] == sto02["proposed"]
+    saved = put_draft(owner_client,
         draft_url(sto02), json={"entity_type": "container", "proposed": container}
     )
     assert saved.status_code == 200, saved.text
@@ -489,6 +491,6 @@ def test_hierarchy_draft_of_a_waiting_row_keeps_edits_kinds_parent_and_duplicate
     )
     assert box["name"] == "Storage box two"
     assert item["location"]["id"] == box["id"]
-    late = owner_client.put(draft_url(ethernet), json={**choice, "proposed": edited})
+    late = put_draft(owner_client, draft_url(ethernet), json={**choice, "proposed": edited})
     assert late.status_code == 409
     assert late.json()["detail"]["code"] == "import_entry_not_pending"

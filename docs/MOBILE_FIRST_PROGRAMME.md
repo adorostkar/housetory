@@ -21,6 +21,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | — | Check in Mobile Safari on the iOS Simulator, and fixes | Done (see "iOS Simulator record") |
 | — | Pending corrections saved by themselves; more iOS sizes; Android; final production build | Done (see "Last round record") |
 | — | Corrections kept on the device until the server has them; document review top fields; phone and tablet on their side with the keyboard open | Done (see "Data and keyboard round record") |
+| — | Two devices: an older correction cannot go over a newer one without a choice | Done (see "Conflict check record") |
 
 All phases are finished and pushed to the branch. Nothing is merged or deployed.
 What is not complete is listed plainly under "Not complete" near the end.
@@ -1243,14 +1244,11 @@ longer relies on that request alone.
 - When a review opens, each copy is put back into its row and sent again. The
   row still **waits**: nothing is added, nothing is applied.
 - A copy can also stay behind when the request did arrive but the page was
-  gone before the answer. So the copy also says what the server had when the
-  correction was made. If the server now has something else, a newer
-  correction from another device, **the server wins**: its value is shown and
-  the copy is removed. A correction that this browser itself sent without an
-  answer does not count as "something else".
-- Without the review on screen there is no row to compare with. Then only a
-  copy of the last 10 minutes is sent again by itself (a reload, a quick
-  navigation). An older copy waits until its review is opened.
+  gone before the answer. In this round the page compared the copy with the
+  row on the server, let the server win without a word, and sent a copy of
+  the last 10 minutes again without comparing. **Both rules were replaced in
+  the next round**: the server now checks every save, and a conflict is shown
+  with a choice. See "Conflict check record".
 - While saving fails the page keeps the correction, shows the line "Your
   corrections are not saved yet. Trying again." and tries again.
 
@@ -1388,11 +1386,8 @@ before pass.
   in 3 of 3 kills from the foreground.
 - The copy is on **this device and this browser** only. With storage turned
   off (some private modes) the safety is as it was before.
-- **The server wins** over a copy when another device corrected the same row
-  in the meantime. Nothing is said about it.
-- A copy older than 10 minutes is sent only when its review is opened. A copy
-  for a suggestion that is in no loaded list, or for a line of an older
-  reading of a document, waits until it is removed after 14 days.
+- (Replaced in the next round: "the server wins without a word" and the
+  10-minute rule. See "Conflict check record".)
 - The choice of an **existing** purchase in a document review is not kept.
 - The server tidies tags (it removes `#` and doubles). A copy that differs
   only in that can be dropped when the tab also died before the answer.
@@ -1418,6 +1413,104 @@ before pass.
 Outside the repository, in the same `mfp-runtime` folder: `ios-sim/uitest/`
 (`out-prod2-*`, `out-land3`), `android/` (`prod2-*`), and the scripts
 `pwa/device-drafts.sh` (kill and stopped-server steps for both systems).
+
+## Conflict check record
+
+Done on 27 Nov 2026, after the data and keyboard round. One thing was asked
+for: an older correction kept on one device must not go over a newer
+correction that another device saved, without anyone knowing.
+
+### The rule, kept by the server
+
+Each kept correction of a review row now has a **revision** (a number that
+goes up by one each time the stored correction changes) and a **writer** (the
+device and person that stored it). Both are stored beside the correction, in
+the JSON that was there already. No migration. They are not part of what the
+review reads as its source, so AI suggestions stay usable, and they are never
+copied to an item.
+
+Every save says which revision it was made on and who sends it. Both are
+required; a save without them is refused (422). The server decides while it
+holds the lock of the row, so two devices cannot both win:
+
+| The save | The server |
+| --- | --- |
+| says what is stored already | nothing to do, 200 (a request that arrived before and is sent again) |
+| was made on the stored revision | stores it, revision + 1 |
+| was made on an older revision, but the stored correction is from the same device and person | stores it, revision + 1 (that device saved before and never got the answer) |
+| anything else | **409 `draft_conflict`**, nothing stored |
+
+This holds for all four kinds: import rows, document lines, the top fields of
+a document review, and inventory suggestions. A skip, taking AI suggestions,
+a cleanup after scanning and a new reading of a document keep the revision
+going; none of them starts it again at 0.
+
+### What the app does
+
+- Every copy on the device is sent again with its revision, whether its
+  review is open or not. The 10-minute rule is gone, and the page no longer
+  decides by comparing rows itself.
+- **No conflict:** as before, by itself. The correction is back in its row,
+  it is saved, the copy is removed, the row still waits.
+- **Conflict:** the copy is kept and is not sent again by itself. The row
+  shows what the server has, and one line on that row says: "This row was
+  also corrected on another device. Yours: «Step ladder», quantity 2." with
+  two buttons, **Use mine** and **Keep the other**. "Use mine" saves the copy
+  on top of what the server has now. "Keep the other" removes the copy. The
+  same line shows when two devices have the review open at the same time.
+- Nothing here adds, skips or applies anything. A correction in conflict is
+  not part of what Add, Skip or Apply sends until the person chose "Use
+  mine".
+
+### Defects found by review before the commit, all fixed
+
+- On the import page, a row corrected earlier in the same visit could still
+  go over a newer correction: device A corrects a row and leaves the page,
+  device B corrects it, skips it and restores it, A comes back. The page now
+  takes the server's row when someone else changed it.
+- The "same device" rule matched two people on one browser. The writer is now
+  the device together with the person.
+- A cleanup after scanning started the revision of the top fields again at 0.
+- A save without a revision was stored as before. Now it is refused.
+- After "Accept suggestions" on the import page, a row that had no suggestion
+  and that another device had corrected was put back as this page had it. The
+  page now moves the revision on only for the rows the server changed.
+
+### Tests
+
+| Case | Where |
+| --- | --- |
+| Two devices read a row; B saves; A's save on the older row is refused; B's correction is intact | backend, all four kinds |
+| A's save arrived but its answer was lost; A's newer correction is stored without a conflict | backend, all four kinds; web unit tests |
+| The same request sent again after it arrived | backend: 200, no new revision |
+| B saves a newer correction after that; A's older copy comes back | backend: refused; web: the copy is kept and the line shows |
+| A new reading or a cleanup does not start the revision again | backend |
+| Two browser windows as two devices on one import review; "Use mine" and "Keep the other" | end-to-end, 2 tests |
+| A lost request with no conflict is still recovered by itself | end-to-end, as before |
+
+| Check | Result |
+| --- | --- |
+| `tsc -b`, `ruff check`, `vite build` | clean |
+| `vitest run` | 87 files, 673 tests pass |
+| Backend `pytest`, fresh database | 934 tests: 931 pass, 1 skipped, 2 fail (the two old failures) |
+| End-to-end: Add items, document review, inventory review | 21 of 21 |
+| End-to-end: assistant, documents and reviews group | 102 of 102 that can run on a development server, 1 skipped (it needs a real AI model). A first pass had two failures while a source file was being saved; both passed in a full second pass with no file changing |
+
+This round was not run on the iOS Simulator, the Android emulator or a
+production build. The change is in the server rule and in what the page
+sends; the layout did not change.
+
+### Limits that remain, stated plainly
+
+- **Add, Skip and Apply are not checked by revision.** A person who decides a
+  row decides what is on their screen. If another device corrected that row a
+  moment before, that correction is replaced by the decision.
+- **Two tabs of one browser** are one device and one person. The newer save
+  of either tab wins there, as before.
+- With storage turned off, a conflict is remembered only while the page is
+  open.
+- The line shows the name and quantity of "yours" for a row, and the changed
+  fields for the top of a document. It does not show a full comparison.
 
 ## Final checklist
 
@@ -1633,7 +1726,8 @@ All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
 | `e55fd2a` | Correction batch: the seven points of the review, and its record |
 | `d98436f` | Fixes from the iOS Simulator check, and its record |
 | `9aada2f` | Corrections on review rows saved by themselves; fixes from more iOS sizes and Android; the last round record |
-| the commit after `9aada2f` | Corrections kept on the device until the server has them; top fields of a document review; phone and tablet on their side with the keyboard open; this record |
+| `27cb43e` | Corrections kept on the device until the server has them; top fields of a document review; phone and tablet on their side with the keyboard open |
+| the commit after `27cb43e` | The server checks every kept correction by revision; a conflict between two devices is shown with a choice |
 
 The phases were built side by side, so they are not in number order.
 
@@ -1704,7 +1798,7 @@ note" was left out on purpose (point 3 of the decision).
   scrolls, and it can be hidden.
 - **Keyboard on small strips and wide screens, and corrections saved by
   themselves:** see "Limits that remain" in the data and keyboard round
-  record.
+  record and in the conflict check record.
 
 ## Not complete
 

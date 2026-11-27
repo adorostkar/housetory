@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@/lib/api";
 import type { ImportReviewDraft } from "@/lib/assistant-documents";
 import type { ImportBatchDetail, ImportEntry } from "@/lib/types";
+import { writerId } from "@/lib/review-draft-store";
 import { BarEditorBoundary } from "@/components/shell/bar-editor";
 import { ImportDetailPage } from "@/pages/import-detail-page";
 
@@ -56,6 +57,8 @@ function batchOf(entries: ImportEntry[], patch: Partial<ImportBatchDetail> = {})
 let server: ImportBatchDetail;
 // Without a signed-in user there is no copy of a correction on this device.
 let signedIn = false;
+// Who stores a draft from this browser: the device, and the person when one is signed in.
+const thisWriter = () => writerId(signedIn ? "user-1" : null);
 const session = { authenticated: true, user: { id: "user-1" }, household: { id: "house-1" } };
 const localCopies = () => Object.keys(localStorage).filter((key) => key.startsWith("housetory:review-draft:"));
 
@@ -100,18 +103,29 @@ beforeEach(() => {
     const draft = body as {
       action: string; merge_item_id: string | null; merge_fields: string[];
       edited_fields: string[]; proposed: ImportEntry["proposed"];
+      expected_revision: number; writer: string;
     };
     const current = server.entries.find((item) => item.id === id);
     if (!current || !["proposed", "failed"].includes(current.status)) {
       throw new ApiError(409, "import_entry_not_pending", "This row is no longer waiting.");
     }
-    server = { ...server, entries: server.entries.map((item) => item.id === id ? { ...item, proposed: {
+    const proposed = {
       ...draft.proposed,
       relationships: { ...draft.proposed.relationships, review_draft: {
         action: draft.action, merge_item_id: draft.merge_item_id, merge_fields: draft.merge_fields,
         allow_duplicate: false, edited_fields: draft.edited_fields,
       } },
-    } } : item) };
+    };
+    // Like the server: a draft is kept when it was made on the revision the row has,
+    // or when the draft the row has is from the same device. The same draft again
+    // changes nothing. Anything else is a conflict, and nothing is kept.
+    const revision = current.draft_revision ?? 0;
+    if (JSON.stringify(proposed) === JSON.stringify(current.proposed)) return current as never;
+    if (draft.expected_revision !== revision && draft.writer !== current.draft_writer) {
+      throw new ApiError(409, "draft_conflict", "This row was also corrected on another device.");
+    }
+    server = { ...server, entries: server.entries.map((item) => item.id === id
+      ? { ...item, proposed, draft_revision: revision + 1, draft_writer: draft.writer } : item) };
     return server.entries.find((item) => item.id === id) as never;
   });
   vi.mocked(api.post).mockReset();
@@ -133,7 +147,8 @@ beforeEach(() => {
         skipped += 1;
         // Like the server: the edited proposal is kept, with the choices of the row.
         const choice = request as { merge_item_id?: string | null; merge_fields?: string[] };
-        return { ...item, status: "skipped", proposed: {
+        // A skip changes what is kept for the row: one revision on, from no device.
+        return { ...item, status: "skipped", draft_revision: (item.draft_revision ?? 0) + 1, draft_writer: null, proposed: {
           ...request.proposed,
           relationships: { ...request.proposed.relationships, review_draft: {
             action: choice.merge_item_id ? "merge" : "import",
@@ -514,7 +529,16 @@ describe("ImportDetailPage kept corrections", () => {
     expect(vi.mocked(api.put).mock.calls[0]).toEqual([draftPath("e1"), {
       action: "import", merge_item_id: null, merge_fields: [], edited_fields: ["name", "quantity"],
       proposed: expect.objectContaining({ name: "Step ladder", quantity: 2, serial_number: null }),
+      // The revision of the row's draft that the row was built from, and this device.
+      expected_revision: 0, writer: thisWriter(),
     }, undefined]);
+    // The next correction is made on what the server kept.
+    type("Name of Step ladder", "Tall ladder");
+    await pass(600);
+    expect(vi.mocked(api.put).mock.calls[1]![1]).toEqual(expect.objectContaining({ expected_revision: 1 }));
+    type("Name of Tall ladder", "Step ladder");
+    await pass(600);
+    vi.mocked(api.put).mockClear();
     // The row is as it was: still there, not selected, with what was typed.
     expect(screen.getByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("Step ladder");
     expect(screen.getByRole("checkbox", { name: "Select Step ladder" })).not.toBeChecked();
@@ -525,12 +549,12 @@ describe("ImportDetailPage kept corrections", () => {
     // Selecting is not a correction. An empty name is not kept; the last real one stays.
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Step ladder" }));
     await pass(2000);
-    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.put).not.toHaveBeenCalled();
     type("Name of Step ladder", "");
     fireEvent.change(within(row("Unnamed")).getByRole("spinbutton"), { target: { value: "3" } });
     await pass(600);
-    expect(api.put).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(api.put).mock.calls[1]![1]).toEqual(expect.objectContaining({
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0]![1]).toEqual(expect.objectContaining({
       proposed: expect.objectContaining({ name: "Step ladder", quantity: 3 }),
     }));
     expect(within(row("Unnamed")).getByRole("textbox", { name: "Name of Step ladder" })).toHaveValue("");
@@ -706,6 +730,45 @@ describe("ImportDetailPage kept corrections", () => {
     expect(api.put).toHaveBeenCalledTimes(1);
   });
 
+  it("shows another device's correction of a row without a suggestion after the suggestions are loaded", async () => {
+    signedIn = true;
+    const suggestion = { ...server.entries[0]!.proposed, name: "Ladder, aluminium", brand: "Wibe" };
+    server = { ...server, enhancement: {
+      status: "ready", job_id: "job-1", version: "v1", reason: null, error: null, provider: "ollama",
+      model: "test", ai_attempted: true, ai_succeeded: true,
+      proposals: [{ entry_id: "e1", proposed: suggestion, entity_type: "item", legacy_identifier: null, source_excerpt: null }],
+    } };
+    renderPage();
+    await screen.findByRole("article", { name: "Ladder" });
+    // Like the server: only the row that has a suggestion is changed, one revision on.
+    vi.mocked(api.post).mockImplementationOnce(async () => {
+      server = { ...server, enhancement: { ...server.enhancement!, status: "accepted" },
+        entries: server.entries.map((item) => item.id === "e1"
+          ? { ...item, proposed: suggestion, draft_revision: (item.draft_revision ?? 0) + 1, draft_writer: null }
+          : item) };
+      return server as never;
+    });
+    // This device corrects the rope, which has no suggestion. That is saved.
+    const name = screen.getByRole("textbox", { name: "Name of Rope" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Rope 30 m");
+    await waitFor(() => expect(server.entries[1]!.proposed.name).toBe("Rope 30 m"), { timeout: 3000 });
+    // Then the laptop corrects the rope too.
+    correctElsewhere("e2", "Rope from the laptop");
+    vi.mocked(api.put).mockClear();
+    await userEvent.click(screen.getByText("Review AI suggestions"));
+    await userEvent.click(screen.getByRole("button", { name: "Load suggestions into review" }));
+    // The ladder takes its suggestion. The rope was not part of the suggestions,
+    // so its newer revision is the laptop's: the row shows it, and the older
+    // correction of this visit is not saved over it.
+    expect(await screen.findByRole("article", { name: "Ladder, aluminium" })).toBeVisible();
+    expect(await screen.findByRole("article", { name: "Rope from the laptop" })).toBeVisible();
+    expect(screen.queryByRole("article", { name: "Rope 30 m" })).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(vi.mocked(api.put).mock.calls.filter((call) => call[0] === draftPath("e2"))).toEqual([]);
+    expect(server.entries[1]!.proposed.name).toBe("Rope from the laptop");
+  });
+
   it("shows a correction again after a reload when its request was lost, and the row still waits", async () => {
     signedIn = true;
     const kept = vi.mocked(api.put).getMockImplementation()!;
@@ -719,8 +782,8 @@ describe("ImportDetailPage kept corrections", () => {
     // The copies are on this device before anything is sent.
     expect(api.put).not.toHaveBeenCalled();
     expect(localCopies().sort()).toEqual([
-      "housetory:review-draft:v1:user-1:house-1:import:batch-1:e1",
-      "housetory:review-draft:v1:user-1:house-1:import:batch-1:e3",
+      "housetory:review-draft:v2:user-1:house-1:import:batch-1:e1",
+      "housetory:review-draft:v2:user-1:house-1:import:batch-1:e3",
     ]);
     view.unmount();
     expect(server.entries.map((item) => item.proposed.name)).toEqual(["Ladder", "Rope", "Drill"]);
@@ -750,12 +813,25 @@ describe("ImportDetailPage kept corrections", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("lets the server win over a copy when the row was corrected somewhere else, or was saved after all", async () => {
+  // Another device corrects a row: the server keeps its draft as the next revision.
+  const correctElsewhere = (id: string, name: string) => {
+    server = { ...server, entries: server.entries.map((item) => item.id === id ? {
+      ...item,
+      draft_revision: (item.draft_revision ?? 0) + 1, draft_writer: "laptop-0123456789",
+      proposed: { ...item.proposed, name, relationships: { review_draft: {
+        action: "import", merge_item_id: null, merge_fields: [], allow_duplicate: false, edited_fields: ["name"],
+      } } },
+    } : item) };
+  };
+  const notice = (name: string) => within(row(name).parentElement!).getByRole("group", { name: "Two corrections" });
+
+  it("keeps a correction of this device beside a row that another device corrected, and lets the person choose", async () => {
     signedIn = true;
     const kept = vi.mocked(api.put).getMockImplementation()!;
     vi.mocked(api.put).mockRejectedValue(new ApiError(0, "network_error", "No connection."));
     const view = await load();
     type("Name of Ladder", "Step ladder");
+    fireEvent.change(within(row("Step ladder")).getByRole("spinbutton"), { target: { value: "2" } });
     type("Name of Rope", "Rope 30 m");
     type("Name of Drill", "Drill 18V");
     expect(localCopies()).toHaveLength(3);
@@ -764,30 +840,152 @@ describe("ImportDetailPage kept corrections", () => {
     drafts.clear();
     vi.mocked(api.put).mockReset();
     vi.mocked(api.put).mockImplementation(kept);
-    // Before this device is opened again, the ladder is corrected on another device.
-    // The request for the rope turns out to have reached the server after all.
-    const setName = (id: string, name: string) => {
-      server = { ...server, entries: server.entries.map((item) => item.id === id ? { ...item, proposed: {
-        ...item.proposed, name, relationships: { review_draft: {
-          action: "import", merge_item_id: null, merge_fields: [], allow_duplicate: false, edited_fields: ["name"],
-        } },
-      } } : item) };
-    };
-    setName("e1", "Ladder from the laptop");
-    setName("e2", "Rope 30 m");
+    // Before this device is opened again, two of the rows are corrected on a laptop.
+    correctElsewhere("e1", "Ladder from the laptop");
+    correctElsewhere("e2", "Rope from the laptop");
     renderPage();
-    // The newer correction of the other device is shown, not the copy of this one.
+    // The rows show what the server has. The corrections of this device are not
+    // lost: each waits in one plain notice beside its row.
     expect(await screen.findByRole("article", { name: "Ladder from the laptop" })).toBeVisible();
     expect(screen.queryByRole("article", { name: "Step ladder" })).not.toBeInTheDocument();
-    expect(row("Rope 30 m")).toBeVisible();
-    // The drill is as the server had it when it was corrected here: its copy is used.
+    expect(within(notice("Ladder from the laptop")).getByRole("status")).toHaveTextContent(
+      "This row was also corrected on another device. Yours: «Step ladder», quantity 2.",
+    );
+    expect(within(notice("Rope from the laptop")).getByRole("status")).toHaveTextContent("Yours: «Rope 30 m», quantity 1.");
+    // The drill was not touched anywhere else: its copy is used by itself, as before.
     expect(row("Drill 18V")).toBeVisible();
-    await waitFor(() => expect(localCopies()).toEqual([]), { timeout: 3000 });
-    // Nothing went over the correction of the other device. The rope is what this
-    // browser sent itself, so it is sent once more, only to get its answer.
-    expect(vi.mocked(api.put).mock.calls.map((call) => call[0]).sort()).toEqual([draftPath("e2"), draftPath("e3")]);
-    expect(server.entries.map((item) => item.proposed.name)).toEqual(["Ladder from the laptop", "Rope 30 m", "Drill 18V"]);
+    await waitFor(() => expect(server.entries[2]!.proposed.name).toBe("Drill 18V"), { timeout: 3000 });
+    await waitFor(() => expect(localCopies()).toHaveLength(2), { timeout: 3000 });
+    // Nothing of the two is sent by itself, and nothing went over the laptop's rows.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(vi.mocked(api.put).mock.calls.map((call) => call[0])).toEqual([draftPath("e3")]);
+    expect(server.entries.map((item) => item.proposed.name))
+      .toEqual(["Ladder from the laptop", "Rope from the laptop", "Drill 18V"]);
+
+    // "Use mine": the correction goes into the row and is saved on the revision the
+    // server has now. The row still waits: not selected, nothing added.
+    vi.mocked(api.put).mockClear();
+    await userEvent.click(within(notice("Ladder from the laptop")).getByRole("button", { name: "Use mine" }));
+    expect(within(row("Step ladder")).getByRole("spinbutton")).toHaveValue(2);
+    await waitFor(() => expect(server.entries[0]!.proposed).toEqual(
+      expect.objectContaining({ name: "Step ladder", quantity: 2 }),
+    ), { timeout: 3000 });
+    expect(vi.mocked(api.put).mock.calls).toEqual([[draftPath("e1"), expect.objectContaining({
+      expected_revision: 1, writer: thisWriter(), proposed: expect.objectContaining({ name: "Step ladder" }),
+    }), undefined]]);
+    await waitFor(() => expect(localCopies()).toHaveLength(1), { timeout: 3000 });
+    expect(within(row("Step ladder").parentElement!).queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Step ladder" })).not.toBeChecked();
+
+    // "Keep the other": the copy of this device is removed, and nothing is sent.
+    vi.mocked(api.put).mockClear();
+    await userEvent.click(within(notice("Rope from the laptop")).getByRole("button", { name: "Keep the other" }));
+    expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+    expect(localCopies()).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(api.put).not.toHaveBeenCalled();
+    expect(server.entries[1]!.proposed.name).toBe("Rope from the laptop");
     expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("shows the other device's row when a save meets a newer one, and never adds a correction that waits for a choice", async () => {
+    signedIn = true;
+    await load();
+    // Both devices have the review open. The laptop saves first.
+    type("Name of Ladder", "Step ladder");
+    correctElsewhere("e1", "Ladder from the laptop");
+    await pass(600);
+    // The server kept nothing of this save. The row now shows the laptop's value,
+    // with the correction of this device beside it.
+    expect(vi.mocked(api.put).mock.calls).toEqual([[draftPath("e1"), expect.objectContaining({ expected_revision: 0 }), undefined]]);
+    await pass(0);
+    expect(row("Ladder from the laptop")).toBeVisible();
+    expect(within(notice("Ladder from the laptop")).getByRole("status")).toHaveTextContent("Yours: «Step ladder», quantity 1.");
+    expect(server.entries[0]!.proposed.name).toBe("Ladder from the laptop");
+    expect(localCopies()).toEqual(["housetory:review-draft:v2:user-1:house-1:import:batch-1:e1"]);
+    // It is not a failed save, and it is not sent again by itself.
+    expect(screen.queryByText(/not saved yet/)).not.toBeInTheDocument();
+    await pass(60_000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    // Add takes the row as it is shown. The correction that waits is not part of it.
+    fireEvent.click(within(row("Ladder from the laptop")).getByRole("button", { name: "Add item" }));
+    await pass(0);
+    expect(vi.mocked(api.post).mock.calls.at(-1)![1]).toEqual({ entries: [expect.objectContaining({
+      id: "e1", action: "import", proposed: expect.objectContaining({ name: "Ladder from the laptop" }),
+    })] });
+    // The row is decided, so there is nothing left to choose.
+    expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+    expect(localCopies()).toEqual([]);
+  });
+
+  it("shows a row of this visit as the server has it when another device corrected it since", async () => {
+    signedIn = true;
+    const view = await load();
+    type("Name of Ladder", "Step ladder");
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    expect(localCopies()).toEqual([]);
+    // The person goes to another page of the app. The laptop corrects the ladder.
+    view.unmount();
+    vi.useRealTimers();
+    correctElsewhere("e1", "Ladder from the laptop");
+    vi.mocked(api.put).mockClear();
+    renderPage();
+    // Everything of this device was saved before, so the laptop's row is the newer
+    // one. The rope is still as it was corrected here.
+    expect(await screen.findByRole("article", { name: "Ladder from the laptop" })).toBeVisible();
+    expect(row("Rope 30 m")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(api.put).not.toHaveBeenCalled();
+    expect(server.entries[0]!.proposed.name).toBe("Ladder from the laptop");
+  });
+
+  it("shows a row of this visit as the server has it when another device corrected, skipped and restored it", async () => {
+    signedIn = true;
+    const view = await load();
+    type("Name of Ladder", "Step ladder");
+    await pass(600);
+    expect(server.entries[0]!.proposed.name).toBe("Step ladder");
+    // The person goes to another page of the app. On the laptop the ladder is
+    // corrected, skipped and restored. A skip leaves no writer with the row.
+    view.unmount();
+    vi.useRealTimers();
+    correctElsewhere("e1", "Ladder from the laptop");
+    server = { ...server, entries: server.entries.map((item) => item.id === "e1"
+      ? { ...item, draft_revision: item.draft_revision! + 1, draft_writer: null } : item) };
+    vi.mocked(api.put).mockClear();
+    renderPage();
+    // The row of this visit is older than what the server keeps. It is not sent
+    // over it: the server's row is shown.
+    expect(await screen.findByRole("article", { name: "Ladder from the laptop" })).toBeVisible();
+    expect(screen.queryByRole("article", { name: "Step ladder" })).not.toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(api.put).not.toHaveBeenCalled();
+    expect(server.entries[0]!.proposed.name).toBe("Ladder from the laptop");
+  });
+
+  it("goes on from a row that this page skipped and restored, without a question", async () => {
+    signedIn = true;
+    await load();
+    type("Name of Rope", "Rope 30 m");
+    await pass(600);
+    fireEvent.click(within(row("Rope 30 m")).getByRole("button", { name: "Skip" }));
+    await pass(0);
+    expect(server.entries[1]).toEqual(expect.objectContaining({ status: "skipped", draft_revision: 2 }));
+    fireEvent.click(screen.getByText("Skipped (1)"));
+    fireEvent.click(screen.getByRole("button", { name: "Restore Rope 30 m" }));
+    await pass(0);
+    // The row is back as it was skipped here. The next correction is made on the
+    // revision the skip left, so the server keeps it and nothing is asked.
+    type("Name of Rope 30 m", "Rope 40 m");
+    await pass(600);
+    expect(vi.mocked(api.put).mock.calls.at(-1)![1]).toEqual(expect.objectContaining({
+      expected_revision: 2, proposed: expect.objectContaining({ name: "Rope 40 m" }),
+    }));
+    expect(server.entries[1]!.proposed.name).toBe("Rope 40 m");
+    expect(screen.queryByRole("group", { name: "Two corrections" })).not.toBeInTheDocument();
   });
 
   it("keeps a newer correction when an older one of this browser reached the server without an answer", async () => {
@@ -842,12 +1040,12 @@ describe("ImportDetailPage kept corrections", () => {
     await screen.findByRole("article", { name: "Step" });
     vi.useFakeTimers();
     type("Name of Step", "Step ladder");
-    const copy = JSON.parse(localStorage.getItem(localCopies()[0]!)!) as { base: { proposed: { name: string } } };
-    // The copy starts from the row the server confirmed, not from the row as it was first read.
-    expect(copy.base.proposed.name).toBe("Step");
+    const copy = JSON.parse(localStorage.getItem(localCopies()[0]!)!) as { baseRevision: number };
+    // The copy was made on the revision the server confirmed, not on the row as it was first read.
+    expect(copy.baseRevision).toBe(1);
     cleanup();
 
-    // Back online after a reload: the server still has that row, so the copy is used.
+    // Back online after a reload: the server still has that revision, so the copy is used.
     vi.useRealTimers();
     drafts.clear();
     vi.mocked(api.put).mockReset();
@@ -867,7 +1065,7 @@ describe("ImportDetailPage kept corrections", () => {
     fireEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
     await pass(0);
     // The decision failed. A reload now would still have the correction.
-    expect(localCopies()).toEqual(["housetory:review-draft:v1:user-1:house-1:import:batch-1:e1"]);
+    expect(localCopies()).toEqual(["housetory:review-draft:v2:user-1:house-1:import:batch-1:e1"]);
     vi.mocked(api.post).mockImplementation(added);
     fireEvent.click(within(row("Step ladder")).getByRole("button", { name: "Add item" }));
     await pass(0);
@@ -878,8 +1076,8 @@ describe("ImportDetailPage kept corrections", () => {
     cleanup();
     vi.useRealTimers();
     drafts.clear();
-    localStorage.setItem("housetory:review-draft:v1:user-1:house-1:import:batch-1:e1", JSON.stringify({
-      path: draftPath("e1"), at: Date.now(),
+    localStorage.setItem("housetory:review-draft:v2:user-1:house-1:import:batch-1:e1", JSON.stringify({
+      path: draftPath("e1"), at: Date.now(), baseRevision: 0,
       body: { action: "import", proposed: { ...server.entries[0]!.proposed, name: "Old correction" } },
     }));
     renderPage();
@@ -991,6 +1189,7 @@ describe("ImportDetailPage kept corrections", () => {
       entity_type: "container", parent_entry_id: "r2", legacy_identifier: "BOX-9",
       edited_fields: ["name", "relationships"],
       proposed: expect.objectContaining({ name: "Blue box", relationships: { container_type: "crate" } }),
+      expected_revision: 0, writer: thisWriter(),
     }, undefined]);
     fireEvent.click(within(row("Blue box")).getByRole("button", { name: "Edit" }));
     fireEvent.change(within(row("Blue box")).getByRole("combobox", { name: "Entity type" }), { target: { value: "location" } });

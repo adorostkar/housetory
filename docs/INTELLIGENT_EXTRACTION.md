@@ -151,17 +151,35 @@ the first reading back. The draft is not part of the extraction, so it does not
 change its version and does not make AI suggestions out of date. It stays while
 a line still waits, so that the rest is applied with the same details. A
 finished review, with every line applied or skipped, shows none, and a late one
-then answers 409. It is removed for good when the last line is applied. When
+then answers 409. It is removed for good when the last line is applied (only
+its revision stays). When
 the last line was skipped instead, it is back if that line is restored.
 A choice of an existing purchase is not kept: it depends on the matched items.
 
 Each correction of a line or of these fields is also written to this device
 first, and removed when the server has confirmed it. A request that is lost
 while the page closes (Safari does this) is then not a lost correction: after a
-reload the review shows it again and sends it again, if the server still has
-what it had when the correction was made. If the server has something newer
-for that line or for the fields, the server wins and the copy is removed. See
-[Assisted add items](ASSISTED_ADD_ITEMS.md) for the rules of that copy.
+reload the review shows it again and saves it by itself.
+
+Two devices can correct the same line or the same fields. The kept draft of
+each line, and of the fields, has a revision and the device that stored it
+(`revision` and `writer` in the line state, `header_revision` and
+`header_writer` for the fields). Every save says which revision it was made on,
+and the server keeps it only when no other device changed that part since;
+otherwise it answers 409 `draft_conflict` and keeps nothing. Then the line, or
+the fields, show what the server has, and the correction of this device waits
+in one plain notice beside them: *This line was also corrected on another
+device. Yours: «Drill Bit Set», quantity 1, total 19.90.* **Use mine** saves
+it on the revision the server has now. **Keep the other** removes it. Neither
+applies anything, and Apply and Skip only take what is shown. A line whose
+draft was taken back keeps a waiting state with no draft, so that its revision
+is not lost. The revision and the writer are not part of the extraction: they
+do not change its version and they are never applied. A new reading of the
+document keeps the revisions, and its lines are new lines, so a correction for
+a line of the old reading has no line to go to (422). When the pages are
+cleaned up, the kept drafts go with the old pages, but their revisions stay,
+one step further, so that an older correction is still seen as older. See
+[Assisted add items](ASSISTED_ADD_ITEMS.md) for the full rule.
 
 Stock rules:
 

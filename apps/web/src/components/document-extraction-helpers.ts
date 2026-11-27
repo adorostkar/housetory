@@ -292,23 +292,20 @@ export interface ExtractionLineState {
   description?: string | null;
   quantity?: number | null;
   line_total_cents?: number | null;
+  /** How often the kept correction of the line changed, and the device that kept it. */
+  revision?: number;
+  writer?: string | null;
   /** Written by this page before the server has confirmed it. Never from the server. */
   unconfirmed?: boolean;
 }
 
 /**
- * What the server keeps for a line that still waits, in one fixed form, or null when
- * it keeps nothing. It goes with the copy of a correction on this device: the copy
- * is only used again while the server still has exactly this.
+ * True for a waiting line that keeps no correction. The server still has a state
+ * for it then, to remember the revision of its draft.
  */
-export function serverLine(state: ExtractionLineState | null | undefined) {
-  if (!state) return null;
-  return {
-    description: state.description ?? null,
-    quantity: state.quantity ?? null,
-    line_total_cents: state.line_total_cents ?? null,
-    draft: state.draft ?? null,
-  };
+export function keepsNothing(state: ExtractionLineState | null | undefined) {
+  return !state || (state.status === "pending" && !state.draft &&
+    state.description == null && state.quantity == null && state.line_total_cents == null);
 }
 
 export interface ExtractionLineStates {
@@ -330,17 +327,11 @@ export interface ExtractionHeaderDraft {
 export interface ExtractionHeaderDraftState {
   /** The kept fields, with the extraction version they were corrected for. */
   header_draft?: { version: string; draft: ExtractionHeaderDraft } | null;
+  /** How often the kept fields changed, and the device that kept them. */
+  header_revision?: number;
+  header_writer?: string | null;
   /** Written by this page before the server has confirmed the fields. Never from the server. */
   header_unconfirmed?: boolean;
-}
-
-/** What the server keeps for the fields at the top, in one fixed form, or null. */
-export function serverHeader(kept: ExtractionHeaderDraftState["header_draft"]) {
-  if (!kept) return null;
-  return {
-    version: kept.version,
-    draft: Object.fromEntries(Object.entries(kept.draft ?? {}).filter(([, value]) => value != null)),
-  };
 }
 
 export type ExtractionReviewWithStates = ExtractionReview &
@@ -392,7 +383,7 @@ export function serializeLineDraft(draft: LineDraft, candidate?: CandidateItem):
 
 /** Puts a kept draft back on a freshly built row. Unknown or broken parts are ignored. */
 export function restoreLineDraft(base: LineDraft, state: ExtractionLineState | undefined): LineDraft {
-  if (!state || state.status === "applied") return base;
+  if (!state || state.status === "applied" || keepsNothing(state)) return base;
   const saved = (state.draft ?? {}) as Partial<LineDraft>;
   const text = (value: unknown, fallback: string) => (typeof value === "string" ? value : fallback);
   const part = <T extends object>(value: unknown, fallback: T): T =>

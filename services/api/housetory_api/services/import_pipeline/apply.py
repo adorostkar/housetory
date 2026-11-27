@@ -31,7 +31,18 @@ from ...schemas.imports import (
 from ...schemas.items import ItemCreate, ItemUpdate, PurchaseIn, WarrantyIn
 from .. import properties as property_service
 from ..containers import create_containers
-from ..import_row_drafts import REVIEW_DRAFT_KEY, first_reading, with_draft
+from ..draft_revisions import REVISION_KEY, DraftConflict, decide
+from ..import_row_drafts import (
+    REVIEW_DRAFT_KEY,
+    draft_revision,
+    first_reading,
+    is_stub,
+    kept_draft,
+    same_draft,
+    source_proposed,
+    with_draft,
+    without_draft,
+)
 from ..items import create_item_record, get_item, update_item_record
 from .serialization import _batch_detail, _safe_error, serialize_batch
 
@@ -44,8 +55,12 @@ from .serialization import _batch_detail, _safe_error, serialize_batch
 def _proposed_json(
     proposed: ProposedItem,
     request: ImportApplyEntry | ImportEntryDraftRequest | None = None,
+    revision: int | None = None,
 ) -> dict:
-    """The edited proposal as stored. With ``request`` it also carries the review draft."""
+    """The edited proposal as stored. With ``request`` it also carries the review draft.
+
+    ``revision`` is the revision of the draft that is kept with a skip.
+    """
     data = proposed.model_dump(mode="json")
     relationships = dict(data.get("relationships") or {})
     kept = relationships.pop(REVIEW_DRAFT_KEY, None)
@@ -78,6 +93,8 @@ def _proposed_json(
             edited = list(request.edited_fields)
         if edited:
             draft["edited_fields"] = edited
+        if revision is not None:
+            draft[REVISION_KEY] = revision
         relationships[REVIEW_DRAFT_KEY] = draft
     data["relationships"] = relationships
     return data
@@ -493,15 +510,17 @@ def apply_hierarchy_import(
         savepoint = db.begin_nested()
         try:
             proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
+            # A skip changes what is kept for the row, so its revision goes up.
+            revision = draft_revision(entry.proposed) + 1
             if request.action == "reject":
-                entry.proposed = _proposed_json(proposed, request)
+                entry.proposed = _proposed_json(proposed, request, revision)
                 entry.status = ImportEntryStatus.REJECTED.value
                 rejected += 1
                 savepoint.commit()
                 continue
             if request.action == "skip":
                 # The edited record and its choices are kept, for Restore.
-                entry.proposed = _proposed_json(proposed, request)
+                entry.proposed = _proposed_json(proposed, request, revision)
                 entry.status = ImportEntryStatus.SKIPPED.value
                 skipped += 1
                 savepoint.commit()
@@ -739,19 +758,21 @@ def apply_import(
             skipped += 1
             continue
         proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
+        # A skip changes what is kept for the row, so its revision goes up.
+        revision = draft_revision(entry.proposed) + 1
         savepoint = db.begin_nested()
         try:
             entry.proposed = _proposed_json(proposed)
             entry.field_sources = proposed.field_sources
             if request.action == "reject":
-                entry.proposed = _proposed_json(proposed, request)
+                entry.proposed = _proposed_json(proposed, request, revision)
                 entry.status = ImportEntryStatus.REJECTED.value
                 rejected += 1
                 savepoint.commit()
                 continue
             if request.action == "skip":
                 # The edited row and its choices (action, target) are kept, for Restore.
-                entry.proposed = _proposed_json(proposed, request)
+                entry.proposed = _proposed_json(proposed, request, revision)
                 entry.status = ImportEntryStatus.SKIPPED.value
                 entry.duplicate_resolution = "skip"
                 skipped += 1
@@ -849,8 +870,12 @@ def save_import_entry_draft(
     the row inside it. The proposal as it was read before the first correction is kept
     with it. That first reading is what optional AI suggestions were made for, so a
     kept correction does not make them out of date. The status, the error, the counts
-    of the batch and the inventory are not touched. An empty request puts the first
-    reading back. The last write wins.
+    of the batch and the inventory are not touched. A request with no row field puts
+    the first reading back.
+
+    Two devices can correct the same row. The draft has a revision, and the request
+    says which revision it was made on. ``decide`` says what happens, while the row is
+    locked. A conflict raises ``DraftConflict`` and stores nothing.
     """
     # The batch is locked first, so that this cannot run in the middle of an apply.
     batch = db.scalar(
@@ -898,16 +923,36 @@ def save_import_entry_draft(
         raise ApiError(422, "import_draft_invalid", "Choose a parent from this import.")
     # The first reading stays the one that was there before the first correction.
     base = first_reading(entry.proposed)
-    if not request.model_fields_set:
-        if base is not None:
-            entry.proposed = base
-        db.commit()
-        return entry
-    proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
-    data = _proposed_json(proposed, request)
-    entry.proposed = with_draft(
-        data, data["relationships"][REVIEW_DRAFT_KEY], base or dict(entry.proposed)
+    kept = kept_draft(entry.proposed)
+    revision = draft_revision(entry.proposed) + 1
+    if not (request.model_fields_set - {"expected_revision", "writer"}):
+        # Take the draft back. Its revision is kept, so that an older correction from
+        # another device is still seen as older.
+        stored = (
+            without_draft(base, revision=revision, writer=request.writer)
+            if base is not None and not is_stub(kept)
+            else None
+        )
+    else:
+        proposed = request.proposed or ProposedItem.model_validate(entry.proposed)
+        data = _proposed_json(proposed, request)
+        stored = with_draft(
+            data,
+            data["relationships"][REVIEW_DRAFT_KEY],
+            base or source_proposed(entry.proposed),
+            revision=revision,
+            writer=request.writer,
+        )
+    outcome = decide(
+        kept,
+        expected=request.expected_revision,
+        writer=request.writer,
+        same=stored is None or same_draft(stored, entry.proposed),
     )
+    if outcome == "conflict":
+        raise DraftConflict(revision - 1)
+    if outcome == "store" and stored is not None:
+        entry.proposed = stored
     db.commit()
     return entry
 

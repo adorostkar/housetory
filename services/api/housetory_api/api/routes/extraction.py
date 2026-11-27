@@ -10,6 +10,7 @@ from ...schemas.extraction import (
     ExtractionApplyResult,
     ExtractionHeaderDraftRequest,
     ExtractionHeaderDraftState,
+    ExtractionLineDraftRequest,
     ExtractionLineSkipRequest,
     ExtractionLineState,
     ExtractionLineStatesOut,
@@ -24,6 +25,7 @@ from ...services import (
     document_matching,
 )
 from ...services.documents import get_document
+from ...services.draft_revisions import DraftConflict, conflict
 from ..deps import AuthContext, require_auth
 from ..errors import ApiError
 
@@ -69,13 +71,21 @@ def _review(db: Session, document) -> ExtractionReviewOut:
     states = _line_states(db, document)
     review.line_states = states.line_states
     review.applied_version = states.applied_version
-    review.header_draft = _header_draft(document).header_draft
+    header = _header_draft(document)
+    review.header_draft = header.header_draft
+    review.header_revision = header.header_revision
+    review.header_writer = header.header_writer
     return review
 
 
 def _header_draft(document) -> ExtractionHeaderDraftState:
+    revision, writer = document_extraction_apply.header_revision(document)
     return ExtractionHeaderDraftState.model_validate(
-        {"header_draft": document_extraction_apply.header_draft(document)}
+        {
+            "header_draft": document_extraction_apply.header_draft(document),
+            "header_revision": revision,
+            "header_writer": writer,
+        }
     )
 
 
@@ -230,14 +240,22 @@ def save_extraction_header_draft(
     """Keep the corrected fields at the top of the review. Nothing is applied."""
     document = _review_document(db, auth.household.id, document_id)
     document_extraction.ensure_extraction(db, document)
-    document = document_extraction_apply.save_header_draft(
-        db,
-        auth.household.id,
-        document,
-        version=payload.version,
-        draft=payload.draft.model_dump(exclude_none=True) if payload.draft else None,
-        actor_user_id=auth.user.id,
-    )
+    try:
+        document = document_extraction_apply.save_header_draft(
+            db,
+            auth.household.id,
+            document,
+            version=payload.version,
+            draft=payload.draft.model_dump(exclude_none=True) if payload.draft else None,
+            actor_user_id=auth.user.id,
+            expected_revision=payload.expected_revision,
+            writer=payload.writer,
+        )
+    except DraftConflict as error:
+        # The page gets the fields as the server keeps them, and their revision.
+        raise conflict(
+            error.revision, _header_draft(document).model_dump(mode="json")
+        ) from error
     return _header_draft(document)
 
 
@@ -247,21 +265,30 @@ def save_extraction_header_draft(
 def save_extraction_line_draft(
     document_id: uuid.UUID,
     line_id: str,
-    payload: ExtractionLineSkipRequest | None = None,
+    payload: ExtractionLineDraftRequest,
     auth: AuthContext = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> ExtractionLineStatesOut:
-    """Keep the corrections of one line that still waits. An empty body forgets them."""
+    """Keep the corrections of one line that still waits. A body without a draft forgets them."""
     document = _review_document(db, auth.household.id, document_id)
     document_extraction.ensure_extraction(db, document)
-    document = document_extraction_apply.save_line_draft(
-        db,
-        auth.household.id,
-        document,
-        line_id,
-        actor_user_id=auth.user.id,
-        edits=payload.model_dump() if payload else None,
-    )
+    try:
+        document = document_extraction_apply.save_line_draft(
+            db,
+            auth.household.id,
+            document,
+            line_id,
+            actor_user_id=auth.user.id,
+            edits=payload.model_dump(exclude={"expected_revision", "writer"}),
+            expected_revision=payload.expected_revision,
+            writer=payload.writer,
+        )
+    except DraftConflict as error:
+        # The page gets the line as the server keeps it, and its revision.
+        state = _line_states(db, document).line_states.get(line_id)
+        raise conflict(
+            error.revision, state.model_dump(mode="json") if state else {}
+        ) from error
     return _line_states(db, document)
 
 

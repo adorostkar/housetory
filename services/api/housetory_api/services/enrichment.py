@@ -21,7 +21,7 @@ from ..schemas.extraction import LineMatch
 from ..schemas.imports import ImportEnhancementEntry, ProposedItem
 from . import ai
 from .ai_runtime import AiRuntimeConfig
-from .import_row_drafts import carry_draft_over, source_proposed
+from .import_row_drafts import carry_draft_over, public_proposed, source_proposed
 
 TASK = "ai.enrich"
 DOCUMENT_AI_QUEUE = "ai-documents"
@@ -1048,12 +1048,11 @@ def accept_import_enhancement(db: Session, batch: ImportBatch) -> None:
         # A waiting row with a kept correction keeps it: the fields the person changed
         # keep the person's value, the rest take the suggestion, and the choices of the
         # row stay. A skipped or decided row is replaced as before.
-        kept = (
+        entry.proposed = (
             carry_draft_over(entry.proposed, suggested)
             if entry.status in {"proposed", "approved", "failed"}
-            else None
+            else suggested
         )
-        entry.proposed = kept or suggested
         entry.field_sources = proposal.proposed.field_sources
         entry.confidence = proposal.proposed.confidence
         entry.entity_type = proposal.entity_type
@@ -1063,7 +1062,7 @@ def accept_import_enhancement(db: Session, batch: ImportBatch) -> None:
             for candidate in find_duplicates(
                 db,
                 batch.household_id,
-                ProposedItem.model_validate(kept) if kept else proposal.proposed,
+                ProposedItem.model_validate(public_proposed(entry.proposed)),
             )
         ]
     db.flush()

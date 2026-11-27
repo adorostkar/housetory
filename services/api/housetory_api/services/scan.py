@@ -40,6 +40,7 @@ from ..schemas.documents import (
     ScanPoint,
 )
 from . import storage
+from .document_extraction_apply import draft_revisions_after_new_source
 from .document_ocr import enqueue_ocr
 from .documents import get_document, resolve_document_items
 from .serializers import document_page_out
@@ -871,6 +872,8 @@ def _commit_cleanup(
         }
         document.extracted_metadata = {
             **document.extracted_metadata,
+            # The kept review drafts go with the old pages. Their revisions stay.
+            **draft_revisions_after_new_source(metadata),
             "scan": {"page_count": len(pages), "source": "scanner"},
         }
         scan.status = "committed"

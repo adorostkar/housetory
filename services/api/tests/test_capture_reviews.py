@@ -10,6 +10,7 @@ from housetory_api.services import ai
 from housetory_api.services.document_ocr import run_document_ocr
 from housetory_api.services.import_pipeline import process_import_batch
 from housetory_api.services.recognition import run_recognition
+from tests.draft_conflict_cases import put_draft
 
 
 def image_bytes():
@@ -410,13 +411,15 @@ def test_partly_applied_document_stays_pending_until_every_line_is_applied_or_sk
     # wait, the review is the same one, and a dismissal of it is not undone by a draft.
     before = capture(owner_client, document_id)
     for line in (roller, lamp):
-        kept = owner_client.put(
+        kept = put_draft(
+        owner_client,
             f"{review_url}/lines/{line['id']}/draft", json={"draft": {"quantity": "4"}}
         )
         assert kept.status_code == 200, kept.text
     assert capture(owner_client, document_id) == before
     dismissed = dismiss(owner_client, "document", document_id)
-    kept = owner_client.put(
+    kept = put_draft(
+        owner_client,
         f"{review_url}/lines/{lamp['id']}/draft", json={"draft": {"quantity": "5"}}
     )
     assert kept.status_code == 200, kept.text

@@ -26,6 +26,7 @@ from housetory_api.services import document_matching
 from housetory_api.services.auth import create_session
 from housetory_api.services.document_ocr import run_document_ocr
 from housetory_api.services.ocr import ExtractedText
+from tests.draft_conflict_cases import named, put_draft
 
 RECEIPT_TEXT = """CORNER HARDWARE
 123 Main Street
@@ -1437,14 +1438,14 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     def states():
         return owner_client.get(review_url).json()["line_states"]
 
-    first = owner_client.put(
+    first = put_draft(owner_client,
         draft_url(lamp), json={"draft": {**lamp_draft, "description": "First try"}}
     )
     assert first.status_code == 200, first.text
     for line in (lamp, roller):
         # The last write wins, and the same draft twice changes nothing.
         for _attempt in range(2):
-            saved = owner_client.put(
+            saved = put_draft(owner_client,
                 draft_url(line),
                 json={
                     "description": drafts[line["id"]]["description"],
@@ -1469,15 +1470,15 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     # Who may not write, and what is not accepted. None of it changes what is stored.
     viewer_token, _ = _add_member(owner_client, email="draft-viewer@example.com", role="viewer")
     body = {"draft": {**lamp_draft, "description": "Changed by someone else"}}
-    denied = owner_client.put(draft_url(lamp), headers=_headers(viewer_token), json=body)
+    denied = put_draft(owner_client, draft_url(lamp), headers=_headers(viewer_token), json=body)
     assert denied.status_code == 403
     for bad in (
         {"draft": {"blob": "x" * 21_000}},
         {"draft": lamp_draft, "quantity": 0},
         {"draft": "not a draft"},
     ):
-        assert owner_client.put(draft_url(lamp), json=bad).status_code == 422, bad.keys()
-    unknown = owner_client.put(f"{review_url}/lines/no-such-line/draft", json=body)
+        assert put_draft(owner_client, draft_url(lamp), json=bad).status_code == 422, bad.keys()
+    unknown = put_draft(owner_client, f"{review_url}/lines/no-such-line/draft", json=body)
     assert unknown.status_code == 422
     assert unknown.json()["detail"]["code"] == "extraction_line_not_found"
     first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
@@ -1486,7 +1487,7 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     )
     assert second.status_code == 201, second.text
     other = {"X-Household-Id": second.json()["household"]["id"]}
-    assert owner_client.put(draft_url(lamp), headers=other, json=body).status_code == 404
+    assert put_draft(owner_client, draft_url(lamp), headers=other, json=body).status_code == 404
     assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
     owner_client.headers["X-Household-Id"] = first_household
     assert states() == kept
@@ -1495,18 +1496,24 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     skip = f"{review_url}/lines/{ladder['id']}"
     assert owner_client.post(f"{skip}/skip", json={"description": "Ladder"}).status_code == 200
     skipped_state = states()[ladder["id"]]
-    late = owner_client.put(draft_url(ladder), json={"draft": {"description": "Late ladder"}})
+    late = put_draft(
+        owner_client, draft_url(ladder), json={"draft": {"description": "Late ladder"}}
+    )
     assert late.status_code == 409
     assert late.json()["detail"]["code"] == "extraction_line_skipped"
     assert states()[ladder["id"]] == skipped_state
     # After Restore it waits again and takes one. An empty body forgets it.
     assert owner_client.post(f"{skip}/restore").status_code == 200
-    again = owner_client.put(draft_url(ladder), json={"draft": {"description": "Tall ladder"}})
+    again = put_draft(
+        owner_client, draft_url(ladder), json={"draft": {"description": "Tall ladder"}}
+    )
     assert again.status_code == 200, again.text
     assert states()[ladder["id"]]["draft"] == {"description": "Tall ladder"}
-    assert owner_client.put(draft_url(ladder), json={}).status_code == 200
-    assert ladder["id"] not in states()
-    assert owner_client.put(draft_url(ladder)).status_code == 200
+    assert put_draft(owner_client, draft_url(ladder), json={}).status_code == 200
+    # Only the revision of the line stays, so that an older correction is seen as older.
+    assert states()[ladder["id"]]["draft"] is None
+    assert states()[ladder["id"]]["status"] == "pending"
+    assert put_draft(owner_client, draft_url(ladder)).status_code == 200
 
     # Applying what the kept drafts say gives records with the edited values.
     kept_lamp, kept_roller = states()[lamp["id"]]["draft"], states()[roller["id"]]["draft"]
@@ -1570,11 +1577,11 @@ def test_draft_of_a_waiting_line_is_kept_without_skip_or_apply(owner_client):
     # An applied line does not take a draft any more. The ladder still waits.
     final = states()
     assert {final[lamp["id"]]["status"], final[roller["id"]]["status"]} == {"applied"}
-    done = owner_client.put(draft_url(lamp), json=body)
+    done = put_draft(owner_client, draft_url(lamp), json=body)
     assert done.status_code == 409
     assert done.json()["detail"]["code"] == "extraction_line_applied"
     assert states() == final
-    assert ladder["id"] not in final
+    assert (final[ladder["id"]]["status"], final[ladder["id"]]["draft"]) == ("pending", None)
 
 
 def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client):
@@ -1615,11 +1622,13 @@ def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client
         "order_number": "ORD-1",
         "purchase_action": "none",
     }
-    first = owner_client.put(draft_url, json={"version": version, "draft": {"merchant": "First"}})
+    first = put_draft(
+        owner_client, draft_url, json={"version": version, "draft": {"merchant": "First"}}
+    )
     assert first.status_code == 200, first.text
     # The last write wins, and the same draft twice changes nothing.
     for _attempt in range(2):
-        saved = owner_client.put(draft_url, json={"version": version, "draft": draft})
+        saved = put_draft(owner_client, draft_url, json={"version": version, "draft": draft})
         assert saved.status_code == 200, saved.text
         assert kept_header(saved) == (version, draft)
 
@@ -1641,7 +1650,7 @@ def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client
     # Who may not write, and what is not accepted. None of it changes what is stored.
     viewer_token, _ = _add_member(owner_client, email="header-viewer@example.com", role="viewer")
     body = {"version": version, "draft": {"merchant": "Changed by someone else"}}
-    denied = owner_client.put(draft_url, headers=_headers(viewer_token), json=body)
+    denied = put_draft(owner_client, draft_url, headers=_headers(viewer_token), json=body)
     assert denied.status_code == 403
     for bad in (
         {"draft": draft},
@@ -1650,25 +1659,25 @@ def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client
         {"version": version, "draft": {"purchase_action": "existing"}},
         {"version": version, "draft": "not a draft"},
     ):
-        assert owner_client.put(draft_url, json=bad).status_code == 422, bad
+        assert put_draft(owner_client, draft_url, json=bad).status_code == 422, bad
     first_household = owner_client.get("/api/v1/auth/session").json()["household"]["id"]
     second = owner_client.post(
         "/api/v1/households", json={"name": "Other household", "property_name": "Other"}
     )
     assert second.status_code == 201, second.text
     other = {"X-Household-Id": second.json()["household"]["id"]}
-    assert owner_client.put(draft_url, headers=other, json=body).status_code == 404
+    assert put_draft(owner_client, draft_url, headers=other, json=body).status_code == 404
     assert owner_client.post(f"/api/v1/households/{first_household}/select").status_code == 200
     owner_client.headers["X-Household-Id"] = first_household
     assert kept_header(owner_client.get(review_url)) == (version, draft)
 
     # An empty draft puts the first reading back.
     for empty in ({"version": version}, {"version": version, "draft": {}}):
-        cleared = owner_client.put(draft_url, json=empty)
+        cleared = put_draft(owner_client, draft_url, json=empty)
         assert cleared.status_code == 200, cleared.text
-        assert cleared.json() == {"header_draft": None}
+        assert cleared.json()["header_draft"] is None
         assert owner_client.get(review_url).json()["header_draft"] is None
-        again = owner_client.put(draft_url, json={"version": version, "draft": draft})
+        again = put_draft(owner_client, draft_url, json={"version": version, "draft": draft})
         assert again.status_code == 200, again.text
 
     def add(line, name):
@@ -1695,7 +1704,7 @@ def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client
     add(ladder, "Ladder")
     assert kept_header(owner_client.get(review_url)) == (version, draft)
     changed = {**draft, "order_number": "ORD-2"}
-    kept = owner_client.put(draft_url, json={"version": version, "draft": changed})
+    kept = put_draft(owner_client, draft_url, json={"version": version, "draft": changed})
     assert kept.status_code == 200, kept.text
 
     # A review that is finished by skipping its last waiting line shows no kept
@@ -1703,29 +1712,252 @@ def test_header_draft_of_a_waiting_review_is_kept_and_never_applied(owner_client
     for line in (roller, lamp):
         assert owner_client.post(f"{review_url}/lines/{line['id']}/skip").status_code == 200
     assert owner_client.get(review_url).json()["header_draft"] is None
-    late = owner_client.put(draft_url, json=body)
+    late = put_draft(owner_client, draft_url, json=body)
     assert late.status_code == 409
     assert late.json()["detail"]["code"] == "extraction_applied"
     # Restore makes the review wait again. The fields are back as they were kept,
     # and they can be changed again.
     assert owner_client.post(f"{review_url}/lines/{lamp['id']}/restore").status_code == 200
     assert kept_header(owner_client.get(review_url)) == (version, changed)
-    kept = owner_client.put(draft_url, json={"version": version, "draft": draft})
+    kept = put_draft(owner_client, draft_url, json={"version": version, "draft": draft})
     assert kept.status_code == 200, kept.text
 
     # With every line applied or skipped the review is finished. The draft is removed
     # for good, and a late one answers 409 and keeps nothing.
     add(lamp, "Work lamp")
     assert owner_client.get(review_url).json()["header_draft"] is None
-    late = owner_client.put(draft_url, json=body)
+    late = put_draft(owner_client, draft_url, json=body)
     assert late.status_code == 409
     assert late.json()["detail"]["code"] == "extraction_applied"
     assert owner_client.get(review_url).json()["header_draft"] is None
     with SessionLocal() as db:
         stored = db.get(Document, uuid.UUID(document["id"])).extracted_metadata
-        assert "extraction_header_draft" not in stored
+        # Only the revision of the fields stays.
+        assert "draft" not in stored["extraction_header_draft"]
     # Only the two applies recorded anything: one purchase with the two items.
     with SessionLocal() as db:
         assert db.scalar(select(func.count()).select_from(Purchase)) == 1
         assert db.scalar(select(func.count()).select_from(Item)) == 2
 
+
+
+def test_document_review_drafts_from_two_devices_are_checked_by_revision(owner_client):
+    from housetory_api.services.enrichment import source_version
+    from tests.draft_conflict_cases import DEVICE_A, DEVICE_B, check_draft_revision_rule
+
+    room = create_room(owner_client)
+    document = upload_document(owner_client, THREE_LINE_RECEIPT)
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    ladder, roller, lamp = [line for line in extraction["lines"] if line["kind"] == "product"]
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+    version = extraction["version"]
+    assert (extraction["header_revision"], extraction["header_writer"]) == (0, None)
+
+    def stored_version():
+        with SessionLocal() as db:
+            return source_version(db, db.get(Document, uuid.UUID(document["id"])))
+
+    before_version = stored_version()
+
+    def review():
+        return owner_client.get(review_url).json()
+
+    # The fields at the top of the review.
+    def put_header(text, expected, writer):
+        return owner_client.put(
+            f"{review_url}/draft",
+            json={
+                "version": version,
+                "draft": {"merchant": text} if text is not None else None,
+                **named(expected, writer),
+            },
+        )
+
+    def read_header():
+        current = review()
+        kept = current["header_draft"]
+        return current["header_revision"], kept["draft"]["merchant"] if kept else None
+
+    check_draft_revision_rule(put_header, read_header)
+    revision = read_header()[0]
+    kept = put_header("Corner Hardware AB", revision, DEVICE_B)
+    assert kept.status_code == 200, kept.text
+    assert (kept.json()["header_revision"], kept.json()["header_writer"]) == (
+        revision + 1,
+        DEVICE_B,
+    )
+    refused = put_header("Other shop", 0, DEVICE_A).json()["detail"]
+    assert refused["current"]["header_draft"]["draft"]["merchant"] == "Corner Hardware AB"
+    assert refused["current"]["header_revision"] == revision + 1
+
+    # One line.
+    def put_line(text, expected, writer):
+        return owner_client.put(
+            f"{review_url}/lines/{lamp['id']}/draft",
+            json={
+                "draft": {"description": text} if text is not None else None,
+                **named(expected, writer),
+            },
+        )
+
+    def read_line():
+        state = review()["line_states"].get(lamp["id"])
+        if state is None:
+            return 0, None
+        assert state["status"] == "pending"
+        return state["revision"], (state["draft"] or {}).get("description")
+
+    check_draft_revision_rule(put_line, read_line)
+    revision = read_line()[0]
+    assert put_line("Work lamp", revision, DEVICE_B).status_code == 200
+    refused = put_line("Desk lamp", 0, DEVICE_A).json()["detail"]
+    assert refused["current"]["draft"] == {"description": "Work lamp"}
+    assert (refused["current"]["revision"], refused["current"]["writer"]) == (
+        revision + 1,
+        DEVICE_B,
+    )
+    # Another line is not touched by any of this.
+    assert roller["id"] not in review()["line_states"]
+
+    # Skip counts as a change of the line: a correction another device made before
+    # the skip does not go over the restored line silently.
+    line_url = f"{review_url}/lines/{lamp['id']}"
+    skipped = owner_client.post(f"{line_url}/skip", json={"draft": {"description": "Skipped"}})
+    assert skipped.status_code == 200, skipped.text
+    assert owner_client.post(f"{line_url}/restore").status_code == 200
+    assert read_line() == (revision + 2, "Skipped")
+    assert put_line("Desk lamp", revision + 1, DEVICE_A).status_code == 409
+    assert read_line() == (revision + 2, "Skipped")
+
+    # None of it is part of the reading: suggestions made for it stay usable. And
+    # none of it is applied.
+    assert stored_version() == before_version
+    assert review()["version"] == version
+    applied = owner_client.post(
+        f"{review_url}/apply",
+        json={
+            "request_id": str(uuid.uuid4()),
+            "extraction_version": version,
+            "purchase_action": "create",
+            "purchase": {"merchant": "Corner Hardware AB", "price_cents": 30000},
+            "lines": [
+                {
+                    "line_id": line["id"],
+                    "action": "create",
+                    "new_item": {"name": name, "room_id": room["id"]},
+                }
+                for line, name in ((ladder, "Ladder"), (roller, "Roller"), (lamp, "Lamp"))
+            ],
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    for path in (
+        f"/api/v1/documents/{document['id']}",
+        f"/api/v1/purchases/{applied.json()['purchase_id']}",
+        "/api/v1/items",
+    ):
+        answer = owner_client.get(path)
+        assert answer.status_code == 200, answer.text
+        assert DEVICE_A not in answer.text and DEVICE_B not in answer.text
+    # A finished review takes no draft, with or without a revision. Its revision is
+    # not started again.
+    late = put_header("Late", review()["header_revision"], DEVICE_A)
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "extraction_applied"
+    assert review()["header_revision"] > 0
+
+
+def test_draft_revisions_are_not_started_again_by_a_new_reading_or_new_pages(owner_client):
+    from tests.draft_conflict_cases import DEVICE_A, DEVICE_B, named
+    from tests.test_document_scan import commit_scan, create_scan, scan_png, upload_page
+
+    # A scanned document, read once, with a kept draft of its fields and of one line.
+    scan = create_scan(owner_client)
+    upload_page(owner_client, scan["id"], scan_png())
+    document = commit_scan(owner_client, scan["id"]).json()
+    extraction = ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT).json()
+    lamp = [line for line in extraction["lines"] if line["kind"] == "product"][-1]
+    review_url = f"/api/v1/documents/{document['id']}/extraction"
+
+    def put_header(text, expected, writer, version=None):
+        return owner_client.put(
+            f"{review_url}/draft",
+            json={
+                "version": version or owner_client.get(review_url).json()["version"],
+                "draft": {"merchant": text},
+                **named(expected, writer),
+            },
+        )
+
+    def put_line(text, expected, writer):
+        return owner_client.put(
+            f"{review_url}/lines/{lamp['id']}/draft",
+            json={"draft": {"description": text}, **named(expected, writer)},
+        )
+
+    # Device A has a copy of each that was made before anything was kept (revision 0),
+    # and device B keeps two drafts of each after that.
+    for put in (put_header, put_line):
+        assert put("B, first", 0, DEVICE_B).status_code == 200
+        assert put("B, second", 1, DEVICE_B).status_code == 200
+
+    def revisions():
+        review = owner_client.get(review_url).json()
+        line = review["line_states"].get(lamp["id"], {})
+        return review["header_revision"], line.get("revision", 0)
+
+    assert revisions() == (2, 2)
+
+    # The document is read again and the reading changes. The revisions go on from
+    # where they were, so the old copies of device A are still seen as older.
+    reread = THREE_LINE_RECEIPT.replace("CORNER HARDWARE", "CORNER HARDWARE AB")
+    run_document_ocr(
+        document["id"],
+        extractor=lambda path, content_type: ExtractedText(
+            text=reread, confidence=91, source="ocr"
+        ),
+        force=True,
+    )
+    again = owner_client.get(review_url).json()
+    assert again["version"] != extraction["version"]
+    assert again["header_revision"] == 2
+    assert put_header("A, old copy", 0, DEVICE_A, extraction["version"]).status_code == 409
+    # The lines of a new reading are new lines. A copy for a line of the old one
+    # has no line to go to, and nothing is stored for it.
+    assert lamp["id"] not in {line["id"] for line in again["lines"]}
+    gone = put_line("A, old copy", 0, DEVICE_A)
+    assert gone.status_code == 422
+    assert gone.json()["detail"]["code"] == "extraction_line_not_found"
+    with SessionLocal() as db:
+        stored = db.get(Document, uuid.UUID(document["id"])).extracted_metadata
+        assert stored["extraction_header_draft"]["draft"] == {"merchant": "B, second"}
+        assert stored["extraction_line_skips"][lamp["id"]]["revision"] == 2
+
+    # The pages are cleaned up: every proposal of the old pages goes, and with them
+    # the drafts. Their revisions stay, one step further and from no device.
+    draft = owner_client.post(
+        "/api/v1/documents/scans", json={"target_document_id": document["id"]}
+    )
+    assert draft.status_code == 201, draft.text
+    saved = commit_scan(owner_client, draft.json()["id"], request_id=str(uuid.uuid4()))
+    assert saved.status_code == 200, saved.text
+    with SessionLocal() as db:
+        stored = db.get(Document, uuid.UUID(document["id"])).extracted_metadata
+        assert stored["extraction_header_draft"] == {"revision": 3, "writer": None}
+        assert stored["extraction_line_skips"][lamp["id"]] == {
+            "pending": True,
+            "revision": 3,
+            "writer": None,
+        }
+    # After the new pages are read, a copy that was made on revision 0, 1 or 2 is
+    # refused: none of them can be stored over what another device keeps from now on.
+    ocr_document(owner_client, document["id"], THREE_LINE_RECEIPT)
+    review = owner_client.get(review_url).json()
+    assert (review["header_revision"], review["header_draft"]) == (3, None)
+    for stale in (0, 1, 2):
+        assert put_header("A, old copy", stale, DEVICE_A).status_code == 409
+        assert put_header("B, old copy", stale, DEVICE_B).status_code == 409
+        assert put_line("A, old copy", stale, DEVICE_A).status_code == 409
+    assert put_header("B, new", 3, DEVICE_B).status_code == 200
+    assert put_line("B, new", 3, DEVICE_B).status_code == 200
+    assert revisions() == (4, 4)
