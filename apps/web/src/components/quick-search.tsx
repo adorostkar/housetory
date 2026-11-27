@@ -21,6 +21,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { layoutViewportHeight } from "@/hooks/use-keyboard-inset";
 import { formatDuration, useVoiceRecorder } from "@/hooks/use-voice-recorder";
 import { api, getApiErrorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -135,6 +136,7 @@ export function QuickSearch({
   const synchronizedPathRef = React.useRef(location.pathname);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const probeRef = React.useRef<HTMLDivElement>(null);
   const voiceNoticeId = React.useId();
   const queryClient = useQueryClient();
   const [query, setQuery] = React.useState(() =>
@@ -374,36 +376,51 @@ export function QuickSearch({
 
   React.useLayoutEffect(() => {
     if (!showPanel) return;
+    let last = "";
     const updatePosition = () => {
       const anchor = wrapperRef.current;
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
+      // Safari measures boxes from the top of what is seen; a fixed box is placed
+      // from the top of the window. With the iOS keyboard open these two differ.
+      // A fixed mark at the window's top tells by how much (0 in other browsers).
+      const shift = -(probeRef.current?.getBoundingClientRect().top ?? 0);
+      const anchorTop = rect.top + shift;
+      const anchorBottom = rect.bottom + shift;
+      // The part of the page that can be seen. On iOS the software keyboard does
+      // not make the window shorter: it only makes the visual viewport shorter,
+      // and it can move it. Space under the keyboard is not space for the panel.
+      const visual = window.visualViewport;
+      const visibleTop = visual ? visual.offsetTop : 0;
+      const layoutHeight = layoutViewportHeight();
+      const visibleBottom = visual ? visual.offsetTop + visual.height : layoutHeight;
       const width = Math.min(Math.max(rect.width, 320), viewportWidth - 24);
       const left = Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
-      const panelHeight = Math.min(440, viewportHeight - 24);
-      const below = viewportHeight - rect.bottom - 12;
-      const top =
-        below >= 220
-          ? rect.bottom + 8
-          : Math.max(12, rect.top - Math.min(panelHeight, rect.top - 12) - 8);
-      setPanelStyle({
-        position: "fixed",
-        left,
-        top,
-        width,
-        maxHeight: Math.min(panelHeight, below >= 220 ? below : rect.top - 18),
-        zIndex: 80,
-      });
+      const panelHeight = Math.min(440, visibleBottom - visibleTop - 24);
+      const below = visibleBottom - anchorBottom - 12;
+      const above = anchorTop - visibleTop - 12;
+      const opensBelow = below >= 220;
+      const maxHeight = Math.max(0, Math.min(panelHeight, opensBelow ? below : above - 6));
+      // Above the field the panel hangs from its lower edge, so a short list
+      // still sits right on top of the field.
+      const next: React.CSSProperties = opensBelow
+        ? { position: "fixed", left, top: anchorBottom + 8, width, maxHeight, zIndex: 80 }
+        : { position: "fixed", left, bottom: layoutHeight - anchorTop + 8, width, maxHeight, zIndex: 80 };
+      const key = JSON.stringify(next);
+      if (key === last) return;
+      last = key;
+      setPanelStyle(next);
     };
     updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
+    // The field moves without any event when the keyboard opens or closes (the
+    // bar follows the keyboard one frame later), so the place is checked on
+    // every frame while the panel is open. Nothing is drawn unless it changed.
+    let frame = window.requestAnimationFrame(function follow() {
+      updatePosition();
+      frame = window.requestAnimationFrame(follow);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [showPanel, term, voiceNotice, recorder.recording, voiceProcessing]);
 
   const startRecording = () => {
@@ -529,6 +546,8 @@ export function QuickSearch({
   const panel =
     showPanel && typeof document !== "undefined"
       ? createPortal(
+          <>
+          <div ref={probeRef} aria-hidden="true" style={{ position: "fixed", top: 0, left: 0, width: 0, height: 0, pointerEvents: "none" }} />
           <div
             ref={panelRef}
             style={panelStyle}
@@ -665,7 +684,8 @@ export function QuickSearch({
                 </div>
               </>
             )}
-          </div>,
+          </div>
+          </>,
           document.body,
         )
       : null;

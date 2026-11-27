@@ -213,10 +213,10 @@ export function WarrantiesPage() {
                     {warranty.document && (
                       <Link
                         to={`/documents/${warranty.document.id}`}
-                        className="inline-flex shrink-0 items-center gap-1.5 underline-offset-4 hover:text-foreground hover:underline"
+                        className="inline-flex min-w-0 max-w-full items-center gap-1.5 underline-offset-4 hover:text-foreground hover:underline coarse:min-h-11 coarse:min-w-11"
                       >
-                        <CalendarDays className="size-3.5" />
-                        {warranty.document.title}
+                        <CalendarDays className="size-3.5 shrink-0" />
+                        <span className="min-w-0 break-words">{warranty.document.title}</span>
                       </Link>
                     )}
                   </div>

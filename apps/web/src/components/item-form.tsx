@@ -635,7 +635,9 @@ function ItemFormFields(props: ItemFormProps) {
               <Field label="Item name" htmlFor="item-name" error={fieldErrors?.name}>
                 <Input
                   id="item-name"
-                  autoFocus
+                  // A new item starts with its name. When an item is edited on a touch
+                  // screen, the keyboard must not cover the form before a field is chosen.
+                  autoFocus={!item || !window.matchMedia?.("(pointer: coarse)").matches}
                   required
                   maxLength={200}
                   value={name}

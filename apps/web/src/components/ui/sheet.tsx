@@ -26,7 +26,7 @@ const SheetContent = React.forwardRef<
       ref={ref}
       onEscapeKeyDown={(event) => keepOpenForInnerList(event, onEscapeKeyDown)}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-50 grid max-h-[calc(100dvh-1rem)] grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border/80 bg-popover px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-sheet-up",
+        "fixed inset-x-0 bottom-[var(--keyboard-inset,0px)] z-50 grid max-h-[min(calc(100dvh-1rem),calc(var(--visual-viewport-height,100dvh)-0.5rem))] grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border/80 bg-popover px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-sheet-up",
         className,
       )}
       {...props}
@@ -34,10 +34,14 @@ const SheetContent = React.forwardRef<
       <div aria-hidden="true" className="mx-auto h-1.5 w-10 rounded-full bg-border" />
       {children}
       {!hideClose && (
-        <DialogPrimitive.Close className="absolute right-3 top-3 z-20 flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
+        // Stays at the top while the sheet scrolls, so it can always be reached,
+        // also when the phone keyboard leaves the sheet little room.
+        <div className="pointer-events-none sticky top-3 z-20 order-first -mb-4 h-0">
+          <DialogPrimitive.Close className="pointer-events-auto absolute -right-2 top-0 flex size-11 items-center justify-center rounded-full bg-popover/90 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        </div>
       )}
     </DialogPrimitive.Content>
   </DialogPortal>

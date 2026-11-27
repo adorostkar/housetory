@@ -464,6 +464,8 @@ interface Seed {
   plainItemId: string;
   loanId: string;
   documentId: string;
+  /** The warranty of the main item links to this document. */
+  documentTitle: string;
   stocktakeId: string;
   importId: string;
 }
@@ -542,6 +544,13 @@ async function seedData(request: APIRequestContext): Promise<Seed> {
   });
   expect(uploaded.ok(), await uploaded.text()).toBeTruthy();
   const document = (await uploaded.json()) as { id: string };
+  // The warranty points at the receipt, so /warranties shows the link to it.
+  const linked = await request.patch(`/api/v1/items/${main.item.id}`, {
+    data: {
+      warranty: { provider: "Makita", start_date: "2026-02-01", duration_months: 24, document_id: document.id },
+    },
+  });
+  expect(linked.ok(), await linked.text()).toBeTruthy();
   const stocktake = await post<{ id: string }>(request, "/api/v1/stocktake/sessions", {
     room_ids: [room.id],
     container_ids: [],
@@ -566,6 +575,7 @@ async function seedData(request: APIRequestContext): Promise<Seed> {
     plainItemId,
     loanId: loan.id,
     documentId: document.id,
+    documentTitle: `Touch receipt ${tag}`,
     stocktakeId: stocktake.id,
     importId: batch.id,
     nookId: nook.id,
@@ -594,6 +604,7 @@ async function reuseOrSeed(request: APIRequestContext, baseURL: string): Promise
     const batch = await request.get(`/api/v1/imports/${earlier.importId}`);
     const nook = earlier.nookId ? await request.get(`/api/v1/rooms/${earlier.nookId}`) : undefined;
     if (
+      earlier.documentTitle &&
       nook?.ok() &&
       item.ok() &&
       stocktake.ok() &&
@@ -920,6 +931,7 @@ test("loans, documents, purchases, warranties and insurance", async ({ browser, 
         await page.goto("/warranties");
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
         await expect(main(page).getByText(new RegExp(data.itemName)).first()).toBeVisible();
+        await expect(main(page).getByRole("link", { name: data.documentTitle })).toBeVisible();
         await audit.check("/warranties");
 
         await page.goto("/insurance");
@@ -1276,6 +1288,9 @@ test("a touch tablet held sideways: the sidebar, its menus and every main page",
           await expect(page.locator("main h1").first()).toBeVisible();
           await page.waitForLoadState("networkidle");
           if (path === "/rooms") await expectNestedRooms(page, data);
+          if (path === "/warranties") {
+            await expect(main(page).getByRole("link", { name: data.documentTitle })).toBeVisible();
+          }
           if (path === "/settings/ai") await expectChosenModel(page);
           await audit.check(`tablet, ${path.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/, ":id").replace(/\?.*/, "")}`);
         }

@@ -112,6 +112,30 @@ export function SmartAddInput({
   const location = useLocation();
   const queryClient = useQueryClient();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const submitRef = React.useRef<HTMLButtonElement>(null);
+  // With the phone keyboard open the sheet is short. While the text box has the
+  // keyboard, the main button is kept in view, so it can be pressed at once.
+  React.useEffect(() => {
+    const visual = window.visualViewport;
+    const area = textareaRef.current;
+    if (!visual || !area) return;
+    let frame = 0;
+    const reveal = () => {
+      if (document.activeElement !== area) return;
+      window.cancelAnimationFrame(frame);
+      // Two frames: the sheet gets its new height first.
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => submitRef.current?.scrollIntoView?.({ block: "nearest" }));
+      });
+    };
+    visual.addEventListener("resize", reveal);
+    area.addEventListener("focus", reveal);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      visual.removeEventListener("resize", reveal);
+      area.removeEventListener("focus", reveal);
+    };
+  }, []);
   const cameraRef = React.useRef<HTMLInputElement>(null);
   const libraryRef = React.useRef<HTMLInputElement>(null);
   const chipRef = React.useRef<HTMLButtonElement>(null);
@@ -835,6 +859,7 @@ export function SmartAddInput({
               or fill in the form yourself
             </Link>
             <Button
+              ref={submitRef}
               type="submit"
               className="order-1 h-11 sm:order-2"
               disabled={kind === "empty" || kind === "conflict" || inputLocked}

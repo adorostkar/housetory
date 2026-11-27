@@ -16,7 +16,6 @@ export function BottomBar({
   canAdd,
   onAdd,
   keyboardOpen,
-  onFocusWithinChange,
   children,
 }: {
   compact: boolean;
@@ -26,21 +25,25 @@ export function BottomBar({
   canAdd: boolean;
   onAdd: (trigger: HTMLElement) => void;
   keyboardOpen: boolean;
-  /** Told when focus enters or leaves the bar, so the shell knows who the keyboard is for. */
-  onFocusWithinChange?: (focused: boolean) => void;
   /** The search field. It gets all the room while it has focus on the phone. */
   children: (props: { onFocusChange: (focused: boolean) => void }) => React.ReactNode;
 }) {
-  const [typing, setTyping] = React.useState(false);
+  const [typing, setTypingNow] = React.useState(false);
+  // The field gives its extra room back a moment after it loses focus, not at
+  // once. On a phone a tap on a button of the bar takes focus from the field
+  // first. If the buttons moved in that moment, the tap would miss its button.
+  const release = React.useRef(0);
+  const setTyping = React.useCallback((focused: boolean) => {
+    window.clearTimeout(release.current);
+    if (focused) setTypingNow(true);
+    else release.current = window.setTimeout(() => setTypingNow(false), 250);
+  }, []);
+  React.useEffect(() => () => window.clearTimeout(release.current), []);
   const narrow = compact && typing;
   return (
     <div
       data-always-on-screen
       data-testid="bottom-bar"
-      onFocus={() => onFocusWithinChange?.(true)}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) onFocusWithinChange?.(false);
-      }}
       className={cn(
         "z-40 border-t border-border/70 bg-background/95 backdrop-blur-xl",
         compact

@@ -96,6 +96,30 @@ viewport returns, without changing focus, selection or typed text.
 - Orientation changes reset the baseline.
 - No viewport-meta mutation and no UA-only branches.
 
+Since the mobile-first programme (see `MOBILE_FIRST_PROGRAMME.md`, "iOS
+Simulator record") the rules are these:
+
+- The bar hides only while a text field **of the page** has focus and the
+  keyboard is up. Its own field and the bar editor keep it. A tap on a button
+  of the bar while its field has the keyboard must work, so the bar keeps its
+  layout for 250 ms after the field loses focus.
+- `useKeyboardInset` sets three values on the root element. On iOS the keyboard
+  does not make the window shorter; it makes the visual viewport shorter and
+  can move it down the page.
+  - `--keyboard-inset`: what is left of the window under the visible part.
+    Things fixed to the bottom add it to their `bottom`.
+  - `--visual-viewport-top`: how far the visible part has moved down.
+    The assistant sheet uses it as its `top` while the keyboard is open.
+  - `--visual-viewport-height`: the visible height, set only while the keyboard
+    is open. Bottom sheets and phone dialogs use it as their largest height.
+- The layout height is `layoutViewportHeight()`, not `window.innerHeight`: an
+  installed iOS web app reports a shrunken window height while the keyboard is
+  open.
+- `useKeepFocusedFieldVisible` moves the page so that the field being typed in
+  is above a sticky Save bar.
+- On a touch screen, opening an existing item for editing does not focus a
+  field, so the keyboard does not cover the form.
+
 ## Dialogs and fixed controls
 
 - Dialog height accounts for the safe-area inset and keeps internal scrolling.

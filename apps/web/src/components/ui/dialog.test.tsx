@@ -19,8 +19,9 @@ describe("DialogContent bottom sheet", () => {
       </Dialog>,
     );
     const dialog = screen.getByRole("dialog", { name: "Move item" });
-    expect(dialog.className).toContain("max-sm:bottom-0");
-    expect(dialog.className).toContain("max-sm:max-h-[90dvh]");
+    // The sheet stands on the phone keyboard and is never taller than what is seen.
+    expect(dialog.className).toContain("max-sm:bottom-[var(--keyboard-inset,0px)]");
+    expect(dialog.className).toContain("max-sm:max-h-[min(90dvh,calc(var(--visual-viewport-height,100dvh)-0.5rem))]");
     expect(dialog.className).toContain("max-sm:rounded-t-2xl");
     expect(dialog.className).toContain("-translate-y-1/2");
     expect(dialog.querySelector("[data-dialog-handle]")).not.toBeNull();

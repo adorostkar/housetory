@@ -18,6 +18,7 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | 5 | Secondary flows and account design | Done (see "Phase 5 record") |
 | 6 | Verification and final handoff | Done (see "Phase 6 record" and "Final checklist") |
 | — | Correction batch after the review of Phase 6 | Done (see "Correction batch record") |
+| — | Check in Mobile Safari on the iOS Simulator, and fixes | Done (see "iOS Simulator record") |
 
 All phases are finished and pushed to the branch. Nothing is merged or deployed.
 What is not complete is listed plainly under "Not complete" near the end.
@@ -575,10 +576,10 @@ This is point 4 of the decision. What was done:
   viewport. While a field on the page has the keyboard, the bar is hidden.
 - Tests make the window shorter to act like a keyboard, at 390 px.
 
-**Not done: a real iPhone.** No device was available. A shorter window is not
-the same as the iOS keyboard. The bar's place above the real keyboard, the
-safe area in the installed PWA, and how the field feels with one hand still
-need a check on a device. Problems found there are to be fixed then, as agreed.
+**Later:** this was checked in Mobile Safari on the iOS Simulator, with the
+real iOS keyboard, and as an installed app there. That check found seven
+defects that the shorter window did not show. See "iOS Simulator record". A
+phone in the hand is still not checked.
 
 ### Screenshots
 
@@ -876,8 +877,7 @@ touch and at 1440 × 900. All 15 pass:
 8. Each of the four colour themes applies and stays after a reload.
 
 **This is a phone-sized window in desktop Chrome. It is not an iPhone.** The
-real keyboard, gestures and the installed PWA on a phone remain a separate
-device check for Ashkan.
+check with the real iOS keyboard came after this; see "iOS Simulator record".
 
 ### Evidence
 
@@ -886,6 +886,103 @@ Kept outside the repository, on the development machine, under
 `GEOMETRY_CHECK.md` and `geometry/` (pictures with the boxes drawn),
 `MANUAL_DISCOVERY_CHECK.md` and `manual-check/`, `correction-shots/` (pins,
 bar editing, the selected row in all themes) and `journeys/`.
+
+## iOS Simulator record
+
+Done on 27 Nov 2026, after the correction batch.
+
+**A mistake to record first.** The reports before this said "no device" and
+left the iPhone check open. That was wrong in one point: Xcode with iPhone
+simulators was on the development machine the whole time, and nobody looked.
+The owner asked why no simulator was used. It was then used, and it found real
+defects at once. A shorter window in desktop Chrome did not show any of them.
+
+### How it was checked
+
+- iPhone 17e, iOS 27.0, 390 × 844 points, in the Simulator. First tries also
+  on an iPhone 17 (402 × 874).
+- The real Mobile Safari, and the app put on the Home Screen and opened from
+  its icon (no browser bars).
+- The real iOS software keyboard, with its bar of arrows and "Done" above it.
+- Taps and typing were made by an Xcode UI test, so they are real touches.
+  The test also reads where each control is on the screen, in points.
+- The test project and its pictures are kept outside the repository.
+
+### What iOS does that a shorter window does not
+
+When the keyboard opens, iOS does not make the window shorter. It makes only
+the *visible part* shorter, and it often moves that part down the page so the
+field is in view. A box fixed to the bottom of the window is then under the
+keyboard, or far from it. In the installed app there is one more difference:
+the window height that the browser reports shrinks, but fixed boxes are still
+placed in the full height.
+
+### Defects found, and fixed
+
+| # | What happened on iOS | Fix |
+| --- | --- | --- |
+| 1 | The search results lay on top of the search field, or far above it | The list is placed in the visible part, follows the field, and hangs from its lower edge |
+| 2 | In the assistant, with the keyboard open, the top row with Close was off the screen | The sheet starts at the top of the visible part |
+| 3 | In Add items, with the keyboard open, the heading, Close and the "Review items" button were off the screen or under the keyboard | Sheets and phone dialogs stand on the keyboard and are never taller than the visible part; Close stays at the top; the main button is brought into view |
+| 4 | The space under the keyboard was worked out wrongly when iOS had moved the page (it was 0, or the whole keyboard height) | It is now what is really left under the visible part |
+| 5 | Editing an item opened the keyboard at once, over the form | On a touch screen the name is no longer focused when an existing item is opened for editing. A new item still starts in its name |
+| 6 | A field of a form could end up under the Save bar while it was typed in | The page moves so the field is above the Save bar |
+| 7 | **With the keyboard open in the bottom bar, a tap on the robot button did nothing.** The tap took focus from the field, the bar changed its layout in that moment, and the tap missed | The bar keeps its layout for a quarter of a second after the field loses focus, and no longer hides in that moment |
+| 8 | In the installed app, point 2 came back, because the app reports a shrunken window height | The full layout height is used |
+
+Point 7 is the kind of defect this check exists for: on a phone, it made the
+assistant unreachable from the keyboard.
+
+### Results after the fixes
+
+All on the Simulator, each test run again on the final code:
+
+| Check | Result |
+| --- | --- |
+| Sign in with the real keyboard | Pass |
+| Bottom bar: field takes the bar when typed in; it sits above the keyboard's own bar; results are above the field | Pass |
+| Assistant sheet: message field above the keyboard, Send and Close reachable | Pass |
+| Robot and + buttons tapped while the keyboard is open | Pass |
+| Add items: text box above the keyboard, "Review items" and Close reachable | Pass |
+| Import review: a name changed in the bar editor with the real keyboard; ✕ and ✓ reachable; the rail's More stays free; the bar comes back | Pass |
+| Quantity in the bar editor shows the number keys | Pass (seen); typing on those keys by the test tool was too slow to finish, so the wrong-value case was not run here |
+| Item form: nothing has focus at first; the name and a field far down are both in view above the Save bar; Save can be pressed | Pass |
+| List → item → Safari's Back: the list is at the same place | Pass |
+| "Add to Home Screen" is offered, and the icon appears | Pass |
+| Installed app: no browser bars; title below the status bar; bar above the home line (34 points free); keyboard, results, assistant and Close as above | Pass |
+
+### Checks after these fixes
+
+The fixes touch shared parts (dialogs, sheets, the bottom bar), so everything
+was run again on fresh databases:
+
+| Check | Result |
+| --- | --- |
+| Web type check and production build | clean |
+| Web unit tests | 86 files, 601 tests, all pass (new: the keyboard values with the numbers measured on iOS, and the bar's layout after it loses focus) |
+| End-to-end in desktop Chrome, all 54 files | 196 pass, 1 skipped (needs a real model), 1 not run (the PWA test needs the production build; it passed in the correction batch) |
+| Touch audit | 254 screen states, 5,121 controls, no finding. It now also covers a warranty with a receipt |
+| Simulator tests, Safari and the installed app | 8 of 8 on the final code |
+
+Backend code did not change. The production build behind nginx was not built
+again for this commit.
+
+One end-to-end test (voice dictation in the assistant) failed once while a
+file was being edited under the running development server. It passed in the
+complete run afterwards and six more times alone.
+
+### What this check is not
+
+- **It is a simulator, not a phone in a hand.** Reach with a thumb, real
+  speed, the camera, the microphone, and iOS versions other than 27.0 are not
+  covered. Only one screen size was used for the full run.
+- **Safari's edge swipe to go back** could not be made by the test tool.
+  Safari's own Back button was used. It goes through the same history.
+- **The name shown for the Home Screen icon** was "127.0.0.1" in the test,
+  because the app ran from the development server. The production build
+  serves the manifest that names it; that was checked in desktop Chrome only.
+- After "Done" on the keyboard, the search results stay open until the next
+  tap elsewhere. Left as it is.
 
 ## Final checklist
 
@@ -924,7 +1021,7 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Four colour themes, light and dark | Done | `styles/globals.css`, Settings → Appearance |
 | Inventory-first start | Done | `/` goes to `/items` |
 | Touch targets of 44 px | Partly | shared buttons, menus, tabs, back links, checkboxes, rail and bar are done. A few controls on Settings screens are 36 to 40 px (role select, AI model fields) and the label start grid is 36 px |
-| Stable keyboard, safe areas, reachable main actions | Partly | built and tested with a shorter window; **not checked on an iPhone** |
+| Stable keyboard, safe areas, reachable main actions | Done on the iOS Simulator | "iOS Simulator record"; not checked on a phone in the hand |
 | No zoom on focus; pinch zoom and text scaling kept | Done | 16 px rule kept; viewport tag unchanged |
 | Predictable Back, Close, Cancel and outside tap | Done | Close fix on sheets; Escape closes the inner list first |
 | Drafts and selections kept; cleared on sign-out | Done | item drafts as before; bulk selection survives opening an item; recent items cleared with drafts |
@@ -1079,7 +1176,8 @@ State is one of: **Done**, **Partly** (with what is missing), **Not done**.
 | Empty, large, loading and error states | Partly | covered where the end-to-end files cover them; not walked through one by one |
 | Production build behind nginx, as a PWA in desktop Chrome | Done | correction batch, point 6 |
 | Touch targets of 44 px | Done | `e2e/touch-targets.spec.ts`, correction batch, point 5 |
-| Real iPhone and installed PWA on a phone | **Not done** | no device; this is a separate check for Ashkan |
+| Mobile Safari and installed app on the iOS Simulator | Done | "iOS Simulator record": eight defects found and fixed |
+| A real iPhone in the hand | **Not done** | a separate device check for Ashkan |
 
 ## Commits
 
@@ -1095,7 +1193,8 @@ All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
 | `1f59cf8` | Phase 4 |
 | `ea69ef7` | Docs in line with the new interface; touch targets |
 | `a846424` | Phase 6: end-to-end files, fixes found by them, real-model fixes, the Phase 6 record |
-| the commit after `a846424` | Correction batch: the seven points of the review, and this record |
+| `e55fd2a` | Correction batch: the seven points of the review, and its record |
+| the commit after `e55fd2a` | Fixes from the iOS Simulator check, and its record |
 
 The phases were built side by side, so they are not in number order.
 
@@ -1171,11 +1270,11 @@ note" was left out on purpose (point 3 of the decision).
 
 Stated plainly, after the correction batch:
 
-1. **No check on a real iPhone or as an installed PWA on a phone.** The
-   keyboard, the gestures and the bottom-bar space are only tested in desktop
-   Chrome, with a phone-sized window, touch turned on and a shorter window to
-   act like a keyboard. That is not the same as an iPhone. This is a separate
-   device check for Ashkan. Problems found there are to be fixed then.
+1. **No check on a real iPhone in the hand.** The keyboard, the bottom bar and
+   the installed app were checked on the iOS Simulator (see "iOS Simulator
+   record"), which found and fixed eight defects. A simulator does not show
+   reach with a thumb, real speed, the camera or the edge swipe. This stays a
+   separate device check for Ashkan. Problems found there are to be fixed then.
 2. **Video links in assistant answers are not built.**
 3. **Hosted sign-up is design only**, as the specification allows.
 4. **Two backend tests fail**, as they did before this work

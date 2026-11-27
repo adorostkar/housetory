@@ -14,8 +14,9 @@ import { BottomBar } from "@/components/shell/bottom-bar";
 import { RoomRail, SidebarNav, useRailModel } from "@/components/shell/room-rail";
 import { ShellProvider, useRememberedRail } from "@/components/shell/shell-context";
 import { toast } from "sonner";
+import { useKeepFocusedFieldVisible } from "@/hooks/use-keep-focused-field-visible";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
-import { useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
+import { isTextEntry, useSoftwareKeyboardOpen } from "@/hooks/use-software-keyboard-open";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useCanWrite, usePendingActions, useReviewSummary } from "@/lib/queries";
 import { SearchSessionProvider } from "@/lib/search-session";
@@ -110,14 +111,31 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const mainLocation = itemPanel ? pageBehindItem(location) : location;
   const [railOpen, setRailOpen] = useRememberedRail();
   const [assistantTall, setAssistantTall] = useState(false);
-  const [barFocused, setBarFocused] = useState(false);
+  // A text field of the page itself has focus (not the bar's field, not the bar editor).
+  const [pageFieldFocused, setPageFieldFocused] = useState(false);
   const [barEditing, setBarEditing] = useState(false);
   // The keyboard is open for a field on the page, not for the bar. The bar steps
   // aside so the field and its Save button have the room, as a tab bar would.
-  // The bar editor stands where the bar stands, so it counts as the bar here.
-  const typingOnPage = softwareKeyboardOpen && !barFocused && !barEditing;
+  // This asks which field has focus now. "The bar lost focus" is not enough: on a
+  // phone a tap on a button of the bar takes focus from its field while the
+  // keyboard is still up, and the bar must not vanish under that tap.
+  const typingOnPage = softwareKeyboardOpen && pageFieldFocused && !barEditing;
+  useEffect(() => {
+    const update = () => {
+      const field = document.activeElement;
+      setPageFieldFocused(isTextEntry(field) && !field?.closest("[data-always-on-screen]"));
+    };
+    update();
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", update);
+    return () => {
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", update);
+    };
+  }, []);
   const rail = useRailModel();
   useKeyboardInset();
+  useKeepFocusedFieldVisible(softwareKeyboardOpen);
   useEffect(() => {
     // Things fixed to the bottom of the screen (bulk bars, save bars) sit above the bar.
     const root = document.documentElement;
@@ -392,7 +410,6 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             canAdd={canWrite}
             onAdd={(trigger) => openAddItems(undefined, trigger)}
             keyboardOpen={softwareKeyboardOpen}
-            onFocusWithinChange={setBarFocused}
           >
             {({ onFocusChange }) => (
               <QuickSearch
@@ -453,7 +470,11 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             "fixed z-50 flex min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none",
             // Phone: a sheet from the bottom that can go to full height. It stays above the keyboard.
             "inset-x-0 bottom-[var(--keyboard-inset,0px)] rounded-t-3xl border-t border-border/80 max-lg:data-[state=open]:animate-sheet-up",
-            assistantTall || softwareKeyboardOpen ? "top-0 max-lg:rounded-t-none" : "top-[max(14dvh,env(safe-area-inset-top))]",
+            // With the keyboard open the sheet fills what can be seen, so its header and
+            // Close stay on the screen. On iOS that part can start below the page's top.
+            softwareKeyboardOpen
+              ? "top-[var(--visual-viewport-top,0px)] max-lg:rounded-t-none"
+              : assistantTall ? "top-0 max-lg:rounded-t-none" : "top-[max(14dvh,env(safe-area-inset-top))]",
             // Desktop: a box above the bar, in the main column.
             "lg:inset-x-auto lg:bottom-4 lg:left-[calc(264px+3rem)] lg:w-[min(44rem,calc(100vw-264px-6rem-var(--item-panel,0px)))] lg:rounded-2xl lg:border lg:data-[state=open]:animate-fade-in",
             assistantTall ? "lg:top-4" : "lg:top-auto lg:h-[min(42rem,calc(100dvh-2rem))]",

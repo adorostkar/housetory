@@ -13,7 +13,7 @@ const NON_TEXT_INPUT_TYPES = new Set([
   "submit",
 ]);
 
-function isTextEntry(element: Element | null): boolean {
+export function isTextEntry(element: Element | null): boolean {
   if (!element || !(element instanceof HTMLElement)) return false;
   if (element.isContentEditable) return true;
   if (element.tagName === "TEXTAREA" || element.tagName === "SELECT") return true;
