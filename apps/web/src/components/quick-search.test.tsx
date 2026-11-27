@@ -268,6 +268,28 @@ describe("QuickSearch", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/");
   });
 
+  it("empties the field and the item-list filter once a question goes to the assistant", async () => {
+    const onAsk = vi.fn();
+    vi.mocked(api.get).mockImplementation(async (path) =>
+      response(queryFromPath(path), []),
+    );
+    renderSearch("/items", false, { onAsk });
+    const input = screen.getByRole("combobox", {
+      name: "Search or ask about your inventory",
+    });
+    await userEvent.type(input, "Where is my camera?");
+    // Typing on the item list filters it.
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/items?q=Where+is+my+camera%3F"),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: /Ask the assistant:/ }),
+    );
+    expect(onAsk).toHaveBeenCalledWith("Where is my camera?", input);
+    expect(input).toHaveValue("");
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/items$/));
+  });
+
   it("hands a validated attachment to the capture panel", async () => {
     const onAttach = vi.fn();
     renderSearch("/", false, { onAttach });

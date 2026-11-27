@@ -26,17 +26,25 @@ for (const mobile of [false, true]) {
 
     // Places: rooms first, containers one tab away, both under one navigation entry.
     await page.goto("/");
+    const destinations = ["Places", "Documents", "Purchases", "Insurance", "Stocktake", "Review", "Settings"];
     if (mobile) {
-      await page.getByRole("button", { name: "More destinations" }).click();
-      const menu = page.getByTestId("mobile-more-menu");
-      await expect(menu.getByRole("menuitem")).toHaveText(["Places", "Documents", "Financials", "Review", "Settings"]);
+      // More rolls its choices up over the rooms in the rail.
+      const rail = page.getByTestId("room-rail");
+      await rail.getByRole("button", { name: "More", exact: true }).click();
+      const menu = rail.getByTestId("rail-more");
+      await expect(menu.getByRole("link")).toHaveCount(destinations.length);
+      for (const [index, name] of destinations.entries()) {
+        await expect(menu.getByRole("link").nth(index)).toHaveAttribute("title", name);
+      }
       if (shots) await page.screenshot({ path: `${shots}/mobile-more.png` });
-      await menu.getByRole("menuitem", { name: "Places" }).click();
+      await menu.getByRole("link", { name: "Places" }).click();
     } else {
-      const aside = page.locator("aside");
-      await expect(aside.getByRole("link", { name: "Rooms", exact: true })).toHaveCount(0);
-      await expect(aside.getByRole("link", { name: "Containers", exact: true })).toHaveCount(0);
-      await aside.getByRole("link", { name: "Places", exact: true }).click();
+      const nav = page.locator("aside").getByRole("navigation", { name: "Rooms" });
+      await expect(nav.getByRole("link", { name: "Rooms", exact: true })).toHaveCount(0);
+      await expect(nav.getByRole("link", { name: "Containers", exact: true })).toHaveCount(0);
+      await nav.getByRole("button", { name: "More", exact: true }).click();
+      await expect(nav.getByTestId("rail-more").getByRole("link")).toHaveText(destinations);
+      await nav.getByTestId("rail-more").getByRole("link", { name: "Places", exact: true }).click();
     }
     await expect(page).toHaveURL(/\/rooms$/);
     const tabs = page.getByRole("navigation", { name: "Places" });
@@ -57,8 +65,12 @@ for (const mobile of [false, true]) {
     await page.goto(`/containers/${box.id}`);
     await expect(page.getByRole("heading", { name: box.identifier, level: 1 })).toBeVisible();
     if (!mobile) {
-      await expect(page.locator("aside").getByRole("link", { name: "Places", exact: true }))
-        .toHaveClass(/nav-link-active/);
+      // A container belongs to Places: More is marked, and Places is the current choice in it.
+      const nav = page.locator("aside").getByRole("navigation", { name: "Rooms" });
+      await expect(nav.getByRole("button", { name: "More", exact: true })).toHaveClass(/nav-link-active/);
+      await nav.getByRole("button", { name: "More", exact: true }).click();
+      await expect(nav.getByTestId("rail-more").getByRole("link", { name: "Places", exact: true }))
+        .toHaveAttribute("aria-current", "page");
     }
 
     // Old photo-capture URLs open Add items with their place context.
@@ -86,7 +98,11 @@ for (const mobile of [false, true]) {
     await expect(dialog).toHaveCount(0);
     const panel = page.getByTestId("assistant-panel");
     const review = panel.getByLabel("Assistant capture status").last();
-    await expect(review.getByRole("region", { name: "Assistant item review" })).toContainText(itemName);
+    // The name is a field in the review row now, so it can be corrected in place.
+    const row = review.getByRole("region", { name: "Assistant item review" }).getByRole("article", { name: itemName });
+    await expect(row.getByRole("textbox", { name: `Name of ${itemName}` })).toHaveValue(itemName);
+    // Nothing is selected or added until the person does it.
+    await expect(row.getByRole("checkbox", { name: `Select ${itemName}` })).not.toBeChecked();
     await expect(review).toBeInViewport();
     // Earlier conversation history, when present, restores above this new capture.
     await expect(review.locator("xpath=following::*[@aria-label='Assistant tool task']")).toHaveCount(0);
@@ -96,7 +112,8 @@ for (const mobile of [false, true]) {
     await expect(page.locator("[data-sonner-toast]").filter({ hasText: /ready for review/i })).toHaveCount(0);
     const listed = async () => (await (await request.get(`/api/v1/items?q=${encodeURIComponent(itemName)}`)).json()).total;
     expect(await listed()).toBe(0);
-    await expect.poll(badge).toBe(before + 1);
+    // The count of open reviews is checked every 30 seconds while nothing is running.
+    await expect.poll(badge, { timeout: 40_000 }).toBe(before + 1);
     if (shots) await page.screenshot({ path: `${shots}/${size}-add-items-inline-review.png` });
 
     // Unfinished work survives closing the panel and is reachable from the Review queue.
@@ -106,8 +123,10 @@ for (const mobile of [false, true]) {
     await page.getByRole("region", { name: "Pending captures" })
       .getByRole("button", { name: `Review ${title}`, exact: true }).first().click();
     const reopened = panel.locator(`[data-capture-id="${batchId}"]`);
-    await expect(reopened).toContainText(itemName);
-    await reopened.getByRole("button", { name: /^Approve/ }).last().click();
+    const reopenedRow = reopened.getByRole("article", { name: itemName });
+    await expect(reopenedRow.getByRole("textbox", { name: `Name of ${itemName}` })).toHaveValue(itemName);
+    // Each row has its own explicit Add item button.
+    await reopenedRow.getByRole("button", { name: "Add item", exact: true }).click();
     await expect.poll(listed).toBe(1);
     await expect.poll(badge).toBe(before);
     const saved = (await (await request.get(`/api/v1/items?q=${encodeURIComponent(itemName)}`)).json()).items[0];
@@ -127,16 +146,17 @@ for (const mobile of [false, true]) {
     await expect(page.getByRole("heading", { name: itemName, level: 1 })).toBeVisible();
     if (shots) await page.screenshot({ path: `${shots}/${size}-item.png`, fullPage: true });
 
-    // Overview keeps occasional tasks in one menu; Settings keeps setup detail collapsed.
+    // The app opens in the item list; the totals wait in one line at the top of Purchases.
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Create insurance list" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Home actions" }).click();
-    await expect(page.getByRole("menuitem", { name: "Create insurance list" })).toBeVisible();
-    await expect(page.getByRole("menuitem", { name: "Export evidence" })).toBeVisible();
-    await expect(page.getByRole("menuitem", { name: "New room" })).toBeVisible();
-    if (shots) await page.screenshot({ path: `${shots}/${size}-overview.png` });
+    await expect(page).toHaveURL(/\/items$/);
+    await expect(page.getByRole("heading", { name: "All items", level: 1 })).toBeVisible();
+    await expect(page.getByLabel("Sort items")).toHaveValue("recent");
+    await page.goto("/purchases");
+    await expect(page.getByTestId("purchase-totals").getByRole("button", { name: /^Totals/ }))
+      .toHaveAttribute("aria-expanded", "false");
+    if (shots) await page.screenshot({ path: `${shots}/${size}-totals.png` });
     await page.keyboard.press("Escape");
-    await page.goto("/settings");
+    await page.goto("/settings/services");
     await expect(page.getByRole("heading", { name: "Online lookups" })).toBeVisible();
     await expect(page.getByLabel(/Brave Search API key/)).toBeHidden();
     await page.getByRole("heading", { name: "Brave Search connection" }).click();
@@ -233,7 +253,8 @@ for (const mobile of [false, true]) {
     expect(await pendingTotal()).toBe(23);
 
     const queue = page.getByRole("region", { name: "Prepared actions" });
-    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 23");
+    // The open page finds actions prepared elsewhere on its next check, every 30 seconds.
+    await expect(queue.getByRole("heading")).toHaveText("Prepared actions · 23", { timeout: 40_000 });
     await expect.poll(badge).toBe(before + 23);
     await expect(queue.getByText("1–20 of 23")).toBeVisible();
     const oldTitle = `Review Edit: Old lamp ${suffix}`;

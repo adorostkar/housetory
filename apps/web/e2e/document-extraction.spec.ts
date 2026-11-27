@@ -2,6 +2,13 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 import http from "node:http";
 import { AddressInfo } from "node:net";
 
+// Run this file on a fresh household. Drills and drill bit sets left by an earlier run
+// are offered as matches for the new receipt lines, and the checks below then fail.
+//
+// The mock AI is reached through Docker's host name by default. Set E2E_AI_BASE_URL
+// (for example http://127.0.0.1:4893) when the API runs outside Docker; the mock then
+// listens on that port.
+const aiBaseUrl = process.env.E2E_AI_BASE_URL;
 let mockServer: http.Server;
 let mockPort = 0;
 let aiSuffix = "run";
@@ -87,7 +94,8 @@ test.beforeAll(async () => {
     }
     response.end(JSON.stringify({}));
   });
-  await new Promise<void>((resolve) => mockServer.listen(0, "0.0.0.0", resolve));
+  const port = aiBaseUrl ? Number(new URL(aiBaseUrl).port) : 0;
+  await new Promise<void>((resolve) => mockServer.listen(port, "0.0.0.0", resolve));
   mockPort = (mockServer.address() as AddressInfo).port;
 });
 
@@ -159,30 +167,41 @@ Visa 112.85
 
   await page.goto("/documents");
   await page.getByRole("button", { name: "Add document" }).click();
-  await page.locator("#document-file").setInputFiles({
+  // The file is saved as soon as it is chosen. Details are an optional step after that.
+  const upload = page.getByRole("dialog", { name: "Add a document" });
+  await upload.getByTestId("document-file").setInputFiles({
     name: `receipt-${suffix}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(receipt),
   });
-  await page.getByLabel(/^Title/).fill(`Corner Hardware receipt ${suffix}`);
-  await page.getByRole("button", { name: "Add document" }).last().click();
+  await upload.getByRole("button", { name: /Add details/ }).click();
+  await upload.getByLabel("Type", { exact: true }).selectOption("receipt");
+  await upload.getByLabel(/^Title/).fill(`Corner Hardware receipt ${suffix}`);
+  await upload.getByRole("button", { name: "Save details" }).click();
+  await upload.getByRole("link", { name: "View" }).click();
 
   await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+/);
-  await expect(page.getByRole("heading", { name: "Review extracted items" })).toBeVisible({
-    timeout: 30_000,
-  });
+  // The review is closed until asked for.
+  await page.getByRole("button", { name: "Review extraction" }).click({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Product lines" })).toBeVisible();
-  const drillLine = page.locator("article").filter({ hasText: `Cordless Drill ${suffix}` });
+  // Each line is a closed row. Nothing is selected to begin with.
+  const drillLine = page.getByRole("article", { name: `Cordless Drill ${suffix}` });
+  await expect(drillLine.getByRole("checkbox")).not.toBeChecked();
+  await expect(drillLine.getByRole("button", { name: "Link to item" })).toBeVisible();
+  await drillLine.getByRole("button", { name: "Edit" }).click();
   await expect(drillLine.getByText("Identifier verified")).toBeVisible();
   await expect(drillLine.getByText(/serial number matches/)).toBeVisible();
 
   await page.getByLabel(/^Merchant/).fill("Corner Hardware");
-  const bitLine = page.locator("article").filter({ hasText: `Drill Bit Set ${suffix}` });
+  const bitLine = page.getByRole("article", { name: `Drill Bit Set ${suffix}` });
+  // A line without a match proposes a new item. Its room is chosen in the editor.
+  await expect(bitLine.getByRole("button", { name: "Add item" })).toBeVisible();
+  await bitLine.getByRole("button", { name: "Edit" }).click();
   await expect(bitLine.getByText("No likely household match")).toBeVisible();
-  await bitLine.getByRole("button", { name: "Create new item" }).click();
   await bitLine.getByLabel("Destination room").selectOption(room.id);
   await bitLine.getByLabel("Optional container").selectOption(box.id);
-  await page.getByRole("button", { name: "Apply reviewed changes" }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.getByRole("button", { name: /^Apply: add 1 item, link 1 item/ }).click();
 
   await expect(page.getByText("Applied", { exact: true })).toBeVisible();
   const documentId = page.url().split("/").pop();
@@ -219,6 +238,8 @@ Visa 112.85
   ).toBeTruthy();
 
   await page.goto(`/purchases?q=${encodeURIComponent("Corner Hardware")}`);
+  // A purchase is a short row; its allocations show when the row is opened.
+  await page.getByTestId("purchase-row").first().getByRole("button").first().click();
   await expect(page.getByText("Reviewed item allocations").first()).toBeVisible();
   await expect(page.getByText(/104\.49/).first()).toBeVisible();
 });
@@ -233,7 +254,7 @@ test("AI-refines fields and lines, then applies reviewed allocations", async ({
     data: {
       provider: "ollama",
       display_name: "Mock document AI",
-      base_url: `http://host.docker.internal:${mockPort}`,
+      base_url: aiBaseUrl ?? `http://host.docker.internal:${mockPort}`,
       default_model: "document-model",
       enabled: true,
       cloud_consent: false,
@@ -282,14 +303,36 @@ Total $75.00
     )
     .toBe("succeeded");
 
+  // With a document AI set up, the AI reading is prepared in the background.
+  const aiReading = async () => {
+    const review = (await (
+      await request.get(`/api/v1/documents/${document.id}/extraction`)
+    ).json()) as { enhancement?: { status: string } | null };
+    return review.enhancement?.status;
+  };
+  await expect.poll(aiReading, { timeout: 30_000 }).toBe("ready");
+
   await page.goto(`/documents/${document.id}`);
-  await expect(page.getByRole("heading", { name: "Review extracted items" })).toBeVisible();
+  await page.getByRole("button", { name: "Review extraction" }).click();
+  // An untouched review starts from the AI reading and says so.
+  await expect(page.getByText("AI-assisted draft. Check every value before Apply.")).toBeVisible();
+  // Go back to the local reading, ask the AI again, and accept its proposal by hand.
+  await page.getByRole("button", { name: "Use deterministic proposal" }).click();
+  await expect(page.getByText("AI-refined proposal")).toHaveCount(0);
+  const asked = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" && response.url().endsWith("/processing/retry"),
+  );
   await page.getByRole("button", { name: "Refine fields & lines" }).first().click();
-  await expect(page.getByText("AI refinement proposal")).toBeVisible({ timeout: 15_000 });
+  expect((await asked).ok()).toBeTruthy();
+  await expect.poll(aiReading, { timeout: 30_000 }).toBe("ready");
+  await page.getByRole("button", { name: "Review AI suggestions" }).click();
+  await expect(page.getByText("AI refinement proposal")).toBeVisible();
   await page.getByRole("button", { name: "Accept AI refinement" }).click();
   await expect(page.getByText("AI-refined proposal")).toBeVisible();
   await page.getByLabel(/^Merchant/).fill("Edited AI Shop");
-  await page.getByRole("button", { name: "Apply reviewed changes" }).click();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.getByRole("button", { name: /^Apply: / }).click();
   await expect(page.getByText("Applied", { exact: true })).toBeVisible();
 
   const documentAfter = await (await request.get(`/api/v1/documents/${document.id}`)).json();
@@ -306,6 +349,10 @@ Total $75.00
   expect(itemAfter.item.purchase.allocations).toHaveLength(1);
 
   await page.reload();
+  // The closed review says it is applied; the full sentence is inside.
+  const reviewSection = page.getByRole("region", { name: "Extraction review" });
+  await expect(reviewSection.getByText("Already applied", { exact: true })).toBeVisible();
+  await reviewSection.getByRole("button", { name: "Review extraction" }).click();
   await expect(page.getByText("This extraction was already applied")).toBeVisible();
 
   await resetProviders(request);

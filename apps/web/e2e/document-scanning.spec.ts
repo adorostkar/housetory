@@ -47,6 +47,8 @@ test("scans, edits, reorders and saves a multi-page document from item context",
   const item = await createItem(request);
   await page.goto(`/items/${item.item.id}`);
   await expect(page.getByRole("heading", { name: "Document scanner test item" })).toBeVisible();
+  // Documents are one of the tabs of the item page.
+  await page.getByRole("tab", { name: "Documents" }).click();
   await page.getByRole("button", { name: "Scan pages" }).click();
   await expect(page.getByRole("heading", { name: "Scan document" })).toBeVisible();
 
@@ -64,13 +66,16 @@ test("scans, edits, reorders and saves a multi-page document from item context",
   ]);
   await expect(page.getByRole("button", { name: /Edit page/ })).toHaveCount(2);
   await expect(page.getByAltText("Original page 1")).toBeVisible();
-  await expect(page.getByText("1 item selected")).toBeVisible();
+  // The scan started from the item, so it says which item it will belong to.
+  await expect(page.getByText("Attached to: Document scanner test item")).toBeVisible();
 
   await page.getByRole("button", { name: "Rotate page right" }).click();
   await page.getByRole("button", { name: "Adjust Top left corner" }).focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowDown");
   await page.getByRole("button", { name: "Move page 2 earlier" }).click();
+  // Title and type are optional and start closed.
+  await page.getByRole("button", { name: /^Add details/ }).click();
   await page.getByLabel(/^Title/).fill("Scanned receipt");
   await page.getByLabel("Type").selectOption("receipt");
   const save = page.getByRole("button", { name: "Save scanned document" });
@@ -120,6 +125,7 @@ test("mobile scan editor supports page editing and cancel without saving", async
   await expect(page.getByRole("button", { name: "Choose pages" })).toBeVisible();
   await page.getByRole("button", { name: "Adjust Top left corner" }).focus();
   await page.keyboard.press("ArrowRight");
+  await page.getByRole("button", { name: /^Add details/ }).click();
   await page.getByLabel(/^Title/).fill("Discarded mobile scan");
   await expect(page.getByRole("button", { name: "Save scanned document" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel scan" }).click();

@@ -104,42 +104,70 @@ for (const mobile of [false, true]) {
     expect(new Set(proposals.map((entry) => entry.fingerprint)).size).toBe(summary.pending_count);
     expect((await (await request.get("/api/v1/overview")).json()).item_count).toBe(total);
     await page.screenshot({ path: test.info().outputPath(`review-${mobile ? "mobile" : "desktop"}.png`) });
+    // The old Overview pointed at the suggestions that wait for a decision. That count now
+    // sits on the assistant button and in the item list's notice row.
+    const household = (await (await request.get("/api/v1/auth/session")).json()).household.id as string;
+    const waiting =
+      ((await (await request.get("/api/v1/inventory-review/summary")).json()).pending_count as number) +
+      ((await (await request.get("/api/v1/inventory-review/captures?dismissed=false")).json()) as unknown[]).length +
+      ((await (await request.get(`/api/v1/assistant/actions/proposals/pending?household_id=${household}&limit=1`)).json()).total as number);
+    expect(waiting).toBeGreaterThan(0);
+    await page.goto("/items");
+    await expect(page.getByTestId("bottom-bar").getByRole("button", {
+      name: `Open assistant, ${waiting} unresolved reviews`, exact: true,
+    })).toBeVisible();
+    const notice = page.getByTestId("list-notices").getByRole("link", {
+      name: `${waiting} ${waiting === 1 ? "finding" : "findings"} to review`, exact: true,
+    });
+    await expect(notice).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await notice.click();
+    await expect(page).toHaveURL(/\/review$/);
   });
 
   test(`${mobile ? "narrow mobile" : "desktop"} purchase privacy persists through loading and warranty counts include expiring coverage`, async ({ page }) => {
     await page.setViewportSize(mobile ? { width: 320, height: 640 } : { width: 1366, height: 768 });
-    await page.goto("/");
-    const hide = page.getByRole("button", { name: "Hide purchase values", exact: true });
+    // The totals moved from the old Overview to the top of Purchases, one line until opened.
+    await page.goto("/purchases");
+    const totals = page.getByTestId("purchase-totals");
+    await totals.getByRole("button", { name: /^Totals/ }).click();
+    const hide = totals.getByRole("button", { name: "Hide purchase values", exact: true });
     await expect(hide).toBeVisible();
     await hide.click({ trial: true });
     const box = await hide.boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
-    const label = await page.getByText("Purchase value", { exact: true }).first().boundingBox();
-    expect(box!.x >= label!.x + label!.width || box!.y >= label!.y + label!.height).toBe(true);
+    // The button sits beside the line that opens the totals, not over it.
+    const line = await totals.getByRole("button", { name: /^Totals/ }).boundingBox();
+    expect(box!.x >= line!.x + line!.width || box!.y >= line!.y + line!.height).toBe(true);
     await hide.click();
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("button", { name: "Show purchase values" })).toBeVisible();
-    await expect(page.locator("body")).not.toContainText(/\$123\.[45]|€678\.9/);
+    await expect(page).toHaveURL(/\/purchases$/);
+    await expect(totals.getByRole("button", { name: "Show purchase values" })).toBeVisible();
+    // This hides the totals. The purchase rows below still show their own prices,
+    // so only the totals are checked for amounts.
+    await expect(totals).not.toContainText(/\$123\.[45]|€678\.9/);
     await page.addInitScript(() => {
       window.reviewLeakedAmounts = false;
       new MutationObserver(() => {
-        if (/\$123\.[45]|€678\.9/.test(document.body?.innerText ?? "")) {
+        const totalsText =
+          document.querySelector<HTMLElement>('[data-testid="purchase-totals"]')?.innerText ?? "";
+        if (/\$123\.[45]|€678\.9/.test(totalsText)) {
           window.reviewLeakedAmounts = true;
         }
       }).observe(document, { subtree: true, childList: true, characterData: true });
     });
     await page.reload();
-    await expect(page.getByRole("button", { name: "Show purchase values" })).toBeVisible();
+    await expect(totals.getByRole("button", { name: "Show purchase values" })).toBeVisible();
     expect(await page.evaluate(() => window.reviewLeakedAmounts)).toBe(false);
-    const warranty = page.getByRole("link", { name: /Active warranties 2/ });
+    const warranty = totals.getByRole("link", { name: /Active warranties/ });
+    await expect(warranty).toContainText("2");
     await expect(warranty).toContainText("1 expiring soon · 1 expired");
     await expect(warranty).toHaveAttribute("href", "/warranties");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: test.info().outputPath(`overview-hidden-${mobile ? "mobile" : "desktop"}.png`) });
-    await page.getByRole("button", { name: "Show purchase values" }).click();
-    await expect(page.getByRole("link", { name: /Purchase value/ })).toContainText("$123.5");
-    await page.getByRole("link", { name: /Purchase value/ }).click();
-    await expect(page).toHaveURL(/\/purchases$/);
+    await page.screenshot({ path: test.info().outputPath(`totals-hidden-${mobile ? "mobile" : "desktop"}.png`) });
+    await totals.getByRole("button", { name: "Show purchase values" }).click();
+    await expect(totals.getByRole("button", { name: /^Totals/ })).toContainText("$123.5");
+    await warranty.click();
+    await expect(page).toHaveURL(/\/warranties$/);
   });
 }

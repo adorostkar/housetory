@@ -88,7 +88,7 @@ test("uploads a manual without make/model, keeps its page text, and attaches it 
   const uploadDialog = page.getByRole("dialog", { name: "Add a manual" });
   await expect(uploadDialog).toBeVisible();
   await expect(uploadDialog.getByLabel("Type")).toHaveCount(0);
-  await uploadDialog.locator("#document-file").setInputFiles({
+  await uploadDialog.getByTestId("document-file").setInputFiles({
     name: "drill-notes.txt",
     mimeType: "text/plain",
     buffer: Buffer.from(
@@ -96,8 +96,11 @@ test("uploads a manual without make/model, keeps its page text, and attaches it 
         "Maintenance\nApply light machine oil to the chuck monthly.",
     ),
   });
+  // The manual is saved at once. The title is an optional detail after that.
+  await uploadDialog.getByRole("button", { name: /Add details/ }).click();
   await uploadDialog.getByLabel("Title").fill(title);
-  await uploadDialog.getByRole("button", { name: "Add manual" }).click();
+  await uploadDialog.getByRole("button", { name: "Save details" }).click();
+  await uploadDialog.getByRole("button", { name: "Done" }).click();
   await expect(uploadDialog).toBeHidden();
   await expect(page.getByText(title).first()).toBeVisible();
 
@@ -388,35 +391,31 @@ test("the assistant finds a manual online, shows each proposal only when it has 
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("/items");
+    const searchesBefore = braveRequests.length;
     const search = page.getByRole("combobox", { name: "Search or ask about your inventory" });
     await search.fill(`How do I change the bit on ${name}?`);
     await search.press("Enter");
 
-    // The make and model must be confirmed first. The proposal is prepared while the
+    // The brand and model recorded on the item are enough: nothing is asked before the
+    // search. It leads to one manual to save. The proposal is prepared while the
     // assistant still works: the page says so, and shows the card when it has finished.
     // Earlier conversations of this household stay on the page: only this item's cards count.
     const cards = page.getByLabel("Action review").filter({ hasText: name });
-    const working = page.getByRole("status").filter({ hasText: "Working on your request…" });
+    const working = page.getByRole("status").filter({ hasText: "A proposal is prepared." });
     await expect(working).toContainText(
       "A proposal is prepared. It appears for your review when the assistant has finished.",
     );
     await expect(cards).toHaveCount(0);
     await expect(cards).toHaveCount(1);
     await expect(working).toHaveCount(0);
-    await expect(cards.first()).toContainText("Applying confirms this as the exact product");
-    const searchesBefore = braveRequests.length;
-    await cards.first().getByRole("button", { name: "Apply" }).click();
-
-    // Apply was the decision: the search starts by itself and leads to one manual to save.
-    await expect(working).toContainText("A proposal is prepared.");
-    await expect(cards).toHaveCount(1);
-    await expect(cards).toHaveCount(2);
     expect(braveRequests.length).toBeGreaterThan(searchesBefore);
     const save = cards.last();
     await expect(save).toContainText("Check that this manual is for your exact model");
     await expect(
       save.getByRole("link", { name: "https://www.dewalt.com/-/media/manuals/DCD791B.pdf" }).first(),
     ).toBeVisible();
+    // The page the manual was found on is in the closed Sources list under the answer.
+    await page.getByLabel("Assistant tool task").last().getByText(/^Sources \(\d+\)$/).click();
     await expect(
       page.getByLabel("Online sources").last().getByRole("link", {
         name: "DeWalt DCD791B 20V MAX Drill Instruction Manual",
@@ -437,6 +436,8 @@ test("the assistant finds a manual online, shows each proposal only when it has 
       `Disconnect the battery before changing the drill bit. (${savedTitle}, page 1)`,
       { timeout: 60_000 },
     );
+    // The page it quotes is in the closed Sources list of this answer.
+    await answered.getByText(/^Sources \(\d+\)$/).click();
     await expect(
       answered
         .getByRole("list", { name: "Manual citations" })

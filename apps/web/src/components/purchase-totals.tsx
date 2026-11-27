@@ -372,9 +372,13 @@ function BreakdownTable({
         <table className="w-full table-fixed text-left text-xs xl:table-auto">
           <thead>
             <tr className="border-b border-border/60 text-2xs uppercase tracking-[0.1em] text-muted-foreground">
-              <th className="px-3 py-2.5 font-medium xl:px-4">Name</th>
-              <th className="px-3 py-2.5 font-medium">Currency</th>
-              <th className="px-3 py-2.5 text-right font-medium xl:px-4">Purchase</th>
+              <th className="px-2 py-2.5 font-medium sm:px-3 xl:px-4">Name</th>
+              {/* On a phone the two short columns are only as wide as their values, so the
+                  name gets the rest. The currency codes need no visible heading there. */}
+              <th className="w-12 px-2 py-2.5 font-medium sm:w-auto sm:px-3">
+                <span className="sr-only sm:not-sr-only">Currency</span>
+              </th>
+              <th className="w-[5.5rem] px-2 py-2.5 text-right font-medium sm:w-auto sm:px-3 xl:px-4">Purchase</th>
             </tr>
           </thead>
           <tbody>
@@ -383,7 +387,7 @@ function BreakdownTable({
                 key={`${row.name}-${row.currency}`}
                 className="border-b border-border/40 last:border-0"
               >
-                <td className="px-3 py-2.5 xl:px-4">
+                <td className="px-2 py-2.5 sm:px-3 xl:px-4">
                   <span className="block [overflow-wrap:anywhere] xl:max-w-40 xl:truncate">
                     {row.name}
                   </span>
@@ -391,8 +395,8 @@ function BreakdownTable({
                     {pluralize(row.item_count, "item")}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-muted-foreground">{row.currency}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums xl:px-4">
+                <td className="px-2 py-2.5 text-muted-foreground sm:px-3">{row.currency}</td>
+                <td className="px-2 py-2.5 text-right tabular-nums sm:px-3 xl:px-4">
                   {valuesHidden
                     ? MASK
                     : formatCurrency(row.purchase_total_cents, row.currency, { compact: true })}

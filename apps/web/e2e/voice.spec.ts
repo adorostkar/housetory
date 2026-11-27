@@ -63,7 +63,8 @@ test("a voice note is transcribed and opens straight in the import review", asyn
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
-  await page.locator("aside").getByRole("button", { name: "Add items" }).click();
+  // Add is in the bar at the bottom of the main column.
+  await page.getByTestId("bottom-bar").getByRole("button", { name: "Add items" }).click();
   const dialog = page.getByRole("dialog", { name: "Add items" });
   const textbox = dialog.getByRole("textbox", {
     name: "Describe items or paste a product link",
@@ -72,7 +73,9 @@ test("a voice note is transcribed and opens straight in the import review", asyn
 
   await textbox.fill("Chairs");
   await expect(mic).toHaveAttribute("aria-disabled", "true");
-  await mic.click();
+  // Only marked as off, so a press still explains why. The test tool waits for
+  // "enabled" by default, so this press is forced.
+  await mic.click({ force: true });
   await expect(
     dialog.locator("p", { hasText: "Voice is sent on its own — clear the box to record." }),
   ).toBeVisible();

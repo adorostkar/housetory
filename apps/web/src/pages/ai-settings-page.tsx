@@ -697,7 +697,7 @@ export function AiSettingsPage() {
               Deterministic imports, search, QR labels and assistant answers continue to
               work. Add a provider when you want model-written assistance or vision.
             </p>
-            <Button className="mt-5" onClick={openCreate}>
+            <Button className="mt-5 h-auto min-h-10 max-w-full whitespace-normal py-2 coarse:h-auto coarse:min-h-11" onClick={openCreate}>
               <Plus /> Add the first provider
             </Button>
           </div>

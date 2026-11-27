@@ -8,6 +8,7 @@ import {
   DialogOverlay,
   DialogPortal,
   DialogTitle,
+  keepOpenForInnerList,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -18,11 +19,12 @@ const SheetClose = DialogPrimitive.Close;
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose = false, ...props }, ref) => (
+>(({ className, children, hideClose = false, onEscapeKeyDown, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      onEscapeKeyDown={(event) => keepOpenForInnerList(event, onEscapeKeyDown)}
       className={cn(
         "fixed inset-x-0 bottom-0 z-50 grid max-h-[calc(100dvh-1rem)] grid-cols-[minmax(0,1fr)] gap-4 overflow-y-auto overscroll-contain rounded-t-3xl border-t border-border/80 bg-popover px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-sheet-up",
         className,

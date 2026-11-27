@@ -6,6 +6,10 @@ import fs from "node:fs/promises";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const MOCK_PORT = 50555;
+// The mock AI is reached through Docker's host name by default. Set E2E_AI_BASE_URL
+// (for example http://127.0.0.1:50555) when the API does not run in Docker. The same
+// mock answers the online search: start the API with BRAVE_SEARCH_BASE_URL set to it.
+const AI_BASE_URL = process.env.E2E_AI_BASE_URL ?? `http://host.docker.internal:${MOCK_PORT}`;
 let mockServer: http.Server;
 let aiCalls = 0;
 
@@ -145,7 +149,7 @@ async function configureProviders(request: APIRequestContext) {
   const payload = {
     provider: "openai",
     display_name: "Valuation E2E mock",
-    base_url: `http://host.docker.internal:${MOCK_PORT}/v1`,
+    base_url: `${AI_BASE_URL}/v1`,
     default_model: "valuation-mock",
     api_key: "sk-valuation-e2e-not-real",
     enabled: true,
@@ -224,6 +228,10 @@ test("insurance list uses AI replacement estimates without changing item values"
   await expect(page.getByText("$170", { exact: true })).toBeVisible();
   await shot(page, "01-insurance-review");
 
+  await page.getByRole("button", { name: "Continue to export" }).click();
+  const exportStep = page.getByRole("region", { name: "Export" });
+  await expect(exportStep.getByText("1 (2 owned units)")).toBeVisible();
+  await expect(exportStep.getByText("$170", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Generate insurance list" }).click();
   const pdfLink = page.getByRole("link", { name: "Download PDF" });
   await expect(pdfLink).toBeVisible();

@@ -51,7 +51,7 @@ export function InfoRow({
         <Icon className="size-3.5 shrink-0" strokeWidth={1.7} />
         {label}
       </dt>
-      <dd className="min-w-0">{children}</dd>
+      <dd className="min-w-0 [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }

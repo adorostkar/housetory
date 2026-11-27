@@ -85,15 +85,23 @@ test("checks a room, resumes after refresh, reviews a move and completes partial
   ).toBeVisible();
   await expect(page.getByText(/Opening this page does not mark it present/).first()).toBeVisible();
 
-  await page.getByRole("button", { name: `Mark ${drill.item.name} present` }).click();
-  const drillDialog = page.getByRole("dialog");
-  await expect(drillDialog.getByText(/At home 2/)).toBeVisible();
-  await expect(drillDialog.getByText(/Loans excluded/)).toBeVisible();
-  await drillDialog.getByRole("button", { name: "Save present" }).click();
-  await expect(drillDialog).not.toBeVisible();
+  // Counting starts on what is left. Present is one tap: the two at-home units
+  // are recorded and the unit on loan stays out of the count.
+  await expect(page.getByRole("button", { name: /^Unchecked/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const drillPresent = page.getByRole("button", { name: `Mark ${drill.item.name} present` });
+  await expect(drillPresent).toHaveText("All 2 present");
+  await drillPresent.click();
+  await expect(page.getByText(`${drill.item.name}: present saved`)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(drillPresent).toHaveCount(0);
 
-  await page.getByRole("button", { name: `Mark ${tent.item.name} missing` }).click();
+  await page.getByRole("button", { name: `Other results for ${tent.item.name}` }).click();
+  await page.getByRole("menuitem", { name: "Missing" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save missing" }).click();
+  await page.getByRole("button", { name: /^All/ }).click();
   await expect(page.getByText("Reported missing; no inventory deletion or write-off.")).toBeVisible();
 
   await page.reload();
@@ -113,7 +121,8 @@ test("checks a room, resumes after refresh, reviews a move and completes partial
   );
   await page.getByRole("button", { name: /^All/ }).click();
 
-  await page.getByRole("button", { name: `Mark ${rope.item.name} moved` }).click();
+  await page.getByRole("button", { name: `Other results for ${rope.item.name}` }).click();
+  await page.getByRole("menuitem", { name: "Moved" }).click();
   const moveDialog = page.getByRole("dialog");
   await moveDialog.getByLabel("Existing room").selectOption(garage.id);
   await moveDialog.getByLabel("Existing place (optional)").selectOption(garageShelf.id);
@@ -181,7 +190,7 @@ test("checks a room, resumes after refresh, reviews a move and completes partial
     fullPage: false,
   });
   await page.getByRole("link", { name: "Back to room" }).click();
-  await expect(page.getByText(/Last checked/)).toBeVisible();
+  await expect(page.getByText(/Last stocktake/)).toBeVisible();
   await page.screenshot({
     path: "../../docs/walkthrough/stocktake/05-room-last-checked-desktop.png",
     fullPage: false,
@@ -208,7 +217,8 @@ test("handles keyboard close, a failed save and an abandoned stocktake on mobile
   const item = await createItem(request, `Ladder ${id}`, room.id, box.id);
 
   await startViaUi(page, room.id);
-  await page.getByRole("button", { name: `Mark ${item.item.name} present` }).click();
+  await page.getByRole("button", { name: `Other results for ${item.item.name}` }).click();
+  await page.getByRole("menuitem", { name: "Present, with a note" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
@@ -223,11 +233,10 @@ test("handles keyboard close, a failed save and an abandoned stocktake on mobile
       }),
     });
   });
+  // One-tap Present reports a failed save and leaves the item unchecked.
   await page.getByRole("button", { name: `Mark ${item.item.name} present` }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Save present" }).click();
-  await expect(page.getByRole("dialog").getByText("The observation could not be saved.")).toBeVisible();
+  await expect(page.getByText("The observation could not be saved.")).toBeVisible();
   await expect(page.getByText("Not checked yet. Opening this page does not mark it present.")).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await page.unrouteAll();
 
   await page.setViewportSize({ width: 390, height: 844 });

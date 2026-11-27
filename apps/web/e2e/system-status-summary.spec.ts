@@ -122,9 +122,21 @@ test("Settings shows compact health and the detailed status page is deep-linkabl
     await route.fulfill({ status: 200, json: detailed });
   });
 
+  // The Settings index shows only the count; the summary is on the status screen.
   await page.goto("/settings");
+  const row = page.getByRole("link", { name: /^System status/ });
+  await expect(row.getByText("2 need attention")).toBeVisible();
+  expect(summaryCalls).toBe(1);
+  expect(statusCalls).toBe(0);
+  await page.screenshot({
+    path: "../../docs/walkthrough/system-status-page/01-settings-summary-light.png",
+    fullPage: false,
+  });
+
+  // The old anchor still works and lands on the status screen.
+  await page.goto("/settings#system-status");
+  await expect(page).toHaveURL(/\/settings\/system-status#system-status$/);
   const health = page.locator("#system-status");
-  await health.scrollIntoViewIfNeeded();
   await expect(
     health.getByRole("heading", { name: "System health" }),
   ).toBeVisible();
@@ -133,15 +145,7 @@ test("Settings shows compact health and the detailed status page is deep-linkabl
   await expect(health.getByText(/1 configured feature issue/)).toBeVisible();
   await expect(health.getByText(/Worker jobs:/)).toBeVisible();
   await expect(health.getByText(/Fixture live test failed/)).toBeVisible();
-  expect(summaryCalls).toBe(1);
-  expect(statusCalls).toBe(0);
-  await page.screenshot({
-    path: "../../docs/walkthrough/system-status-page/01-settings-summary-light.png",
-    fullPage: false,
-  });
-
-  await health.getByRole("link", { name: "Open System status" }).click();
-  await expect(page).toHaveURL(/\/settings\/system-status$/);
+  await expect(health.getByRole("link", { name: "Open System status" })).toHaveCount(0);
   await expect(
     page.getByRole("heading", { name: "System status", level: 1 }),
   ).toBeVisible();
@@ -154,7 +158,6 @@ test("Settings shows compact health and the detailed status page is deep-linkabl
   await expect(page.getByText("fixture-commit")).toBeVisible();
   await expect(page.getByText("fixture.failed")).toBeVisible();
   expect(statusCalls).toBeGreaterThanOrEqual(1);
-  expect(summaryCalls).toBe(1);
   await page.screenshot({
     path: "../../docs/walkthrough/system-status-page/02-detailed-status-light.png",
     fullPage: false,
@@ -162,5 +165,5 @@ test("Settings shows compact health and the detailed status page is deep-linkabl
 
   await page.getByRole("link", { name: "Back to Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
-  await expect(page.locator("#system-status")).toBeVisible();
+  await expect(page.getByRole("link", { name: /^System status/ })).toBeVisible();
 });

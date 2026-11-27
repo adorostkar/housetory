@@ -62,14 +62,19 @@ test("purchase cards keep vendor-first hierarchy and readable item links", async
   expect(purchase.ok(), await purchase.text()).toBeTruthy();
 
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // Start in light mode, and keep a later choice across reloads.
   await page.addInitScript(() => {
-    window.localStorage.setItem("housetory-theme", "light");
+    if (!window.localStorage.getItem("housetory-theme")) {
+      window.localStorage.setItem("housetory-theme", "light");
+    }
   });
   await page.goto("/purchases");
   const card = page.locator("article").filter({ hasText: vendor });
   await expect(
     card.getByRole("heading", { name: vendor, level: 2 }),
   ).toBeVisible();
+  // A purchase is a short row; its items show when the row is opened.
+  await card.getByRole("heading", { level: 2 }).getByRole("button").click();
   await expect(
     card.getByRole("link", {
       name: new RegExp(`Hammer drill with a deliberately long product name ${id}`),
@@ -84,14 +89,19 @@ test("purchase cards keep vendor-first hierarchy and readable item links", async
     path: "../../docs/walkthrough/local-polish/01-purchases-desktop-light.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  // The header and its theme button are gone; light or dark is chosen in Settings →
+  // Appearance. The screenshot only needs the mode, so the stored choice is set here.
+  await page.evaluate(() => window.localStorage.setItem("housetory-theme", "dark"));
+  await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
+  await card.getByRole("heading", { level: 2 }).getByRole("button").click();
+  await expect(card.getByText("$1,234.56")).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({
     path: "../../docs/walkthrough/local-polish/02-purchases-desktop-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await page.evaluate(() => window.localStorage.setItem("housetory-theme", "light"));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/purchases");
@@ -99,6 +109,7 @@ test("purchase cards keep vendor-first hierarchy and readable item links", async
   await expect(
     mobileCard.getByRole("heading", { name: vendor, level: 2 }),
   ).toBeVisible();
+  await mobileCard.getByRole("heading", { level: 2 }).getByRole("button").click();
   const longItem = mobileCard.getByRole("link", {
     name: new RegExp(`Hammer drill with a deliberately long product name ${id}`),
   });

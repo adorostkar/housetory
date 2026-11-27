@@ -67,9 +67,9 @@ const photos = [
 ];
 
 const viewports = [
-  { width: 390, height: 844, frameHeight: 240 },
-  { width: 869, height: 900, frameHeight: 320 },
-  { width: 1440, height: 1000, frameHeight: 340 },
+  { width: 390, height: 844 },
+  { width: 869, height: 900 },
+  { width: 1440, height: 1000 },
 ];
 
 test("actual photos stay inside a bounded gallery with their complete aspect ratio", async ({
@@ -96,15 +96,20 @@ test("actual photos stay inside a bounded gallery with their complete aspect rat
       page.getByRole("heading", { name: itemName, level: 1 }),
     ).toBeVisible();
 
-    const frame = page.getByTestId("photo-gallery-frame");
-    await expect(frame).toBeVisible();
-    const frameBox = await frame.boundingBox();
-    expect(frameBox).not.toBeNull();
-    expect(Math.abs((frameBox?.height ?? 0) - viewport.frameHeight)).toBeLessThan(1.5);
+    // The page shows small thumbnails; the whole photograph opens full screen.
+    const strip = page.getByTestId("photo-strip");
+    await expect(strip).toBeVisible();
+    const stripBox = await strip.boundingBox();
+    expect(stripBox).not.toBeNull();
+    expect(stripBox?.height ?? 0).toBeLessThan(120);
 
     for (const [index, photo] of photos.entries()) {
-      await page.getByRole("button", { name: `View photograph ${index + 1}` }).click();
-      const image = page.getByAltText(`${itemName} photograph`);
+      const thumbnail = page.getByRole("button", { name: `View photograph ${index + 1}` });
+      const thumbnailBox = await thumbnail.boundingBox();
+      expect(Math.abs((thumbnailBox?.width ?? 0) - 96)).toBeLessThan(1.5);
+      expect(Math.abs((thumbnailBox?.height ?? 0) - 96)).toBeLessThan(1.5);
+      await thumbnail.click();
+      const image = page.getByAltText(`${itemName} photograph ${index + 1}`);
       await expect
         .poll(async () =>
           image.evaluate((element) => {
@@ -127,54 +132,19 @@ test("actual photos stay inside a bounded gallery with their complete aspect rat
         };
       });
       expect(metrics.objectFit).toBe("contain");
-      expect(metrics.width).toBeLessThanOrEqual((frameBox?.width ?? 0) + 0.5);
-      expect(metrics.height).toBeLessThanOrEqual((frameBox?.height ?? 0) + 0.5);
+      expect(metrics.width).toBeLessThanOrEqual(viewport.width + 0.5);
+      expect(metrics.height).toBeLessThanOrEqual(viewport.height + 0.5);
       expect(metrics.width / metrics.height).toBeCloseTo(
         metrics.naturalWidth / metrics.naturalHeight,
         1,
       );
-    }
-
-    const galleryImage = page.getByAltText(`${itemName} photograph`);
-    const waitForWidth = async (width: number) => {
-      await expect
-        .poll(async () =>
-          galleryImage.evaluate((element) => {
-            const img = element as HTMLImageElement;
-            return img.complete ? img.naturalWidth : 0;
-          }),
-        )
-        .toBe(width);
-    };
-    if (viewport.width === 1440) {
-      await page.getByRole("button", { name: "View photograph 1" }).click();
-      await waitForWidth(900);
-      await page.screenshot({
-        path: "../../docs/walkthrough/photo-sizing/01-gallery-landscape-desktop.png",
-        fullPage: false,
-      });
-      await page.getByRole("button", { name: "View photograph 2" }).click();
-      await waitForWidth(600);
-      await page.screenshot({
-        path: "../../docs/walkthrough/photo-sizing/02-gallery-portrait-desktop.png",
-        fullPage: false,
-      });
-    }
-    if (viewport.width === 869) {
-      await page.getByRole("button", { name: "View photograph 3" }).click();
-      await waitForWidth(700);
-      await page.screenshot({
-        path: "../../docs/walkthrough/photo-sizing/03-gallery-square-tablet.png",
-        fullPage: false,
-      });
-    }
-    if (viewport.width === 390) {
-      await page.getByRole("button", { name: "View photograph 1" }).click();
-      await waitForWidth(900);
-      await page.screenshot({
-        path: "../../docs/walkthrough/photo-sizing/04-gallery-landscape-mobile.png",
-        fullPage: false,
-      });
+      if (index === 0) {
+        await page.screenshot({
+          path: `../../docs/walkthrough/photo-sizing/gallery-${viewport.width}.png`,
+          fullPage: false,
+        });
+      }
+      await page.getByRole("button", { name: "Close photograph viewer" }).click();
     }
   }
 });
@@ -192,6 +162,7 @@ test("inventory grid and compact list fit complete actual photos without croppin
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/items");
+  await page.getByRole("button", { name: "Card view" }).click();
   const card = page.locator(`a[href^="/items/${item.item.id}"]`).first();
   await expect(card).toBeVisible();
   const cardImage = card.locator("img").first();
@@ -364,10 +335,11 @@ test("reference and AI images stay inside the same bounded gallery frame", async
       await expect(
         page.getByRole("heading", { name: itemName, level: 1 }),
       ).toBeVisible();
-      const frame = page.getByTestId("photo-gallery-frame");
+      // The reference or AI image is one small tile in the photo strip.
+      const frame = page.getByTestId("photo-strip").locator("> div").first();
       const frameBox = await frame.boundingBox();
       expect(frameBox).not.toBeNull();
-      expect(Math.abs((frameBox?.height ?? 0) - viewport.frameHeight)).toBeLessThan(1.5);
+      expect(Math.abs((frameBox?.height ?? 0) - 96)).toBeLessThan(1.5);
 
       const image = page.getByAltText(`${itemName} ${variant.label.toLowerCase()}`);
       await expect

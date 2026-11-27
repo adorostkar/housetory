@@ -74,14 +74,20 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
 
   await page.goto(`/items?room_id=${office.id}`);
   await expect(page.getByText(`Camera ${suffix}`)).toBeVisible();
+  // Rows have no checkbox until selection is turned on.
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await page.getByRole("button", { name: "Select items" }).click();
   await expect(
     page.getByText(new RegExp("Showing 24 of 27; only loaded items can be selected")),
   ).toBeVisible();
   await page.getByRole("checkbox", { name: "Select all loaded items" }).check();
   await expect(page.getByText(/24 items selected/)).toBeVisible();
-  await page.getByRole("button", { name: "Clear", exact: true }).last().click();
+  // Clear also leaves selection mode.
+  await page.getByRole("button", { name: "Clear selection" }).click();
   await expect(page.getByText(/items selected/)).not.toBeVisible();
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
 
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select Camera ${suffix}` }).focus();
   await page.keyboard.press("Space");
   await expect(page.getByText(/1 item selected/)).toBeVisible();
@@ -105,6 +111,7 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
 
   await page.goto(`/items?room_id=${garage.id}`);
   await expect(page.getByText(`Camera ${suffix}`)).toBeVisible();
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select Camera ${suffix}` }).check();
   await page.getByRole("checkbox", { name: `Select Tent ${suffix}` }).check();
   await page.getByRole("button", { name: "Tags", exact: true }).click();
@@ -112,9 +119,13 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
   await page.getByRole("button", { name: "Add selected tags" }).click();
   await expect(page.getByText(/Added tags on 2 items/)).toBeVisible();
 
+  // A finished action leaves selection mode, so it is turned on again.
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select Camera ${suffix}` }).check();
   await page.getByRole("checkbox", { name: `Select Tent ${suffix}` }).check();
-  await page.getByRole("button", { name: "Category", exact: true }).click();
+  // The sidebar has a "More" too; this is the one in the bulk bar.
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Category", exact: true }).click();
   await page.getByLabel("Category", { exact: true }).selectOption(category.id);
   await page.getByRole("button", { name: "Apply category" }).click();
   await expect(page.getByText(/Set category on 2 items/)).toBeVisible();
@@ -125,19 +136,25 @@ test("bulk organisation selects loaded records, previews moves and updates tags/
   expect(finalItem.item.tags.map((entry: { id: string }) => entry.id)).toContain(tag.id);
   expect(finalItem.item.category?.id).toBe(category.id);
 
-  await page.getByRole("button", { name: "Compact list view" }).click();
+  // Compact rows are the default; a chosen card view is kept.
   await expect(page.getByRole("button", { name: "Compact list view" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  expect(await page.evaluate(() => localStorage.getItem("housetory.items.view"))).toBe(
-    "list",
+  // A compact row says how many units are out and how many are at home.
+  await expect(page.getByText(/1 on loan · 1 at home/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Card view" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("housetory.items.view.v2"))).toBe(
+    "grid",
   );
   await page.reload();
-  await expect(page.getByRole("button", { name: "Compact list view" })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Card view" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
   await expect(page.getByText(`Camera ${suffix}`)).toBeVisible();
-  await expect(page.getByText(/1 on loan · 1 at home/).first()).toBeVisible();
+  // A card keeps the loan badge next to the quantity.
+  await expect(
+    page.getByRole("link", { name: new RegExp(`1 on loan ×2 Camera ${suffix}`) }),
+  ).toBeVisible();
 });

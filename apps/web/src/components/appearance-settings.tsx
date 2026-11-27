@@ -62,7 +62,7 @@ export function AppearanceSettings({ className }: { className?: string }) {
           })}
         </div>
       </fieldset>
-      <fieldset>
+      <fieldset className="min-w-0">
         <legend className="field-label">Light or dark</legend>
         <div
           role="radiogroup"
@@ -80,6 +80,8 @@ export function AppearanceSettings({ className }: { className?: string }) {
                 onClick={() => setTheme(mode.id)}
                 className={cn(
                   "flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
+                  // On the narrowest phones the icon sits above the word, so all three fit.
+                  "max-[359px]:flex-col max-[359px]:gap-0.5 max-[359px]:px-1 max-[359px]:py-1",
                   selected
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground",

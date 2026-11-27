@@ -782,6 +782,14 @@ REPEATED_CALL_NOTE = (
     "you have, or make a different call: other arguments, other pages, or "
     "look_at_manual_page for a page whose text is unclear."
 )
+# A reply that is empty or is not one valid step is asked for again, this often in one
+# request. A real model returned such a reply once and the request ended with an error.
+MAX_INVALID_REPLIES = 2
+INVALID_REPLY_NOTE = (
+    "Your last reply could not be used: it was empty, or it was not exactly one JSON "
+    "object that matches step_schema. Reply again with one JSON step: a tool call or an "
+    "answer."
+)
 # Pages the application looks at by itself before an answer is shown.
 MAX_LOOKS = 2
 LOOKED_NOTE = (
@@ -1135,13 +1143,35 @@ def run_job(payload: dict):
                 }
                 db.commit()
             # No session/transaction/row lock is retained during inference.
-            with ai.bounded_request_deadline(seconds):
-                raw = ai.complete_json(SYSTEM, prompt, config=config)
-            step = STEP.validate_python(raw)
+            try:
+                with ai.bounded_request_deadline(seconds):
+                    raw = ai.complete_json(SYSTEM, prompt, config=config)
+                step = STEP.validate_python(raw)
+            except (ai.AiInvalidOutput, ValidationError):
+                # The model answered, but not with one step. It is asked again, a few
+                # times at most; each time counts as a model call of this attempt.
+                with SessionLocal() as db:
+                    run = _current(db, run_id, generation)
+                    if run is None:
+                        return {"state": "stopped"}
+                    invalid = run.data.get("invalid_replies", 0)
+                    if invalid >= MAX_INVALID_REPLIES:
+                        raise
+                    run.data = {
+                        **run.data,
+                        "invalid_replies": invalid + 1,
+                        "correction": INVALID_REPLY_NOTE,
+                        "message": "The model's reply could not be read. Asking again.",
+                    }
+                    db.commit()
+                continue
             with SessionLocal() as db:
                 run = _current(db, run_id, generation)
                 if run is None:
                     return {"state": "stopped"}
+                if run.data.get("correction") == INVALID_REPLY_NOTE:
+                    # The reply is readable again. The note has done its work.
+                    run.data = {**run.data, "correction": None}
                 if len(run.data.get("steers", [])) > run.data.get("steers_seen", 0):
                     # The user said something while the model worked. This step was
                     # decided without it, so it is dropped: the model is asked again
@@ -1288,8 +1318,8 @@ def run_job(payload: dict):
                     exc.message
                     if isinstance(exc, ApiError)
                     else (
-                        "Unsupported provider response. Retry or use local/manual controls."
-                        if isinstance(exc, ValidationError)
+                        "The model's reply could not be used. Retry or use local/manual controls."
+                        if isinstance(exc, ValidationError | ai.AiInvalidOutput)
                         else "The AI provider failed. Retry or use local/manual controls."
                     )
                 )
@@ -1298,6 +1328,8 @@ def run_job(payload: dict):
                     **run.data,
                     "message": message,
                     "error": exc.code if isinstance(exc, ApiError) else "provider_output",
+                    # What kind of failure it was, for the diagnostics. Never the reply itself.
+                    "error_detail": getattr(exc, "code", type(exc).__name__),
                 }
                 db.commit()
         return {"run_id": str(run_id), "state": "needs_attention"}

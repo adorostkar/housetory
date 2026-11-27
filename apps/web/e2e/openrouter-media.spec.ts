@@ -6,6 +6,11 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 let fixtureServer: http.Server;
 let fixturePort = 0;
+// The fixture provider is reached through Docker's host name by default. Set
+// E2E_AI_BASE_URL (for example http://127.0.0.1:4791) when the API runs outside
+// Docker: the fixture then listens on that URL's port.
+const aiBaseUrl = process.env.E2E_AI_BASE_URL;
+const fixedPort = aiBaseUrl ? Number(new URL(aiBaseUrl).port) : 0;
 let sttRequests: Array<Record<string, unknown>> = [];
 
 
@@ -126,7 +131,7 @@ test.beforeAll(async () => {
     response.end(JSON.stringify({}));
   });
   await new Promise<void>((resolve) =>
-    fixtureServer.listen(0, "0.0.0.0", resolve),
+    fixtureServer.listen(fixedPort, "0.0.0.0", resolve),
   );
   fixturePort = (fixtureServer.address() as AddressInfo).port;
 });
@@ -138,7 +143,8 @@ test.afterAll(async () => {
 });
 
 function fixtureBaseUrl() {
-  return `http://host.docker.internal:${fixturePort}/api/v1`;
+  const origin = aiBaseUrl ? new URL(aiBaseUrl).origin : `http://host.docker.internal:${fixturePort}`;
+  return `${origin}/api/v1`;
 }
 
 function suffix() {
@@ -344,7 +350,8 @@ test("OpenRouter audio models configure and transcribe locally", async ({
   expect(inputAudio["data"]).toBeTruthy();
 
   await page.goto("/");
-  await page.locator("aside").getByRole("button", { name: "Add items" }).click();
+  // Add is in the bar at the bottom of the main column.
+  await page.getByTestId("bottom-bar").getByRole("button", { name: "Add items" }).click();
   await expect(
     page
       .getByRole("dialog", { name: "Add items" })
@@ -357,6 +364,8 @@ test("OpenRouter audio models configure and transcribe locally", async ({
   await page.keyboard.press("Escape");
 
   await page.goto(`/items/${item.item.id}`);
+  // The image source and its actions are under "Manage photos" on the item page.
+  await page.getByRole("button", { name: "Manage photos" }).click();
   await expect(page.getByRole("button", { name: /Generate illustration/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Find online image/ })).toBeVisible();
 

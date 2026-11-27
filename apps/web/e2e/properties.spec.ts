@@ -179,8 +179,13 @@ test("filters rooms by property, remembers the choice, and keeps add-item/contai
     .getByRole("link", { name: "or fill in the form yourself" })
     .click();
   await expect(page).toHaveURL(/\/items\/new/);
-  await expect(page.getByLabel("Property")).toHaveValue(home.id);
-  await expect(page.getByLabel("Room")).toHaveValue(homeKitchen.id);
+  // The form has one place field. It shows the room the form was opened from,
+  // and opens to the property, room and storage place fields.
+  const place = page.getByRole("button", { name: /^Place/ });
+  await expect(place).toContainText(`${home.name} › ${homeKitchen.name}`);
+  await place.click();
+  await expect(page.getByLabel("Property", { exact: true })).toHaveValue(home.id);
+  await expect(page.getByLabel("Room", { exact: true })).toHaveValue(homeKitchen.id);
   const itemName = `Bread maker ${id}`;
   await page.getByLabel("Item name").fill(itemName);
   await page.getByRole("button", { name: "Add to your home" }).click();
@@ -245,7 +250,8 @@ test("moves a room subtree across properties, preserves ids/qr/loan, and guards 
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/rooms/${workshop.id}`);
-  await page.getByRole("button", { name: "Move to property" }).click();
+  await page.getByRole("button", { name: "Room options" }).click();
+  await page.getByRole("menuitem", { name: "Move to property" }).click();
   const moveDialog = page.getByRole("dialog", { name: "Move room to another property" });
   await moveDialog.getByLabel("Destination property").selectOption(cabin.id);
   await expect(moveDialog.getByText(/1 unit\(s\) remain on loan/)).toBeVisible();
@@ -295,7 +301,7 @@ test("moves a room subtree across properties, preserves ids/qr/loan, and guards 
     fullPage: false,
   });
 
-  await page.goto("/settings");
+  await page.goto("/settings/household");
   await expect(page.getByRole("button", { name: `Archive ${home.name}` })).toBeDisabled();
   await page.screenshot({
     path: "../../docs/walkthrough/properties/05-properties-settings.png",

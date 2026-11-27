@@ -206,8 +206,13 @@ for (const mobile of [false, true]) {
 
     await page.goto("/items");
     await ask(page, "Show me the multimeter documentation", true);
-    const shown = page.getByLabel("Assistant tool task").last();
-    await expect(shown.getByTestId("answer-text")).toHaveText(`Your multimeter's manual is ${TITLE}.`);
+    const tasks = page.getByLabel("Assistant tool task");
+    await expect(tasks.last().getByTestId("answer-text")).toHaveText(`Your multimeter's manual is ${TITLE}.`);
+    // Keep hold of this answer by its place: later answers come after it, and its Open
+    // link is used again further down.
+    const shown = tasks.nth((await tasks.count()) - 1);
+    // The manual is listed in the closed Sources list under the answer.
+    await shown.getByText(/^Sources \(\d+\)$/).click();
     // Open leads to the file viewer. The document page is a separate Details link.
     const open = shown.getByRole("link", { name: `Open ${TITLE}`, exact: true });
     await expect(open).toHaveAttribute("href", new RegExp(`^/documents/${manual.id}/view(\\?|$)`));
@@ -223,6 +228,8 @@ for (const mobile of [false, true]) {
     const answered = page.getByLabel("Assistant tool task").last();
     await expect(answered.getByTestId("answer-text")).toContainText("move the red lead to the 10A jack");
     await expect(answered.getByTestId("answer-text")).toContainText(`(${TITLE}, page 2)`);
+    // The manual and its cited page are in one closed Sources list under the answer.
+    await answered.getByText(/^Sources \(\d+\)$/).click();
     const citations = answered.getByRole("list", { name: "Manual citations" });
     await expect(citations.getByRole("link", { name: `${TITLE}, page 2`, exact: true }))
       .toHaveAttribute("href", new RegExp(`^/documents/${manual.id}/view\\?page=2(&|$)`));
@@ -302,6 +309,10 @@ for (const mobile of [false, true]) {
 
     // A citation opens the same viewer at the cited page.
     const citation = page.locator(`a[href^="/documents/${manual.id}/view?page=2"]`);
+    // The Sources lists are closed again when the assistant is opened anew.
+    await expect(citation).toBeHidden();
+    await page.getByLabel("Assistant tool task").filter({ has: citation })
+      .getByText(/^Sources \(\d+\)$/).click();
     await expect(citation).toHaveText(`${TITLE}, page 2`);
     await citation.click();
     await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}/view\\?page=2$`));
@@ -353,10 +364,13 @@ for (const mobile of [false, true]) {
     expect(withFocusInHeader).toBeGreaterThan(-0.05);
     await page.unroute(`**${documentApi}/file`);
 
-    // Managing the document, with its extraction review, stays a separate page.
+    // Managing the document stays a separate page. A manual has no review there any more:
+    // what was read from it is an optional row that starts closed.
     await page.getByRole("link", { name: "Details", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/documents/${manual.id}$`));
-    await expect(page.locator("#document-extraction-review")).toBeVisible();
+    await expect(page.locator("#document-extraction-review")).toHaveCount(0);
+    await expect(page.locator("summary").filter({ hasText: "Details read from this manual" }))
+      .toContainText("A manual needs no review.");
     // The text of every page is there to read, with a link to each page of the file.
     await page.locator("summary").filter({ hasText: "Extracted text" }).click();
     await expect(page.getByText("3 of 3 pages read", { exact: true })).toBeVisible();

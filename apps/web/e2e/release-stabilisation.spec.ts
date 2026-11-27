@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 function suffix() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -43,34 +43,60 @@ async function createItem(
   return (await response.json()) as { item: { id: string } };
 }
 
-test("search examples and immediate submit keep their query", async ({ page }) => {
+test("example questions and an immediate submit keep their words", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  // What the assistant is asked, whichever of its two ways of answering is used.
+  const asked: string[] = [];
+  page.on("request", (sent) => {
+    const path = new URL(sent.url()).pathname;
+    if (sent.method() === "POST" && /\/api\/v1\/(search\/query|assistant\/runs)$/.test(path)) {
+      asked.push((sent.postDataJSON() as { query: string }).query);
+    }
+  });
+  // The Search page is gone. Its example questions are in the empty assistant.
   await page.goto("/search");
+  await expect(page).toHaveURL(/\/items$/);
+  await page.locator('button[title="Open assistant"]').first().click();
+  const panel = page.getByTestId("assistant-panel");
   const example = "Which items have no purchase information?";
-  await page.getByRole("button", { name: example }).click();
-  await expect(
-    page.getByRole("combobox", { name: "Search or ask about your inventory" }),
-  ).toHaveValue(example);
-  await page.waitForTimeout(550);
+  await panel.getByLabel("Suggested questions").getByRole("button", { name: example }).click();
+  await expect(panel.getByRole("log", { name: "Conversation" }).getByText(example, { exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Copy answer" })).toHaveCount(1);
+  expect(asked.length).toBeGreaterThan(0);
+  expect(new Set(asked)).toEqual(new Set([example]));
   let url = new URL(page.url());
-  expect(url.searchParams.get("q")).toBe(example);
+  expect(url.searchParams.get("q")).toBeNull();
   expect(url.searchParams.get("ask")).toBeNull();
   await page.screenshot({
     path: "../../docs/walkthrough/release-stabilisation/01-search-example-light.png",
     fullPage: false,
   });
 
+  // Enter pressed at once, before any match has loaded, must not lose the words.
+  asked.length = 0;
   await page.goto("/search");
   const input = page.getByRole("combobox", {
     name: "Search or ask about your inventory",
   });
   await input.fill("PS5");
   await input.press("Enter");
-  await page.waitForTimeout(550);
+  await expect(page).toHaveURL(/#assistant$/);
+  await expect(panel.getByRole("log", { name: "Conversation" }).getByText("PS5", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Copy answer" })).toHaveCount(1);
+  expect(new Set(asked)).toEqual(new Set(["PS5"]));
   url = new URL(page.url());
-  expect(url.searchParams.get("q")).toBe("PS5");
   expect(url.searchParams.get("ask")).toBeNull();
 });
+
+/** Light or dark is chosen on the Appearance screen. Links are used, so nothing reloads. */
+async function chooseMode(page: Page, mode: "Light" | "Dark") {
+  await page.getByRole("main").getByRole("link", { name: "Back to Settings" }).click();
+  await page.getByRole("main").getByRole("link", { name: /^Appearance/ }).click();
+  await page.getByRole("radiogroup", { name: "Light or dark" }).getByRole("radio", { name: mode, exact: true }).click();
+  await page.getByRole("main").getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("main").getByRole("link", { name: /^System status/ }).click();
+  await expect(page.getByRole("heading", { name: "System status", level: 1 })).toBeVisible();
+}
 
 test("status screen shows real readiness and task states; optional features are compact", async ({
   page,
@@ -97,18 +123,23 @@ test("status screen shows real readiness and task states; optional features are 
     path: "../../docs/walkthrough/release-stabilisation/02-system-status-light.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  await chooseMode(page, "Dark");
   await page.locator("html.dark").waitFor();
+  await status.scrollIntoViewIfNeeded();
+  await expect(status.getByText("Detailed status")).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({
     path: "../../docs/walkthrough/release-stabilisation/03-system-status-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await chooseMode(page, "Light");
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
 
   const room = await createRoom(request, `Release room ${suffix()}`);
   const item = await createItem(request, `Release item ${suffix()}`, room.id);
   await page.goto(`/items/${item.item.id}`);
+  // The image source and its actions are under "Manage photos" on the item page.
+  await page.getByRole("button", { name: "Manage photos" }).click();
   await expect(
     page.getByRole("button", { name: "Find online image" }),
   ).toBeVisible();
@@ -135,7 +166,9 @@ test("status screen shows real readiness and task states; optional features are 
     "title",
     "Voice needs transcription — set up in AI settings",
   );
-  await micButton.click();
+  // The button is only marked as off (aria-disabled), so a press still shows why.
+  // The test tool waits for "enabled" by default, so the press is forced.
+  await micButton.click({ force: true });
   await expect(
     page.getByRole("link", { name: "set up in AI settings" }),
   ).toHaveAttribute("href", "/settings/ai");

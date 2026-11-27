@@ -11,6 +11,11 @@ const MODEL_COUNT = 300;
 
 let mockServer: http.Server;
 let mockPort = 0;
+// The mock AI is reached through Docker's host name by default. Set E2E_AI_BASE_URL
+// (for example http://127.0.0.1:4791) when the API runs outside Docker: the mock
+// then listens on that URL's port.
+const aiBaseUrl = process.env.E2E_AI_BASE_URL;
+const fixedPort = aiBaseUrl ? Number(new URL(aiBaseUrl).port) : 0;
 
 const catalog = Array.from({ length: MODEL_COUNT }, (_, index) => ({
   id: `openrouter/vendor-${index}/model-${index}-${index}-${LONG_SUFFIX}`,
@@ -36,7 +41,7 @@ test.beforeAll(async () => {
     response.statusCode = 404;
     response.end(JSON.stringify({ error: "not found" }));
   });
-  await new Promise<void>((resolve) => mockServer.listen(0, "0.0.0.0", resolve));
+  await new Promise<void>((resolve) => mockServer.listen(fixedPort, "0.0.0.0", resolve));
   mockPort = (mockServer.address() as AddressInfo).port;
 });
 
@@ -45,7 +50,8 @@ test.afterAll(async () => {
 });
 
 function providerBaseUrl() {
-  return `http://host.docker.internal:${mockPort}/${LONG_PATH}`;
+  const origin = aiBaseUrl ? new URL(aiBaseUrl).origin : `http://host.docker.internal:${mockPort}`;
+  return `${origin}/${LONG_PATH}`;
 }
 
 async function resetProviders(request: APIRequestContext) {
@@ -243,6 +249,10 @@ test.describe("provider dialog responsive layout", () => {
       { width: 320, height: 568, label: "narrow mobile" },
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      // Crossing to the phone layout slides the sheet up. Measure it once it is still.
+      await reopened.evaluate((element) =>
+        Promise.all(element.getAnimations().map((animation) => animation.finished)),
+      );
       await assertDialogLayout(page, reopened, viewport.label);
       const reopenedPicker = reopened.getByRole("combobox", {
         name: "Default model",

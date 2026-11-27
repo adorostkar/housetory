@@ -95,6 +95,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const assistantTrigger = useRef<HTMLElement | null>(null);
   const assistantHeading = useRef<HTMLHeadingElement | null>(null);
   const restoreAssistantFocus = useRef(false);
+  const assistantOpenedAt = useRef(0);
   const { openAddItems } = useAddItems();
   const { select: selectDocument, selectImport, selectPhoto, pendingReviews } = useAssistantDocuments();
   // Captures handed straight to the inline review need no separate "ready" toast.
@@ -108,16 +109,23 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const mainLocation = itemPanel ? pageBehindItem(location) : location;
   const [railOpen, setRailOpen] = useRememberedRail();
   const [assistantTall, setAssistantTall] = useState(false);
+  const [barFocused, setBarFocused] = useState(false);
+  // The keyboard is open for a field on the page, not for the bar. The bar steps
+  // aside so the field and its Save button have the room, as a tab bar would.
+  const typingOnPage = softwareKeyboardOpen && !barFocused;
   const rail = useRailModel();
   useKeyboardInset();
   useEffect(() => {
     // Things fixed to the bottom of the screen (bulk bars, save bars) sit above the bar.
     const root = document.documentElement;
-    root.style.setProperty("--shell-bar-height", desktop ? DESKTOP_BAR_HEIGHT : BAR_HEIGHT);
+    root.style.setProperty(
+      "--shell-bar-height",
+      desktop ? DESKTOP_BAR_HEIGHT : typingOnPage ? "0px" : BAR_HEIGHT,
+    );
     return () => {
       root.style.removeProperty("--shell-bar-height");
     };
-  }, [desktop]);
+  }, [desktop, typingOnPage]);
   const closeAssistant = useCallback(() => {
     restoreAssistantFocus.current = true;
     setAssistantOpen(false);
@@ -239,6 +247,10 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   }, [location.hash, location.pathname, location.search, navigate]);
 
   useEffect(() => {
+    if (assistantOpen) assistantOpenedAt.current = performance.now();
+  }, [assistantOpen]);
+
+  useEffect(() => {
     if (!assistantOpen) return;
     const documentMatch = location.pathname.match(/^\/documents\/([^/]+)$/);
     if (documentMatch?.[1]) selectDocument(documentMatch[1]);
@@ -299,7 +311,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
   const compact = !desktop;
   const showRail = compact && railOpen;
   // The assistant has its own message field, so the bar steps aside for it on the phone.
-  const showBar = !(compact && assistantOpen);
+  const showBar = !(compact && (assistantOpen || typingOnPage));
 
   return (
     <ShellProvider value={{ compact, railOpen, setRailOpen }}>
@@ -365,6 +377,7 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
             canAdd={canWrite}
             onAdd={(trigger) => openAddItems(undefined, trigger)}
             keyboardOpen={softwareKeyboardOpen}
+            onFocusWithinChange={setBarFocused}
           >
             {({ onFocusChange }) => (
               <QuickSearch
@@ -409,7 +422,12 @@ function AppShellLayout({ routes, panelRoutes }: ShellRoutes) {
           style={{ "--item-panel": itemPanel ? PANEL_WIDTH : "0px" } as React.CSSProperties}
           onOpenAutoFocus={(event) => { event.preventDefault(); assistantHeading.current?.focus(); }}
           onCloseAutoFocus={(event) => { event.preventDefault(); }}
-          onInteractOutside={(event) => { if (desktop) event.preventDefault(); }}
+          onInteractOutside={(event) => {
+            // Desktop: the box stays open while the page is used. Phone: the tap that
+            // opened the sheet can be followed by a second, late event above the sheet.
+            // That must not close it again at once.
+            if (desktop || performance.now() - assistantOpenedAt.current < 600) event.preventDefault();
+          }}
           className={cn(
             "fixed z-50 flex min-h-0 flex-col overflow-hidden bg-popover text-popover-foreground shadow-lift outline-none",
             // Phone: a sheet from the bottom that can go to full height. It stays above the keyboard.

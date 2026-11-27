@@ -16,11 +16,10 @@ Branch: `feat/mobile-first-programme` (from `origin/main` at `f026cae`).
 | 3 | Natural assistant behaviour | Done (see "Phase 3 record") |
 | 4 | Inventory-first navigation and everyday flows | Done (see "Phase 4 record") |
 | 5 | Secondary flows and account design | Done (see "Phase 5 record") |
-| 6 | Verification and final handoff | Not started |
+| 6 | Verification and final handoff | Done (see "Phase 6 record" and "Final checklist") |
 
-The decision is made (see "Decision" below). Phases 1 to 6 now run without
-stopping. Each finished phase is committed and pushed. Nothing is merged or
-deployed.
+All phases are finished and pushed to the branch. Nothing is merged or deployed.
+What is not complete is listed plainly under "Not complete" near the end.
 
 ## Phase 0: the three designs
 
@@ -115,10 +114,14 @@ It is not in Figma. **This is the approved design.** These choices are settled:
   The planned assistant behaviour decides what the text means.
 - **Review:** photo with numbered pins on top. Tap a value and type the
   correction in the bar. Skipped findings move to the end, with Undo.
+  *(Built differently: no pins, and corrections are made in the row. See
+  "Where the app differs from the Design D mock".)*
 - **Documents:** saved as soon as the file is chosen, with Undo. Details after.
 - **Add and attach:** both open a small menu at the button that was pressed. On
   the phone it is a sheet from the bottom. On desktop it is a menu above the
   button. The chosen task opens after that.
+  *(Built differently: + opens the existing Add items surface and the
+  paperclip opens the file chooser. See the same section.)*
 - **More:** its choices roll up over the rooms, inside the rail (Loans,
   Documents, Places, Purchases, Insurance, Stocktake, Settings). The More tile
   turns into Close, which brings the rooms back. A chosen page opens next to
@@ -447,6 +450,452 @@ screen keeps that.
 Checks: type check clean; the unit tests of all changed pages pass, with new
 tests for the Settings index, setup, labels, insurance steps and one-tap
 Present. No backend change.
+
+## Phase 6 record
+
+### How it was checked
+
+Everything ran on throwaway stacks on the development machine: a separate
+Postgres on its own port, test databases, made-up items. No real household, no
+production data and no production server was changed.
+
+- **Type check and production build:** clean.
+- **Unit tests (web):** 82 files, 562 tests, all pass. Before the programme
+  there were 74 files and 462 tests.
+- **Backend tests:** 881 tests. 879 pass. The two that fail are in
+  `tests/test_actual_inventory.py`. They fail the same way on the commit the
+  programme started from, so they are not from this work. Lint is clean.
+- **End-to-end (Playwright, system Chrome):** all 53 files were brought in line
+  with the new interface and run. See the table below.
+- **Real AI model:** one session with `openai/gpt-6-luna` through OpenRouter,
+  on made-up items. See "Real-model check".
+- **By eye, in the running app:** item list, item page, room page, loans, add a
+  document, Settings, Appearance and the desktop panel at 390 px and 1440 px.
+  27 pages were checked by script at 320 px for sideways overflow and errors
+  (none), and again at 844 x 390 landscape and 768 px (none).
+
+### End-to-end results
+
+| Group | Files | Tests passed |
+| --- | --- | --- |
+| Shell: `navigation.spec.ts` (rewritten) | 1 | 10 of 10 |
+| Shell, Settings, accounts, search, AI settings | 17 | 45 of 45 |
+| Items, places, loans, purchases, stocktake, evidence | 20 | 50 of 50 |
+| Assistant, documents, reviews | 15 | 101 of 102 |
+| **Total** | **53** | **206 of 207** |
+
+The one test that did not run is the PWA test in `ai-camera-import.spec.ts`. It
+needs the built app behind nginx.
+
+What changed in the tests:
+
+- Tests were moved to the new interface with the same goal and the same checks
+  on data. Checks that named removed things (the header theme button, the five
+  tabs, the Overview page, the old `/search` result page) were replaced by
+  checks on what took their place.
+- No check on data, permissions or "not applied twice" was removed.
+- One rewritten test turned out to pass for the wrong reason. It was corrected
+  to check what the original meant (the assistant draft survives closing and
+  reopening).
+- Many end-to-end files save pictures into `docs/walkthrough/`. Those tracked
+  pictures were put back after every run. **They still show the old
+  interface.** New pictures are kept outside the repository (see
+  "Screenshots").
+
+### Real-model check
+
+Model: `openai/gpt-6-luna` through OpenRouter. 63 requests, made-up items only.
+The owner supplied the key and chose the model. The key was only ever in a
+throwaway test database.
+
+| Scenario | Result |
+| --- | --- |
+| General question, nothing looked up, said to be general | Pass |
+| Facts about recorded things | Pass |
+| On the drill page: "Where is it?" | Pass: the drill |
+| On the drill page: "Where is the tent?" | Pass: the tent |
+| Vague "tool for making holes" | Failed, then pass after a fix |
+| Stated serial number | Pass: applied at once; Undo restored it; Undo after a newer edit was refused and changed nothing |
+| "Move the tent to the Garage." | Failed, then pass after a fix |
+| "Move everything in the Attic…" | Pass: one preview, nothing moved |
+| "The drill is a Makita." (record said Bosch) | Pass: applied with Undo; the answer said what changed |
+| Swedish question and a follow-up | Pass: right items, answers in Swedish |
+| Stop, and steer ("actually only the kitchen") | Pass |
+| The same request sent twice | Pass: applied once |
+| A table in the answer | Pass |
+| A viewer cannot change anything | Not run live (an invitation needs email); covered by backend tests |
+| `assistant-review-live.spec.ts` | Pass |
+
+Fixes that came out of it: the search tool now tells the model to try single
+words when a long phrase finds nothing; a reply from the model that cannot be
+read is asked for again (at most twice) instead of ending in an error; looking
+up a room now returns its id, so the model does not look twice.
+
+Limits of this check: one model, one short session. Online manual search was
+not tested with a real search (no search key). "The drill is a Makita." was
+applied at once; it can be undone and was explained, but a preview would also
+have been reasonable. Whether a person "stated" a change is the model's claim;
+the server only checks the allowlist and that the new value is in the person's
+own words.
+
+### Bugs found and fixed in Phase 6
+
+- The bulk action bar was drawn off-screen. It is now drawn in the page body.
+- On a phone the assistant sheet could close right after it opened.
+- A question sent to the assistant stayed in the bar as a filter on the item
+  list. The field is now emptied.
+- Escape in the borrower name field closed the whole dialog. It now closes the
+  open list first.
+- The name list in the new loan dialog opened by itself and covered other
+  controls.
+- With the keyboard open on a form, the Save bar and the bottom bar together
+  covered about 125 px. The bottom bar now steps aside while a field on the
+  page has the keyboard.
+- A list came back to its place with a slide. It now comes back at once.
+- A warning on a review row ("this is part of the building") only showed after
+  opening the row. It now shows on the closed row.
+- Small overflow on narrow phones on several screens (AI settings, purchase
+  totals, Appearance, long unbroken text on an item).
+- Back links, section tabs, the password button and native checkboxes were
+  smaller than 44 px on touch screens.
+- Older than this work, found on the way: per-unit price entry was hidden for
+  some items; "Test all enabled AI tasks" did not start on the development
+  server; a review run could show an in-between count.
+
+### Bottom-bar space and the keyboard
+
+This is point 4 of the decision. What was done:
+
+- On a phone the field takes the whole bar while it has focus. Attach and voice
+  hide while there is text. With the "This item" chip, voice hides until the
+  field has focus. Under 360 px attach hides too, the chip can shrink, and the
+  field keeps at least 44 px.
+- The bar and the assistant sheet follow the keyboard through the visual
+  viewport. While a field on the page has the keyboard, the bar is hidden.
+- Tests make the window shorter to act like a keyboard, at 390 px.
+
+**Not done: a real iPhone.** No device was available. A shorter window is not
+the same as the iOS keyboard. The bar's place above the real keyboard, the
+safe area in the installed PWA, and how the field feels with one hand still
+need a check on a device. Problems found there are to be fixed then, as agreed.
+
+### Screenshots
+
+36 pictures of the finished app are kept outside the repository, on the
+development machine:
+
+`~/.copilot/session-state/3641ec55-9ea3-4388-a02a-630e6e621ce5/files/mfp-runtime/screenshots/`
+
+They cover a 390 px phone (16 screens), a 320 px phone, landscape, a tablet, a
+1440 px desktop with the item panel, and all four colour themes in light and
+dark. The real-model record is next to them in `REAL_MODEL_CHECK.md`. The
+clickable Design D mock is in `~/Downloads/housetory-mock-design-D.zip`.
+
+## Final checklist
+
+State is one of: **Done**, **Partly** (with what is missing), **Not done**.
+
+### Working method and principles
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| One feature branch from `origin/main`; unrelated work kept | Done | `feat/mobile-first-programme` |
+| Specification not copied into the repository; plan kept here | Done | this file |
+| Design work kept outside Git; stop for the design decision | Done | Figma, mock zip; decision of 26 Nov 2026 |
+| Commit and push each finished phase; no merge, no deploy | Done | "Commits" below |
+| Reuse shared components, services, the assistant registry, jobs and history | Done | no new framework; one new shared row, one new policy module |
+| Mobile first, desktop with the same functions | Done | rail and bar on phones; sidebar, bar and item panel on desktop |
+| Compact by default, more on request; uncertainty and consequences stay visible | Done | review rows show "Check: …" closed; delete and move previews unchanged |
+| Core inventory, search, documents and exports work without AI | Done | unchanged; the test stacks ran without AI |
+| No second assistant or competing interpretation pipeline | Done | one registry; the "?" shortcut of the mock was not built |
+| Household isolation, permissions, provenance, idempotency, source documents kept | Done | no data migration; backend tests for these still pass |
+
+### Phase 0
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| Three new, clearly different UI designs in Figma, with prototypes | Done | "Phase 0: the three designs" |
+| Comparison, recommendation, honest limits, then stop | Done | same section, "Limits" |
+| Selected design recorded | Done | Design D, with four colour themes ("Decision") |
+| Rejected designs not built | Done | A, B and C are not in the app |
+| No theme chooser | Changed by the owner | four colour themes were asked for with the approval |
+
+### Phase 1: shared mobile behaviour
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| Design tokens, shared controls, shell and navigation of the chosen design | Done | `components/app-shell.tsx`, `components/shell/` |
+| Four colour themes, light and dark | Done | `styles/globals.css`, Settings → Appearance |
+| Inventory-first start | Done | `/` goes to `/items` |
+| Touch targets of 44 px | Partly | shared buttons, menus, tabs, back links, checkboxes, rail and bar are done. A few controls on Settings screens are 36 to 40 px (role select, AI model fields) and the label start grid is 36 px |
+| Stable keyboard, safe areas, reachable main actions | Partly | built and tested with a shorter window; **not checked on an iPhone** |
+| No zoom on focus; pinch zoom and text scaling kept | Done | 16 px rule kept; viewport tag unchanged |
+| Predictable Back, Close, Cancel and outside tap | Done | Close fix on sheets; Escape closes the inner list first |
+| Drafts and selections kept; cleared on sign-out | Done | item drafts as before; bulk selection survives opening an item; recent items cleared with drafts |
+| List position and filters kept when opening and closing an item | Done | position restored at once; on desktop the list stays next to the panel |
+| No nested scrolling or stacked overlays | Done | one panel on desktop, one sheet on phones |
+| Reduced motion, labels and focus | Done | global rule kept; new controls have names |
+| Add-items Close problem reproduced before fixing | Done | "Phase 1 record" |
+| Small and large phone, short landscape, tablet, desktop exercised | Done | 320, 390, 844 x 390, 768 and 1440 px |
+| iPhone and PWA checks reported apart from browser checks | Done | none were done; said so here |
+
+### Phase 2: capture, documents and reviews
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| Choose, photograph, scan or drop a file | Done | upload dialog, scan dialog |
+| Preview and true processing state | Done | `document-add-steps.tsx` |
+| Details and item are optional and closed | Done | "Attach to an item", "Add details" |
+| Suggestions shown when there are some | Done | "N details found · View" |
+| Save to the library without an item; nothing required | Done | save on choose, with Undo |
+| From an item, the link is kept and shown | Done | "Attached to: (item)" |
+| Original saved before any review; failed reading keeps the original | Done | unchanged server order; retry and download stay |
+| Manuals do not open a purchase review | Done | left out of pending captures |
+| One compact row for all four review kinds | Done | `components/review-row.tsx` |
+| Old → new for existing records; read values for new ones | Done | row body |
+| Uncertain fields are clear and can be edited | Done | "Check: …" line; inline name and quantity |
+| Empty fields under "More details" | Done | row editor |
+| Checkboxes select only; nothing selected at first; Select all | Done | all four kinds |
+| A direct Add or Apply on each row | Done | per-row button |
+| Bulk button says what it does; off when nothing is selected; separate counts | Done | "Add 3 selected items" and similar |
+| Skip removes the row, offers Undo, keeps edits | Done | "Skipped (n)" with Restore |
+| Dismissals are remembered; reassessment still possible | Done | server state; "Reconsider dismissed" kept |
+| Way back to skipped work after the message is gone | Done | "Skipped (n)" part |
+| No routine Import/Skip/Reject dropdowns; merge only for duplicates | Done | removed |
+| Required fields checked before accepting; errors beside the field | Done | row editor |
+| Partial failure keeps what worked and what is left | Done | failed rows stay selected |
+| Quiet line for optional suggestions in chat | Done | "N possible corrections · View suggestions" |
+| An accepted row cannot be added twice | Done | server rules kept; row loses its actions |
+| A small picture on each row where useful | Partly | photo reviews show the source photo once, above the rows |
+
+### Phase 3: assistant
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| One entry point; no second launcher | Done | robot button in the bar |
+| General questions need no item and no lookup | Done | answer kind `general`; real-model pass |
+| Questions about recorded things use the page and current records | Done | real-model pass |
+| "This item" can be removed on phone and desktop | Done | chip with × in the field |
+| An explicit change of subject is followed | Done | real-model pass ("Where is the tent?" on the drill page) |
+| Clarify only when it matters | Done | no routine identity confirmation |
+| Product limits need matching evidence; general advice is said to be general | Done | prompt rule and server gate |
+| Prefer local records, then read further or go online | Partly | local first works; online is manual discovery only, and it was not tried with a real search |
+| Tell typed facts, sourced facts and estimates apart | Done | provenance in item details |
+| Working source and page links; nothing invented | Done | citations come from pages actually read |
+| Use stated information to improve the record | Done | direct edit |
+| Clear, reversible instructions run at once, with Undo | Done | allowlist: edit one item, move one item |
+| Uncertain, conflicting, large or consequential changes get one preview | Done | everything outside the allowlist |
+| Server-enforced policy, small allowlist | Done | `assistant_tools/policy.py` |
+| Undo is safe; a conflict is explained, nothing overwritten | Done | 409 with a reason; real-model pass |
+| Text in documents or websites is never permission | Done | direct apply is refused after such text was read |
+| Manual discovery and saving as one task | Partly | built and covered by scripted tests; not tried with a real search |
+| Suggest a correction on a real mismatch; no housekeeping flood | Done | prompt rule; scripted tests |
+| Paragraphs, headings, lists and tables | Done | `answer-text.tsx` |
+| Only supported components, no model-made UI | Done | unchanged |
+| One compact Sources list | Done | "Sources (n)" |
+| Video links from real online results | **Not done** | see "Not complete" |
+| Progress from real states; short updates; no percentages | Done | progress labels from tool states |
+| Stop by button or by words; steer the rest | Done | stop words and `POST /assistant/runs/{id}/steer` |
+| Stop prevents further changes; says what was done | Done | stop message |
+| Finished results kept across recovery; no repeated writes | Done | unchanged step store; receipts |
+| Time, retry and spending limits stay with the application | Done | limits kept; a steer limit of six was added |
+| Technical details behind a disclosure | Done | unchanged |
+| Tests: general guidance, evidence, vague references, corrections, conflicts | Done | scripted and real-model |
+| Tests: direct change, Undo, preview, cancel, duplicates | Done | scripted and real-model |
+| Other languages and follow-ups | Done | Swedish, real-model |
+| A few real-model checks on isolated data | Done | "Real-model check" |
+| No real household record changed | Done | throwaway databases only |
+
+### Phase 4: inventory-first navigation and everyday flows
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| Overview removed as a main place; open in the inventory | Done | page deleted |
+| One item list | Done | `/items` |
+| Recent order from adding or opening, not view counts | Done | `lib/recent-items.ts` |
+| Recent access kept locally, scoped and cleared | Done | per person and household, on the device; limit written down |
+| Later of created and opened, fixed tie-break | Done | id as tie-break |
+| Order does not change while browsing | Done | snapshot, 30 minutes |
+| Recent, Newest, Name, Location; choice remembered | Done | sort control |
+| Search order comes first | Done | server match order |
+| Short notices only when useful | Done | notice row |
+| Totals and money reports still reachable | Done | Purchases, Warranties |
+| Home and Items no longer double; clear desktop form | Done | rail, sidebar |
+| Item: name, place, availability and actions first | Done | "Lives in", "Right now" |
+| Photos less dominant; full screen still there | Done | thumbnail strip |
+| Documents and Loans near the item facts | Done | tabs |
+| Photo source text and record details out of the way | Done | "Manage photos", "Record details" |
+| Essentials-first editing; optional parts closed | Done | unchanged, plus one place field |
+| Better place choice; Save always reachable | Done | one field; sticky Save |
+| Price per unit and loan rules kept | Done | a hidden per-unit entry was also repaired |
+| Rooms and containers: contents and a compact place choice first | Done | place chips |
+| Empty photo areas, stocktake text and management folded | Done | ⋯ menu |
+| Add in context, bulk actions, way back kept | Done | unchanged behaviour |
+| What delete or move does to the contents is shown | Done | previews unchanged |
+| Loans: open items and people first | Done | list under the title |
+| Filters joined; lent and borrowed kept apart | Done | two chips, "Filters" |
+| Direct Return | Done | on rows and on the item |
+| Loan entry starts with item, person, quantity; dates default | Done | "More options" |
+| Name suggestions and reuse kept; partial returns and history kept | Done | unchanged |
+| Compact bulk bar that respects keyboard and bar | Done | fixed above the bar |
+| Common actions first, others under More | Done | Move, Tags, More, Clear |
+| "All loaded" never looks like "all matching" | Done | wording kept |
+| Selection kept across navigation and partial failure; pruning explained | Done | per page |
+| Documents and purchases: search visible, filters on request with a count | Done | both pages |
+| Compact purchase rows that open | Done | Purchases |
+| Totals, shared allocations and item links stay correct | Done | figures unchanged; partial apply is guarded |
+| Source details without repeated paragraphs | Done | folded |
+
+### Phase 5: secondary flows and account design
+
+| Requirement | State | Where |
+| --- | --- | --- |
+| Settings as an index into focused screens | Done | "Phase 5 record" |
+| Normal preferences apart from administration; advanced settings kept | Done | owner-only rows hidden for others |
+| Insurance: scope, review, export; honest values | Done | three steps and a summary |
+| Stocktake: fast counting, progress, resume; explicit reconciliation | Done | one-tap Present; Stocktake page |
+| Label calibration under Advanced | Done | Labels |
+| Sign-in, recovery and invitations kept | Done | unchanged |
+| First run toward account, home, first item | Done | lands in the item list with the first-run steps |
+| Account, household and membership ownership designed | Done | design document |
+| Onboarding tested locally | Done | unit tests and the end-to-end setup path |
+| Hosted sign-up, if built, off by default | Not built | design only, by choice |
+| No destructive migration of members or households | Done | no migration at all |
+| Supplied AI next to bring-your-own-key: ownership, usage, routing, privacy | Done | `docs/AI_SUPPLIED_AND_BYOK.md` (design only) |
+| No billing, payments or hosted AI built | Done | none |
+
+### Phase 6: verification
+
+| Journey | State | How |
+| --- | --- | --- |
+| 1. Capture → compact review → correct → save → find | Done | end-to-end (photo and import with a scripted model, documents with real OCR) |
+| 2. Save to the library, then attach; add from an item | Done | end-to-end and by hand at 390 px |
+| 3. Browse or search → item → edit, documents, loans → back | Done | end-to-end and by hand |
+| 4. Room and container browsing; move selected items | Done | end-to-end |
+| 5. Lend, borrow, partial return, correction | Done | end-to-end |
+| 6. Assistant: general help, evidence, manual discovery, correction, Undo | Partly | real model for all but online manual discovery, which ran with a fixture search only |
+| 7. Long work, steering, stopping, recovery | Done | real model for stop and steer; scripted for recovery |
+| 8. Insurance export, stocktake, Settings | Done | end-to-end |
+| 9. No AI, permissions, household isolation | Done | end-to-end and backend tests |
+| Phone at 320, 390 and 430 px, short and landscape, tablet, desktop | Partly | 320, 390, landscape, 768 and 1440 px were checked; 430 px was not checked on its own |
+| Empty, large, loading and error states | Partly | covered where the end-to-end files cover them; not walked through one by one |
+| Real iPhone and PWA | **Not done** | no device |
+
+## Commits
+
+All on `feat/mobile-first-programme`, on top of `main` at `f026cae`.
+
+| Commit | What |
+| --- | --- |
+| `ce03d7f` | Plan, Phase 0 record and the Design D decision |
+| `d3a650f` | Phase 1 |
+| `316393c` | Phase 5 |
+| `b1d85fd` | Phase 2 |
+| `4ee2b4b` | Phase 3 |
+| `1f59cf8` | Phase 4 |
+| `ea69ef7` | Docs in line with the new interface; touch targets |
+| the commit after `ea69ef7` | Phase 6: end-to-end files, fixes found by them, real-model fixes, this record |
+
+The phases were built side by side, so they are not in number order.
+
+## Removed UI and code
+
+- The Overview page and its route. Its totals live on Purchases and its
+  warranty watch on Warranties.
+- The top header, the five-tab bar and the "More destinations" menu.
+- The theme button in the header. The choice is in Settings → Appearance.
+- The Import/Skip/Reject dropdowns and "Approve N entries" in reviews.
+- The required document type before an upload in the assistant.
+- The separate "choose lend or borrow", item picker and borrow dialogs. There
+  is one "New loan" surface.
+- The large photo frame on the item page.
+
+## Where the app differs from the Design D mock
+
+The mock was a sketch with made-up data. These parts of it were **not** built
+as drawn:
+
+1. **Photo review with numbered pins.** The mock put numbered pins on the
+   photo. The app shows the photo once above the rows, with no pins. Photo
+   recognition returns names and values but no positions in the picture, so
+   pins need a change to what the AI is asked for and to what is stored. That
+   was not done.
+2. **Correcting a finding by typing in the bottom bar.** In the mock, tapping a
+   value moved it into the bar for editing. In the app, name and quantity are
+   edited in the row itself, and other fields in the row's editor. This
+   follows the specification ("small corrections happen inline") but it is not
+   what was chosen in the mock.
+3. **The Add menu.** The mock's + opened a small menu with three choices. The
+   app's + opens the existing "Add items" surface, where text, a link, a photo
+   or voice go into one field. The paperclip opens the file chooser at once.
+4. **The desktop panel** holds the item and its edit form. In the mock,
+   reviews and documents also opened there. In the app they open as pages,
+   dialogs or in the assistant.
+5. **Fonts.** The mock used its own fonts. The app keeps its fonts in all four
+   themes.
+
+Points 1 and 2 are the largest gaps. They can be built later if wanted.
+
+## Known limits and deferred work
+
+- **Recent order is per device.** Opening times are not sent to the server.
+- **Fonts.** The themes change colours only. Design D's own fonts are not
+  shipped, so the "Design D" theme uses the app's fonts.
+- **"Collected" dark** has no Figma original; it was derived.
+- **Pictures in `docs/walkthrough/`** and in older reports show the old
+  interface. They were left as records.
+- **The import page (`/imports`)** has no link in the navigation. This was so
+  before the programme.
+- **The review count on the robot button** can lag up to 30 seconds after an
+  Add-items capture.
+- **Photo review rows** have no picture each.
+- **Document matching** sorts equally strong matches by name. Older than this
+  work.
+- **In the new loan dialog**, the name list still covers "More options" while a
+  name is being typed.
+- **Each assistant change** costs three to five model requests.
+- **The phone rail in landscape** shows only about two rooms at a time. It
+  scrolls, and it can be hidden.
+
+## Not complete
+
+Stated plainly:
+
+1. **No check on a real iPhone or as an installed PWA.** The keyboard and the
+   bottom-bar space are only tested with a shorter browser window.
+2. **Video links in assistant answers are not built.**
+3. **Online manual discovery was not tried with a real search and a real
+   model together.** It passes with a fixture search and a scripted model.
+4. **One end-to-end test did not run** (the PWA test behind nginx).
+5. **A few touch controls are still under 44 px** on Settings screens and the
+   label start grid.
+6. **Hosted sign-up is design only**, as the specification allows.
+7. **Two backend tests fail**, as they did before this work
+   (`tests/test_actual_inventory.py`).
+8. **Two interactions of the Design D mock are not built:** numbered pins on
+   the review photo, and correcting a finding by typing in the bottom bar. See
+   "Where the app differs from the Design D mock".
+
+## Judgement
+
+- **Are the phone journeys simple and usable?** In the browser, yes for the
+  ones tried: the list starts at once, an item shows where it lives and who has
+  it, a document is saved in one step, a review is a short row with one button.
+  The honest gap is the real phone. The bar holds a lot in little width, and
+  only a device can show how it feels with a thumb and a real keyboard.
+- **Is Design D coherent across flows?** Mostly, with the differences from the
+  mock listed above. The shell, the item list, the
+  item, rooms, loans, documents, reviews and Settings follow one pattern: title,
+  one tools row, compact rows, one ⋯ menu. Less reworked screens (AI settings,
+  system status, labels, imports) keep their older, denser look inside the new
+  shell.
+- **Does desktop still work?** Yes. The sidebar, the bar and the item panel
+  work at 1440 px, and every end-to-end file with desktop steps passes. Between
+  1024 and 1200 px an item is a full page, not a panel.
+
+Tests passing is not the claim here. The claim is narrower: on the widths
+tried in a browser, the rebuilt flows do what the specification asks, with the
+gaps listed above.
 
 ## Checks done in Phase 0
 

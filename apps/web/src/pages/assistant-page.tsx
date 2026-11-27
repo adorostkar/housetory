@@ -1436,6 +1436,8 @@ function AssistantAnswer({
             const container = itemContainer(item);
             const place =
               [
+                // When more than one household was searched, say which one has the item.
+                (response.households?.length ?? 0) > 1 ? item.household?.name : null,
                 item.property?.name,
                 item.room?.name,
                 container

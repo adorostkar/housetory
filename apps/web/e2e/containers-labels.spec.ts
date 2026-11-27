@@ -74,7 +74,8 @@ test("moves a container across rooms without changing its identity or contents",
 
   await page.goto(`/containers/${container.id}`);
   await expect(page.getByRole("heading", { name: container.identifier, level: 1, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Move", exact: true }).click();
+  await page.getByRole("button", { name: "Container options" }).click();
+  await page.getByRole("menuitem", { name: "Move container" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Destination room").selectOption(destination.id);
   await dialog.getByRole("button", { name: "Move container" }).click();
@@ -105,6 +106,8 @@ test("previews, downloads and calibrates a label sheet", async ({ page, request 
   expect(path).toBeTruthy();
   expect(fs.statSync(path as string).size).toBeGreaterThan(10_000);
 
+  // Calibration is under a closed Advanced disclosure.
+  await page.getByText("Advanced · Calibration").click();
   const calibrationPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download calibration sheet" }).click();
   const calibration = await calibrationPromise;
@@ -119,7 +122,8 @@ test("shows an authenticated QR destination and mobile container view", async ({
   const room = await createRoom(request, `QR ${Date.now()}`);
   const container = await createContainer(request, room.id, "bin");
   await page.goto(`/containers/${container.id}`);
-  await page.getByRole("button", { name: "QR" }).click();
+  await page.getByRole("button", { name: "Container options" }).click();
+  await page.getByRole("menuitem", { name: "QR code" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.locator("img")).toBeVisible();
   const payload = await dialog.locator("code").innerText();
@@ -132,7 +136,7 @@ test("shows an authenticated QR destination and mobile container view", async ({
   const mobilePage = await mobile.newPage();
   await mobilePage.goto(`/containers/${container.id}`);
   await expect(mobilePage.getByRole("heading", { name: container.identifier, level: 1, exact: true })).toBeVisible();
-  await expect(mobilePage.getByRole("button", { name: "Move", exact: true })).toBeVisible();
+  await expect(mobilePage.getByRole("button", { name: "Container options" })).toBeVisible();
   await mobilePage.goto("/labels");
   await expect(mobilePage.getByText("Printer checklist")).toBeVisible();
   await mobile.close();
@@ -169,29 +173,7 @@ async function uploadContainerPhoto(
   expect(response.ok()).toBeTruthy();
 }
 
-async function expectPhotoFrame(
-  page: Page,
-  state: "empty" | "photo",
-  limits: { min: number; max: number },
-) {
-  const frame = page.getByTestId("entity-photo-frame");
-  await expect(frame).toBeVisible();
-  if (state === "empty") {
-    await expect(frame.getByText("Add a photograph")).toBeVisible();
-  } else {
-    await expect(
-      page.getByRole("button", { name: /photograph full screen$/ }),
-    ).toBeVisible();
-  }
-  const box = await frame.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(limits.min);
-  expect(box!.height).toBeLessThanOrEqual(limits.max);
-  const metrics = await frame.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+async function expectNoOverflow(page: Page) {
   const documentMetrics = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
@@ -199,6 +181,31 @@ async function expectPhotoFrame(
   expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(
     documentMetrics.clientWidth + 1,
   );
+}
+
+/** Without photos the page shows no photo block; "Add photo" is in the ⋯ menu. */
+async function expectAddPhotoFromMenu(page: Page, menuName: string) {
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^View photograph/ })).toHaveCount(0);
+  await page.getByRole("button", { name: menuName }).click();
+  await page.getByRole("menuitem", { name: "Add photo" }).click();
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
+  await page.getByRole("button", { name: "Close add photo" }).click();
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+  await expectNoOverflow(page);
+}
+
+/** With photos there is one strip of thumbnails; the large frame opens with Manage. */
+async function expectPhotoStrip(page: Page, count: number) {
+  await expect(page.getByRole("button", { name: /^View photograph \d/ })).toHaveCount(count);
+  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(1);
+  await expect(page.getByTestId("entity-photo-frame")).toHaveCount(0);
+  const strip = await page.getByRole("button", { name: "View photograph 1" }).boundingBox();
+  expect(strip).not.toBeNull();
+  expect(strip!.height).toBeLessThanOrEqual(72);
+  await expectNoOverflow(page);
 }
 
 test("keeps room and container photo areas compact for empty and populated states", async ({
@@ -210,39 +217,31 @@ test("keeps room and container photo areas compact for empty and populated state
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/rooms/${room.id}`);
-  await expectPhotoFrame(page, "empty", { min: 160, max: 220 });
-  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(0);
+  await expectAddPhotoFromMenu(page, "Room options");
 
   await page.setViewportSize({ width: 393, height: 852 });
-  await expectPhotoFrame(page, "empty", { min: 160, max: 230 });
+  await expectAddPhotoFromMenu(page, "Room options");
 
   await uploadRoomPhoto(request, room.id, "room-one.png");
   await page.reload();
-  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
-  await expect(page.getByRole("button", { name: "View photograph 1" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+  await expectPhotoStrip(page, 1);
+  await page.getByRole("button", { name: "Manage photographs" }).click();
+  await expect(page.getByTestId("entity-photo-frame")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /photograph full screen$/ }),
+  ).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
   await uploadRoomPhoto(request, room.id, "room-two.png");
   await page.reload();
-  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
-  await expect(page.getByRole("button", { name: /^View photograph \d/ })).toHaveCount(2);
+  await expectPhotoStrip(page, 2);
 
   await page.goto(`/containers/${container.id}`);
-  await expectPhotoFrame(page, "empty", { min: 160, max: 220 });
-  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
+  await expectAddPhotoFromMenu(page, "Container options");
   await uploadContainerPhoto(request, container.id, "container-one.png");
   await page.reload();
-  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
-  await expect(page.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+  await expectPhotoStrip(page, 1);
 
   await page.setViewportSize({ width: 393, height: 852 });
-  await expectPhotoFrame(page, "photo", { min: 180, max: 300 });
+  await expectPhotoStrip(page, 1);
 });

@@ -176,15 +176,15 @@ test("contextual Add items keeps place and returns a useful origin", async ({
   const containerId = await createContainer(request, roomId, `Context box ${id}`);
   await page.goto(`/containers/${containerId}`);
   await expect(page.getByRole("heading", { level: 1, name: /BOX-/ })).toBeVisible();
-  await page.getByRole("button", { name: "Add items" }).first().click();
+  await page.getByTestId("bottom-bar").getByRole("button", { name: "Add items", exact: true }).click();
   await page
     .getByRole("dialog", { name: "Add items" })
     .getByRole("link", { name: "or fill in the form yourself" })
     .click();
   await expect(page).toHaveURL(/\/items\/new\?/);
   await expect(page.getByRole("heading", { name: "The essentials" })).toBeVisible();
-  await expect(page.getByLabel("Room")).toHaveValue(roomId);
-  await expect(page.getByLabel("Storage location")).toHaveValue(containerId);
+  await expect(page.getByLabel("Room", { exact: true })).toHaveValue(roomId);
+  await expect(page.getByLabel("Storage location", { exact: true })).toHaveValue(containerId);
   await expect(
     page.getByRole("button", { name: /Purchase/ }),
   ).toHaveAttribute("aria-expanded", "false");
@@ -198,8 +198,18 @@ test("contextual Add items keeps place and returns a useful origin", async ({
   await page.getByLabel("Item name").fill(`Context item ${id}`);
   await shot(page, "01-item-form-essentials");
   await page.getByRole("button", { name: "Add to your home" }).click();
-  await expect(page.getByRole("heading", { name: `Context item ${id}` })).toBeVisible();
+  // On a wide screen the new item opens in the panel, beside the place it was added from.
+  const panel = page.getByTestId("item-panel");
+  await expect(panel.getByRole("heading", { name: `Context item ${id}` })).toBeVisible();
+  await expect(page.locator("main").getByRole("heading", { level: 1, name: /BOX-/ })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Close" })).toHaveAttribute(
+    "href",
+    `/containers/${containerId}`,
+  );
+  // Below 1200 px the same address is a full page with a Back link to that place.
+  await page.setViewportSize({ width: 1100, height: 1000 });
   await expect(page.getByRole("link", { name: /Back to .*Context room/ })).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 1000 });
   // Documents and manuals have their own tab on the item page.
   await page.getByRole("tab", { name: "Documents" }).click();
   await expect(page.getByRole("heading", { name: "Documents & manuals" })).toBeVisible();
@@ -324,7 +334,8 @@ test("documents, manuals and image-source details stay coherent and honest", asy
   await page.getByRole("heading", { name: "Documents & manuals" }).scrollIntoViewIfNeeded();
   await shot(page, "04-documents-manuals");
 
-  await page.getByRole("tab", { name: "Details" }).click();
+  await page.getByRole("tab", { name: "Info" }).click();
+  await page.getByRole("button", { name: "Manage photos" }).click();
   await expect(page.getByText("Image source")).toBeVisible();
   await expect(page.getByText("Category icon").first()).toBeVisible();
 });
@@ -367,9 +378,10 @@ test("pack purchase can be entered per unit and shows the package total on detai
   expect(detail.item.purchase?.price_cents).toBe(12000);
 
   await page.goto(`/items/${itemId}`);
-  await expect(page.getByText("Package total")).toBeVisible();
-  await expect(page.getByText("$120")).toBeVisible();
-  await expect(page.getByText(/\$60 effective per unit/)).toBeVisible();
+  const panel = page.getByTestId("item-panel");
+  await expect(panel.getByText("Package total")).toBeVisible();
+  await expect(panel.getByText("$120")).toBeVisible();
+  await expect(panel.getByText(/\$60 effective per unit/)).toBeVisible();
 });
 
 test("item form and detail stay usable at phone, tablet and desktop widths", async ({
@@ -385,8 +397,9 @@ test("item form and detail stay usable at phone, tablet and desktop widths", asy
     await page.setViewportSize({ width, height: width <= 430 ? 844 : 1024 });
     await page.goto(`/items/${fixture.itemId}/edit`);
     await expect(page.getByLabel("Item name")).toBeVisible();
-    await expect(page.getByLabel("Room")).toBeVisible();
-    await expect(page.getByLabel("Storage location")).toBeVisible();
+    await page.getByRole("button", { name: /^Place/ }).click();
+    await expect(page.getByLabel("Room", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Storage location", { exact: true })).toBeVisible();
     const optionalSections = page.getByTestId("optional-form-sections");
     await expect(optionalSections.getByRole("button")).toHaveCount(4);
     await expect(
@@ -404,7 +417,10 @@ test("item form and detail stay usable at phone, tablet and desktop widths", asy
       );
       expect(new Set(boxes.map((box) => box.x)).size).toBe(1);
       expect(new Set(boxes.map((box) => box.width)).size).toBe(1);
-      expect(boxes[0]?.width).toBeGreaterThan(700);
+      // On a wide screen the form is in the item panel: one column that fills it.
+      const panelBox = (await page.getByTestId("item-panel").boundingBox())!;
+      expect(boxes[0]?.width).toBeGreaterThan(panelBox.width * 0.8);
+      expect(boxes[0]?.width).toBeLessThanOrEqual(panelBox.width);
     }
     expect(
       await page.evaluate(

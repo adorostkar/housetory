@@ -16,6 +16,7 @@ export function BottomBar({
   canAdd,
   onAdd,
   keyboardOpen,
+  onFocusWithinChange,
   children,
 }: {
   compact: boolean;
@@ -25,6 +26,8 @@ export function BottomBar({
   canAdd: boolean;
   onAdd: (trigger: HTMLElement) => void;
   keyboardOpen: boolean;
+  /** Told when focus enters or leaves the bar, so the shell knows who the keyboard is for. */
+  onFocusWithinChange?: (focused: boolean) => void;
   /** The search field. It gets all the room while it has focus on the phone. */
   children: (props: { onFocusChange: (focused: boolean) => void }) => React.ReactNode;
 }) {
@@ -34,6 +37,10 @@ export function BottomBar({
     <div
       data-always-on-screen
       data-testid="bottom-bar"
+      onFocus={() => onFocusWithinChange?.(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onFocusWithinChange?.(false);
+      }}
       className={cn(
         "z-40 border-t border-border/70 bg-background/95 backdrop-blur-xl",
         compact

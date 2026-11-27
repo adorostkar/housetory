@@ -508,7 +508,12 @@ export function InventoryReview({
     actionableSuggestions.every((suggestion) =>
       selectedSuggestionIds.has(suggestion.id),
     );
-  const displayedRun = runQuery.data ?? lastRun ?? (embedded ? null : summaryQuery.data?.last_run) ?? null;
+  // The page runs a review batch by batch and keeps the newest state in lastRun. The
+  // loaded copy of the same run can be older, so the newer of the two is shown.
+  const loadedRun = runQuery.data;
+  const currentRun = loadedRun && lastRun && loadedRun.id === lastRun.id &&
+    (lastRun.batch_version ?? 0) > (loadedRun.batch_version ?? 0) ? lastRun : loadedRun ?? lastRun;
+  const displayedRun = currentRun ?? (embedded ? null : summaryQuery.data?.last_run) ?? null;
   const cancelBackground = async () => {
     if (!displayedRun) return;
     setCancelRequested(true);
@@ -1467,7 +1472,12 @@ export function InventoryReview({
                 <Button size="sm" variant="outline" asChild className="mt-3">
                   <Link
                     to={appendOrigin(`/items/${item.id}`, origin)}
-                    onClick={() => rememberListScroll(origin ?? null)}
+                    onClick={() => {
+                      rememberListScroll(origin ?? null);
+                      // On a wide screen the item opens in a panel beside this page,
+                      // so this dialog would stay open over it.
+                      setCompareTarget(null);
+                    }}
                   >
                     Open item
                   </Link>

@@ -203,6 +203,37 @@ async function fixtureApp(page: Page) {
     ) {
       return route.fulfill({ json: { items: [], total: 0, limit: 24, offset: 0 } });
     }
+    // The shell asks for these on every page: the review count on the assistant button,
+    // the waiting captures and prepared actions, and the "On loan" count in the list of rooms.
+    if (url.pathname === "/api/v1/inventory-review/summary") {
+      return route.fulfill({ json: {
+        pending_count: 0, status_counts: {}, type_counts: {}, last_run: null, schedule: null,
+      } });
+    }
+    if (url.pathname === "/api/v1/inventory-review/captures") {
+      return route.fulfill({ json: [] });
+    }
+    if (url.pathname === "/api/v1/assistant/actions/proposals/pending") {
+      return route.fulfill({ json: { items: [], total: 0 } });
+    }
+    if (url.pathname === "/api/v1/loans") {
+      return route.fulfill({ json: { items: [], total: 0, limit: 24, offset: 0 } });
+    }
+    // The item list behind the assistant asks for the totals of an empty household and
+    // for earlier assistant conversations.
+    if (url.pathname === "/api/v1/overview") {
+      return route.fulfill({ json: {
+        financial: null, room_count: 1, location_count: 0, item_count: 0, total_quantity: 0,
+        value_by_currency: [], current_value_by_currency: [], document_count: 1,
+        warranties_expiring_soon: 0,
+        warranties: { active_count: 0, expiring_count: 0, expired_count: 0, unknown_count: 0 },
+        items_missing_purchase_count: 0, photo_bytes: 0, document_bytes: 0,
+        outstanding_loan_count: 0, overdue_loan_count: 0, on_loan_quantity: 0, recent_items: [],
+      } });
+    }
+    if (url.pathname === "/api/v1/assistant/runs" && method === "GET") {
+      return route.fulfill({ json: [] });
+    }
     const root = `/api/v1/documents/${documentId}`;
     if (url.pathname === `${root}/processing/retry` && method === "POST") {
       const body = request.postDataJSON();
@@ -405,7 +436,7 @@ test("late AI suggestions cannot replace an edited local review", async ({ page 
     exact: true,
   })).toBeVisible();
   await expect(merchant).toHaveValue("Manually reviewed shop");
-  await expect(page.getByLabel("Description", { exact: true })).toHaveValue("Drill");
+  await expect(page.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Drill");
   expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH"))).toEqual([]);
   expect(unexpected).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -420,7 +451,11 @@ test("presents one editable AI-assisted review with financial evidence", async (
     await page.goto(`/documents/${documentId}`);
     await page.getByRole("button", { name: "Review extraction", exact: true }).click();
     await expect(page.getByLabel(/^Merchant/)).toHaveValue("NORDIC TOOLS");
-    await expect(page.getByLabel("Description", { exact: true })).toHaveValue("Drill kit");
+    // The line is a closed row; its amounts are in the editor.
+    await expect(page.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Drill kit");
+    await page.getByRole("article")
+      .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first()
+      .getByRole("button", { name: "Edit" }).click();
     await expect(page.getByLabel(/^Merchant/)).toHaveCount(1);
     await expect(page.getByLabel(/^Merchant/)).toBeEditable();
     await expect(page.getByRole("button", {
@@ -457,6 +492,10 @@ for (const [operation, label] of [
     await page.getByRole("button", { name: "Review extraction", exact: true }).click();
     const merchant = page.getByLabel(/^Merchant/);
     await merchant.fill("Keep my reviewed merchant");
+    // The line is a closed row. Its possible matches are in the editor.
+    await page.getByRole("article")
+      .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first()
+      .getByRole("button", { name: "Edit" }).click();
     const sourceCandidate = page.getByRole("button", { name: /^Workshop drill/ });
     await expect(sourceCandidate).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: label, exact: true }).first().click();
@@ -492,24 +531,41 @@ for (const [operation, label] of [
   });
 }
 
-test("assistant document review preserves manual edits across sheet and full-page views", async ({ page }) => {
+/** Sends a document through the assistant. Its review then opens in the conversation. */
+async function sendDocumentThroughAssistant(page: Page) {
+  // An old link to the assistant page opens the assistant over the item list.
+  await page.goto("/assistant");
+  const dialog = page.getByRole("dialog", { name: "Assistant" });
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: "invoice.txt", mimeType: "text/plain", buffer: Buffer.from(sourceText),
+  });
+  await expect(dialog.getByText("invoice.txt")).toBeVisible();
+  // A document needs no type to be sent.
+  await dialog.getByRole("button", { name: "Send question" }).click();
+  await expect(dialog.getByRole("heading", { name: /Document review: Synthetic invoice/ })).toBeVisible();
+  return dialog;
+}
+
+test("assistant document review preserves manual edits across the sheet and its full-height view", async ({ page }) => {
   const { calls, unexpected, pageErrors } = await fixtureApp(page);
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto(`/documents/${documentId}`);
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("heading", { name: /Document review: Synthetic invoice/ })).toBeVisible();
+  const dialog = await sendDocumentThroughAssistant(page);
   await dialog.getByRole("region", { name: "Document processing" })
     .getByRole("button", { name: "Use local/manual review now" }).click();
   const merchant = dialog.getByLabel(/^Merchant/);
   await expect(merchant).toHaveValue("NORDIC TOOLS");
   await merchant.fill("Keep this draft");
   await dialog.getByRole("button", { name: "Close assistant" }).click();
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Assistant" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByTestId("bottom-bar").locator('button[title="Open assistant"]').click();
   await expect(dialog.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
-  await dialog.getByRole("link", { name: "Open full page" }).click();
-  await expect(page.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
-  expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH"))).toEqual([]);
+  // The old full-page assistant is now the same panel at full height. The draft is still there.
+  await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
+  await expect(dialog.getByRole("button", { name: "Make the assistant smaller" })).toBeVisible();
+  await expect(dialog.getByLabel(/^Merchant/)).toHaveValue("Keep this draft");
+  // Sending the file is the only write. Editing the draft saves nothing.
+  expect(calls.filter((call) => call.startsWith("POST") || call.startsWith("PATCH")))
+    .toEqual(["POST /api/v1/documents"]);
   expect(unexpected).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
@@ -517,15 +573,8 @@ test("assistant document review preserves manual edits across sheet and full-pag
 test("assistant capture uses the existing document upload and review path", async ({ page }) => {
   const { calls, unexpected, pageErrors } = await fixtureApp(page);
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto("/assistant");
-  await page.getByRole("button", { name: "Add document" }).click();
-  const upload = page.getByRole("dialog", { name: "Add a document" });
-  await upload.locator('input[type="file"]').setInputFiles({
-    name: "invoice.txt", mimeType: "text/plain", buffer: Buffer.from(sourceText),
-  });
-  await upload.getByRole("button", { name: "Add document", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /Document review: Synthetic invoice/ })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Document processing" })).toBeVisible();
+  const dialog = await sendDocumentThroughAssistant(page);
+  await expect(dialog.getByRole("region", { name: "Document processing" })).toBeVisible();
   expect(calls.filter((call) => call.startsWith("POST"))).toEqual(["POST /api/v1/documents"]);
   expect(unexpected).toEqual([]);
   expect(pageErrors).toEqual([]);

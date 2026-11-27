@@ -1649,6 +1649,52 @@ def test_an_answer_that_rests_on_nothing_is_sent_back_once(
     assert lent["steps"][0]["result"]["proposal"]["kind"] == "lend"
 
 
+def test_a_reply_that_is_not_one_step_is_asked_for_again(owner_client, configured_ai, monkeypatch):
+    """A real model returned a reply that could not be read, once. The request ended with
+    "The AI provider failed" and the user had to press Retry."""
+    seed(owner_client)
+    unreadable = ai.AiInvalidOutput("Cloud model returned no text.")
+
+    def converse(replies):
+        prompts = []
+        pending = iter(replies)
+
+        def complete(system, prompt, **kwargs):
+            prompts.append(json.loads(prompt))
+            reply = next(pending)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        monkeypatch.setattr(ai, "complete_json", complete)
+        run = start(owner_client, "Where is the validation drill?")
+        work(run)
+        return read(owner_client, run), prompts
+
+    done, prompts = converse(
+        [
+            unreadable,
+            call("search_items", q="Validation drill"),
+            # Valid JSON that is no step of the schema is treated the same way.
+            {"kind": "tool", "name": "search_items"},
+            {"kind": "answer", "message": "It is in Tool Storage."},
+        ]
+    )
+    assert done["state"] == "completed" and done["answer"] == "It is in Tool Storage."
+    assert done["model_calls"] == 4
+    assert "could not be used" in prompts[1]["correction"]
+    # Once the reply is readable again the note is gone.
+    assert "correction" not in prompts[2] and "could not be used" in prompts[3]["correction"]
+
+    # A model that never returns a step ends the request, with the finished work kept.
+    stuck, _ = converse([call("search_items", q="Validation drill"), *[unreadable] * 3])
+    assert stuck["state"] == "needs_attention" and stuck["can_retry"] is True
+    assert stuck["message"] == (
+        "The model's reply could not be used. Retry or use local/manual controls."
+    )
+    assert stuck["model_calls"] == 4 and len(stuck["steps"]) == 1
+
+
 def test_an_attempt_that_runs_out_of_time_goes_on_by_itself_a_few_times(
     owner_client, configured_ai, monkeypatch
 ):
@@ -1823,6 +1869,24 @@ def test_a_general_question_is_answered_without_a_lookup(owner_client, configure
     )
     assert claimed["answer"] == "It is in Tool Storage." and claimed["answer_kind"] == "answer"
     assert "kind general" in prompts[1]["correction"]
+
+    # A real model put several guesses into one search, found nothing and gave up. The
+    # result says that q is one phrase and how to go on, and the next search finds it.
+    vague, prompts = scripted(
+        owner_client,
+        monkeypatch,
+        "where is that tool I use for making holes?",
+        [
+            call("search_items", q="tool making holes drill"),
+            call("search_items", q="drill"),
+            {"kind": "answer", "message": "Your Validation drill is in Tool Storage."},
+        ],
+    )
+    missed, found = (step["result"] for step in vague["steps"])
+    assert missed["references"] == [] and "as one phrase" in missed["summary"]
+    assert "search again with single words" in missed["summary"]
+    assert [ref["title"] for ref in found["references"]] == ["Validation drill"]
+    assert "as one phrase" not in found["summary"]
 
     # An item's details say where they come from.
     drill = owner_client.post(
@@ -2039,8 +2103,13 @@ def test_the_server_decides_what_is_applied_and_everything_else_is_one_proposal(
     # One item, with the destination in the user's words, is moved and can be moved back.
     run, result = prepared(
         "Put the jigsaw in the garage",
+        call("search_locations", q="garage"),
         call("prepare_action", action={**move, "item_ids": [saw["id"]]}, basis="user_stated"),
     )
+    # The place lookup gives the id that the move needs.
+    assert run["steps"][0]["result"]["facts"]["places"] == [
+        {"id": garage["id"], "type": "room", "name": "Garage"}
+    ]
     assert run["state"] == "completed" and result["proposal"]["applied_directly"]
     assert stored(client, saw)["room"]["name"] == "Garage"
     moved_back = undo(client, result["proposal"])

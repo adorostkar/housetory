@@ -98,12 +98,10 @@ test("box item list selects only its contents and bulk-moves them to a room", as
 
   await page.goto(`/containers/${box.id}`);
   await expect(page.getByRole("heading", { name: box.identifier, level: 1 })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: `Lamp ${id}`, level: 3 }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: `Cable ${id}`, level: 3 }),
-  ).toBeVisible();
+  // Compact rows are the default view; the checkboxes appear after Select.
+  await expect(page.getByRole("link", { name: new RegExp(`Lamp ${id}`) })).toBeVisible();
+  await expect(page.getByRole("link", { name: new RegExp(`Cable ${id}`) })).toBeVisible();
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: "Select all loaded items" }).check();
   await expect(page.getByText(/2 items selected/)).toBeVisible();
   await page.getByText(/2 items selected/).scrollIntoViewIfNeeded();
@@ -112,10 +110,7 @@ test("box item list selects only its contents and bulk-moves them to a room", as
     fullPage: false,
   });
 
-  const bulkBar = page
-    .locator("div.surface")
-    .filter({ hasText: "2 items selected" })
-    .last();
+  const bulkBar = page.getByTestId("bulk-action-bar");
   await bulkBar.getByRole("button", { name: "Move", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Move selected items" });
   await expect(dialog).toBeVisible();
@@ -144,7 +139,8 @@ test("box item list selects only its contents and bulk-moves them to a room", as
 });
 
 test("room/box origin survives edit, save, move and cancel", async ({ page, request }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Below 1200 px an item is a full page, with a Back link that names where it came from.
+  await page.setViewportSize({ width: 1100, height: 1000 });
   await page.addInitScript(() => {
     window.localStorage.setItem("housetory-theme", "light");
   });
@@ -164,7 +160,8 @@ test("room/box origin survives edit, save, move and cancel", async ({ page, requ
   await expect(page).toHaveURL(/\/edit\?from=/);
   await expect(page.getByRole("link", { name: "Back to item" })).toBeVisible();
   await page.getByLabel("Item name").fill(`Renamed origin lamp ${id}`);
-  await page.getByLabel("Room").selectOption(destinationRoom.id);
+  await page.getByRole("button", { name: /^Place/ }).click();
+  await page.getByLabel("Room", { exact: true }).selectOption(destinationRoom.id);
   await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(page.getByRole("heading", { name: `Renamed origin lamp ${id}` })).toBeVisible();
@@ -189,6 +186,18 @@ test("room/box origin survives edit, save, move and cancel", async ({ page, requ
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("heading", { name: `Renamed origin lamp ${id}` })).toBeVisible();
   await expect(page.getByRole("link", { name: `Back to ${box.identifier}` })).toBeVisible();
+
+  // On a wide screen the item is a panel beside that place, and Close goes back to it.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const panel = page.getByTestId("item-panel");
+  await expect(panel.getByRole("heading", { name: `Renamed origin lamp ${id}` })).toBeVisible();
+  await expect(page.locator("main").getByRole("heading", { name: box.identifier, level: 1 })).toBeVisible();
+  await panel.getByRole("link", { name: "Edit", exact: true }).click();
+  await expect(page).toHaveURL(/\/edit\?from=/);
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  await panel.getByRole("link", { name: "Close" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/containers/${box.id}$`));
 });
 
 test("nonempty room deletion reparents child rooms before removing the room", async ({
@@ -275,7 +284,8 @@ test("container delete offers empty confirmation, move-all, and move-contents-an
 
   // Standalone move-all on a nonempty container keeps the container.
   await page.goto(`/containers/${fullBox.id}`);
-  await page.getByRole("button", { name: "Move contents" }).click();
+  await page.getByRole("button", { name: "Container options" }).click();
+  await page.getByRole("menuitem", { name: "Move contents" }).click();
   const moveDialog = page.getByRole("dialog", { name: /Move all contents out of/i });
   await moveDialog.getByLabel("Destination room").selectOption(destinationRoom.id);
   await expect(moveDialog.getByText(/Deleting .* is permanent/i)).toHaveCount(0);

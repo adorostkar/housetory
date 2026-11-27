@@ -60,6 +60,8 @@ test("lends partially, records returns, shows it on the loans list and undoes a 
   await page.getByRole("button", { name: "Lend" }).first().click();
   await page.getByLabel("Borrower").fill(borrower);
   await page.getByLabel("Quantity").fill("2");
+  // Dates and notes are optional and sit under "More options".
+  await page.getByRole("button", { name: /More options/ }).click();
   await page.getByLabel("Lent on").fill("2026-01-01");
   await page.getByLabel("Due back").fill("2026-01-10");
   await page.getByRole("button", { name: /Record loan/ }).click();
@@ -85,7 +87,9 @@ test("lends partially, records returns, shows it on the loans list and undoes a 
   await loanRow.getByRole("link", { name: "View details" }).click();
   await expect(page.getByRole("heading", { name: "1 of 2 still out" })).toBeVisible();
 
+  // The item's history has its own tab.
   await page.goto(`/items/${item.item.id}`);
+  await page.getByRole("tab", { name: "History" }).click();
   await undoFirstMatching(
     page,
     `Returned 1 of 2 × Projector ${suffix} from ${borrower}`,
@@ -113,6 +117,7 @@ test("item and container move history can be undone from the UI", async ({
     data: { room_id: garage.id, storage_location_id: null },
   });
   await page.goto(`/items/${item.item.id}`);
+  await page.getByRole("tab", { name: "History" }).click();
   await undoFirstMatching(page, "Moved Lantern");
   await expect(page.getByRole("link", { name: office.name }).first()).toBeVisible();
 
@@ -120,7 +125,7 @@ test("item and container move history can be undone from the UI", async ({
     data: { room_id: garage.id, parent_id: null },
   });
   await page.goto(`/containers/${container.id}`);
-  await expect(page.getByText(/Movement history/i)).toBeVisible();
+  await page.getByRole("button", { name: "Movement history" }).click();
   await expect(page.getByText(/moved with it/i).first()).toBeVisible();
   await undoFirstMatching(page, "Moved container");
   await expect(page.getByRole("link", { name: office.name }).first()).toBeVisible();
@@ -145,7 +150,6 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
   const newLoan = page.getByRole("button", { name: "New loan" }).first();
   await newLoan.click();
   await expect(page.getByRole("heading", { name: "New loan" })).toBeVisible();
-  await page.getByRole("button", { name: /Lend out an item/ }).click();
   const itemSearch = page.getByLabel("Search inventory for a loan");
   await itemSearch.fill(`Missing ${suffix}`);
   await expect(page.getByText("No active items match that search.")).toBeVisible();
@@ -154,7 +158,7 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
     page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }),
   ).toBeVisible();
   await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();
-  await expect(page.getByRole("heading", { name: `Lend Tent ${suffix}` })).toBeVisible();
+  await expect(page.getByTestId("loan-item-chosen")).toContainText(`Tent ${suffix}`);
 
   await page.getByLabel("Borrower").fill(`Mohsen ${suffix}`);
   await page.getByRole("button", { name: /Record loan/ }).click();
@@ -169,7 +173,6 @@ test("creates a loan from the Loans page, blocks over-lending and reports stale 
   // immediately after the first loan mutation.
   await page.reload();
   await newLoan.click();
-  await page.getByRole("button", { name: /Lend out an item/ }).click();
   await itemSearch.fill(`Tent ${suffix}`);
   await page.getByRole("button", { name: `Choose Tent ${suffix} for a new loan` }).click();
   await page.getByLabel("Borrower").fill(`Alex ${suffix}`);

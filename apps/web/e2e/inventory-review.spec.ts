@@ -129,7 +129,7 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
     fullPage: false,
   });
 
-  await categoryCard.getByRole("button", { name: "Accept", exact: true }).click();
+  await categoryCard.getByRole("button", { name: "Apply change", exact: true }).click();
   await expect(page.getByText("Suggestion applied to the item.")).toBeVisible();
   await expect(page.getByText("Suggestion applied to the item.")).toBeHidden({
     timeout: 10_000,
@@ -153,7 +153,7 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   });
 
   await page.getByLabel("Filter suggestions by status").selectOption("pending");
-  await expect(categoryCard.getByRole("button", { name: "Accept", exact: true })).toBeVisible();
+  await expect(categoryCard.getByRole("button", { name: "Apply change", exact: true })).toBeVisible();
   await page.getByLabel("Search suggestions").fill(id);
   const duplicateCard = page
     .locator("li")
@@ -161,7 +161,7 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
     .first();
   await expect(duplicateCard).toBeVisible();
   await expect(
-    duplicateCard.getByRole("button", { name: "Accept", exact: true }),
+    duplicateCard.getByRole("button", { name: "Apply change", exact: true }),
   ).toHaveCount(0);
   await duplicateCard.getByRole("button", { name: "Compare" }).click();
   const compareDialog = page.getByRole("dialog");
@@ -174,8 +174,14 @@ test("rule-based review persists actionable suggestions, supports apply/undo and
   });
   await compareDialog.getByRole("button", { name: "Close" }).first().click();
 
-  await duplicateCard.getByRole("button", { name: "Dismiss" }).click();
-  await expect(page.getByText("Suggestion dismissed.")).toBeVisible();
+  await duplicateCard.getByRole("button", { name: "Skip", exact: true }).click();
+  // Skip says what was skipped and offers Undo. The skip is remembered.
+  const skipped = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: `Skipped: Possible duplicate: Review camera ${id}` });
+  await expect(skipped).toBeVisible();
+  await expect(skipped.getByRole("button", { name: "Undo" })).toBeVisible();
+  await expect(skipped).toBeHidden({ timeout: 10_000 });
   await clickFindSuggestions(page);
   await expect(
     page.getByText(`Possible duplicate: Review camera ${id}`),
@@ -220,18 +226,21 @@ test("Review item origins preserve scope, queue filters, search and edit roundtr
     .getByRole("link", { name: new RegExp(`Context drill ${id}`) })
     .first()
     .click();
-  await expect(
-    page.getByRole("link", { name: "Back to Review" }),
-  ).toBeVisible();
+  // On a wide screen the item opens in a panel beside the Review list. Its Close
+  // control goes back to the list as it was.
+  const panel = page.getByTestId("item-panel");
+  const backToReview = panel.getByRole("link", { name: "Close" });
+  await expect(backToReview).toBeVisible();
   await expect(page).toHaveURL(/from=/);
 
-  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
-  await page.getByLabel("Item name").fill(`Renamed context drill ${id}`);
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await panel.getByRole("link", { name: "Edit", exact: true }).first().click();
+  await panel.getByLabel("Item name").fill(`Renamed context drill ${id}`);
+  await panel.getByRole("button", { name: "Save changes" }).click();
   await expect(
-    page.getByRole("heading", { name: `Renamed context drill ${id}` }),
+    panel.getByRole("heading", { name: `Renamed context drill ${id}` }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Back to Review" }).click();
+  await backToReview.click();
+  await expect(panel).toHaveCount(0);
   await expect(page).toHaveURL(/status=pending/);
   await expect(page).toHaveURL(/suggestion_type=category/);
   await expect(page).toHaveURL(new RegExp(`q=Context\\+tools\\+${id}`));
@@ -256,13 +265,13 @@ test("Review item origins preserve scope, queue filters, search and edit roundtr
     .getByRole("link", { name: new RegExp(`Renamed context drill ${id}`) })
     .first()
     .click();
-  await page.getByRole("link", { name: "Edit", exact: true }).first().click();
-  await page.getByLabel("Item name").fill(`Discarded context name ${id}`);
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await panel.getByRole("link", { name: "Edit", exact: true }).first().click();
+  await panel.getByLabel("Item name").fill(`Discarded context name ${id}`);
+  await panel.getByRole("button", { name: "Cancel" }).click();
   await expect(
-    page.getByRole("heading", { name: `Renamed context drill ${id}` }),
+    panel.getByRole("heading", { name: `Renamed context drill ${id}` }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Back to Review" }).click();
+  await backToReview.click();
   await expect(page.getByLabel("Search suggestions")).toHaveValue(
     `Context tools ${id}`,
   );
@@ -318,9 +327,18 @@ test("Review item origins preserve scope, queue filters, search and edit roundtr
   await contextDuplicateCard.getByRole("button", { name: "Compare" }).click();
   const compareDialog = page.getByRole("dialog");
   await compareDialog.getByRole("link", { name: "Open item" }).first().click();
-  await expect(
-    page.getByRole("link", { name: "Back to Review" }),
-  ).toBeVisible();
+  await expect(backToReview).toBeVisible();
+  await backToReview.click();
+  await expect(page).toHaveURL(/suggestion_type=possible_duplicate/);
+  await expect(page.getByLabel("Search suggestions")).toHaveValue(
+    `Context camera ${id}`,
+  );
+
+  // Below 1200 px the item is a full page, and the same way back is named.
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await contextDuplicateCard.getByRole("button", { name: "Compare" }).click();
+  await compareDialog.getByRole("link", { name: "Open item" }).first().click();
+  await expect(page.getByTestId("item-panel")).toHaveCount(0);
   await page.getByRole("link", { name: "Back to Review" }).click();
   await expect(page).toHaveURL(/suggestion_type=possible_duplicate/);
   await expect(page.getByLabel("Search suggestions")).toHaveValue(
@@ -345,13 +363,12 @@ test("selected-items review is reachable from the Items bulk action", async ({
   const second = await createItem(request, `Scoped drill ${id}`, room.id);
 
   await page.goto(`/items?q=${encodeURIComponent(`Scoped drill ${id}`)}`);
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: "Select all loaded items" }).check();
   await expect(page.getByText(/2 items selected/)).toBeVisible();
-  const bulkBar = page
-    .locator("div.surface")
-    .filter({ hasText: "2 items selected" })
-    .last();
-  await bulkBar.getByRole("link", { name: "Review" }).click();
+  const bulkBar = page.getByRole("region", { name: "Selected items" });
+  await bulkBar.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Review" }).click();
   await expect(page).toHaveURL(/\/review\?scope_type=items&item_ids=/);
   await expect(page.getByLabel("Review scope type")).toHaveValue("items");
   await expect(page.getByText(`Scoped drill ${id}`).first()).toBeVisible();

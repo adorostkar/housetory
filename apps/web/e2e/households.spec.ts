@@ -86,7 +86,7 @@ async function createSecondHousehold(
   name: string,
   propertyName: string,
 ) {
-  await page.goto("/settings");
+  await page.goto("/settings/household");
   await page.getByRole("button", { name: "Switch household" }).first().click();
   await page.getByText("Create household", { exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create a household" });
@@ -94,7 +94,8 @@ async function createSecondHousehold(
   await dialog.getByLabel("First property").fill(propertyName);
   await dialog.getByRole("button", { name: "Create household" }).click();
   await expect(page.getByText("Household created")).toBeVisible();
-  await expect(page).toHaveURL(/\/$/);
+  // A new household opens in its item list.
+  await expect(page).toHaveURL(/\/items$/);
 }
 
 async function clearConfiguredProviders(request: APIRequestContext) {
@@ -183,38 +184,47 @@ test("creates, switches and searches authorised all-my-places; opens a result in
   const loan = await createItem(request, `Tile cutter ${id}`, firstRoom.id, 3);
   await createLoan(request, loan.item.id, "Morgan", 2);
 
+  // The search across every household is in the assistant now. The separate Search
+  // page is gone. The assistant starts with "All my places".
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.goto(`/search?q=${encodeURIComponent(`Cordless drill ${id}`)}`);
-  await expect(page.getByLabel("Search scope")).toHaveValue("all");
-  await expect(
-    page.locator(`a[href^="/items/${firstItem.item.id}"]`),
-  ).toBeVisible();
-  await expect(
-    page.locator(`a[href^="/items/${secondItem.item.id}"]`),
-  ).toBeVisible();
-  await expect(
-    page.locator(`a[href^="/items/${firstItem.item.id}"]`),
-  ).toContainText(firstHousehold.name);
-  await expect(
-    page.locator(`a[href^="/items/${secondItem.item.id}"]`),
-  ).toContainText(secondName);
+  const assistant = page.getByTestId("assistant-panel");
+  const scope = assistant.getByLabel("Search scope");
+  // Each match is a row link. (The same item is linked once more under Sources.)
+  const firstResult = assistant.locator(`a[href^="/items/${firstItem.item.id}"]`).first();
+  const secondResult = assistant.locator(`a[href^="/items/${secondItem.item.id}"]`).first();
+  const asked: Array<Record<string, unknown>> = [];
+  page.on("request", (sent) => {
+    if (sent.method() === "POST" && new URL(sent.url()).pathname === "/api/v1/search/query") {
+      asked.push(sent.postDataJSON() as Record<string, unknown>);
+    }
+  });
+  const ask = async (question: string) => {
+    const answers = await assistant.getByRole("button", { name: "Copy answer" }).count();
+    await assistant.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill(question);
+    await assistant.getByRole("button", { name: "Send question", exact: true }).click();
+    await expect(assistant.getByRole("button", { name: "Copy answer" })).toHaveCount(answers + 1);
+  };
+  await page.goto(`/assistant?q=${encodeURIComponent(`Cordless drill ${id}`)}`);
+  await expect(page).toHaveURL(/\/items#assistant$/);
+  await expect(scope).toHaveValue("all");
+  await expect(firstResult).toBeVisible();
+  await expect(secondResult).toBeVisible();
+  // Two items with the same name: each row says which household has it.
+  await expect(firstResult).toContainText(firstHousehold.name);
+  await expect(secondResult).toContainText(secondName);
+  await expect(firstResult).toContainText(`${firstProperty.name} / ${secondRoomName}`);
+  await expect(secondResult).toContainText(`${secondProperty} / ${secondRoomName}`);
   await page.screenshot({
     path: "../../docs/walkthrough/households/02-all-my-places-search-light.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.waitForTimeout(400);
-  await page.screenshot({
-    path: "../../docs/walkthrough/households/07-search-dark.png",
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    page.locator(`a[href^="/items/${secondItem.item.id}"]`),
-  ).toBeVisible();
+  await expect(secondResult).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    ),
+  ).toBe(true);
   await page.waitForTimeout(250);
   await page.screenshot({
     path: "../../docs/walkthrough/households/03-all-my-places-mobile-light.png",
@@ -222,26 +232,25 @@ test("creates, switches and searches authorised all-my-places; opens a result in
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  // A remembered narrower scope survives a refresh and is server-validated.
-  await page.getByLabel("Search scope").selectOption({
+  // A narrower scope is sent to the server and only that household is searched.
+  await scope.selectOption({
     label: `${firstHousehold.name} · ${firstProperty.name}`,
   });
-  await expect(page).toHaveURL(/household_id=/);
-  await page.reload();
-  await expect(page.getByLabel("Search scope")).toHaveValue(/^household:/);
-  await expect(
-    page.locator(`a[href^="/items/${firstItem.item.id}"]`),
-  ).toBeVisible();
-  await expect(
-    page.locator(`a[href^="/items/${secondItem.item.id}"]`),
-  ).toHaveCount(0);
-  await page.getByLabel("Search scope").selectOption("all");
-  await expect(
-    page.locator(`a[href^="/items/${secondItem.item.id}"]`),
-  ).toBeVisible();
+  await expect(scope).toHaveValue(/^household:/);
+  await ask(`Cordless drill ${id}`);
+  expect(asked.at(-1)).toMatchObject({
+    household_id: firstHousehold.id,
+    property_id: firstProperty.id,
+  });
+  await expect(firstResult).toBeVisible();
+  await expect(assistant.locator(`a[href^="/items/${secondItem.item.id}"]`)).toHaveCount(0);
+  await scope.selectOption("all");
+  await ask(`Cordless drill ${id}`);
+  expect(asked.at(-1)).not.toHaveProperty("household_id");
+  await expect(secondResult).toBeVisible();
 
   // A cross-household result link opens the matching item in its own household.
-  await page.locator(`a[href^="/items/${secondItem.item.id}"]`).click();
+  await secondResult.click();
   await expect(page).toHaveURL(new RegExp(`/items/${secondItem.item.id}$`));
   await expect(
     page.getByRole("heading", { name: `Cordless drill ${id}` }),
@@ -266,9 +275,10 @@ test("creates, switches and searches authorised all-my-places; opens a result in
   await page.goto(
     `/assistant?q=${encodeURIComponent(`Where is my Tile cutter ${id}?`)}`,
   );
-  await expect(page.getByText(/Morgan has 2 of your 3 units/)).toBeVisible();
+  await expect(assistant.getByLabel("Search scope")).toHaveValue("all");
+  await expect(assistant.getByText(/Morgan has 2 of your 3 units/)).toBeVisible();
   await expect(
-    page.getByText(
+    assistant.getByText(
       new RegExp(
         `${firstHousehold.name} / ${firstProperty.name} → ${firstRoom.name}`,
       ),
@@ -279,12 +289,20 @@ test("creates, switches and searches authorised all-my-places; opens a result in
     fullPage: false,
   });
 
-  await page.goto("/settings");
-  await expect(
-    page.getByRole("heading", { name: "Settings", level: 1 }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  // Dark is chosen on the Appearance screen. The header button for it is gone.
+  // The Household screen is then reached without a reload, so the choice stays.
+  await page.goto("/settings/appearance");
+  await page.getByRole("radiogroup", { name: "Light or dark" }).getByRole("radio", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("main").getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("main").getByRole("link", { name: /^Household/ }).click();
+  await expect(page).toHaveURL(/\/settings\/household$/);
+  await expect(
+    page.getByRole("heading", { name: "Household", level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  // On desktop the household switcher is in the sidebar, and it is on this screen too.
+  await expect(page.locator("aside").getByRole("button", { name: "Switch household" })).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({
     path: "../../docs/walkthrough/households/05-household-settings-dark.png",
@@ -292,8 +310,10 @@ test("creates, switches and searches authorised all-my-places; opens a result in
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
-    page.getByRole("heading", { name: "Settings", level: 1 }),
+    page.getByRole("heading", { name: "Household", level: 1 }),
   ).toBeVisible();
+  // On a phone there is no sidebar: the switcher is on this screen.
+  await expect(page.getByRole("main").getByRole("button", { name: "Switch household" })).toBeVisible();
   await page.waitForTimeout(250);
   expect(
     await page.evaluate(

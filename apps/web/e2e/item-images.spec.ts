@@ -125,8 +125,11 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
 }) => {
   await fs.mkdir("../../docs/walkthrough/item-images", { recursive: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // The header's theme button is gone (Settings → Appearance now). The screenshots
+  // only need the mode, so the app follows the system here and the test sets that.
+  await page.emulateMedia({ colorScheme: "light" });
   await page.addInitScript(() => {
-    window.localStorage.setItem("housetory-theme", "light");
+    window.localStorage.setItem("housetory-theme", "system");
   });
   const id = suffix();
   const room = await createRoom(request, `Images room ${id}`);
@@ -173,20 +176,27 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   });
 
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByRole("img", { name: "Category icon" })).toBeVisible();
-  await expect(page.getByText("Category icon").first()).toBeVisible();
+  // The item page has a strip of small photos. Without a photo it shows the category
+  // icon. The image source and its actions are under "Manage photos".
+  const photos = page.getByRole("region", { name: "Photographs" });
+  const source = page.getByRole("region", { name: "Item image source" });
+  await expect(photos.getByRole("img", { name: "Category icon" })).toBeVisible();
+  await expect(photos.getByText("No photograph yet")).toBeVisible();
+  await photos.getByRole("button", { name: "Manage photos" }).click();
+  await expect(source.getByText("Category icon", { exact: true })).toBeVisible();
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/01-category-icon-light.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.locator("html.dark").waitFor();
   await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/02-category-icon-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.locator("html:not(.dark)").waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   await page.screenshot({
@@ -195,11 +205,14 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
 
-  await page.getByRole("button", { name: "Find online image" }).click();
-  await expect(page.getByText("Reference image").first()).toBeVisible();
-  await expect(page.getByText(/exact model not confirmed/i).first()).toBeVisible();
-  await expect(page.getByText(/lg\.com/).first()).toBeVisible();
-  const referenceImage = page
+  // "Manage photos" stays open or closed across the size change; open it if needed.
+  const manage = photos.getByRole("button", { name: "Manage photos" });
+  if ((await manage.getAttribute("aria-expanded")) !== "true") await manage.click();
+  await source.getByRole("button", { name: "Find online image" }).click();
+  await expect(photos.getByText("Reference image").first()).toBeVisible();
+  await expect(source.getByText(/exact model not confirmed/i).first()).toBeVisible();
+  await expect(source.getByText(/lg\.com/).first()).toBeVisible();
+  const referenceImage = photos
     .getByRole("img", { name: /reference image/i })
     .first();
   await expect(referenceImage).toBeVisible();
@@ -210,14 +223,15 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
     fullPage: false,
   });
 
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
+  await page.emulateMedia({ colorScheme: "dark" });
   await page.locator("html.dark").waitFor();
   await page.waitForTimeout(350);
   await page.screenshot({
     path: "../../docs/walkthrough/item-images/05-reference-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.locator("html:not(.dark)").waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   await page.screenshot({
@@ -240,8 +254,11 @@ test("category icon fallback, automatic reference selection, and actual-photo pr
   await page.unroute(new RegExp(`/api/v1/items/${item.item.id}$`));
   await page.unroute(new RegExp(`/api/v1/items/${item.item.id}/image$`));
   await page.reload();
-  await expect(page.getByRole("img", { name: item.item.name as string })).toBeVisible();
-  await expect(page.getByText("Actual photo is used")).toBeVisible();
+  // The real photograph takes the place of the reference image in the strip.
+  await expect(photos.getByRole("button", { name: "View photograph 1" })).toBeVisible();
+  await expect(photos.getByRole("img", { name: /reference image/i })).toHaveCount(0);
+  await photos.getByRole("button", { name: "Manage photos" }).click();
+  await expect(source.getByText("Actual photo is used")).toBeVisible();
   await expect(page.getByRole("button", { name: "Find online image" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Generate illustration" })).toHaveCount(0);
   await page.screenshot({
@@ -293,7 +310,10 @@ test("existing AI illustration remains readable without a generation workflow", 
   });
 
   await page.goto(`/items/${item.item.id}`);
-  await expect(page.getByText("AI illustration").first()).toBeVisible();
+  const photos = page.getByRole("region", { name: "Photographs" });
+  await expect(photos.getByText("AI illustration").first()).toBeVisible();
+  // What the image is, and its actions, are under "Manage photos".
+  await photos.getByRole("button", { name: "Manage photos" }).click();
   await expect(page.getByText(/not a photo/).first()).toBeVisible();
   await page.getByText("Image details").click();
   await expect(page.getByText(/new illustrations are no longer generated/)).toBeVisible();
@@ -312,8 +332,8 @@ test("household reference image setting and explicit batch cancellation", async 
   await page.addInitScript(() => {
     window.localStorage.setItem("housetory-theme", "light");
   });
-  await page.goto("/settings");
-  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  await page.goto("/settings/household");
+  await expect(page.getByRole("heading", { name: "Household", level: 1 })).toBeVisible();
   const autoReference = page.getByLabel(/Automatically find a reference image/);
   if (!(await autoReference.isChecked())) await autoReference.check();
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -331,6 +351,7 @@ test("household reference image setting and explicit batch cancellation", async 
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/items");
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByLabel("Select all loaded items").check();
   await page.route("**/api/v1/items/images/batch/preview", (route) =>
     route.fulfill({
@@ -397,7 +418,8 @@ test("household reference image setting and explicit batch cancellation", async 
     }),
   );
 
-  await page.getByRole("button", { name: "Images" }).click();
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Images" }).click();
   const dialog = page.getByRole("dialog", { name: "Find images for selected items" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Eligible")).toBeVisible();
@@ -430,6 +452,7 @@ test("item cards and compact list rows use the category icon fallback", async ({
     { description: "Plain cardboard storage box" },
   );
   await page.goto("/items");
+  await page.getByRole("button", { name: "Card view" }).click();
   const card = page
     .getByRole("link", { name: new RegExp(`Plain storage box ${id}`) })
     .first();

@@ -216,9 +216,12 @@ export function ItemDetailPage({
   const roomTrail = item.room
     ? roomPath(roomsQuery.data?.items ?? [], item.room.id)
     : [];
+  // Reviewed document lines only. The "single-item" allocation is written by the
+  // server for a purchase with one item and follows its price.
   const purchaseAllocations =
     item.purchase?.allocations.filter(
-      (allocation) => allocation.item_id === item.id,
+      (allocation) =>
+        allocation.item_id === item.id && allocation.source_line_id !== "single-item",
     ) ?? [];
   const purchaseUnitCents =
     item.purchase?.price_cents != null &&
@@ -544,7 +547,7 @@ export function ItemDetailPage({
                 About this item
               </h2>
               {item.description ? (
-                <p className="mt-3 whitespace-pre-line text-pretty text-sm leading-[1.75] text-muted-foreground">
+                <p className="mt-3 whitespace-pre-line text-pretty text-sm leading-[1.75] text-muted-foreground [overflow-wrap:anywhere]">
                   {item.description}
                 </p>
               ) : (
@@ -846,9 +849,7 @@ export function ItemDetailPage({
                       </p>
                     )}
                     {(() => {
-                      const allocations = item.purchase.allocations.filter(
-                        (allocation) => allocation.item_id === item.id,
-                      );
+                      const allocations = purchaseAllocations;
                       const total = allocations.reduce(
                         (sum, allocation) =>
                           sum + (allocation.allocated_cents ?? 0),

@@ -345,6 +345,26 @@ export function ImportEntryCard({
           : []),
       ];
 
+  // What a person should see before pressing the row's button, while the row is closed.
+  // A possible duplicate, a low confidence and a failed save have their own place in
+  // the closed row already. The full texts are in the editor.
+  const reviewReason = typeof proposed.relationships?.review_reason === "string"
+    ? proposed.relationships.review_reason.trim() : "";
+  const placeCheck = (proposal: LocationProposal | null, kind: string) =>
+    proposal?.status === "ambiguous" ? [`More than one ${kind} matches`]
+      : proposal?.status === "missing" ? [`${kind === "room" ? "Room" : "Place"} “${proposal.name ?? proposal.text}” is new`]
+      : [];
+  const guessed = ["name", "quantity"].filter((field) => inferred(field));
+  const checks = final ? [] : [
+    // For example a window or a radiator: part of the building, not a possession.
+    ...(proposed.relationships?.review === true
+      ? [reviewReason.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? (reviewReason || "This may not be something to add as an item")]
+      : []),
+    ...placeCheck(proposed.room, "room"),
+    ...placeCheck(proposed.storage_location, "place"),
+    ...(guessed.length ? [`Guessed, not read: ${guessed.join(", ")}`] : []),
+  ];
+
   const identityBlock = (
     <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Brand" htmlFor={`brand-${entry.id}`} optional>
@@ -687,6 +707,8 @@ export function ImportEntryCard({
         : (value) => update({ quantity: value === "" ? Number.NaN : Number(value) })}
       quantityError={open ? null : errors?.quantity}
       values={values}
+      // While the row is open the same warnings are explained in full below.
+      checks={open ? [] : checks}
       disabled={disabled || final}
       selection={final || !onAdd
         ? undefined
@@ -737,6 +759,13 @@ export function ImportEntryCard({
       onSkip={onSkip}
       expand={final ? undefined : { open, onOpenChange: setOpen, label: "Edit" }}
     >
+      {proposed.relationships?.review === true && reviewReason &&
+        !(entry.source_excerpt ?? "").includes(reviewReason) && (
+        <p className="flex items-start gap-1.5 rounded-lg border border-brass/20 bg-brass-soft/50 px-3 py-2 text-xs leading-relaxed">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-brass" />
+          <span>{reviewReason}</span>
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
         <CircleHelp className="size-3.5" />
         <span>Field confidence:</span>

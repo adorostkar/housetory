@@ -125,7 +125,7 @@ test("owner can configure online search without env vars or plaintext key exposu
     });
   });
 
-  await page.goto("/settings");
+  await page.goto("/settings/services");
   const card = page.locator("#online-search");
   await card.scrollIntoViewIfNeeded();
   await expect(card.getByRole("heading", { name: "Online lookups" })).toBeVisible();
@@ -187,7 +187,31 @@ test("saved public-web settings refresh the system health summary without a doma
   await page.addInitScript(() => {
     window.localStorage.setItem("housetory-theme", "light");
   });
-  await page.goto("/settings");
+  const session = await request.get("/api/v1/auth/session");
+  const household = (await session.json()) as { household: { id: string } };
+  const turnOff = () =>
+    request.put("/api/v1/settings/online-search", {
+      headers: { "X-Household-Id": household.household.id },
+      data: {
+        manual_enabled: false,
+        reference_enabled: false,
+        clear_api_key: true,
+        permitted_source_domains: [],
+      },
+    });
+  // Start from "not configured", also after an earlier run that stopped half way.
+  expect((await turnOff()).ok()).toBeTruthy();
+
+  // The health summary is on the System status screen now. It is opened first, so
+  // the later visit shows whether saving really refreshed it.
+  await page.goto("/settings/system-status");
+  const summary = page.getByText(/Optional, not configured:/);
+  await expect(summary).toContainText("Online manual search");
+  await expect(summary).toContainText("Reference-image search");
+  // On to the online lookups through the Settings index, without a page reload.
+  await page.getByRole("main").getByRole("link", { name: "Back to Settings" }).click();
+  await page.getByRole("main").getByRole("link", { name: /^AI and online services/ }).click();
+  await expect(page).toHaveURL(/\/settings\/services$/);
   const card = page.locator("#online-search");
   await card.scrollIntoViewIfNeeded();
   for (const row of ["Online manual search", "Reference-image search", "Brave Search connection"]) {
@@ -202,7 +226,10 @@ test("saved public-web settings refresh the system health summary without a doma
   await expect(card.getByText("Ready")).toHaveCount(2);
   await expect(card.getByText(/Needs domains/)).toHaveCount(0);
 
-  const summary = page.getByText(/Optional, not configured:/);
+  // Back to System status the same way. Its summary no longer lists the two lookups.
+  await page.getByRole("main").getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("main").getByRole("link", { name: /^System status/ }).click();
+  await expect(page).toHaveURL(/\/settings\/system-status$/);
   await expect(summary).toBeVisible();
   await expect(summary).not.toContainText("Online manual search");
   await expect(summary).not.toContainText("Reference-image search");
@@ -213,15 +240,5 @@ test("saved public-web settings refresh the system health summary without a doma
     fullPage: false,
   });
 
-  const session = await request.get("/api/v1/auth/session");
-  const household = (await session.json()) as { household: { id: string } };
-  await request.put("/api/v1/settings/online-search", {
-    headers: { "X-Household-Id": household.household.id },
-    data: {
-      manual_enabled: false,
-      reference_enabled: false,
-      clear_api_key: true,
-      permitted_source_domains: [],
-    },
-  });
+  await turnOff();
 });

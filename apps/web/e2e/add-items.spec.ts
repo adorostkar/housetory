@@ -34,13 +34,18 @@ async function createLocation(
   return (await response.json()) as { id: string; name: string };
 }
 
-async function expectSmartAdd(page: Page) {
+async function expectSmartAdd(page: Page, layout: "dialog" | "sheet" = "dialog") {
   const dialog = page.getByRole("dialog", { name: "Add items" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Add items" })).toBeVisible();
-  await expect(
-    dialog.getByRole("textbox", { name: "Describe items or paste a product link" }),
-  ).toBeFocused();
+  const textbox = dialog.getByRole("textbox", { name: "Describe items or paste a product link" });
+  if (layout === "sheet") {
+    // The phone sheet does not open the keyboard by itself: focus waits on the title.
+    await expect(dialog.getByRole("heading", { name: "Add items" })).toBeFocused();
+    await expect(textbox).not.toBeFocused();
+  } else {
+    await expect(textbox).toBeFocused();
+  }
   await expect(dialog.getByRole("button", { name: "Take photo" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Choose photo" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Record voice note" })).toBeVisible();
@@ -65,7 +70,9 @@ test("unified Add items input detects input kinds and preserves context", async 
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/");
-  const sidebarAdd = page.locator("aside").getByRole("button", { name: "Add items" });
+  // "/" opens the item list. Add is the round button in the bottom bar.
+  await expect(page).toHaveURL(/\/items$/);
+  const sidebarAdd = page.getByTestId("bottom-bar").getByRole("button", { name: "Add items", exact: true });
   await expect(sidebarAdd).toBeVisible();
   await sidebarAdd.click();
   let dialog = await expectSmartAdd(page);
@@ -82,7 +89,7 @@ test("unified Add items input detects input kinds and preserves context", async 
   );
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/items$/);
   await expect(sidebarAdd).toBeFocused();
 
   await sidebarAdd.click();
@@ -92,13 +99,13 @@ test("unified Add items input detects input kinds and preserves context", async 
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page).toHaveURL(/\/items\/new(\?property_id=[^&]+)?$/);
   await page.goBack();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/items$/);
 
   await page.goto(`/containers/${container.id}`);
   await expect(
     page.getByRole("heading", { name: container.identifier, level: 1, exact: true }),
   ).toBeVisible();
-  const containerAdd = page.locator("main").getByRole("button", { name: "Add items" }).first();
+  const containerAdd = page.getByTestId("bottom-bar").getByRole("button", { name: "Add items", exact: true });
   await containerAdd.click();
   dialog = await expectSmartAdd(page);
   await expect(
@@ -138,7 +145,7 @@ test("unified Add items input detects input kinds and preserves context", async 
   );
 
   await page.goto(`/add-items?room_id=${room.id}&location_id=${container.id}`);
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/items$/);
   dialog = await expectSmartAdd(page);
   await expect(
     dialog.getByRole("button", {
@@ -148,13 +155,14 @@ test("unified Add items input detects input kinds and preserves context", async 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
+  // An empty room has its own "Add items" button too; this is the one in the bottom bar.
   await page.goto(`/rooms/${room.id}?location_id=${shelf.id}`);
-  await page.getByRole("button", { name: "Add items" }).first().click();
+  await page.getByTestId("bottom-bar").getByRole("button", { name: "Add items", exact: true }).click();
   dialog = await expectSmartAdd(page);
   await dialog.getByRole("button", { name: /^Place:/ }).click();
   const picker = dialog.getByRole("group", { name: "Where are these items?" });
-  await expect(picker.getByLabel("Room")).toHaveValue(room.id);
-  await expect(picker.getByLabel("Place")).toHaveValue(shelf.id);
+  await expect(picker.getByRole("combobox", { name: "Room", exact: true })).toHaveValue(room.id);
+  await expect(picker.getByRole("combobox", { name: "Place", exact: true })).toHaveValue(shelf.id);
   await picker.getByRole("button", { name: "Done" }).click();
   await dialog.getByRole("link", { name: "or fill in the form yourself" }).click();
   await expect(page).toHaveURL(
@@ -167,8 +175,8 @@ test("unified Add items input detects input kinds and preserves context", async 
   });
   const mobilePage = await mobile.newPage();
   await mobilePage.goto("/");
-  await mobilePage.getByRole("button", { name: "Add items" }).first().click();
-  const sheet = await expectSmartAdd(mobilePage);
+  await mobilePage.getByRole("button", { name: "Add items", exact: true }).first().click();
+  const sheet = await expectSmartAdd(mobilePage, "sheet");
   const sheetBox = await sheet.boundingBox();
   expect(sheetBox).not.toBeNull();
   expect(Math.round((sheetBox?.y ?? 0) + (sheetBox?.height ?? 0))).toBeGreaterThanOrEqual(851);
@@ -176,8 +184,8 @@ test("unified Add items input detects input kinds and preserves context", async 
   await mobilePage.keyboard.press("Escape");
   await expect(mobilePage.getByRole("dialog")).toHaveCount(0);
   await mobilePage.goto("/items");
-  await mobilePage.getByRole("button", { name: "Add items" }).click();
-  await (await expectSmartAdd(mobilePage))
+  await mobilePage.getByRole("button", { name: "Add items", exact: true }).click();
+  await (await expectSmartAdd(mobilePage, "sheet"))
     .getByRole("link", { name: "or fill in the form yourself" })
     .click();
   await expect(mobilePage).toHaveURL(/\/items\/new/);

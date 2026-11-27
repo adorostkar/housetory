@@ -406,6 +406,15 @@ def _check_item(db: Session, auth: AuthContext, run: AssistantRun, item_id: uuid
 # ---- Handlers. Each calls the service that the normal pages use. -----------------------
 
 
+# Lookups match q as one phrase. A real model put several guesses into one q, found
+# nothing and gave up; the result now says how to go on.
+PHRASE_HINT = (
+    " The words of q were looked for together, as one phrase. Before you say that "
+    "nothing was found, search again with single words a record is likely to contain: "
+    "the most likely name first, then other words for it."
+)
+
+
 def _read(function, shape=None):
     """Handler for a read-only inventory lookup of ``ai_tools``.
 
@@ -424,6 +433,8 @@ def _read(function, shape=None):
         facts, summary = shape(result) if shape else (result.facts, result.summary)
         if len(json.dumps(facts, default=str)) > 12000:
             facts = {"truncated": True, "notice": "Refine the query for more detail."}
+        if not result.references and len((getattr(call.args, "q", None) or "").split()) > 1:
+            summary += PHRASE_HINT
         return ToolOutput(summary=summary, facts=facts, references=result.references[:12])
 
     handler.reads = function
@@ -454,6 +465,20 @@ def _item_details(result):
     if facts.get("last_verified"):
         provenance["last_verified"] = "seen and counted in a stocktake"
     return {**facts, "documents": documents, "provenance": provenance}, result.summary
+
+
+def _places(result):
+    # The matches with their ids. Without them a real model could not name the
+    # destination of a move and looked the room up a second time.
+    places = [
+        {
+            key: entry[key]
+            for key in ("id", "type", "name", "identifier", "room")
+            if entry.get(key) is not None
+        }
+        for entry in result.locations[:20]
+    ]
+    return {"places": places}, result.summary
 
 
 def _documents(result):
@@ -859,7 +884,8 @@ TOOLS = _register(
     Tool(
         "search_items",
         "Search inventory by words, room (room_name/room_id), place "
-        "(location_name/container_id), category or tag; bounded matches and real total.",
+        "(location_name/container_id), category or tag; bounded matches and real total. "
+        "q is one phrase: a word or two that the record contains, not a list of guesses.",
         ReadArguments,
         _read(ai_tools.tool_search_items),
         progress="Searching your items",
@@ -874,9 +900,10 @@ TOOLS = _register(
     ),
     Tool(
         "search_locations",
-        "Find authorized rooms/places; keep duplicate names distinct.",
+        "Find authorized rooms/places by q, a part of the name or identifier, with their "
+        "ids; keep duplicate names distinct.",
         ReadArguments,
-        _read(ai_tools.tool_search_locations),
+        _read(ai_tools.tool_search_locations, _places),
         progress="Looking up rooms and places",
     ),
     Tool(

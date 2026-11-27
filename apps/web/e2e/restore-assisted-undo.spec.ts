@@ -98,6 +98,8 @@ test("restores a recoverable container and returns one item from history", async
   await expect(
     page.getByRole("heading", { name: new RegExp(`Recovery router ${id}`) }),
   ).toBeVisible();
+  // Undo and restore are offered in the item's History tab.
+  await page.getByRole("tab", { name: "History" }).click();
   const restoreButton = page.getByRole("button", {
     name: /Restore container and undo move/,
   });
@@ -177,6 +179,7 @@ test("shows an honest blocker when the item moved again after container deletion
   await moveItem(request, item.item.id, attic.id, null);
 
   await page.goto(`/items/${item.item.id}`);
+  await page.getByRole("tab", { name: "History" }).click();
   await expect(
     page.getByText(/Restore unavailable: The item has moved since this action/),
   ).toBeVisible();
@@ -241,6 +244,7 @@ test("room deletion warns about detached recoverable places and leaves an honest
   expect(container.status()).toBe(410);
 
   await page.goto(`/items/${item.item.id}`);
+  await page.getByRole("tab", { name: "History" }).click();
   await expect(
     page.getByText(/Restore unavailable: The original room no longer exists/),
   ).toBeVisible();

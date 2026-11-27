@@ -50,9 +50,11 @@ test("selects items, previews evidence, generates and downloads the PDF/CSV/ZIP"
   expect(receipt.ok()).toBeTruthy();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/items");
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select ${first.item.name}` }).check();
   await page.getByRole("checkbox", { name: `Select ${second.item.name}` }).check();
-  await page.getByRole("button", { name: "Export evidence" }).click();
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Export evidence" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Export 2 selected items with evidence" });
   await expect(dialog).toBeVisible();
@@ -115,8 +117,10 @@ test("shows preview errors and a canceled package state", async ({ page, request
     });
   });
   await page.goto("/items");
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select ${item.item.name}` }).check();
-  await page.getByRole("button", { name: "Export evidence" }).click();
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Export evidence" }).click();
   const dialog = page.getByRole("dialog", { name: "Export 1 selected item with evidence" });
   await expect(dialog.getByText("The preview fixture failed safely.")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -175,8 +179,14 @@ test("shows preview errors and a canceled package state", async ({ page, request
   );
 
   await page.goto("/items");
-  await page.getByRole("checkbox", { name: `Select ${item.item.name}` }).check();
-  await page.getByRole("button", { name: "Export evidence" }).click();
+  // The selection is kept for this browser tab, so the item is still selected.
+  await expect(page.getByRole("button", { name: "Select items" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("checkbox", { name: `Select ${item.item.name}` })).toBeChecked();
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Export evidence" }).click();
   const retryDialog = page.getByRole("dialog", {
     name: "Export 1 selected item with evidence",
   });

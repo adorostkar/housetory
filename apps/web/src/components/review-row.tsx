@@ -31,6 +31,7 @@ export function ReviewRow({
   quantityError,
   thumbnail,
   values = [],
+  checks = [],
   badges,
   selection,
   primary,
@@ -56,6 +57,11 @@ export function ReviewRow({
   quantityError?: string | null;
   thumbnail?: React.ReactNode;
   values?: ReviewValue[];
+  /**
+   * Short warnings a person must see before pressing the row's button. They are shown
+   * on the closed row, in one line under the name. A longer text belongs in the editor.
+   */
+  checks?: string[];
   badges?: React.ReactNode;
   /** A checkbox only selects the row for the bulk action. It never decides anything. */
   selection?: { checked: boolean; onChange: (checked: boolean) => void; label: string };
@@ -141,6 +147,12 @@ export function ReviewRow({
           )}
           {quantityError && (
             <p id={`${ids}-quantity-error`} role="alert" className="text-xs text-destructive">{quantityError}</p>
+          )}
+          {checks.length > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-brass">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">Check: {checks.join(" · ")}</span>
+            </p>
           )}
           {values.length > 0 && (
             <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">

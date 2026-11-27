@@ -125,7 +125,9 @@ test.beforeAll(async () => {
     response.statusCode = 404;
     response.end(JSON.stringify({ error: "not found" }));
   });
-  await new Promise<void>((resolve) => mockServer.listen(0, "0.0.0.0", resolve));
+  // With E2E_AI_BASE_URL (an API outside Docker) the mock listens on that URL's port.
+  const fixedPort = process.env.E2E_AI_BASE_URL ? Number(new URL(process.env.E2E_AI_BASE_URL).port) : 0;
+  await new Promise<void>((resolve) => mockServer.listen(fixedPort, "0.0.0.0", resolve));
   mockPort = (mockServer.address() as AddressInfo).port;
 });
 
@@ -320,7 +322,7 @@ test("configures an Ollama provider through Settings with a mocked local service
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
-  await page.goto("/settings");
+  await page.goto("/settings/services");
   await expect(
     page.getByRole("heading", { name: "Intelligence", level: 2 }),
   ).toBeVisible();
@@ -361,44 +363,49 @@ test("captures a camera photo, reviews multi-object suggestions and creates appr
     page.getByRole("heading", { name: container.identifier, level: 1, exact: true }),
   ).toBeVisible();
   await page.locator("main").getByRole("button", { name: "Add items" }).first().click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: /Scan a photo/ })
-    .click();
-  await expect(page).toHaveURL(
-    new RegExp(`/scan\\?(?:property_id=[^&]+&)?room_id=${room.id}&location_id=${container.id}`),
-  );
-  await expect(
-    page.getByText(/A vision-capable model is selected/),
-  ).toBeVisible();
+  // The photo goes through Add items, which already knows the container it was opened in.
+  const addItems = page.getByRole("dialog", { name: "Add items" });
+  await addItems.getByTestId("smart-add-camera").setInputFiles(photoPath);
+  await expect(addItems.getByRole("button", { name: "Remove photo" })).toBeVisible();
+  await addItems.getByRole("button", { name: "Review items" }).click();
 
-  await captureInput(page).setInputFiles(photoPath);
-  await expect(
-    page.getByRole("img", { name: "Captured photograph preview" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Upload photograph" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Review 2 suggestions" }),
-  ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Local · ollama · llava:latest/)).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: cameraName }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: cablesName }),
-  ).toBeVisible();
-  const cameraCard = page
-    .getByRole("heading", { name: cameraName })
-    .locator("xpath=ancestor::article");
-  await expect(cameraCard.getByLabel(/^Room/)).toHaveValue(room.id);
-  await expect(
-    cameraCard.getByLabel(/Container or storage location/),
-  ).toHaveValue(container.id);
-  await expect(page.getByLabel("Quantity").nth(1)).toHaveValue("3");
+  // The found items are reviewed in the assistant, on the page the photo was added from.
+  const review = page
+    .getByTestId("assistant-panel")
+    .getByRole("region", { name: "Assistant item review" });
+  await expect(review.getByRole("heading", { name: "Photo review: icon-192.png" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page).toHaveURL(new RegExp(`/containers/${container.id}#assistant$`));
+  await expect(review.getByText(/2 proposals/)).toBeVisible();
+  await expect(review.getByText("AI-assisted")).toBeVisible();
+  await expect(review.getByRole("img", { name: "The photo these items were found in" })).toBeVisible();
+  const cameraRow = review.getByRole("article", { name: cameraName });
+  const cablesRow = review.getByRole("article", { name: cablesName });
+  await expect(cameraRow).toBeVisible();
+  await expect(cablesRow.getByLabel(`Quantity of ${cablesName}`)).toHaveValue("3");
+  // The destination comes from the container. The full fields are behind Edit.
+  await cameraRow.getByRole("button", { name: "Edit" }).click();
+  await expect(cameraRow.getByLabel(/^Room/)).toHaveValue(room.id);
+  await expect(cameraRow.getByLabel(/^Storage place/)).toHaveValue(container.id);
 
-  await page.getByRole("button", { name: "Approve selected" }).click();
-  await expect(page.getByText("Scan applied")).toBeVisible();
-  await expect(page.getByText(/2 created/).first()).toBeVisible();
+  // Nothing is selected at first, and nothing is added until asked.
+  await expect(cameraRow.getByRole("checkbox", { name: `Select ${cameraName}` })).not.toBeChecked();
+  await expect(review.getByRole("button", { name: "Add selected items" })).toBeDisabled();
+  await review.getByRole("button", { name: "Select all" }).click();
+  await review.getByRole("button", { name: "Add 2 selected items" }).first().click();
+  await expect(page.getByText("2 items added")).toBeVisible();
+  await expect(review.getByText(/2 proposals · 2 imported/)).toBeVisible();
+
+  // The review no longer names the provider and model. They are recorded with it.
+  const batches = (await (await request.get("/api/v1/imports?limit=1")).json()) as {
+    items: Array<{ id: string; title: string }>;
+  };
+  expect(batches.items[0]?.title).toBe("Photo review: icon-192.png");
+  const batch = (await (await request.get(`/api/v1/imports/${batches.items[0]!.id}`)).json()) as {
+    metadata: { ai_provider: string; ai_model: string };
+  };
+  expect(batch.metadata).toMatchObject({ ai_provider: "ollama", ai_model: "llava:latest" });
 
   const itemsResponse = await request.get(`/api/v1/items?limit=100&room_id=${room.id}`);
   expect(itemsResponse.ok()).toBeTruthy();
@@ -444,35 +451,58 @@ test("scans into a room only, flags fixed fixtures and applies a per-suggestion 
   });
   expect(task.ok()).toBeTruthy();
 
+  // The old scan address opens Add items with the room already chosen, and no container.
   await page.goto(`/scan?room_id=${room.id}`);
-  await expect(page.getByText(/A vision-capable model is selected/)).toBeVisible();
-  await expect(page.getByLabel(/Default room/)).toHaveValue(room.id);
-  await expect(
-    page.getByLabel(/Default container or storage location/),
-  ).toHaveValue("");
+  const addItems = page.getByRole("dialog", { name: "Add items" });
+  await expect(addItems.getByRole("button", { name: `Place: ${room.name}. Change` })).toBeVisible();
+  await addItems.getByTestId("smart-add-camera").setInputFiles(photoPath);
+  await addItems.getByRole("button", { name: "Review items" }).click();
+  const review = page
+    .getByTestId("assistant-panel")
+    .getByRole("region", { name: "Assistant item review" });
+  await expect(review.getByRole("heading", { name: "Photo review: icon-192.png" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(review.getByText(/4 proposals/)).toBeVisible();
+  const batches = (await (await request.get("/api/v1/imports?limit=1")).json()) as {
+    items: Array<{ id: string }>;
+  };
+  const batch = (await (await request.get(`/api/v1/imports/${batches.items[0]!.id}`)).json()) as {
+    metadata: { ai_provider: string; ai_model: string };
+  };
+  expect(batch.metadata).toMatchObject({ ai_provider: "openai", ai_model: "gpt-4o" });
 
-  await captureInput(page).setInputFiles(photoPath);
-  await page.getByRole("button", { name: "Upload photograph" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Review 4 suggestions" }),
-  ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Remote\/cloud · openai · gpt-4o/)).toBeVisible();
-  await expect(page.getByLabel(`Include Window ${scanSuffix}`)).not.toBeChecked();
-  await expect(page.getByLabel(`Include Radiator ${scanSuffix}`)).not.toBeChecked();
-  await expect(page.getByLabel(`Include Mystery object ${scanSuffix}`)).not.toBeChecked();
-  await expect(page.getByLabel(`Include ${heaterName}`)).toBeChecked();
-  await expect(page.getByText(/fixed architectural features/i)).toBeVisible();
+  // Nothing is selected for the person: not the fixed features, not the unsure one,
+  // and not the heater either.
+  for (const name of [`Window ${scanSuffix}`, `Radiator ${scanSuffix}`, `Mystery object ${scanSuffix}`, heaterName]) {
+    await expect(review.getByRole("checkbox", { name: `Select ${name}` })).not.toBeChecked();
+  }
+  await expect(review.getByRole("article", { name: `Mystery object ${scanSuffix}` })).toContainText("22% sure");
+  // A window and a radiator are parts of the building. The closed row says so, before
+  // anything is opened or added. The heater has no such warning.
+  const windowRow = review.getByRole("article", { name: `Window ${scanSuffix}` });
+  const radiatorRow = review.getByRole("article", { name: `Radiator ${scanSuffix}` });
+  const heaterRow = review.getByRole("article", { name: heaterName });
+  await expect(windowRow.getByRole("button", { name: "Edit" })).toHaveAttribute("aria-expanded", "false");
+  await expect(windowRow.getByText(/^Check: /))
+    .toContainText("Windows are fixed architectural features, not movable possessions.");
+  await expect(radiatorRow.getByText(/^Check: /)).toContainText("Radiators are usually installed fixtures.");
+  await expect(heaterRow).not.toContainText(/fixed architectural|installed fixtures/i);
+  // The full reason is in the row's details.
+  await windowRow.getByRole("button", { name: "Edit" }).click();
+  await expect(windowRow.getByText(/fixed architectural features/i).first()).toBeVisible();
+  await windowRow.getByRole("button", { name: "Close" }).click();
 
-  const heaterCard = page
-    .getByRole("heading", { name: heaterName })
-    .locator("xpath=ancestor::article");
-  await heaterCard.getByLabel(/^Room/).selectOption(otherRoom.id);
-  await expect(
-    heaterCard.getByLabel(/Container or storage location/),
-  ).toHaveValue("");
-  await page.getByRole("button", { name: "Approve selected" }).click();
-  await expect(page.getByText("Scan applied")).toBeVisible();
-  await expect(page.getByText(/1 created/).first()).toBeVisible();
+  await heaterRow.getByRole("button", { name: "Edit" }).click();
+  await expect(heaterRow.getByLabel(/^Room/)).toHaveValue(room.id);
+  await expect(heaterRow.getByLabel(/^Storage place/)).toHaveValue("");
+  await heaterRow.getByLabel(/^Room/).selectOption(otherRoom.id);
+  await expect(heaterRow.getByLabel(/^Storage place/)).toHaveValue("");
+  // Only the heater is ticked, so only the heater is added.
+  await review.getByRole("checkbox", { name: `Select ${heaterName}` }).check();
+  await review.getByRole("button", { name: "Add 1 selected item" }).first().click();
+  await expect(page.getByText("1 item added")).toBeVisible();
+  await expect(review.getByText(/4 proposals · 1 imported/)).toBeVisible();
 
   const itemsResponse = await request.get(
     `/api/v1/items?limit=100&room_id=${otherRoom.id}`,
@@ -504,21 +534,10 @@ test("imports the actual Inventory.md, excludes indexes/templates and prevents d
   await waitForImport(request, batch.id);
   await page.goto(`/imports/${batch.id}`);
   await expect(page.getByText("Structured hierarchy")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Storage", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Storage room 2", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "STO-03", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Keyboards (incl. Dell keyboard)", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Ethernet cables + long ethernet cable", exact: true }),
-  ).toBeVisible();
+  // Rooms, containers and items are rows of one tree.
+  for (const name of ["Storage", "Storage room 2", "STO-03", "Keyboards (incl. Dell keyboard)", "Ethernet cables + long ethernet cable"]) {
+    await expect(page.getByRole("article", { name, exact: true })).toBeVisible();
+  }
   await expect(page.getByText("Source reference").first()).toBeVisible();
   await expect(page.getByText("Sample item")).toHaveCount(0);
   await expect(page.getByText("Possible duplicate")).toHaveCount(0);
@@ -529,7 +548,10 @@ test("imports the actual Inventory.md, excludes indexes/templates and prevents d
   expect(detailBefore.metadata.hierarchy_items).toBe(52);
   expect(detailBefore.metadata.ai_used).toBe(false);
 
-  await page.getByRole("button", { name: "Approve selected" }).click();
+  // Nothing is selected at first. The button counts every record: rooms, containers, items.
+  await expect(page.getByRole("button", { name: "Add selected records" }).first()).toBeDisabled();
+  await page.getByRole("button", { name: "Select all" }).click();
+  await page.getByRole("button", { name: "Add 60 selected records" }).first().click();
   await expect(page.getByText("Import applied")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/0 failed/).first()).toBeVisible();
 
@@ -588,17 +610,18 @@ test("imports the actual Inventory.md, excludes indexes/templates and prevents d
   await page.goto(`/imports/${duplicateBatch.id}`);
   const keyboardRow = page
     .locator("article")
-    .filter({ has: page.getByRole("heading", { name: "Keyboards (incl. Dell keyboard)" }) })
+    .filter({ has: page.getByRole("checkbox", { name: "Select Keyboards (incl. Dell keyboard)" }) })
     .first();
   await expect(keyboardRow.getByText("Possible duplicate")).toBeVisible();
+  // Nothing is selected to begin with, and there is no action dropdown.
   await expect(
-    keyboardRow.getByLabel("Action for Keyboards (incl. Dell keyboard)"),
-  ).toHaveValue("skip");
+    keyboardRow.getByRole("checkbox", { name: "Select Keyboards (incl. Dell keyboard)" }),
+  ).not.toBeChecked();
 
   await keyboardRow
-    .getByRole("checkbox", { name: "Include Keyboards (incl. Dell keyboard)" })
+    .getByRole("checkbox", { name: "Select Keyboards (incl. Dell keyboard)" })
     .check();
-  await page.getByRole("button", { name: /Approve .* entr/ }).click();
+  await page.getByRole("button", { name: /^Add \d+ selected records?$/ }).first().click();
   await expect(page.getByText("Import applied")).toBeVisible({ timeout: 30_000 });
   const after = (await (
     await request.get("/api/v1/items?limit=100")

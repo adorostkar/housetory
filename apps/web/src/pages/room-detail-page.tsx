@@ -166,7 +166,9 @@ export function RoomDetailPage() {
   const origin = itemOrigin(`${location.pathname}${location.search}`, originLabel);
   useRestoreListScroll(items.length > 0, origin);
   const { openAddItems } = useAddItems();
-  const addItemsContext = room
+  // Until the storage places have loaded, the place named in the address is not known
+  // here. Add items then takes the room and the place from the address itself.
+  const addItemsContext = room && !(requestedLocationId && locationsQuery.isPending)
     ? {
         propertyId: room.property_id,
         roomId: room.id,

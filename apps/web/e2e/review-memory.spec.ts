@@ -33,7 +33,7 @@ test.beforeAll(async ({ request }) => {
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const prompt = body.messages.at(-1).content as string;
     const items = JSON.parse(prompt.split("Items: ")[1].split("\nReturn ")[0]) as Array<{
-      index: number; name: string;
+      index: number; name: string; current_tags?: string[];
     }>;
     calls.push(items.map((item) => item.name));
     if (holdNext) {
@@ -46,10 +46,15 @@ test.beforeAll(async ({ request }) => {
     const tags = [{ name: "camping" }, { name: "organised" }];
     res.end(JSON.stringify({ message: { role: "assistant", content: invalid
       ? JSON.stringify({ suggestions: "invalid synthetic output" })
-      : JSON.stringify({ suggestions: items.map((item) => ({
+      // Every item must get a usable answer: a proposal, or a reason for making none.
+      // The same tags again for an item that has them is neither, and leaves it unreviewed.
+      : JSON.stringify({ suggestions: items.map((item) => tags.every((tag) => (item.current_tags ?? []).includes(tag.name)) ? {
+        index: item.index, category: null, no_category_reason: "Already organised with these tags.",
+        tags: [], confidence: "high", reason: `Synthetic explanation variant ${calls.length}`,
+      } : {
         index: item.index, tags: calls.length % 2 ? tags : [...tags].reverse(),
         confidence: "high", reason: `Synthetic explanation variant ${calls.length}`,
-      })) }),
+      }) }),
     } }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -176,7 +181,7 @@ for (const mobile of [false, true]) {
     await page.goto(`/review?scope_type=items&item_ids=${item.id}`);
     await page.getByRole("checkbox", { name: /Include AI suggestions/ }).check();
     const card = page.locator("#review-suggestions li").filter({ hasText: item.name }).first();
-    await card.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await card.getByRole("button", { name: "Skip", exact: true }).click();
     await start(page, true);
     await finished(page);
     let queue = await (await request.get(`/api/v1/inventory-review/suggestions?status=pending&item_ids=${item.id}`)).json();
@@ -194,7 +199,7 @@ for (const mobile of [false, true]) {
     expect(queue.items[0].id).not.toBe(dismissed.items[0].id);
     const approved = page.waitForResponse((response) =>
       response.request().method() === "POST" && response.url().endsWith("/accept"));
-    await card.getByRole("button", { name: "Accept organisation", exact: true }).click();
+    await card.getByRole("button", { name: "Apply changes", exact: true }).click();
     expect((await approved).ok()).toBeTruthy();
     const saved = (await (await request.get(`/api/v1/items/${item.id}`)).json()).item;
     expect(saved.tags.map((tag: { name: string }) => tag.name).sort()).toEqual(["camping", "organised"]);
@@ -233,7 +238,7 @@ for (const mobile of [false, true]) {
     expect(calls.length).toBe(before);
     expect((await (await request.get(`/api/v1/items/${target.id}`)).json()).item.category).toBeNull();
     const card = page.locator("#review-suggestions li").filter({ hasText: `Assign category “${category.name}”` }).first();
-    await card.getByRole("button", { name: "Accept", exact: true }).click();
+    await card.getByRole("button", { name: "Apply change", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/items/${target.id}`)).json()).item.category?.id).toBe(category.id);
     await page.getByRole("link", { name: "Back to item", exact: true }).click();
     await expect(page).toHaveURL(`/items/${target.id}?tab=history`);

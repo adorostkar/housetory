@@ -85,24 +85,27 @@ test("unified search answers the heavy drill loan question without claiming it i
   await expect(panel.getByText(new RegExp(`On loan to Alex`))).toBeVisible();
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/search\?q=.*r=/);
+  // Enter sends a question to the assistant, which opens over the page.
+  await expect(page).toHaveURL(/#assistant$/);
   await expect(page).not.toHaveURL(/ask=1/);
+  const assistant = page.getByTestId("assistant-panel");
   await expect(
-    page.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
+    assistant.getByText(/Alex has 1 of your 2 units of Makita Heavy drill/).first(),
   ).toBeVisible();
-  await expect(page.getByText(/at home in Home → Workshop/).first()).toBeVisible();
-  await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
-  await expect(page.getByText(/BOX-\d+ · Power tools/).first()).toBeVisible();
-  await expect(page.getByText(/On loan: 1 with Alex/)).toHaveCount(0);
-  await expect(page.getByText(/guarantee of return/)).toHaveCount(0);
+  await expect(assistant.getByText(/at home in Home → Workshop/).first()).toBeVisible();
+  await expect(assistant.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
+  await expect(assistant.getByText(/BOX-\d+ · Power tools/).first()).toBeVisible();
+  await expect(assistant.getByText(/On loan: 1 with Alex/)).toHaveCount(0);
+  await expect(assistant.getByText(/guarantee of return/)).toHaveCount(0);
 
-  const followupInput = visibleQuickSearch(page);
-  await followupInput.fill("when is it due?");
-  await followupInput.press("Enter");
-  await expect(page).toHaveURL(/\/search\?q=when/);
-  await expect(page.getByText(new RegExp(`Due ${dueLabel}`)).first()).toBeVisible();
+  // The follow-up goes in the assistant's own field, so it is about the same drill.
+  await assistant.getByRole("textbox", { name: "Ask the Housetory assistant" }).fill("when is it due?");
+  await assistant.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(assistant.getByText("when is it due?", { exact: true })).toBeVisible();
+  await expect(assistant.getByRole("button", { name: "Copy answer" })).toHaveCount(2);
+  await expect(assistant.getByText(new RegExp(`Due ${dueLabel}`)).last()).toBeVisible();
   await expect(
-    page.getByText(/AI unavailable · direct results only|AI-assisted answer/).first(),
+    assistant.getByText(/^(AI off · local answer|AI-assisted|Direct lookup)$/).last(),
   ).toBeVisible();
 });
 
@@ -142,29 +145,38 @@ test("mobile keyword search stays local and missing-purchase filters match the a
   await mobileInput.fill(`PS5 ${id}`);
   const panel = page.getByRole("listbox", { name: "Quick search results" });
   await expect(panel).toBeVisible();
-  await expect(panel.getByText(new RegExp(`PS5 ${id}`))).toBeVisible();
+  await expect(panel.getByRole("option", { name: new RegExp(`^PS5 ${id}`) })).toBeVisible();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/search\\?q=PS5`));
-  await expect(page).not.toHaveURL(/ask=1/);
+  // A plain name stays local: it filters the item list and the assistant is not opened.
+  await expect(page).toHaveURL(/\/items\?q=PS5/);
+  await expect(page).not.toHaveURL(/ask=1|#assistant/);
+  await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
   await expect(
-    page.getByRole("link", { name: new RegExp(`PS5 ${id}`) }),
+    page.locator("main").getByRole("link", { name: new RegExp(`PS5 ${id}`) }).first(),
   ).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(
     `/search?q=${encodeURIComponent("Which items have no purchase information?")}&ask=1`,
   );
-  await expect(page.getByText(/missing or unresolved purchase information/).first()).toBeVisible();
-  await page.getByRole("link", { name: "Open matching filters" }).click();
+  // The old "ask" link opens the assistant with the question.
+  const assistant = page.getByTestId("assistant-panel");
+  await expect(assistant.getByText(/missing or unresolved purchase information/).first()).toBeVisible();
+  await assistant.getByRole("link", { name: "Open matching records" }).click();
   await expect(page).toHaveURL(/\/items\?purchase_info=missing/);
 
-  const itemSearch = page.getByLabel("Search items");
+  // The field in the bar searches inside the filtered list.
+  const itemSearch = page
+    .getByTestId("bottom-bar")
+    .getByRole("combobox", { name: "Search or ask about your inventory" });
   await itemSearch.fill(`Old lantern ${id}`);
+  await expect(page).toHaveURL(/purchase_info=missing/);
   await expect(
-    page.getByRole("link", { name: new RegExp(`Old lantern ${id}`) }).first(),
+    page.locator("main").getByRole("link", { name: new RegExp(`Old lantern ${id}`) }).first(),
   ).toBeVisible();
   await itemSearch.fill(`PS5 ${id}`);
-  await expect(page.getByText("Nothing matches.")).toBeVisible();
+  await expect(page.locator("main").getByText("Nothing matches.")).toBeVisible();
+  await expect(page).toHaveURL(/purchase_info=missing/);
 
   // The PS5 has purchase details and must not be part of the missing filter.
   expect(ps5.item.id).toBeTruthy();

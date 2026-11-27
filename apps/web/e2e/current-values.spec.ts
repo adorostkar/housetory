@@ -136,8 +136,10 @@ test("item and evidence report show $40 per unit, owned quantity 2 and $80 total
   );
 
   await page.goto("/items");
+  await page.getByRole("button", { name: "Select items" }).click();
   await page.getByRole("checkbox", { name: `Select ${itemName}` }).check();
-  await page.getByRole("button", { name: "Export evidence" }).click();
+  await page.getByTestId("bulk-action-bar").getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Export evidence" }).click();
   const dialog = page.getByRole("dialog", {
     name: "Export 1 selected item with evidence",
   });

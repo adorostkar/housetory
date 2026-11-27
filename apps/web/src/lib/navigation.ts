@@ -99,7 +99,8 @@ export function useRestoreListScroll(ready: boolean, origin: ItemOrigin | null):
       restored.current = key;
       const top = Number(value);
       if (Number.isFinite(top) && top > 0) {
-        window.requestAnimationFrame(() => window.scrollTo({ top }));
+        // At once: a list that slides back into place looks like it lost its position.
+        window.requestAnimationFrame(() => window.scrollTo({ top, behavior: "instant" }));
       }
     } catch {
       // Storage failures are non-fatal.

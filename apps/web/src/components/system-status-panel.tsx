@@ -232,6 +232,8 @@ export function SystemStatusPanel({
   const mountedRef = React.useRef(true);
 
   React.useEffect(() => {
+    // Set on every mount: in development React mounts, unmounts and mounts again.
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };

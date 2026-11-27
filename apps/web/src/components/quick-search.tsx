@@ -441,7 +441,11 @@ export function QuickSearch({
 
   const askAssistant = () => {
     setFocused(false);
-    pendingEditRef.current = null;
+    // The text now belongs to the assistant. It must not stay behind as a filter
+    // on the item list, so the field is emptied and that change is published.
+    pendingEditRef.current = "";
+    pendingEditPathRef.current = window.location.pathname;
+    setQuery("");
     if (inputRef.current) onAsk(term, inputRef.current);
   };
 
@@ -702,9 +706,10 @@ export function QuickSearch({
           <span
             data-testid="quick-search-context"
             title={context.name}
-            className="flex h-8 shrink-0 items-center rounded-full bg-accent pl-2.5 text-xs font-medium text-accent-foreground"
+            // The chip gives way before the field gets too narrow to tap.
+            className="flex h-8 min-w-0 items-center rounded-full bg-accent pl-2.5 text-xs font-medium text-accent-foreground"
           >
-            <span className="max-w-[6.5rem] truncate">{context.label}</span>
+            <span className="min-w-0 max-w-[6.5rem] truncate">{context.label}</span>
             <button
               type="button"
               aria-label={`Remove ${context.label.toLowerCase()} from the question: ${context.name}`}
@@ -762,7 +767,7 @@ export function QuickSearch({
           onKeyDown={onKeyDown}
           disabled={recorder.recording || voiceProcessing || pendingRecording}
           aria-describedby={voiceNotice ? voiceNoticeId : undefined}
-          className="quick-search-input h-full min-w-0 flex-1 bg-transparent px-1.5 text-[1rem] text-foreground outline-none placeholder:text-muted-foreground lg:text-[0.95rem]"
+          className="quick-search-input h-full min-w-11 flex-1 bg-transparent px-1.5 text-[1rem] text-foreground outline-none placeholder:text-muted-foreground lg:text-[0.95rem]"
         />
         {onAttach && (
           <>
@@ -798,6 +803,9 @@ export function QuickSearch({
               className={cn(
                 "flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-45",
                 hideExtras && "hidden",
+                // On the narrowest phones the chip leaves no room for the field. Attach
+                // comes back when the field has focus and takes the whole bar.
+                compact && context !== null && !inputFocused && "max-[359px]:hidden",
               )}
               onClick={() => attachInputRef.current?.click()}
             >

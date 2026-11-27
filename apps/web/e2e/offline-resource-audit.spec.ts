@@ -23,7 +23,19 @@ test("core pages load without external browser resources", async ({ page }) => {
     "/search?q=drill",
     "/loans",
     "/documents",
+    "/purchases",
+    "/warranties",
+    "/insurance",
+    "/stocktake",
+    "/review",
     "/settings",
+    // Settings is an index now. Its screens are pages of their own.
+    "/settings/account",
+    "/settings/appearance",
+    "/settings/household",
+    "/settings/services",
+    "/settings/system-status",
+    "/settings/advanced",
   ]) {
     await page.goto(path);
     await expect(page.locator("main")).toBeVisible();

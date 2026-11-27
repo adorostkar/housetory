@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
 import {
@@ -357,7 +358,9 @@ export function BulkItemActionBar({
     <>
       {/* Marks the list's column. The bar is fixed to the screen but lines up with it. */}
       <div ref={anchor} aria-hidden="true" className="h-0" />
-      {items.length > 0 && !keyboardOpen && (
+      {/* The bar is drawn in the page body. Inside the page it would be placed from the
+          page's own box, because the page keeps a transform after its opening animation. */}
+      {items.length > 0 && !keyboardOpen && createPortal(
         <div
           role="region"
           aria-label="Selected items"
@@ -442,7 +445,8 @@ export function BulkItemActionBar({
               <X />
             </Button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {items.length > 0 && (

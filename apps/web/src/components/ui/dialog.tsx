@@ -24,14 +24,27 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * Escape closes the innermost open thing first. While focus is in a field whose
+ * suggestion list is open, Escape closes that list and leaves the dialog open.
+ */
+export function keepOpenForInnerList(
+  event: KeyboardEvent,
+  onEscapeKeyDown?: (event: KeyboardEvent) => void,
+) {
+  onEscapeKeyDown?.(event);
+  if (document.activeElement?.getAttribute("aria-expanded") === "true") event.preventDefault();
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { hideClose?: boolean }
->(({ className, children, hideClose = false, ...props }, ref) => (
+>(({ className, children, hideClose = false, onEscapeKeyDown, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      onEscapeKeyDown={(event) => keepOpenForInnerList(event, onEscapeKeyDown)}
       className={cn(
         "dialog-safe-bottom fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100dvh-2rem-env(safe-area-inset-bottom))] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-5 overflow-y-auto overscroll-contain rounded-2xl border border-border/80 bg-popover px-6 pt-6 text-popover-foreground shadow-lift focus:outline-none data-[state=open]:animate-fade-in sm:px-7 sm:pt-7",
         "max-sm:inset-x-0 max-sm:bottom-0 max-sm:top-auto max-sm:flex max-sm:max-h-[90dvh] max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:flex-col max-sm:overflow-y-auto max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-b-0 max-sm:pb-0 max-sm:pt-0 max-sm:data-[state=open]:animate-sheet-up",

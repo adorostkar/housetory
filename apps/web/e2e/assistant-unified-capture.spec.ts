@@ -701,13 +701,30 @@ async function fixture(
   return errors;
 }
 
+/** The item list's link in the list of rooms: "All items" in the sidebar, "All" in the phone rail. */
+const allItems = (page: Page) =>
+  page.getByRole("navigation", { name: "Rooms" }).getByRole("link", { name: /^All( items)?$/ });
+
+/**
+ * Opens a capture that waits for review. The waiting captures are listed on the Review
+ * page, which the assistant's "Review queue" link opens. "Review" there opens the
+ * capture in the assistant.
+ */
+async function openWaitingCapture(page: Page, title: string) {
+  await page.getByTestId("assistant-panel").getByRole("link", { name: "Review queue" }).click();
+  await expect(page).toHaveURL(/\/review$/);
+  await page.getByRole("region", { name: "Pending captures" })
+    .getByRole("button", { name: `Review ${title}`, exact: true }).click();
+  await expect(page.getByTestId("assistant-panel")).toBeVisible();
+}
+
 test("desktop and keyboard-open mobile screenshots show the shared capture composer", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const errors = await fixture(page, "/");
   const sidebarButton = page.getByRole("button", { name: "Add items" });
   await expect(sidebarButton).toBeVisible();
   expect((await sidebarButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  await page.getByRole("banner").getByTestId("quick-search-attachment-input").setInputFiles({
+  await page.getByTestId("bottom-bar").getByTestId("quick-search-attachment-input").setInputFiles({
     name: "invoice.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4 synthetic"),
@@ -734,26 +751,30 @@ test("desktop and keyboard-open mobile screenshots show the shared capture compo
   expect(errors).toEqual([]);
 });
 
-test("mobile navigation has five equal, working slots with a centered Add control", async ({ page }) => {
+test("phone bar and rail controls are touch sized, do not overlap, and all work", async ({ page }) => {
+  // The five-tab bar was removed on purpose. Its jobs are now done by one bottom bar
+  // (rooms button, search field, Add) and by the rail of rooms (All, On loan, More).
   const errors = await fixture(page, "/items");
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const nav = page.getByTestId("mobile-bottom-nav");
+  const bar = page.getByTestId("bottom-bar");
+  const rail = page.getByTestId("room-rail");
   const controls = [
-    nav.getByRole("link", { name: "Home", exact: true }),
-    nav.getByRole("link", { name: "Items", exact: true }),
-    nav.getByRole("button", { name: "Add items" }),
-    nav.getByRole("link", { name: "Loans", exact: true }),
-    nav.getByRole("button", { name: "More destinations" }),
+    bar.getByRole("button", { name: "Hide rooms" }),
+    bar.locator('button[title="Open assistant"]'),
+    bar.getByRole("button", { name: "Attach a file" }),
+    bar.getByRole("button", { name: "Record voice search" }),
+    bar.getByRole("button", { name: "Add items" }),
   ];
   const boxes = await Promise.all(controls.map((control) => control.boundingBox()));
   expect(boxes.every((box) => box !== null)).toBe(true);
   const slots = boxes.filter((box) => box !== null);
-  expect(Math.max(...slots.map((box) => box.width)) - Math.min(...slots.map((box) => box.width))).toBeLessThan(1);
-  const addBox = slots[2]!;
-  const navBox = await nav.boundingBox();
-  expect(navBox).not.toBeNull();
-  expect(Math.abs(addBox.x + addBox.width / 2 - (navBox!.x + navBox!.width / 2))).toBeLessThan(1);
+  for (const slot of slots) {
+    expect(slot.width).toBeGreaterThanOrEqual(44);
+    expect(slot.height).toBeGreaterThanOrEqual(44);
+    expect(slot.x).toBeGreaterThanOrEqual(0);
+    expect(slot.x + slot.width).toBeLessThanOrEqual(390);
+  }
   for (let left = 0; left < slots.length; left += 1) {
     for (let right = left + 1; right < slots.length; right += 1) {
       expect(
@@ -762,20 +783,20 @@ test("mobile navigation has five equal, working slots with a centered Add contro
       ).toBe(true);
     }
   }
-  const paddingBottom = await nav.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom));
-  expect(paddingBottom).toBeGreaterThanOrEqual(12);
+  // The bar ends at the bottom edge of the screen.
+  const barBox = await bar.boundingBox();
+  expect(barBox).not.toBeNull();
+  expect(Math.abs(barBox!.y + barBox!.height - 844)).toBeLessThan(1);
 
-  await controls[0]!.click();
-  await expect(page).toHaveURL("/");
-  await controls[1]!.click();
+  await rail.getByRole("link", { name: /^On loan/ }).click();
+  await expect(page).toHaveURL("/loans");
+  await rail.getByRole("link", { name: "All", exact: true }).click();
   await expect(page).toHaveURL("/items");
-  await controls[2]!.click();
+  await controls[4]!.click();
   await expect(page.getByRole("dialog", { name: "Add items" })).toBeVisible();
   await page.keyboard.press("Escape");
-  await controls[3]!.click();
-  await expect(page).toHaveURL("/loans");
-  await controls[4]!.click();
-  await page.getByRole("menuitem", { name: "Places" }).click();
+  await rail.getByRole("button", { name: "More", exact: true }).click();
+  await rail.getByTestId("rail-more").getByRole("link", { name: "Places" }).click();
   await expect(page).toHaveURL("/rooms");
   expect(errors).toEqual([]);
 });
@@ -820,7 +841,8 @@ test("header dictation transcribes into an editable query without auto-submittin
   expect(uploadCount).toBe(1);
   expect(submittedQueries).toEqual([]);
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
-  await expect(page).toHaveURL("/");
+  // The transcript is in the field, so it filters the item list. It was not sent.
+  await expect(page).toHaveURL("/items?q=Where+is+my+drill%3F");
 
   await input.fill("Where is my blue drill?");
   await input.press("Enter");
@@ -852,7 +874,7 @@ test("cancelling header dictation sends no audio or search", async ({ page }) =>
   expect(uploads).toBe(0);
   expect(searches).toBe(0);
   await expect(page.getByTestId("assistant-panel")).toHaveCount(0);
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/items");
   expect(errors).toEqual([]);
 });
 
@@ -884,10 +906,14 @@ test("mobile header keeps microphone and attachment controls inside the search b
   expect(inputBox).not.toBeNull();
   expect(attachBox).not.toBeNull();
   expect(micBox).not.toBeNull();
-  expect(attachBox!.x).toBeGreaterThanOrEqual(inputBox!.x);
+  // The search box is the bordered field. The text input and the two buttons sit in it, in a row.
+  const fieldBox = await input.locator("xpath=..").boundingBox();
+  expect(fieldBox).not.toBeNull();
+  expect(inputBox!.x).toBeGreaterThanOrEqual(fieldBox!.x);
+  expect(inputBox!.x + inputBox!.width).toBeLessThanOrEqual(attachBox!.x);
   expect(attachBox!.x + attachBox!.width).toBeLessThanOrEqual(micBox!.x);
-  expect(micBox!.x + micBox!.width).toBeLessThanOrEqual(inputBox!.x + inputBox!.width);
-  expect(micBox!.y + micBox!.height / 2).toBeCloseTo(inputBox!.y + inputBox!.height / 2, 0);
+  expect(micBox!.x + micBox!.width).toBeLessThanOrEqual(fieldBox!.x + fieldBox!.width);
+  expect(micBox!.y + micBox!.height / 2).toBeCloseTo(fieldBox!.y + fieldBox!.height / 2, 0);
 });
 
 test("the header entry opens the assistant panel without separate assistant navigation", async ({ page }) => {
@@ -904,7 +930,9 @@ test("the header entry opens the assistant panel without separate assistant navi
   await assistantRequest;
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
-  await expect(page).toHaveURL(/\/#assistant$/);
+  // A question that was sent leaves the field, and no longer filters the item list.
+  await expect(page).toHaveURL(/\/items#assistant$/);
+  await expect(headerSearch).toHaveValue("");
   await headerSearch.fill("What is in my garage?");
   await expect(headerSearch).toHaveValue("What is in my garage?");
   await panel.getByRole("button", { name: "Close assistant" }).click();
@@ -924,7 +952,6 @@ test("assistant launcher resumes without typing, shows unresolved reviews, and c
     if (path.startsWith("/api/v1/inventory-review/suggestions") && request.method() !== "GET") reviewWrites += 1;
   });
 
-  await page.getByRole("link", { name: "Items", exact: true }).click();
   await expect(page).toHaveURL(/\/items$/);
   const launcher = page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" });
   await expect(launcher).toBeVisible();
@@ -958,7 +985,7 @@ test("legacy Search and Assistant URLs redirect into the unified shell", async (
   await page.goto("/assistant?q=Where%20is%20my%20drill%3F");
   const panel = page.getByTestId("assistant-panel");
   await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
-  await expect(page).toHaveURL(/\/#assistant$/);
+  await expect(page).toHaveURL(/\/items#assistant$/);
   await expect(page.getByTestId("assistant-panel")).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -970,9 +997,12 @@ test("mobile search entry stays reachable while scrolling and the assistant shee
   const launcher = page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" });
   await expect(input).toBeVisible();
   await expect(launcher).toBeVisible();
-  await page.getByRole("button", { name: "More destinations" }).click();
-  await expect(page.getByRole("menuitem", { name: "Search", exact: true })).toHaveCount(0);
-  await page.keyboard.press("Escape");
+  // Search has no page of its own: it is not among the More choices of the rail.
+  const rail = page.getByTestId("room-rail");
+  await rail.getByRole("button", { name: "More", exact: true }).click();
+  await expect(rail.getByTestId("rail-more").getByRole("link")).not.toHaveCount(0);
+  await expect(rail.getByTestId("rail-more").getByRole("link", { name: "Search", exact: true })).toHaveCount(0);
+  await rail.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.evaluate(() => window.scrollTo(0, 900));
   await expect(input).toBeInViewport();
@@ -1004,7 +1034,7 @@ test("completed item capture notifies once and opens its review without resolvin
   await expect(panel.getByLabel("Assistant capture status"))
     .toContainText("Item capture queued. Review extracted proposals before saving.");
   await panel.getByRole("button", { name: "Close assistant" }).click();
-  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await allItems(page).click();
   await expect(page).toHaveURL(/\/items$/);
 
   // A capture queued by the tool engine is first noticed by the review queue's idle poll.
@@ -1041,15 +1071,17 @@ test("attached invoice flows through extraction, notification, and explicit appr
   await panel.getByLabel("Document type").selectOption("invoice");
   await panel.getByRole("button", { name: "Send question" }).click();
 
-  await expect(panel.getByText("Document attached. Progress, extracted details and review are shown below.")).toBeVisible();
+  await expect(panel.getByText("Document saved. Its reading state and what was read are shown below.")).toBeVisible();
   await expect(page.getByText("Validation invoice ready for review")).toHaveCount(1);
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await expect(panel.getByRole("region", { name: "Assistant document review" })).toContainText("Validation invoice");
   await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toContainText("4");
   await panel.getByRole("button", { name: "Review extraction" }).click();
-  await expect(panel.getByLabel("Description")).toHaveValue("Cordless drill");
+  // Lines are closed rows and nothing is selected to begin with.
+  await expect(panel.getByRole("textbox", { name: /^Name of line/ }).first()).toHaveValue("Cordless drill");
   expect(applyRequests).toBe(0);
-  await panel.getByRole("button", { name: "Apply reviewed changes" }).click();
+  await panel.getByRole("button", { name: "Select all" }).click();
+  await panel.getByRole("button", { name: /^Apply: / }).click();
   await expect.poll(() => applyRequests).toBe(1);
   await expect(page.getByText("Reviewed extraction applied")).toBeVisible();
   await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toContainText("3");
@@ -1077,7 +1109,7 @@ test("normal header submission opens the assistant without selecting its prompt"
   await headerSearch.press("Enter");
   await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
   await expect(headerSearch).toBeVisible();
-  await expect(page).toHaveURL(/\/#assistant$/);
+  await expect(page).toHaveURL(/\/items#assistant$/);
   expect(errors).toEqual([]);
 });
 
@@ -1176,20 +1208,21 @@ test("an item capture prepared by the assistant is reviewed and explicitly appli
   const composer = panel.getByRole("textbox", { name: "Ask the Housetory assistant" });
   await expect(composer).toBeVisible();
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Review fields" }).click();
+  await panel.getByRole("button", { name: "Edit" }).click();
   const itemName = panel.getByLabel("Item name");
   await expect(itemName).toHaveValue("Ethernet cables");
-  await expect(panel.getByLabel("Quantity")).toHaveValue("3");
-  await expect(panel.getByText(/Utility Room.*Box 2/)).toBeVisible();
+  await expect(panel.getByLabel("Quantity", { exact: true })).toHaveValue("3");
+  await expect(panel.getByText(/Utility Room.*Box 2/).first()).toBeVisible();
   await expect(panel.getByRole("note", { name: "Local search mode" })).toHaveCount(0);
   expect(assistantQueries).toEqual([query]);
   expect(legacyRequests).toEqual([]);
   expect(applyBodies).toEqual([]);
 
   await itemName.fill("Reviewed Ethernet cables");
-  await panel.getByRole("checkbox", { name: "Include Reviewed Ethernet cables" }).check();
-  await panel.getByRole("button", { name: "Approve selected" }).click();
-  await expect(page.getByText("1 imported · 0 skipped · 0 failed", { exact: true })).toBeVisible();
+  await panel.getByRole("checkbox", { name: "Select Reviewed Ethernet cables" }).check();
+  await panel.getByRole("button", { name: /^Add \d+ selected items?$/ }).first().click();
+  // One row was added by itself: a short message says so.
+  await expect(page.getByText("1 item added", { exact: true })).toBeVisible();
   expect(applyBodies).toHaveLength(1);
   expect(applyBodies[0].entries[0]).toMatchObject({
     action: "import",
@@ -1231,6 +1264,7 @@ test("interrupted primary capture polling reaches local review and retry", async
   await expect(page.getByText("Local results are ready to review. Optional AI never applies inventory changes.")).toBeVisible({
     timeout: 10_000,
   });
+  await page.getByRole("button", { name: "Edit" }).click();
   const itemName = page.getByLabel("Item name");
   await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("User-edited Ethernet cables");
@@ -1404,23 +1438,23 @@ test("item review edits survive closing the panel and switching views", async ({
   const panel = page.getByTestId("assistant-panel");
   const itemName = panel.getByLabel("Item name");
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Review fields" }).click();
+  await panel.getByRole("button", { name: "Edit" }).click();
   await expect(itemName).toHaveValue("Ethernet cables");
   await itemName.fill("Blue Ethernet cable");
-  await panel.getByRole("checkbox", { name: "Include Blue Ethernet cable" }).uncheck();
+  await panel.getByRole("checkbox", { name: "Select Blue Ethernet cable" }).uncheck();
 
   await panel.getByRole("button", { name: "Close assistant" }).click();
-  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await allItems(page).click();
   await expect(page).toHaveURL(/\/items$/);
   await page.evaluate((path) => {
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, `/imports/${importBatch.id}`);
-  await page.getByRole("button", { name: "Review fields" }).click();
+  await page.getByRole("button", { name: "Edit" }).click();
   const fullPageReview = page.getByLabel("Item name");
   await expect(fullPageReview).toHaveValue("Blue Ethernet cable");
   await expect(
-    page.getByRole("checkbox", { name: "Include Blue Ethernet cable" }),
+    page.getByRole("checkbox", { name: "Select Blue Ethernet cable" }),
   ).not.toBeChecked();
   expect(errors).toEqual([]);
 });
@@ -1442,7 +1476,7 @@ test("attaching from the header keeps the accompanying text in the capture compo
   const errors = await fixture(page, "/");
   await page.getByRole("combobox", { name: "Search or ask about your inventory" })
     .fill("This invoice is for the kitchen fridge");
-  await page.getByRole("banner").getByTestId("quick-search-attachment-input").setInputFiles({
+  await page.getByTestId("bottom-bar").getByTestId("quick-search-attachment-input").setInputFiles({
     name: "invoice.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4 synthetic"),
@@ -1474,8 +1508,11 @@ test("parked attachment survives a fresh header question without uploading or co
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
   await panel.getByRole("button", { name: "Close assistant" }).click();
-  await page.getByRole("link", { name: "Items", exact: true }).click();
+  await allItems(page).click();
   await expect(page).toHaveURL(/\/items$/);
+  // Opening the list again clears the field, which had filtered the list. Wait for that
+  // before typing the next question.
+  await expect(headerSearch).toHaveValue("");
   await headerSearch.fill("Where is my drill?");
   await headerSearch.press("Enter");
   await expect(panel.getByText("Synthetic answer for Where is my drill?")).toBeVisible();
@@ -1484,7 +1521,7 @@ test("parked attachment survives a fresh header question without uploading or co
   await headerSearch.fill("Add one Validation Monitor to Storage");
   await headerSearch.press("Enter");
   await panel.getByRole("button", { name: "Review items" }).click();
-  await panel.getByRole("button", { name: "Review fields" }).click();
+  await panel.getByRole("button", { name: "Edit" }).click();
   await expect(panel.getByLabel("Item name")).toHaveValue("Validation Monitor");
   await expect(composer).toHaveValue("This invoice is for the kitchen fridge");
   await expect(panel.getByText("invoice.pdf")).toBeVisible();
@@ -1511,11 +1548,11 @@ test("multiple captures restore after reload and an older notification opens its
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
     await page.locator("[data-sonner-toast][data-front='true']").hover();
     await page.locator("[data-sonner-toast]").filter({ hasText: "Alpha ready for review" }).getByRole("button", { name: "Review", exact: true }).click();
-    await panel.getByRole("button", { name: "Review fields" }).click();
+    await panel.getByRole("button", { name: "Edit" }).click();
     await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
     await panel.getByLabel("Item name").fill("Reviewed Alpha cable");
     await panel.getByRole("button", { name: "Close assistant" }).click();
-    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await allItems(page).click();
     await page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" }).click();
     await expect(panel.getByLabel("Item name")).toHaveValue("Reviewed Alpha cable");
     await header.fill("ordinary lookup");
@@ -1524,16 +1561,20 @@ test("multiple captures restore after reload and an older notification opens its
     await expect(panel.getByLabel("Item name")).toHaveValue("Reviewed Alpha cable");
     await page.reload();
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
-    await panel.getByRole("button", { name: "Review Alpha", exact: true }).click();
-    await panel.getByRole("button", { name: "Review fields" }).click();
+    await openWaitingCapture(page, "Alpha");
+    await panel.getByRole("button", { name: "Edit" }).click();
     await expect(panel.getByLabel("Item name")).toHaveValue("Alpha cable");
     await expect(page.getByRole("button", { name: "Open assistant, 5 unresolved reviews" })).toBeVisible();
-    await panel.getByRole("checkbox", { name: "Include Alpha cable" }).check();
-    await panel.getByRole("button", { name: "Approve selected" }).click();
+    await panel.getByRole("checkbox", { name: "Select Alpha cable" }).check();
+    await panel.getByRole("button", { name: /^Add \d+ selected items?$/ }).first().click();
     await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
-    await expect(panel.getByRole("button", { name: "Review Alpha", exact: true })).toHaveCount(0);
-    await panel.getByRole("button", { name: "Review Beta", exact: true }).click();
-    await panel.getByRole("button", { name: "Review fields" }).click();
+    // The applied capture has left the list of waiting captures. The other one is still there.
+    await panel.getByRole("link", { name: "Review queue" }).click();
+    const waiting = page.getByRole("region", { name: "Pending captures" });
+    await expect(waiting.getByRole("button", { name: "Review Beta", exact: true })).toBeVisible();
+    await expect(waiting.getByRole("button", { name: "Review Alpha", exact: true })).toHaveCount(0);
+    await waiting.getByRole("button", { name: "Review Beta", exact: true }).click();
+    await panel.getByRole("button", { name: "Edit" }).click();
     await expect(panel.getByRole("textbox", { name: "Item name", exact: true })).toHaveValue("Beta adapter");
     expect(errors).toEqual([]);
   });
@@ -1554,9 +1595,12 @@ test("multiple captures restore after reload and an older notification opens its
       await page.keyboard.press(index % 2 ? "Tab" : "Shift+Tab");
       expect(await panel.evaluate((element) => element.contains(document.activeElement))).toBe(true);
     }
-    expect(await page.getByTestId("mobile-bottom-nav").evaluate((element) =>
-      Boolean(element.closest('[aria-hidden="true"]')),
-    )).toBe(true);
+    // The page behind the sheet, with its rail of rooms and its bar, is out of reach.
+    for (const part of ["room-rail", "bottom-bar"]) {
+      expect(await page.getByTestId(part).evaluate((element) =>
+        Boolean(element.closest('[aria-hidden="true"], [inert]')),
+      )).toBe(true);
+    }
     for (const name of ["Attach a file", "Dictate question", "Send question", "Close assistant"]) {
       const box = await panel.getByRole("button", { name, exact: true }).boundingBox();
       expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -1576,6 +1620,7 @@ test("multiple captures restore after reload and an older notification opens its
   });
 
   test("a failed document reopens after reload and retry completion notifies once for the new attempt", async ({ page }) => {
+    await page.clock.install();
     const errors = await fixture(page, "/", undefined, true, false, false, true);
     await page.getByTestId("quick-search-attachment-input").setInputFiles({
       name: "scan.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 synthetic"),
@@ -1587,18 +1632,22 @@ test("multiple captures restore after reload and an older notification opens its
     await panel.getByRole("button", { name: "Close assistant" }).click();
     await page.reload();
     await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
-    await panel.getByRole("button", { name: "Review Validation invoice", exact: true }).click();
+    await openWaitingCapture(page, "Validation invoice");
     await panel.getByRole("button", { name: "Retry processing" }).click();
+    // The review in the panel shows the new attempt at once. The message comes when the
+    // list of waiting captures is read again, which it is every half minute when idle.
+    await page.clock.fastForward(30_000);
     await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(1);
     await panel.getByRole("button", { name: "Close assistant" }).click();
-    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await allItems(page).click();
     await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(1);
     await page.reload();
     await expect(page.getByText("Validation invoice ready for review", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
-    await panel.getByRole("button", { name: "Review Validation invoice", exact: true }).click();
+    await openWaitingCapture(page, "Validation invoice");
     await panel.getByRole("button", { name: "Review extraction" }).click();
-    await panel.getByRole("button", { name: "Apply reviewed changes" }).click();
+    await panel.getByRole("button", { name: "Select all" }).click();
+    await panel.getByRole("button", { name: /^Apply: / }).click();
     await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -1676,36 +1725,48 @@ test("multiple captures restore after reload and an older notification opens its
     await panel.getByRole("radio", { name: "Inventory photo" }).check();
     await panel.getByRole("button", { name: "Send question" }).click();
     await panel.getByRole("button", { name: "Close assistant" }).click();
-    await page.getByRole("link", { name: "Items", exact: true }).click();
+    await allItems(page).click();
     await page.reload();
     await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
     status = "failed";
     await expect(page.getByText("Recovered photo needs attention", { exact: true })).toBeVisible({ timeout: 10_000 });
     await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
-    await panel.getByRole("button", { name: "Review Recovered photo", exact: true }).click();
+    await openWaitingCapture(page, "Recovered photo");
     await panel.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(panel.getByText("Waiting to interpret inventory photo…", { exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "Close assistant" }).click();
     status = "succeeded";
     await expect.poll(() => conversions, { timeout: 10_000 }).toBe(1);
     await expect(page.getByText("Recovered photo ready for review", { exact: true })).toHaveCount(1);
-    await page.getByRole("button", { name: "Review", exact: true }).click();
+    // The earlier "needs attention" message can still be on screen. Use the new one.
+    await page.locator("[data-sonner-toast]").filter({ hasText: "Recovered photo ready for review" })
+      .getByRole("button", { name: "Review", exact: true }).click();
     await expect(panel.getByText("AI-assisted", { exact: true })).toBeVisible();
     await expect(panel.getByRole("region", { name: "Assistant item review" })).toContainText("Storage");
     expect(applyBodies).toEqual([]);
     expect(uploadBodies[0]).toContain(caption);
     await page.reload();
-    await page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" }).click();
-    await panel.getByRole("button", { name: "Review Recovered photo", exact: true }).click();
+    // The assistant was open, so it is open again after the reload.
+    await expect(page.getByRole("button", { name: "Open assistant, 4 unresolved reviews" })).toBeVisible();
+    await expect(panel).toBeVisible();
+    await openWaitingCapture(page, "Recovered photo");
     await expect(panel.getByRole("region", { name: "Assistant item review" })).toContainText("Storage");
     await expect(panel.getByText("AI-assisted", { exact: true })).toBeVisible();
-    await panel.getByRole("checkbox", { name: "Include Cardboard box" }).check();
-    await panel.getByRole("button", { name: "Approve selected" }).click();
+    await panel.getByRole("checkbox", { name: "Select Cardboard box" }).check();
+    await panel.getByRole("button", { name: /^Add \d+ selected items?$/ }).first().click();
     await expect(page.getByRole("button", { name: "Open assistant, 3 unresolved reviews" })).toBeVisible();
     expect(conversions).toBe(1);
     expect(applyBodies).toHaveLength(1);
     expect(applyBodies[0].entries[0].proposed).toMatchObject({ name: "Cardboard box", room: { matched_id: roomId } });
     await panel.getByRole("button", { name: "Close assistant" }).click();
+    // Wait until the assistant is really closed before attaching the next photo.
+    await expect(panel).toHaveCount(0);
+    await expect(page).not.toHaveURL(/#assistant$/);
+    // Back to the item list, where this test sends its photos from.
+    await allItems(page).click();
+    await expect(page).toHaveURL(/\/items$/);
+    // Nothing waits for review until the next photo is sent.
+    exists = false;
     converted = false;
     applied = false;
     photoId = "00000000-0000-0000-0000-000000000031";

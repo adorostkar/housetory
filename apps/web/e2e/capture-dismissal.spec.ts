@@ -44,10 +44,15 @@ async function reviews(request: APIRequestContext, dismissed = false): Promise<R
 async function expectBadge(page: Page, request: APIRequestContext) {
   const reopen = page.viewportSize()!.width < 1024 && new URL(page.url()).hash === "#assistant";
   if (reopen) await page.getByRole("button", { name: "Close assistant", exact: true }).click();
-  const pending = await reviews(request);
-  const summary = await (await request.get("/api/v1/inventory-review/summary")).json();
-  const count = pending.length + summary.pending_count;
-  await expect(page.getByRole("button", { name: count ? `Open assistant, ${count} unresolved reviews` : "Open assistant", exact: true })).toBeVisible();
+  // A press just before this may not have reached the server yet. The server's count
+  // and the button are read again until they agree; they must agree exactly.
+  await expect(async () => {
+    const pending = await reviews(request);
+    const summary = await (await request.get("/api/v1/inventory-review/summary")).json();
+    const count = pending.length + summary.pending_count;
+    await expect(page.getByRole("button", { name: count ? `Open assistant, ${count} unresolved reviews` : "Open assistant", exact: true }))
+      .toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
   if (reopen) await page.getByRole("button", { name: /^Open assistant/ }).click();
 }
 
@@ -71,6 +76,28 @@ function processCapture(kind: Review["kind"], id: string) {
   });
 }
 
+/** Longer than the half minute between two idle reads of the list of waiting captures. */
+const IDLE_READ_MS = 40_000;
+
+/** The captures that wait for review, and the dismissed ones, are listed on the Review page. */
+const waitingCaptures = (page: Page) => page.getByRole("region", { name: "Pending captures" });
+
+/** Review is one of the More choices in the list of rooms. */
+async function openReviewFromRooms(page: Page) {
+  const rooms = page.getByRole("navigation", { name: "Rooms" });
+  await rooms.getByRole("button", { name: "More", exact: true }).click();
+  await rooms.getByTestId("rail-more").getByRole("link", { name: "Review", exact: true }).click();
+  await expect(page).toHaveURL(/\/review$/);
+}
+
+/** Back to the item list. The More choices are closed first: they cover the rooms. */
+async function openItemsFromRooms(page: Page) {
+  const rooms = page.getByRole("navigation", { name: "Rooms" });
+  await rooms.getByRole("button", { name: "Close", exact: true }).click();
+  await rooms.getByRole("link", { name: "All items", exact: true }).click();
+  await expect(page).toHaveURL(/\/items$/);
+}
+
 for (const mobile of [false, true]) {
   test(`${mobile ? "mobile" : "desktop"} real review dismissal, Undo, retained edits and reload update the badge`, async ({ page, request }) => {
     await page.setViewportSize(mobile ? { width: 390, height: 640 } : { width: 1440, height: 900 });
@@ -80,40 +107,52 @@ for (const mobile of [false, true]) {
     const source = await (await request.get(`/api/v1/imports/${id}/source`)).body();
     const inventory = await (await request.get("/api/v1/items")).json();
     expect(inventory.items.length).toBeGreaterThan(0);
-    await page.goto("/");
+    // The waiting capture is listed on the Review page. "Review" opens it in the assistant.
+    await page.goto("/review");
     await expectBadge(page, request);
-    await page.getByRole("button", { name: /^Open assistant/ }).click();
+    const queue = waitingCaptures(page);
     const panel = page.getByRole("dialog", { name: "Assistant" });
-    await panel.getByRole("button", { name: `Review ${title}`, exact: true }).click();
+    const openReview = queue.getByRole("button", { name: `Review ${title}`, exact: true });
+    const dismiss = queue.getByRole("button", { name: `Dismiss review ${title}`, exact: true });
+    await openReview.click();
     const review = panel.getByRole("region", { name: "Assistant item review" });
-    const name = review.getByLabel("Item name", { exact: true });
+    // The name is corrected in the row itself.
+    const name = review.getByRole("textbox", { name: /^Name of / });
+    await expect(name).toHaveCount(1);
     await name.fill(`Edited ${title}`);
-    await panel.getByRole("button", { name: `Dismiss review ${title}`, exact: true }).click();
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+    await dismiss.click();
+    await expect(openReview).toHaveCount(0);
     await expect(review).not.toBeVisible();
     expect((await reviews(request)).some((entry) => entry.id === id)).toBe(false);
     await expectBadge(page, request);
     if (mobile) {
-      await panel.locator("summary").filter({ hasText: "Dismissed reviews" }).click();
-      await panel.getByRole("button", { name: `Undo dismissal ${title}`, exact: true }).click();
+      await queue.locator("summary").filter({ hasText: "Dismissed reviews" }).click();
+      await queue.getByRole("button", { name: `Undo dismissal ${title}`, exact: true }).click();
     } else {
       await page.getByRole("button", { name: "Undo", exact: true }).click();
     }
-    await panel.getByRole("button", { name: `Review ${title}`, exact: true }).click();
+    await openReview.click();
     await expect(name).toHaveValue(`Edited ${title}`);
-    await panel.getByRole("button", { name: `Dismiss review ${title}`, exact: true }).click();
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+    await dismiss.click();
+    await expect(openReview).toHaveCount(0);
     await page.reload();
     await expectBadge(page, request);
-    if (new URL(page.url()).hash !== "#assistant") {
-      await page.getByRole("button", { name: /^Open assistant/ }).click();
-    }
-    await expect(panel.getByRole("button", { name: `Review ${title}`, exact: true })).toHaveCount(0);
-    await panel.locator("summary").filter({ hasText: "Dismissed reviews" }).click();
-    await panel.getByRole("button", { name: `Undo dismissal ${title}`, exact: true }).click();
+    // The dismissed capture is not offered in the assistant after a reload.
+    await page.getByRole("button", { name: /^Open assistant/ }).click();
+    await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+    await expect(panel.getByText(title)).toHaveCount(0);
+    await panel.getByRole("button", { name: "Close assistant", exact: true }).click();
+    // It is among the dismissed ones, and not among the waiting ones.
+    await queue.locator("summary").filter({ hasText: "Dismissed reviews" }).click();
+    await expect(openReview).toHaveCount(0);
+    await queue.getByRole("button", { name: `Undo dismissal ${title}`, exact: true }).click();
     await expectBadge(page, request);
-    await expect(panel.getByRole("button", { name: `Review ${title}`, exact: true })).toBeVisible();
+    await expect(openReview).toBeVisible();
     expect(await (await request.get(`/api/v1/imports/${id}/source`)).body()).toEqual(source);
     expect(await (await request.get("/api/v1/items")).json()).toEqual(inventory);
-    await panel.getByRole("button", { name: `Dismiss review ${title}`, exact: true }).click();
+    await dismiss.click();
   });
 }
 
@@ -213,10 +252,10 @@ import_pipeline.process_import_batch(sys.argv[1])
   try {
     await expect.poll(() => fs.existsSync(started)).toBe(true);
     expect((await reviews(request)).find((entry) => entry.id === id)?.status).toBe("processing");
-    await page.goto("/");
-    await page.getByRole("button", { name: /^Open assistant/ }).click();
+    await page.goto("/review");
+    const queue = waitingCaptures(page);
     const panel = page.getByRole("dialog", { name: "Assistant" });
-    await panel.getByRole("button", { name: "Dismiss review Dismiss processing cable", exact: true }).click();
+    await queue.getByRole("button", { name: "Dismiss review Dismiss processing cable", exact: true }).click();
     fs.writeFileSync(release, "");
     expect(await finished, error).toBe(0);
     const batch = await (await request.get(`/api/v1/imports/${id}`)).json();
@@ -226,8 +265,13 @@ import_pipeline.process_import_batch(sys.argv[1])
     expect((await reviews(request)).some((entry) => entry.id === id)).toBe(false);
     await page.reload();
     await expectBadge(page, request);
+    // The list is loaded: it shows the dismissed captures, and this one is not waiting.
+    await expect(queue.locator("summary").filter({ hasText: "Dismissed reviews" })).toBeVisible();
+    await expect(queue.getByRole("button", { name: "Review Dismiss processing cable", exact: true })).toHaveCount(0);
+    // The assistant does not offer it either.
     await page.getByRole("button", { name: /^Open assistant/ }).click();
-    await expect(panel.getByRole("button", { name: "Review Dismiss processing cable", exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("textbox", { name: "Ask the Housetory assistant" })).toBeVisible();
+    await expect(panel.getByText("Dismiss processing cable")).toHaveCount(0);
     await expect(page.getByText("Dismiss processing cable ready for review", { exact: true })).toHaveCount(0);
     expect(await (await request.get("/api/v1/items")).json()).toEqual(inventory);
   } finally {
@@ -238,6 +282,8 @@ import_pipeline.process_import_batch(sys.argv[1])
 });
 
   test("existing reviews restore silently on load/reload/reopening; active completion, Undo and retry never replay", async ({ page, context, request }) => {
+    // Two of the steps below wait for an idle read of the list.
+    test.setTimeout(180_000);
     await context.addInitScript(() => {
       window.captureNotificationEvents = [];
       window.addEventListener("housetory:assistant-task-completed", (event) => {
@@ -262,20 +308,23 @@ import_pipeline.process_import_batch(sys.argv[1])
     const app = await context.newPage();
     await app.goto("/");
     await expectBadge(app, request);
-    await app.getByRole("link", { name: "Review", exact: true }).click();
+    await openReviewFromRooms(app);
     await expect(app.getByRole("button", { name: `Review ${existingTitle}`, exact: true })).toBeVisible();
     expect(await app.evaluate(() => window.captureNotificationEvents)).toEqual([]);
     const liveTitle = "Replay live failed CSV";
     const live = await createImport(request, liveTitle, true);
     const queue = app.getByRole("region", { name: "Pending captures" });
-    await expect(queue.getByRole("button", { name: `Review ${liveTitle}`, exact: true })).toBeVisible();
+    // It was created outside this page. While nothing is being processed, the page reads
+    // the list of waiting captures again every half minute.
+    await expect(queue.getByRole("button", { name: `Review ${liveTitle}`, exact: true }))
+      .toBeVisible({ timeout: IDLE_READ_MS });
     const oldAttempt = (await reviews(request)).find((entry) => entry.id === live)!.generation;
     processCapture("import", live);
     const notice = `${liveTitle} needs attention`;
     await expect(app.getByText(notice, { exact: true })).toHaveCount(1);
     await expect.poll(() => app.evaluate((id) => window.captureNotificationEvents.filter((entry) => entry.id === id).length, live)).toBe(1);
-    await app.getByRole("link", { name: "Items", exact: true }).click();
-    await app.getByRole("link", { name: "Review", exact: true }).click();
+    await openItemsFromRooms(app);
+    await openReviewFromRooms(app);
     await expectBadge(app, request);
     expect(await app.evaluate((id) => window.captureNotificationEvents.filter((entry) => entry.id === id).length, live)).toBe(1);
     await queue.getByRole("button", { name: `Dismiss review ${liveTitle}`, exact: true }).click();
@@ -303,7 +352,8 @@ import_pipeline.process_import_batch(sys.argv[1])
     // Work completed while the app was closed is restored, never replayed as a toast.
     const parkedTitle = "Replay parked cable";
     const parked = await createImport(request, parkedTitle);
-    await expect(queue.getByRole("button", { name: `Review ${parkedTitle}`, exact: true })).toBeVisible();
+    await expect(queue.getByRole("button", { name: `Review ${parkedTitle}`, exact: true }))
+      .toBeVisible({ timeout: IDLE_READ_MS });
     await app.close();
     processCapture("import", parked);
     const reopened = await context.newPage();

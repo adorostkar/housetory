@@ -161,10 +161,10 @@ test("desktop global and mobile quick search find and open records", async ({
   );
 
   await page.goto("/");
-  const addItem = page.locator("aside").getByRole("button", { name: "Add items" });
-  const globalInput = page
-    .getByRole("combobox", { name: "Search or ask about your inventory" })
-    .first();
+  // The search field and Add are in the one bar at the bottom of the main column.
+  const bar = page.getByTestId("bottom-bar");
+  const addItem = bar.getByRole("button", { name: "Add items" });
+  const globalInput = bar.getByRole("combobox", { name: "Search or ask about your inventory" });
   await expect(addItem).toBeVisible();
   await expect(globalInput).toBeVisible();
 
@@ -173,7 +173,7 @@ test("desktop global and mobile quick search find and open records", async ({
   const panel = page.getByRole("listbox", { name: "Quick search results" });
   await expect(panel).toBeVisible();
   await expect(
-    panel.getByRole("option", { name: new RegExp(`Camera ${suffix}`) }),
+    panel.getByRole("option", { name: new RegExp(`^Camera ${suffix}`) }),
   ).toBeVisible();
   await expect(panel.getByText("Owned items", { exact: true })).toBeVisible();
   await expect(panel.getByText(room.name, { exact: false })).toBeVisible();
@@ -215,24 +215,44 @@ test("desktop global and mobile quick search find and open records", async ({
   const allInput = await focusQuickSearch(page);
   await allInput.fill(`Camera ${suffix}`);
   await expect(
-    page.getByRole("option", { name: new RegExp(`Camera ${suffix}`) }),
+    page.getByRole("option", { name: new RegExp(`^Camera ${suffix}`) }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /View all results/ }).click();
-  await expect(page).toHaveURL(/\/search\?q=/);
+  // The app opens in the item list, so the button under the matches filters that list.
+  await page.getByRole("button", { name: /Filter items/ }).click();
+  await expect(page).toHaveURL(/\/items\?q=/);
   expect(new URL(page.url()).searchParams.get("q")).toBe(`Camera ${suffix}`);
   await expect(
     page.getByRole("combobox", { name: "Search or ask about your inventory" }),
   ).toHaveValue(`Camera ${suffix}`);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator("main").getByRole("link", { name: new RegExp(`Camera ${suffix}`) }).first(),
+  ).toBeVisible();
 
+  // From any other page the same button leads to the item list with the search applied.
+  await page.goto("/rooms");
+  const elsewhereInput = await focusQuickSearch(page);
+  await elsewhereInput.fill(`Passport ${suffix}`);
+  await expect(
+    page.getByRole("option", { name: new RegExp(`^Passport ${suffix}`) }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /View all results/ }).click();
+  await expect(page).toHaveURL(/\/items\?q=/);
+  expect(new URL(page.url()).searchParams.get("q")).toBe(`Passport ${suffix}`);
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator("main").getByRole("link", { name: new RegExp(`Passport ${suffix}`) }).first(),
+  ).toBeVisible();
+  expect(passport.item.name).toBe(`Passport ${suffix}`);
+
+  // The separate Search page is gone. An old link to it lands in the item list
+  // with the same words in the field. Places are found from the quick matches above.
   await page.goto(`/search?q=${encodeURIComponent(shelf.name)}`);
+  await expect(page).toHaveURL(/\/items\?q=/);
+  expect(new URL(page.url()).searchParams.get("q")).toBe(shelf.name);
   await expect(
-    page.getByRole("heading", { name: "Places and containers" }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("region", { name: "Matching containers and locations" })
-      .getByRole("link", { name: new RegExp(shelf.name) }),
-  ).toBeVisible();
+    page.getByRole("combobox", { name: "Search or ask about your inventory" }),
+  ).toHaveValue(shelf.name);
 
   await page.goto("/");
   const escapeInput = await focusQuickSearch(page);
@@ -247,20 +267,26 @@ test("desktop global and mobile quick search find and open records", async ({
   });
   const mobilePage = await mobile.newPage();
   await mobilePage.goto("/");
+  // On a phone the field is in the bottom bar, under the page, within thumb reach.
   const mobileInput = mobilePage
-    .locator('input[data-quick-search-input="true"]:visible')
-    .first();
+    .getByTestId("bottom-bar")
+    .locator('input[data-quick-search-input="true"]:visible');
+  await expect(mobileInput).toHaveCount(1);
   await expect(mobileInput).toBeVisible();
   const mainHeading = mobilePage.locator("main h1").first();
   const mobileInputBox = await mobileInput.boundingBox();
   const headingBox = await mainHeading.boundingBox();
   expect(
-    mobileInputBox && headingBox && mobileInputBox.y < headingBox.y,
+    mobileInputBox && headingBox && mobileInputBox.y > headingBox.y,
   ).toBeTruthy();
+  expect(mobileInputBox!.y + mobileInputBox!.height).toBeLessThanOrEqual(852);
   await mobileInput.fill(container.identifier);
-  await expect(
-    mobilePage.getByRole("option", { name: new RegExp(`^${container.identifier}`) }),
-  ).toBeVisible();
+  // The matches open above the bar and stay on the screen.
+  const mobileOption = mobilePage.getByRole("option", { name: new RegExp(`^${container.identifier}`) });
+  await expect(mobileOption).toBeVisible();
+  await expect(mobileOption).toBeInViewport();
+  await mobileOption.click();
+  await expect(mobilePage).toHaveURL(new RegExp(`/containers/${container.id}`));
   await mobilePage.goto("/items");
   await expect(
     mobilePage.locator('input[data-quick-search-input="true"]:visible').first(),

@@ -83,7 +83,9 @@ export function PersonNameInput({
         value={value}
         maxLength={maxLength}
         placeholder={placeholder ?? "Start typing a name"}
-        onFocus={() => setOpen(true)}
+        // Focus alone does not open the list: a dialog puts focus here when it
+        // opens, and the list would lie over the fields and buttons below.
+        onClick={() => setOpen(true)}
         onChange={(event) => {
           onChange(event.target.value);
           setOpen(true);

@@ -69,14 +69,14 @@ test("container contents summary is live after quantity and move changes", async
   });
 
   await page.goto(`/containers/${boxId}`);
-  await expect(page.getByRole("heading", { name: /Inside/ })).toBeVisible();
-  const summary = page.getByText(/units total/).locator("..");
+  await expect(page.getByRole("region", { name: /^Inside/ })).toBeVisible();
+  const summary = page.getByRole("region", { name: /^About/ });
   await expect(summary).toContainText(`2 items · 5 units total`);
   await expect(summary).toContainText(`1 item · 3 directly here`);
   await expect(summary).toContainText(`Tools ${id} · 1`);
   await expect(summary).toContainText(`Gear ${id} · 1`);
   await fs.mkdir("../../docs/walkthrough/simplification", { recursive: true });
-  await page.getByRole("heading", { name: /Inside/ }).scrollIntoViewIfNeeded();
+  await page.getByTestId("container-summary").scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await page.screenshot({
     path: "../../docs/walkthrough/simplification/01-container-live-summary.png",
@@ -89,7 +89,7 @@ test("container contents summary is live after quantity and move changes", async
   });
   expect(quantity.ok()).toBeTruthy();
   await page.reload();
-  await expect(page.getByText(/units total/).locator("..")).toContainText(
+  await expect(page.getByRole("region", { name: /^About/ })).toContainText(
     `2 items · 7 units total`,
   );
 
@@ -99,7 +99,7 @@ test("container contents summary is live after quantity and move changes", async
   });
   expect(moved.ok()).toBeTruthy();
   await page.reload();
-  const movedSummary = page.getByText(/units total/).locator("..");
+  const movedSummary = page.getByRole("region", { name: /^About/ });
   await expect(movedSummary).toContainText(`1 item · 2 units total`);
   await expect(movedSummary).toContainText(`0 items · 0 directly here`);
   await expect(movedSummary).not.toContainText(`Tools ${id} · 1`);

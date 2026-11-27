@@ -81,11 +81,17 @@ test.beforeAll(async ({ request }) => {
           : { kind: "answer", message: `The **verified drill** is in Browser Storage.\n\n- Quantity: 2.\n\nitem_id: ${itemId}\nGET /api/v1/items/${itemId}` };
       }
     } else {
-      const items = JSON.parse(prompt.split("Items: ")[1].split("\nReturn ")[0]);
-      output = { suggestions: items.map((item: { index: number }) => ({
+      const items = JSON.parse(prompt.split("Items: ")[1].split("\nReturn ")[0]) as
+        { index: number; current_tags?: string[] }[];
+      // Every item must get a usable answer: a proposal, or a reason for making none.
+      // The same tag again for an item that has it is neither, and leaves the item unreviewed.
+      output = { suggestions: items.map((item) => (item.current_tags ?? []).includes("tools") ? {
+        index: item.index, category: null, no_category_reason: "Already organised with the tools tag.",
+        tags: [], confidence: "high", reason: "Synthetic provider organization proposal",
+      } : {
         index: item.index, tags: [{ name: "tools" }], confidence: "high",
         reason: "Synthetic provider organization proposal",
-      })) };
+      }) };
     }
     res.end(JSON.stringify({ message: { role: "assistant", content: JSON.stringify(output) } }));
   });
@@ -226,7 +232,8 @@ for (const mobile of [false, true]) {
     await action.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/items/${itemId}`)).json()).item.name).toBe(`Approved ${itemName}`);
     await page.reload();
-    await expect(page.getByText("Already applied.").last()).toBeVisible();
+    // After a reload the card still says what was done.
+    await expect(page.getByText(`Updated Approved ${itemName}.`).last()).toBeVisible();
 
     // The request itself carries out the AI analysis: no checkbox, no second prompt.
     holdReview = true;
@@ -256,11 +263,16 @@ for (const mobile of [false, true]) {
     const suggestion = page.locator("li").filter({
       hasText: "Synthetic provider organization proposal",
     }).filter({ hasText: `Approved ${itemName}` }).last();
+    // In the conversation the suggestions start as one quiet line. They open on request.
+    const quietLine = workspace.getByRole("button", { name: /View suggestions$/ });
+    await expect(quietLine).toContainText("2 possible corrections");
+    await expect(suggestion).toBeHidden();
+    await quietLine.click();
     await expect(suggestion).toBeVisible();
     await expect(workspace.getByRole("status")).toContainText("1 new suggestion · 1 already pending");
     // Finished analysis is clearly not an applied change.
     await expect(workspace.getByRole("status")).toContainText("Analysis finished");
-    await expect(workspace.getByRole("status")).toContainText("waiting for your approval. Nothing has been changed yet.");
+    await expect(workspace.getByRole("status")).toContainText("Nothing has been changed yet.");
     await ask(page, "What did you find?");
     const found = page.getByLabel("Assistant tool task").last();
     await expect(found.getByTestId("answer-text"))
@@ -274,7 +286,7 @@ for (const mobile of [false, true]) {
       .getByText("Already pending", { exact: true })).toBeVisible();
     await suggestion.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath(`review-proposals-${mobile ? "mobile" : "desktop"}.png`) });
-    await suggestion.getByRole("button", { name: "Accept organisation", exact: true }).click();
+    await suggestion.getByRole("button", { name: "Apply changes", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/v1/items/${itemId}`)).json()).item.tags.map((tag: { name: string }) => tag.name)).toEqual(["tools"]);
     expect(searched).toEqual([]);
     if (mobile) {

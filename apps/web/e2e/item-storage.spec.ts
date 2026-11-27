@@ -126,8 +126,13 @@ test("owned item provides contents while retaining purchase, warranty and value"
   await page.reload();
   await expect(page.getByText(`Torque wrench ${id}`)).toBeVisible();
   await expect(page.getByText("1 item · 1 nested unit")).toBeVisible();
+  // An item that holds things opens on Contents. The purchase is on Info and the
+  // warranty on Documents.
+  await page.getByRole("tab", { name: "Info" }).click();
   await expect(page.getByText("Purchase total")).toBeVisible();
+  await page.getByRole("tab", { name: "Documents" }).click();
   await expect(page.getByText("Tool warranty")).toBeVisible();
+  await page.getByRole("tab", { name: "Contents" }).click();
   await page.getByRole("heading", { name: "Contents" }).scrollIntoViewIfNeeded();
   await screenshot(page, "01-item-contents");
 
@@ -215,7 +220,8 @@ test("existing container gains ownership details without duplicating its identit
   const containerId = await createContainer(request, roomId, `Garden bench ${id}`);
   await page.goto(`/containers/${containerId}`);
   await expect(page.getByText(`Garden bench ${id}`).first()).toBeVisible();
-  await page.getByRole("button", { name: "Add ownership details" }).click();
+  await page.getByRole("button", { name: "Container options" }).click();
+  await page.getByRole("menuitem", { name: "Add ownership details" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Ownership details for")).toBeVisible();
   await dialog.getByLabel("Owned item name").fill(`Garden bench item ${id}`);
@@ -228,7 +234,7 @@ test("existing container gains ownership details without duplicating its identit
   await page.waitForTimeout(200);
   await screenshot(page, "04-container-ownership");
 
-  await page.getByRole("link", { name: "Open owned item" }).click();
+  await page.getByRole("link", { name: `Garden bench item ${id}` }).click();
   await expect(page.getByRole("heading", { name: `Garden bench item ${id}` })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Contents" })).toBeVisible();
   await expect(page.getByText("Storage active")).toBeVisible();

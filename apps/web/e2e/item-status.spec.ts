@@ -156,39 +156,30 @@ test("item title area states the full loan truth and labels the usual home", asy
   ]);
 
   await page.goto(`/items/${full.item.item.id}`);
-  await expect(page.getByText("On loan to Mohsen")).toBeVisible();
-  await expect(
-    page.getByText(/Owned 1 · at home 0 · on loan 1 · No return date set/),
-  ).toBeVisible();
-  await expect(page.getByText(/No return date set/)).toBeVisible();
-  await expect(page.getByText(/usual home, not a current physical location/)).toBeVisible();
-  await expect(page.getByText("Usual home location")).toBeVisible();
+  const status = page.getByRole("region", { name: "Place and availability" });
+  await expect(status.getByText("With Mohsen")).toBeVisible();
+  await expect(status.getByText(/no return date/)).toBeVisible();
+  await expect(status.getByText("Lives in")).toBeVisible();
+  await expect(status.getByText("Right now")).toBeVisible();
   await expect(page.getByText(/PRIVATE BORROWER NOTE/)).toHaveCount(0);
   await expect(page.getByText("No photograph yet")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Record return" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Choose photo" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Return", exact: true })).toBeVisible();
 
   await page.goto(`/items/${partial.item.item.id}`);
-  await expect(page.getByText("1 of 3 units on loan to Mohsen")).toBeVisible();
-  await expect(
-    page.getByText(/Owned 3 · at home 2 · on loan 1 · Due/),
-  ).toBeVisible();
-  await expect(page.getByText(/covers only the 2 at-home units/)).toBeVisible();
-  await expect(page.getByText("Usual home location")).toBeVisible();
+  await expect(page.getByText("1 of 3 with Mohsen")).toBeVisible();
+  await expect(page.getByText(/due .* · owned 3 · here 2 · on loan 1/)).toBeVisible();
+  await expect(page.getByText("2 here")).toBeVisible();
 
   await page.goto(`/items/${multiple.item.item.id}`);
-  await expect(page.getByText("2 of 3 units on loan")).toBeVisible();
-  await expect(page.getByText(/Mohsen · 1 of 1 on loan/)).toBeVisible();
-  await expect(page.getByText(/Alex · 1 of 1 on loan/)).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Record return from Mohsen" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Record return from Alex" }),
-  ).toBeVisible();
+  await expect(page.getByText("2 of 3 on loan")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Mohsen · 1 of 1" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Alex · 1 of 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Return from Mohsen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Return from Alex" })).toBeVisible();
 });
 
 test("authorized return flow uses the selected loan and restores the at-home state", async ({
@@ -200,16 +191,15 @@ test("authorized return flow uses the selected loan and restores the at-home sta
     { borrower_name: "Mohsen", quantity: 1, due_on: "2026-11-20" },
   ]);
   await page.goto(`/items/${fixture.item.item.id}`);
-  await expect(page.getByText("On loan to Mohsen")).toBeVisible();
-  await page.getByRole("button", { name: "Record return" }).click();
+  await expect(page.getByText("With Mohsen")).toBeVisible();
+  await page.getByRole("button", { name: "Return", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Return from Mohsen" })).toBeVisible();
   await expect(dialog.getByLabel("Quantity")).toHaveValue("1");
   await dialog.getByRole("button", { name: "Record return" }).click();
-  await expect(page.getByText("On loan to Mohsen")).toHaveCount(0);
-  await expect(page.getByText(/Everything is at home/)).toBeVisible();
-  await expect(page.getByText("Place", { exact: true })).toBeVisible();
-  await expect(page.getByText("Usual home location")).toHaveCount(0);
+  await expect(page.getByText("With Mohsen")).toHaveCount(0);
+  await expect(page.getByText("Here", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Lend" })).toBeEnabled();
 });
 
 test("returned loans and populated galleries render truthfully", async ({
@@ -228,16 +218,12 @@ test("returned loans and populated galleries render truthfully", async ({
   });
 
   await page.goto(`/items/${returned.item.item.id}`);
-  await expect(page.getByText(/Everything is at home/)).toBeVisible();
-  await expect(page.getByText("Usual home location")).toHaveCount(0);
-  await expect(page.getByText("Place", { exact: true })).toBeVisible();
-  await expect(page.getByText("On loan to Mohsen")).toHaveCount(0);
+  await expect(page.getByText("Here", { exact: true })).toBeVisible();
+  await expect(page.getByText("With Mohsen")).toHaveCount(0);
 
   await page.goto(`/items/${gallery.item.item.id}`);
   await expect(page.getByText("No photograph yet")).toHaveCount(0);
-  await expect(
-    page.getByRole("img", { name: new RegExp(`${gallery.item.item.name} photograph`) }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "View photograph 1" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Take a photo" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Choose a photo" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Take photo" })).toHaveCount(0);
@@ -267,8 +253,8 @@ test("viewers see loan state but no return or editing actions", async ({
   await viewerRequest.dispose();
   const page = await context.newPage();
   await page.goto(`/items/${fixture.item.item.id}`);
-  await expect(page.getByText("On loan to Mohsen")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Record return" })).toHaveCount(0);
+  await expect(page.getByText("With Mohsen")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Return", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Lend" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Edit" })).toHaveCount(0);
 

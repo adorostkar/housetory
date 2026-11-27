@@ -246,8 +246,13 @@ function ItemFormFields(props: ItemFormProps) {
     .filter(Boolean)
     .join(" › ");
   const parsedQuantity = /^\d+$/.test(quantity) ? Number(quantity) : 0;
+  // The "single-item" allocation is written by the server for a purchase with one
+  // item. It follows the price, so it is not a reviewed document line.
   const hasReviewedAllocation = Boolean(
-    item?.purchase?.allocations.some((allocation) => allocation.item_id === item?.id),
+    item?.purchase?.allocations.some(
+      (allocation) =>
+        allocation.item_id === item?.id && allocation.source_line_id !== "single-item",
+    ),
   );
   const canUseUnitPrice =
     parsedQuantity > 1 &&

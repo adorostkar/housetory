@@ -596,14 +596,18 @@ test("assistant retains a selected household scope when reopened over scoped pag
       { id: secondHousehold, name: "Home B", properties: [] },
     ] } }),
   );
-  await page.goto(`/search?household_id=${household.id}`);
-  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  // The page behind the assistant is the item list. Its own choices are in the address.
+  // (The old search page is gone, and a household in the address is only a link that
+  // switches household and is then removed.)
+  await page.goto("/items?sort=name_asc");
+  const pageFilters = "?sort=name_asc";
+  expect(new URL(page.url()).search).toBe(pageFilters);
   const trigger = launcher(page);
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Assistant" });
   const scope = dialog.getByLabel("Search scope");
   await expect(scope.getByRole("option", { name: "Home B — all properties" })).toHaveCount(1);
-  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  expect(new URL(page.url()).search).toBe(pageFilters);
   const pageStoredScope = await page.evaluate(() => localStorage.getItem("housetory-search-scope"));
   await scope.selectOption(`household:${secondHousehold}`);
   expect(await page.evaluate(() => localStorage.getItem("housetory-search-scope"))).toBe(pageStoredScope);
@@ -613,22 +617,25 @@ test("assistant retains a selected household scope when reopened over scoped pag
   await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
   await input.fill("Draft for home B");
   await dialog.getByRole("button", { name: "Close assistant" }).click();
-  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
+  expect(new URL(page.url()).search).toBe(pageFilters);
   await trigger.click();
   await expect(scope).toHaveValue(`household:${secondHousehold}`);
   await expect(input).toHaveValue("Draft for home B");
   await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
   await dialog.getByRole("button", { name: "Close assistant" }).click();
-  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Items", exact: true }).click();
-  await expect(page).toHaveURL(/\/items/);
+  // Another page, from the sidebar.
+  await page.getByRole("navigation", { name: "Rooms" }).getByRole("link", { name: /^On loan/ }).click();
+  await expect(page).toHaveURL(/\/loans/);
   await trigger.click();
   await expect(scope).toHaveValue(`household:${secondHousehold}`);
   await expect(input).toHaveValue("Draft for home B");
-  await dialog.getByRole("link", { name: "Open full page" }).click();
-  await expect(page).toHaveURL(/\/assistant/);
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByLabel("Search scope")).toHaveValue(`household:${secondHousehold}`);
-  await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toHaveValue("Draft for home B");
+  // There is no separate assistant page any more. The same panel grows to full height
+  // and keeps the scope and the draft.
+  await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
+  await expect(dialog.getByRole("button", { name: "Make the assistant smaller" })).toBeVisible();
+  await expect(page).toHaveURL(/\/loans#assistant$/);
+  await expect(scope).toHaveValue(`household:${secondHousehold}`);
+  await expect(input).toHaveValue("Draft for home B");
 });
 
 test("property scope and in-flight response survive reopening and full-page handoff", async ({ page }) => {
@@ -658,7 +665,11 @@ test("property scope and in-flight response survive reopening and full-page hand
       scope_label: "Home B · Property B", households: [], property: null,
     } });
   });
-  await page.goto(`/search?household_id=${household.id}&property_id=${propertyA}`);
+  // The item list is shown for one property. That choice is the page's own.
+  await page.route("**/api/v1/properties**", (route) =>
+    route.fulfill({ json: { items: [{ id: propertyA, name: "Property A", is_default: true }], total: 1 } }),
+  );
+  await page.goto(`/items?property_id=${propertyA}`);
   const trigger = launcher(page);
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Assistant" });
@@ -674,16 +685,15 @@ test("property scope and in-flight response survive reopening and full-page hand
   expect((await request).postDataJSON()).toMatchObject({ household_id: secondHousehold, property_id: propertyB });
   await input.fill("Unsent property B draft");
   await dialog.getByRole("button", { name: "Close assistant" }).click();
-  expect(new URL(page.url()).searchParams.get("household_id")).toBe(household.id);
   expect(new URL(page.url()).searchParams.get("property_id")).toBe(propertyA);
   await trigger.click();
   await expect(scope).toHaveValue(`household:${secondHousehold}|property:${propertyB}`);
   await expect(input).toHaveValue("Unsent property B draft");
   await expect(dialog.getByRole("button", { name: "Send question" })).toBeDisabled();
-  await dialog.getByRole("link", { name: "Open full page" }).click();
-  await expect(page).toHaveURL(/\/assistant/);
-  await expect(dialog).toHaveCount(0);
-  const fullScope = page.getByLabel("Search scope");
+  // The panel grows to full height in place: there is no separate assistant page.
+  await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
+  await expect(dialog.getByRole("button", { name: "Make the assistant smaller" })).toBeVisible();
+  const fullScope = scope;
   await expect(fullScope).toHaveValue(`household:${secondHousehold}|property:${propertyB}`);
   await fullScope.selectOption(`household:${household.id}|property:${propertyA}`);
   const response = page.waitForResponse((candidate) =>
@@ -728,12 +738,15 @@ for (const width of [390, 1440]) {
     await trigger.click();
     await expect(input).toHaveValue("A draft for later");
     await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
-    await dialog.getByRole("link", { name: "Open full page" }).click();
-    await expect(page).toHaveURL(/\/assistant/);
-    await expect(page.getByRole("textbox", { name: "Ask the Housetory assistant" })).toHaveValue("A draft for later");
-    await expect(page.getByText("Synthetic answer from local records.")).toBeVisible();
-    await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Items", exact: true }).click();
-    await expect(page).toHaveURL(/\/items/);
+    // Full height is the same panel made taller. Nothing in it is lost.
+    await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
+    await expect(dialog.getByRole("button", { name: "Make the assistant smaller" })).toBeVisible();
+    await expect(input).toHaveValue("A draft for later");
+    await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Close assistant" }).click();
+    // Another page, from the rail of rooms, and back into the assistant.
+    await page.getByRole("navigation", { name: "Rooms" }).getByRole("link", { name: /^On loan/ }).click();
+    await expect(page).toHaveURL(/\/loans/);
     await trigger.click();
     await expect(dialog.getByRole("textbox", { name: "Ask the Housetory assistant" })).toHaveValue("A draft for later");
     await expect(dialog.getByText("Synthetic answer from local records.")).toBeVisible();
@@ -759,6 +772,7 @@ for (const width of [390, 1440]) {
       route.fulfill({ json: { items, total: items.length, limit: 24, offset: 0 } }),
     );
     await page.goto("/items");
+    await page.getByRole("button", { name: "Select items" }).click();
     await page.getByRole("checkbox", { name: "Select Synthetic drill" }).check();
     await page.getByRole("checkbox", { name: "Select Synthetic ladder" }).check();
     const dialog = await openAssistant(page);
@@ -778,10 +792,10 @@ for (const width of [390, 1440]) {
     await page.screenshot({
       path: `../../docs/assistant-stage-b-${width === 390 ? "mobile" : "desktop"}.png`,
     });
-    await dialog.getByRole("link", { name: "Open full page" }).click();
-    await expect(page.getByLabel("Current assistant context")).toContainText("Selection: 2 items");
-    await page.getByRole("button", { name: "Clear assistant context" }).click();
-    await expect(page.getByLabel("Current assistant context")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Make the assistant full height" }).click();
+    await expect(dialog.getByLabel("Current assistant context")).toContainText("Selection: 2 items");
+    await dialog.getByRole("button", { name: "Clear assistant context" }).click();
+    await expect(dialog.getByLabel("Current assistant context")).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }

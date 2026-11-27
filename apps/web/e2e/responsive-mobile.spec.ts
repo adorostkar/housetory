@@ -95,6 +95,36 @@ async function seedDenseFixtures(request: APIRequestContext) {
   return { itemId, roomId };
 }
 
+/**
+ * Runs SQL in the database of the stack under test. By default that is the Docker
+ * e2e database. A local stack without Docker sets RESPONSIVE_E2E_DATABASE_URL to
+ * its own throwaway database and the SQL goes there through psql.
+ */
+function runSql(sql: string) {
+  const local = process.env.RESPONSIVE_E2E_DATABASE_URL;
+  const options = ["-v", "ON_ERROR_STOP=1", "-c", sql];
+  if (local) {
+    const url = new URL(local.replace(/^postgresql\+\w+:/, "postgresql:"));
+    expect(url.hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
+    execFileSync("psql", [url.toString(), ...options], { stdio: "pipe" });
+    return;
+  }
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      process.env.E2E_DB_CONTAINER ?? "housetory-e2e-db-1",
+      "psql",
+      "-U",
+      "housetory",
+      "-d",
+      "housetory",
+      ...options,
+    ],
+    { stdio: "pipe" },
+  );
+}
+
 function seedAiTaskRows(householdId: string) {
   const sql = `
     INSERT INTO ai_providers
@@ -145,23 +175,7 @@ function seedAiTaskRows(householdId: string) {
       model = excluded.model,
       enabled = true;
   `;
-  execFileSync(
-    "docker",
-    [
-      "exec",
-      process.env.E2E_DB_CONTAINER ?? "housetory-e2e-db-1",
-      "psql",
-      "-U",
-      "housetory",
-      "-d",
-      "housetory",
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-c",
-      sql,
-    ],
-    { stdio: "pipe" },
-  );
+  runSql(sql);
 }
 
 async function pageMetrics(page: import("@playwright/test").Page) {
@@ -205,68 +219,139 @@ async function pageMetrics(page: import("@playwright/test").Page) {
           height: rect.height,
         };
       });
-    const nav = document.querySelector<HTMLElement>('[data-testid="mobile-bottom-nav"]');
-    const navVisible =
-      nav !== null &&
-      nav.getClientRects().length > 0 &&
-      getComputedStyle(nav).display !== "none" &&
-      getComputedStyle(nav).visibility !== "hidden";
+    // The controls of one part of the shell that are on screen right now.
+    const controls = (testId: string) => {
+      const root = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+      if (!root || !visible(root)) return [];
+      return Array.from(root.querySelectorAll<HTMLElement>("a,button,input"))
+        .filter((element) => visible(element) && element.getAttribute("aria-hidden") !== "true")
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          // A small drawn control can have a larger tap area around it (the cross
+          // on the "This item" chip does). So the tap area is measured by asking
+          // which element is under points 44 px apart.
+          const tapped = (x: number, y: number) => {
+            const hit = document.elementFromPoint(x, y);
+            return hit !== null && (hit === element || element.contains(hit));
+          };
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const wide = tapped(centerX - 21.5, centerY) && tapped(centerX + 21.5, centerY);
+          const tall = tapped(centerX, centerY - 21.5) && tapped(centerX, centerY + 21.5);
+          return {
+            name: element.getAttribute("aria-label") || (element.textContent || "").trim(),
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height,
+            tapWidth: Math.max(rect.width, wide ? 44 : 0),
+            tapHeight: Math.max(rect.height, tall ? 44 : 0),
+            font: Number.parseFloat(getComputedStyle(element).fontSize),
+          };
+        });
+    };
     return {
       viewport: window.innerWidth,
+      viewportHeight: window.innerHeight,
       scrollWidth: document.documentElement.scrollWidth,
       bodyScrollWidth: document.body.scrollWidth,
       textEntries,
-      nav:
-        navVisible && nav
-          ? Array.from(nav.querySelectorAll<HTMLElement>("a,button")).map((element) => {
-              const rect = element.getBoundingClientRect();
-              return {
-                text: (element.textContent || "").trim(),
-                left: rect.left,
-                right: rect.right,
-                width: rect.width,
-                height: rect.height,
-                font: Number.parseFloat(getComputedStyle(element).fontSize),
-              };
-            })
-          : [],
+      bar: controls("bottom-bar"),
+      rail: controls("room-rail"),
+      // The 5-tab bar of the old interface. It must not come back.
+      oldTabBar: document.querySelector('[data-testid="mobile-bottom-nav"]') !== null,
     };
   });
+}
+
+type ShellMetrics = Awaited<ReturnType<typeof pageMetrics>>;
+
+/**
+ * Checks the phone shell on one page: one bottom bar (rooms button, search field,
+ * Add) and the room rail, with touch targets of at least 44 px that do not overlap
+ * and stay on the screen. Returns what is wrong, or nothing.
+ */
+function shellProblems(metrics: ShellMetrics, expectBar: boolean): unknown[] {
+  const problems: unknown[] = [];
+  if (metrics.oldTabBar) problems.push({ oldTabBar: true });
+  if (!expectBar) {
+    if (metrics.bar.length > 0) problems.push({ barShouldBeHidden: metrics.bar.map((entry) => entry.name) });
+  } else {
+    const names = metrics.bar.map((entry) => entry.name);
+    for (const needed of [/^(Hide|Show) rooms$/, /^Open assistant$/, /^Search or ask about your inventory$/, /^Add items$/]) {
+      if (!names.some((name) => needed.test(name))) problems.push({ barMissing: String(needed), names });
+    }
+    const inOrder = [...metrics.bar].sort((first, second) => first.left - second.left);
+    for (let index = 0; index < inOrder.length; index += 1) {
+      const current = inOrder[index]!;
+      const next = inOrder[index + 1];
+      if (current.tapWidth < 44 || current.tapHeight < 44) problems.push({ barTarget: current });
+      if (current.left < 0 || current.right > metrics.viewport + 0.5 || current.bottom > metrics.viewportHeight + 0.5) {
+        problems.push({ barOffScreen: current });
+      }
+      if (next && current.right > next.left + 0.5) problems.push({ barOverlap: [current, next] });
+    }
+  }
+  const railNames = metrics.rail.map((entry) => entry.name);
+  for (const needed of ["All", "On loan", "More"]) {
+    const tile = metrics.rail.find((entry) => entry.name === needed || entry.name.startsWith(needed));
+    if (!tile) problems.push({ railMissing: needed, railNames });
+    // These three do not scroll with the rooms, so they must be on the screen.
+    else if (tile.top < 0 || tile.bottom > metrics.viewportHeight + 0.5) problems.push({ railOffScreen: tile });
+  }
+  for (const tile of metrics.rail) {
+    if (tile.tapWidth < 44 || tile.tapHeight < 44) problems.push({ railTarget: tile });
+    // The rail labels are 10.5 px in the approved design.
+    if (tile.font < 10.5) problems.push({ railFont: tile });
+  }
+  return problems;
 }
 
 test.describe("mobile responsive", () => {
   test.use({ viewport: { width: 320, height: 568 }, hasTouch: true, deviceScaleFactor: 3 });
 
-  test("appearance cycles in the header and replaces the Settings control", async ({ page }) => {
+  test("light, dark and system are chosen on the Appearance screen and remembered", async ({ page }) => {
     for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       await page.emulateMedia({ colorScheme: "light" });
       await page.goto("/items");
       await page.evaluate(() => localStorage.setItem("housetory-theme", "light"));
-      await page.reload();
-      const button = page.getByRole("button", { name: /^Appearance:/ });
-      await expect(button).toHaveAccessibleName("Appearance: Light. Switch to dark mode");
-      await button.click();
-      await expect(button).toHaveAccessibleName("Appearance: Dark. Switch to system mode");
-      await expect(page.locator("html")).toHaveClass(/dark/);
-      await button.focus();
-      await page.keyboard.press("Enter");
-      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
-      await expect(button.locator("svg")).toHaveClass(/lucide-monitor/);
-      await expect(page.locator("html")).not.toHaveClass(/dark/);
-      await page.emulateMedia({ colorScheme: "dark" });
-      await expect(page.locator("html")).toHaveClass(/dark/);
-      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
-      await page.reload();
-      await expect(button).toHaveAccessibleName("Appearance: System. Switch to light mode");
-      await expect(page.locator("html")).toHaveClass(/dark/);
-      await button.click();
-      await expect(button).toHaveAccessibleName("Appearance: Light. Switch to dark mode");
-      await expect(page.locator("html")).not.toHaveClass(/dark/);
+      // The header and its theme button are gone. Settings leads to the Appearance screen.
+      await expect(page.getByRole("button", { name: /^Appearance:/ })).toHaveCount(0);
       await page.goto("/settings");
+      await page.getByRole("main").getByRole("link", { name: /^Appearance/ }).click();
+      await expect(page).toHaveURL(/\/settings\/appearance$/);
+      await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
+      const html = page.locator("html");
+      const modes = page.getByRole("radiogroup", { name: "Light or dark" });
+      const mode = (name: string) => modes.getByRole("radio", { name, exact: true });
+      await expect(mode("Light")).toBeChecked();
+      await expect(html).not.toHaveClass(/dark/);
+      await mode("Dark").click();
+      await expect(mode("Dark")).toBeChecked();
+      await expect(html).toHaveClass(/dark/);
+      await mode("System").focus();
+      await page.keyboard.press("Enter");
+      await expect(mode("System")).toBeChecked();
+      await expect(html).not.toHaveClass(/dark/);
+      await page.emulateMedia({ colorScheme: "dark" });
+      await expect(html).toHaveClass(/dark/);
+      await expect(mode("System")).toBeChecked();
+      await page.reload();
+      await expect(mode("System")).toBeChecked();
+      await expect(html).toHaveClass(/dark/);
+      await mode("Light").click();
+      await expect(mode("Light")).toBeChecked();
+      await expect(html).not.toHaveClass(/dark/);
+      for (const radio of await modes.getByRole("radio").all()) {
+        const box = await radio.boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+      await expect(page.getByRole("radiogroup", { name: "Colour theme" })).toBeVisible();
+      await page.goto("/settings/advanced");
       await expect(page.getByRole("heading", { name: "Storage", exact: true })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Appearance", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("group", { name: "Theme", exact: true })).toHaveCount(0);
     }
   });
 
@@ -275,9 +360,8 @@ test.describe("mobile responsive", () => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto("/items");
       const mobile = width < 1024;
-      const trigger = mobile
-        ? page.getByTestId("mobile-bottom-nav").getByRole("button", { name: "Add items", exact: true })
-        : page.getByRole("main").getByRole("button", { name: "Add items", exact: true });
+      // The Add button is in the one bottom bar at every width.
+      const trigger = page.getByTestId("bottom-bar").getByRole("button", { name: "Add items", exact: true });
       await trigger.click();
       const dialog = page.getByRole("dialog", { name: "Add items", exact: true });
       const heading = dialog.getByRole("heading", { name: "Add items", exact: true });
@@ -379,11 +463,15 @@ test.describe("mobile responsive", () => {
       await page.getByRole("link", { name: "Linked fixture item", exact: true }).click();
       await expect(page).toHaveURL(/\/items\/00000000-0000-0000-0000-000000000001$/);
       await page.goto("/documents");
+      // Download and Delete are in the row's one menu.
+      const options = page.getByRole("button", { name: "Options for Surface receipt", exact: true });
       const download = page.waitForEvent("download");
-      await page.getByRole("link", { name: "Download Surface receipt", exact: true }).click();
+      await options.click();
+      await page.getByRole("menuitem", { name: "Download Surface receipt", exact: true }).click();
       await download;
       await expect(page).toHaveURL(/\/documents$/);
-      await page.getByRole("button", { name: "Delete Surface receipt" }).click();
+      await options.click();
+      await page.getByRole("menuitem", { name: "Delete Surface receipt", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Delete this document?" })).toBeVisible();
       await expect(page).toHaveURL(/\/documents$/);
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -550,7 +638,9 @@ test.describe("mobile responsive", () => {
     expect(cancellations).toBe(2);
   });
 
-  test("Home purchase panels wrap without horizontal scrolling", async ({ page }) => {
+  test("Purchase total panels wrap without horizontal scrolling", async ({ page, request }) => {
+    // The totals are only shown once the household has an item.
+    await seedDenseFixtures(request);
     const rows: FinancialOverview["value_by_category"] = [
       {
         name: "Equipment and supplies for the workshop and home",
@@ -571,7 +661,7 @@ test.describe("mobile responsive", () => {
     await page.route("**/api/v1/overview?**", async route => {
       const response = await route.fetch();
       const data: Overview = await response.json();
-      if (!data.financial) throw new Error("Expected embedded Home financial data");
+      if (!data.financial) throw new Error("Expected embedded financial data");
       await route.fulfill({
         response,
         json: {
@@ -591,7 +681,9 @@ test.describe("mobile responsive", () => {
     });
     for (const width of [360, 390, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.goto("/");
+      // The totals sit at the top of Purchases and stay open once opened.
+      await page.addInitScript(() => localStorage.setItem("housetory.totals", "open"));
+      await page.goto("/purchases");
       for (const title of ["Purchases by category", "Purchases by room"]) {
         const panel = page.getByRole("heading", { name: title, exact: true }).locator("../..");
         const table = panel.getByRole("table");
@@ -628,7 +720,7 @@ test.describe("mobile responsive", () => {
     }
   });
 
-  test("Home and document cards stay bounded with long item names", async ({ page }) => {
+  test("Item list and document cards stay bounded with long item names", async ({ page }) => {
     const item: ItemSummary = {
       id: "00000000-0000-0000-0000-000000000001",
       name: "Long equipment name SERIAL_ABCDEFGHIJKLMNOPQRSTUVWXYZ_012345678901234567890123456789",
@@ -641,14 +733,10 @@ test.describe("mobile responsive", () => {
       current_value_estimated_at: null,
       created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
     };
-    await page.addInitScript(() => localStorage.setItem("housetory.items.view", "list"));
-    await page.route("**/api/v1/overview?**", async route => {
+    await page.route("**/api/v1/items?**", async route => {
       const response = await route.fetch();
-      const data: Overview = await response.json();
-      await route.fulfill({
-        response,
-        json: { ...data, item_count: 1, total_quantity: 1, recent_items: [item] },
-      });
+      const data = await response.json();
+      await route.fulfill({ response, json: { ...data, total: 1, items: [item] } });
     });
     const receipt: DocumentSummary = {
       id: "00000000-0000-0000-0000-000000000003",
@@ -669,7 +757,7 @@ test.describe("mobile responsive", () => {
     });
     for (const width of [360, 390, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.goto("/");
+      await page.goto("/items");
       await expect(page.getByText(item.name, { exact: true })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
       await page.goto("/documents");
@@ -682,8 +770,9 @@ test.describe("mobile responsive", () => {
     page,
     request,
   }) => {
+    test.setTimeout(300_000);
     await fs.mkdir("../../docs/walkthrough/responsive-mobile", { recursive: true });
-    const { itemId } = await seedDenseFixtures(request);
+    const { itemId, roomId } = await seedDenseFixtures(request);
     const sizes = [
       { width: 320, height: 568 },
       { width: 375, height: 667 },
@@ -694,19 +783,26 @@ test.describe("mobile responsive", () => {
       { width: 869, height: 700 },
       { width: 1024, height: 768 },
     ];
+    // "/" and "/search" now lead to the item list, and "/assistant" opens the
+    // assistant over it. Overview is gone; its parts are on Purchases and Warranties.
     const paths = [
       "/",
       "/items",
       "/settings",
       "/review",
       "/search",
+      `/items/${itemId}`,
       `/items/${itemId}/edit`,
+      `/rooms/${roomId}`,
       "/settings/ai",
       "/loans",
       "/rooms",
       "/containers",
       "/documents",
       "/purchases",
+      "/warranties",
+      "/insurance",
+      "/stocktake",
       "/assistant",
     ];
     await page.goto("/");
@@ -719,6 +815,9 @@ test.describe("mobile responsive", () => {
       await page.setViewportSize(size);
       for (const path of paths) {
         await page.goto(path);
+        const assistant = path === "/assistant";
+        if (assistant) await expect(page.getByTestId("assistant-panel")).toBeVisible();
+        await expect(page.locator("main h1").first()).toBeVisible();
         await page.waitForTimeout(100);
         const metrics = await pageMetrics(page);
         const overflow =
@@ -735,30 +834,19 @@ test.describe("mobile responsive", () => {
             small,
           });
         }
-        if (size.width <= 430) {
-          if (metrics.nav.length !== 5) {
-            failures.push({ size, path, navCount: metrics.nav.length });
-          }
-          for (let index = 0; index < metrics.nav.length; index += 1) {
-            const current = metrics.nav[index];
-            const next = metrics.nav[index + 1];
-            if (current.width < 44 || current.height < 44) {
-              failures.push({ size, path, navTarget: current });
-            }
-            if (current.font < 11) {
-              failures.push({ size, path, navFont: current });
-            }
-            if (next && current.right > next.left + 0.5) {
-              failures.push({ size, path, navOverlap: [current, next] });
-            }
+        // Below 1024 px the shell is the room rail and the one bottom bar. On a phone
+        // the open assistant takes the place of the bar.
+        if (size.width < 1024) {
+          for (const problem of shellProblems(metrics, !assistant)) {
+            failures.push({ size, path, problem });
           }
         }
       }
     }
     expect(failures).toEqual([]);
     await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+    await page.goto("/settings/household");
+    await expect(page.getByRole("heading", { name: "Household", level: 1 })).toBeVisible();
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "20px";
     });
@@ -783,37 +871,122 @@ test.describe("mobile responsive", () => {
     });
   });
 
-  test("More exposes every secondary destination with usable targets", async ({ page }) => {
+  test("Settings is an index of rows, and every screen fits a phone", async ({ page }) => {
+    test.setTimeout(180_000);
+    const screens: Array<[string, string, string]> = [
+      // Row title, where it leads, the heading of that screen.
+      ["Account", "/settings/account", "Your account"],
+      ["Appearance", "/settings/appearance", "Appearance"],
+      ["Household", "/settings/household", "Household"],
+      ["Members and invitations", "/settings/members", "Members & invitations"],
+      ["AI and online services", "/settings/services", "AI and online services"],
+      ["System status", "/settings/system-status", "System status"],
+      ["Storage, install and labels", "/settings/advanced", "Advanced"],
+    ];
+    const failures: unknown[] = [];
+    for (const size of [
+      { width: 320, height: 568 },
+      { width: 390, height: 844 },
+      { width: 430, height: 932 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto("/settings");
+      await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+      const rows = page.getByRole("main").getByRole("listitem").getByRole("link");
+      await expect(rows).toHaveCount(screens.length);
+      for (const [index, [title, path]] of screens.entries()) {
+        const row = rows.nth(index);
+        await expect(row).toContainText(title);
+        await expect(row).toHaveAttribute("href", path);
+        const box = await row.boundingBox();
+        if (!box || box.height < 44 || box.x < 0 || box.x + box.width > size.width + 0.5) {
+          failures.push({ size, row: title, box });
+        }
+      }
+      await expect(page.getByRole("main").getByRole("button", { name: "Sign out" })).toBeVisible();
+
+      for (const [title, path, heading] of [["", "/settings", "Settings"], ...screens, ["", "/settings/ai", "AI providers"]]) {
+        await page.goto(path!);
+        await expect(page.getByRole("heading", { name: heading!, level: 1 })).toBeVisible();
+        await page.waitForTimeout(150);
+        const metrics = await pageMetrics(page);
+        const overflow =
+          metrics.scrollWidth > metrics.viewport + 1 ||
+          metrics.bodyScrollWidth > metrics.viewport + 1;
+        const small = metrics.textEntries.filter((entry) => entry.font < 16);
+        if (overflow || small.length > 0) {
+          failures.push({ size, path, overflow, scrollWidth: metrics.scrollWidth, small });
+        }
+        for (const problem of shellProblems(metrics, true)) failures.push({ size, path, problem });
+        if (path !== "/settings") {
+          // Every screen has a way back that is big enough to tap.
+          const back = page.getByRole("main").getByRole("link", { name: /^(Back to )?Settings$/ }).first();
+          const box = await back.boundingBox();
+          if (!box || box.height < 43.5) failures.push({ size, path, back: box, title });
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+
+    // A row opens its screen, and the way back returns to the index.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/settings");
+    await page.getByRole("main").getByRole("link", { name: /^Household/ }).click();
+    await expect(page).toHaveURL(/\/settings\/household$/);
+    await expect(page.getByLabel("Household name")).toBeVisible();
+    await page.getByRole("main").getByRole("link", { name: "Settings", exact: true }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    // Old links to parts of the long Settings page go to the screen that has the part now.
+    await page.goto("/settings#system-status");
+    await expect(page).toHaveURL(/\/settings\/system-status/);
+    await page.goto("/settings#online-search");
+    await expect(page).toHaveURL(/\/settings\/services/);
+  });
+
+  test("More rolls up every other destination in the rail with usable targets", async ({ page }) => {
+    const destinations = ["Places", "Documents", "Purchases", "Insurance", "Stocktake", "Review", "Settings"];
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/");
-    await page.getByRole("button", { name: "More destinations" }).click();
-    const menu = page.getByTestId("mobile-more-menu");
+    const rail = page.getByTestId("room-rail");
+    const more = rail.getByRole("button", { name: "More", exact: true });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click();
+    const menu = rail.getByTestId("rail-more");
     await expect(menu).toBeVisible();
     await page.waitForTimeout(350);
     await page.screenshot({
       path: "../../docs/walkthrough/responsive-mobile/after-320-more-menu.png",
       fullPage: false,
     });
-    const menuItems = menu.getByRole("menuitem");
-    await expect(menuItems).toHaveCount(5);
-    for (const item of await menuItems.all()) {
+    const menuItems = menu.getByRole("link");
+    await expect(menuItems).toHaveCount(destinations.length);
+    for (const [index, name] of destinations.entries()) {
+      const item = menuItems.nth(index);
+      // The rail shows a short label. The full name is the link's title.
+      await expect(item).toHaveAttribute("title", name);
       const box = await item.boundingBox();
       expect(box).not.toBeNull();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
     }
-    await menu.getByRole("menuitem", { name: "Places" }).click();
+    // The More button is now Close, and it is still in reach.
+    await expect(rail.getByRole("button", { name: "Close", exact: true })).toHaveAttribute("aria-expanded", "true");
+    await menu.getByRole("link", { name: "Places" }).click();
     await expect(page).toHaveURL(/\/rooms$/);
     await page.getByRole("navigation", { name: "Places" }).getByRole("link", { name: "Containers" }).click();
     await expect(page).toHaveURL(/\/containers$/);
-    await expect(page.getByRole("button", { name: "More destinations" })).toHaveAttribute(
-      "data-active",
-      "true",
-    );
+    // The choices stay up on one of their pages, with the current one marked.
+    await expect(menu.getByRole("link", { name: "Places" })).toHaveAttribute("aria-current", "page");
+    await rail.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(menu).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 
+    // In landscape the rail is short, so the choices scroll inside it.
     await page.setViewportSize({ width: 844, height: 390 });
     await page.goto("/settings/ai");
-    await page.getByRole("button", { name: "More destinations" }).click();
-    const landscapeMenu = page.getByTestId("mobile-more-menu");
+    await rail.getByRole("button", { name: "More", exact: true }).click();
+    const landscapeMenu = rail.getByTestId("rail-more");
     await expect(landscapeMenu).toBeVisible();
     await page.waitForTimeout(350);
     const menuMetrics = await landscapeMenu.evaluate((element) => {
@@ -832,7 +1005,8 @@ test.describe("mobile responsive", () => {
     await landscapeMenu.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
-    await expect(landscapeMenu.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+    await expect(landscapeMenu.getByRole("link", { name: "Settings" })).toBeInViewport();
+    await expect(landscapeMenu.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     await page.waitForTimeout(150);
     await page.screenshot({
       path: "../../docs/walkthrough/responsive-mobile/after-844-landscape-more.png",
@@ -840,31 +1014,50 @@ test.describe("mobile responsive", () => {
     });
   });
 
-  test("software-keyboard viewport shrink hides the bar without losing focus or text", async ({
+  test("software-keyboard viewport shrink hides the bar for a page field and keeps it for its own field", async ({
     page,
     request,
   }) => {
     const { itemId } = await seedDenseFixtures(request);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/items/${itemId}/edit`);
+    const bar = page.getByTestId("bottom-bar");
+    const rail = page.getByTestId("room-rail");
     const input = page.getByLabel("Item name");
     await input.focus();
-    await expect(page.getByTestId("mobile-bottom-nav")).toBeVisible();
+    await expect(bar).toBeVisible();
     await input.fill("Keyboard stable value");
+    // A shorter viewport is what an open software keyboard looks like to the page.
     await page.setViewportSize({ width: 390, height: 500 });
     await page.waitForTimeout(200);
-    await expect(page.getByTestId("mobile-bottom-nav")).toHaveCount(0);
+    // The keyboard is open for a field on the page, so the bar steps aside and the
+    // form has the room. The rail then reaches the keyboard.
+    await expect(bar).toBeHidden();
+    const railBox = (await rail.boundingBox())!;
+    expect(railBox.y + railBox.height).toBeLessThanOrEqual(500.5);
     await expect(input).toBeFocused();
     await expect(input).toHaveValue("Keyboard stable value");
     await page.keyboard.type(" typed");
     await expect(input).toHaveValue("Keyboard stable value typed");
+    // The field being typed in can be brought clear of the bars at the bottom.
+    await input.evaluate((element) => element.scrollIntoView({ block: "center", behavior: "instant" }));
+    expect(
+      await input.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit === element;
+      }),
+    ).toBe(true);
+    await expect(input).toBeFocused();
     await page.screenshot({
       path: "../../docs/walkthrough/responsive-mobile/after-390-keyboard-hidden.png",
       fullPage: false,
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(200);
-    await expect(page.getByTestId("mobile-bottom-nav")).toBeVisible();
+    await expect(bar).toBeVisible();
+    const restored = (await bar.boundingBox())!;
+    expect(Math.round(restored.y + restored.height)).toBe(844);
     await expect(input).toBeFocused();
     await expect(input).toHaveValue("Keyboard stable value typed");
     await page.screenshot({
@@ -872,11 +1065,43 @@ test.describe("mobile responsive", () => {
       fullPage: false,
     });
 
+    // The bar's own field: while it has focus it gets the whole bar, and with
+    // text in it attach and voice step aside too. Nothing typed is lost.
+    const search = bar.getByRole("combobox", { name: "Search or ask about your inventory" });
+    await expect(bar.getByRole("button", { name: "Hide rooms" })).toBeVisible();
+    await search.tap();
+    await expect(search).toBeFocused();
+    await expect(bar.getByRole("button", { name: /^(Hide|Show) rooms$/ })).toHaveCount(0);
+    await expect(bar.getByRole("button", { name: "Add items" })).toHaveCount(0);
+    await expect(bar.getByRole("button", { name: "Attach a file" })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 500 });
+    await page.waitForTimeout(200);
+    await search.pressSequentially("drill");
+    await expect(search).toHaveValue("drill");
+    await expect(bar.getByRole("button", { name: "Attach a file" })).toBeHidden();
+    await expect(bar.getByRole("button", { name: "Record voice search" })).toBeHidden();
+    await expect(bar.getByRole("button", { name: "Clear search" })).toBeVisible();
+    const typingBox = (await bar.boundingBox())!;
+    expect(typingBox.y + typingBox.height).toBeLessThanOrEqual(500.5);
+    const fieldBox = (await search.boundingBox())!;
+    expect(fieldBox.width).toBeGreaterThan(200);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await bar.getByRole("button", { name: "Clear search" }).click();
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 844 });
+    // The form kept what was typed while the bar was used.
+    await expect(input).toHaveValue("Keyboard stable value typed");
+
     await page.locator("main h1").click();
+    await expect(bar.getByRole("button", { name: "Hide rooms" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "Add items" })).toBeVisible();
     await page.setViewportSize({ width: 844, height: 390 });
     await page.waitForTimeout(200);
     await input.focus();
-    await expect(page.getByTestId("mobile-bottom-nav")).toBeVisible();
+    // Turning the phone is not a keyboard: the bar and the rail are still there.
+    await expect(bar).toBeVisible();
+    await expect(rail).toBeVisible();
   });
 
   test("schedule and add-item dialogs fit and scroll without covering controls", async ({
@@ -889,6 +1114,8 @@ test.describe("mobile responsive", () => {
     ]) {
       await page.setViewportSize(size);
       await page.goto("/review");
+      // The schedule is in a closed part of the page.
+      await page.getByText("Advanced · Scheduled review").click();
       await page
         .getByRole("button", { name: /Set up schedule|Edit schedule/ })
         .click();
@@ -921,12 +1148,14 @@ test.describe("mobile responsive", () => {
             .map((entry) => Number.parseFloat(getComputedStyle(entry).fontSize)),
         };
       });
-      expect(metrics.width).toBeLessThanOrEqual(size.width - 24);
-      expect(metrics.height).toBeLessThanOrEqual(size.height - 24);
+      // On a phone a dialog is a sheet from the bottom: as wide as the screen and
+      // at most nine tenths of its height.
+      expect(metrics.width).toBeLessThanOrEqual(size.width);
+      expect(metrics.height).toBeLessThanOrEqual(size.height * 0.9 + 1);
       expect(metrics.left).toBeGreaterThanOrEqual(0);
       expect(metrics.right).toBeLessThanOrEqual(size.width);
       expect(metrics.top).toBeGreaterThanOrEqual(0);
-      expect(metrics.bottom).toBeLessThanOrEqual(size.height);
+      expect(Math.round(metrics.bottom)).toBe(size.height);
       expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
       expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
       expect(metrics.inputs.every((font) => font >= 16)).toBe(true);
@@ -991,12 +1220,12 @@ test.describe("mobile responsive", () => {
             .map((entry) => Number.parseFloat(getComputedStyle(entry).fontSize)),
         };
       });
-      expect(metrics.width).toBeLessThanOrEqual(390 - 24);
-      expect(metrics.height).toBeLessThanOrEqual(844 - 24);
+      expect(metrics.width).toBeLessThanOrEqual(390);
+      expect(metrics.height).toBeLessThanOrEqual(844 * 0.9 + 1);
       expect(metrics.left).toBeGreaterThanOrEqual(0);
       expect(metrics.right).toBeLessThanOrEqual(390);
       expect(metrics.top).toBeGreaterThanOrEqual(0);
-      expect(metrics.bottom).toBeLessThanOrEqual(844);
+      expect(Math.round(metrics.bottom)).toBe(844);
       expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
       expect(metrics.inputs.every((font) => font >= 16)).toBe(true);
     };
@@ -1006,7 +1235,8 @@ test.describe("mobile responsive", () => {
     await page.waitForTimeout(300);
     await measureDialog(lendDialog);
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Record return" }).first().click();
+    // "Right now" on the item page has the Return button of the open loan.
+    await page.getByRole("main").getByRole("button", { name: /^Return\b/ }).first().click();
     const returnDialog = page.getByRole("dialog", { name: /Return from/ });
     await expect(returnDialog).toBeVisible();
     await page.waitForTimeout(300);
@@ -1033,11 +1263,11 @@ test.describe("mobile responsive", () => {
     const testHouseholdId = ((await createdHousehold.json()) as {
       household: { id: string };
     }).household.id;
-    seedAiTaskRows(testHouseholdId);
-
     const sizes = [320, 640, 700, 767, 768, 800, 820, 843, 844, 869, 1024, 1280, 1440];
     const failures: unknown[] = [];
     try {
+    // Inside the try, so the extra household is removed even when seeding fails.
+    seedAiTaskRows(testHouseholdId);
     for (const width of sizes) {
       await page.setViewportSize({ width, height: width <= 430 ? 844 : 1024 });
       await page.goto("/settings/ai");
@@ -1123,7 +1353,8 @@ test.describe("mobile responsive", () => {
             button.right > row.right + 0.5 ||
             button.right > metrics.viewport + 0.5 ||
             button.left < -0.5 ||
-            button.height < 32
+            // Half a pixel of slack: a box measured mid-animation can read 31.9999.
+            button.height < 31.5
           ) {
             failures.push({ width, button });
           }
@@ -1137,36 +1368,28 @@ test.describe("mobile responsive", () => {
           `/api/v1/households/${originalHouseholdId}/select`,
         );
       }
-      execFileSync(
-        "docker",
-        [
-          "exec",
-          process.env.E2E_DB_CONTAINER ?? "housetory-e2e-db-1",
-          "psql",
-          "-U",
-          "housetory",
-          "-d",
-          "housetory",
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-c",
-          `DELETE FROM households WHERE id = '${testHouseholdId}';`,
-        ],
-        { stdio: "pipe" },
-      );
+      runSql(`DELETE FROM households WHERE id = '${testHouseholdId}';`);
     }
   });
 
 test.describe("desktop regression", () => {
   test.use({ viewport: { width: 1440, height: 1000 }, isMobile: false, hasTouch: false });
 
-  test("desktop keeps compact controls and no mobile bottom bar", async ({ page, request }) => {
+  test("desktop keeps compact controls, the sidebar and no room rail", async ({ page, request }) => {
     const { itemId } = await seedDenseFixtures(request);
-    for (const path of ["/", "/items", "/settings", `/items/${itemId}/edit`]) {
+    for (const path of ["/", "/items", "/settings", "/settings/appearance", "/purchases", `/items/${itemId}/edit`]) {
       await page.goto(path);
+      await expect(page.locator("h1").first()).toBeVisible();
       const metrics = await pageMetrics(page);
       expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.viewport + 1);
-      expect(metrics.nav).toEqual([]);
+      // Desktop has the sidebar instead of the rail, and the bar has no rooms button.
+      expect(metrics.oldTabBar).toBe(false);
+      expect(metrics.rail).toEqual([]);
+      const barNames = metrics.bar.map((entry) => entry.name);
+      expect(barNames).toContain("Search or ask about your inventory");
+      expect(barNames).toContain("Add items");
+      expect(barNames.filter((name) => /rooms$/.test(name))).toEqual([]);
+      await expect(page.locator("aside").getByRole("navigation", { name: "Rooms" })).toBeVisible();
       for (const entry of metrics.textEntries) {
         expect(entry.font).toBeGreaterThanOrEqual(12);
       }

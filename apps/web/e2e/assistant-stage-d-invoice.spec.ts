@@ -42,13 +42,15 @@ for (const flow of ["Add", "assistant"] as const) {
     if (flow === "Add") {
       await page.getByRole("button", { name: "Add items", exact: true }).first().click();
       await page.getByTestId("smart-add-library").setInputFiles(file);
-      await page.getByRole("button", { name: "Review document" }).click();
+      await page.getByLabel("Document type (optional)").selectOption("invoice");
+      await page.getByRole("button", { name: "Save document" }).click();
     } else {
-      await page.getByRole("button", { name: "Add document" }).click();
-      const upload = page.getByRole("dialog", { name: "Add a document" });
-      await upload.locator('input[type="file"]').setInputFiles(file);
-      await upload.getByLabel("Type", { exact: true }).selectOption("invoice");
-      await upload.getByRole("button", { name: "Add document", exact: true }).click();
+      // The old assistant address opens the assistant over the item list. The file goes
+      // in its message field. A type is optional; this one is an invoice.
+      const assistant = page.getByRole("dialog", { name: "Assistant" });
+      await assistant.locator('input[type="file"]').setInputFiles(file);
+      await assistant.getByLabel("Document type").selectOption("invoice");
+      await assistant.getByRole("button", { name: "Send question" }).click();
     }
     const response = await uploadResponse;
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -66,12 +68,17 @@ for (const flow of ["Add", "assistant"] as const) {
     if (await openReview.isVisible()) await openReview.click();
     await expect(page.getByLabel(/^Merchant/)).toBeVisible();
     await page.getByLabel(/^Merchant/).fill(merchant);
-    await page.getByRole("button", { name: "Create new item" }).first().click();
+    // Each line is a closed row. Open the first one and select it for Apply.
+    const firstLine = page.getByRole("article")
+      .filter({ has: page.getByRole("checkbox", { name: /^Select line/ }) }).first();
+    await firstLine.getByRole("button", { name: "Edit" }).click();
+    await firstLine.getByRole("button", { name: "Create new item" }).click();
+    await firstLine.getByRole("checkbox", { name: /^Select line/ }).check();
     await page.getByLabel("New item name").first().fill(itemName);
     await page.getByLabel("Destination room").first().selectOption(room.id);
     const before = await (await page.request.get("/api/v1/items")).json();
     expect(before.items.some((item: { name: string }) => item.name === itemName)).toBe(false);
-    await page.getByRole("button", { name: "Apply reviewed changes" }).click();
+    await page.getByRole("button", { name: /^Apply: / }).click();
     await expect(page.getByText("A shared purchase was recorded.", { exact: false })).toBeVisible();
 
     const saved = await (await page.request.get(`/api/v1/documents/${document.id}`)).json();

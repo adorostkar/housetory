@@ -2,10 +2,17 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const photoPath = path.resolve(here, "../public/icons/icon-192.png");
+
+/** The status, person and past-due filters of the Loans page sit behind "Filters". */
+async function loanFilter(page: Page, label: string) {
+  const toggle = page.getByRole("button", { name: /^Filters/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  return page.getByLabel(label);
+}
 
 function suffix() {
   return Date.now().toString().slice(-5);
@@ -131,6 +138,17 @@ function createViewer(email: string) {
   );
 }
 
+/**
+ * The header and its theme button are gone; light or dark is chosen in Settings →
+ * Appearance. The screenshots only need the mode, so the stored choice is set here.
+ */
+async function showMode(page: Page, mode: "light" | "dark") {
+  await page.evaluate((value) => window.localStorage.setItem("housetory-theme", value), mode);
+  await page.reload();
+  if (mode === "dark") await expect(page.locator("html")).toHaveClass(/dark/);
+  else await expect(page.locator("html")).not.toHaveClass(/dark/);
+}
+
 test("creates a borrowed record, partially returns it, persists across refresh, uploads a private photo and returns the rest", async ({
   page,
   request,
@@ -162,13 +180,15 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
 
   await page.getByRole("button", { name: "New loan" }).click();
   await expect(page.getByRole("heading", { name: "New loan" })).toBeVisible();
-  await page.getByRole("button", { name: /Borrow from someone/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "Borrow from someone" }),
-  ).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "New loan" })
+    .getByRole("button", { name: "Borrow", exact: true })
+    .click();
   await page.getByLabel("Item name").fill(itemName);
   await page.getByLabel("Owner display name").fill(owner);
   await page.getByLabel("Quantity").fill("3");
+  // Dates, place and notes are optional and sit under "More options".
+  await page.getByRole("button", { name: /More options/ }).click();
   await page.getByLabel("Borrowed on").fill("2026-10-01");
   await page.getByLabel("Due back").fill("2026-11-20");
   await page.getByLabel("Keeping property").selectOption({ label: home.name });
@@ -191,19 +211,18 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
   await expect(ownedRow.first()).toBeVisible();
 
   // Protected direction badges and filters.
-  const directionTabs = page.getByRole("tablist", { name: "Loan direction" });
-  const statusTabs = page.getByRole("tablist", { name: "Loan filters" });
-  await directionTabs.getByRole("tab", { name: "Borrowed" }).click();
+  const directionTabs = page.getByRole("group", { name: "Loan direction" });
+  await directionTabs.getByRole("button", { name: "Borrowed" }).click();
   await expect(borrowedRow).toBeVisible();
   await expect(page.locator('[data-testid="loan-row"]')).toHaveCount(0);
-  await directionTabs.getByRole("tab", { name: "Lent out" }).click();
+  await directionTabs.getByRole("button", { name: "Lent out" }).click();
   await expect(borrowedRow).toHaveCount(0);
   await expect(ownedRow.first()).toBeVisible();
-  const borrowedTab = directionTabs.getByRole("tab", { name: "Borrowed" });
+  const borrowedTab = directionTabs.getByRole("button", { name: "Borrowed" });
   await borrowedTab.focus();
   await page.keyboard.press("Enter");
-  await expect(borrowedTab).toHaveAttribute("aria-selected", "true");
-  await directionTabs.getByRole("tab", { name: "All" }).click();
+  await expect(borrowedTab).toHaveAttribute("aria-pressed", "true");
+  await directionTabs.locator('[aria-pressed="true"]').click();
   await expect(borrowedRow).toBeVisible();
 
   // Partial return from the mixed row.
@@ -225,14 +244,13 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
     path: "../../docs/walkthrough/borrowed-items/after/01-mixed-loans-desktop-light.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  await showMode(page, "dark");
   await page.waitForTimeout(250);
   await page.screenshot({
     path: "../../docs/walkthrough/borrowed-items/after/02-mixed-loans-desktop-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await showMode(page, "light");
 
   // Refresh persists the partial return.
   await page.reload();
@@ -272,14 +290,13 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
     timeout: 10_000,
   });
 
-  await page.getByRole("button", { name: "Switch to dark mode" }).first().click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  await showMode(page, "dark");
   await page.waitForTimeout(250);
   await page.screenshot({
     path: "../../docs/walkthrough/borrowed-items/after/04-borrowed-detail-desktop-dark.png",
     fullPage: false,
   });
-  await page.getByRole("button", { name: "Switch to light mode" }).first().click();
+  await showMode(page, "light");
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/loans");
@@ -321,13 +338,10 @@ test("creates a borrowed record, partially returns it, persists across refresh, 
 
   await page.goto("/loans");
   await page
-    .getByRole("tablist", { name: "Loan direction" })
-    .getByRole("tab", { name: "Borrowed" })
+    .getByRole("group", { name: "Loan direction" })
+    .getByRole("button", { name: "Borrowed" })
     .click();
-  await page
-    .getByRole("tablist", { name: "Loan filters" })
-    .getByRole("tab", { name: "Returned" })
-    .click();
+  await (await loanFilter(page, "Loan status")).selectOption("returned");
   const returnedRow = page
     .locator('[data-testid="borrowed-row"]')
     .filter({ hasText: owner });
