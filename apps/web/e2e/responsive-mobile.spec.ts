@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, webkit, type APIRequestContext, type Browser } from "@playwright/test";
 import type { DocumentSummary, DocumentSummaryList, FinancialOverview, ItemSummary, Overview } from "../src/lib/types";
 
 async function seedDenseFixtures(request: APIRequestContext) {
@@ -1416,4 +1416,48 @@ test.describe("desktop regression", () => {
       fullPage: false,
     });
   });
+});
+
+// Safari sized the title button wrongly when it had a largest width in per cent: "All
+// items" broke into two lines although the row had room. Chrome did not, so this runs
+// in Safari's engine. It is skipped where that engine is not installed.
+test("with the rooms hidden the page title stays on one line in Safari's engine", async ({ baseURL }, testInfo) => {
+  let safari: Browser;
+  try {
+    // The run is set up for the Chrome channel; WebKit has no such channel.
+    safari = await webkit.launch({ channel: undefined });
+  } catch (error) {
+    test.skip(true, `Playwright WebKit could not start (npx playwright install webkit): ${String(error).slice(0, 200)}`);
+    return;
+  }
+  try {
+    const context = await safari.newContext({
+      baseURL,
+      storageState: testInfo.project.use.storageState,
+      viewport: { width: 390, height: 760 },
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    await page.goto("/items");
+    const hide = page.getByRole("button", { name: "Hide rooms" });
+    await expect(hide.or(page.getByRole("button", { name: "Show rooms" }))).toBeVisible();
+    if (await hide.isVisible()) await hide.click();
+
+    const title = page.getByRole("button", { name: "All items. Show rooms" });
+    await expect(title).toBeVisible();
+    const one = await title.boundingBox();
+    expect(one!.height, "one line of title").toBeLessThanOrEqual(52);
+
+    // A long title still wraps and stays inside the screen.
+    await title.evaluate((button) => {
+      button.querySelector("span")!.textContent =
+        "A deliberately long room name that must wrap on a phone and not push the page wider";
+    });
+    const long = await title.boundingBox();
+    expect(long!.height).toBeGreaterThan(52);
+    expect(long!.x + long!.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  } finally {
+    await safari.close();
+  }
 });

@@ -57,7 +57,10 @@ export function PageHeader({
             <h1 className={titleClass}>
               <button
                 type="button"
-                className="-mx-1 inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-lg px-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                // No largest width in per cent here: Safari then sizes the button too narrow
+                // and breaks a short title into two lines. The button never grows wider than
+                // its line by itself, and a long title still wraps inside it.
+                className="-mx-1 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
                 aria-label={`${title}. Show rooms`}
                 onClick={() => shell?.setRailOpen(true)}
               >
